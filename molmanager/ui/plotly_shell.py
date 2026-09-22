@@ -18,26 +18,63 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 from plotly.offline import get_plotlyjs
 
 _SHELL_HTML_PATH = Path(__file__).with_name("plotly_shell.html")
+_PLOTLY_JS: str | None = None
+_SHELL_HTML: dict[int, str] = {}
+_SHELL_PATHS: dict[int, Path] = {}
 
 
 def sanitized_plotly_js() -> str:
     """Plotly.js safe for embedding in HTML (Qt/Chromium quirks)."""
-    return get_plotlyjs().replace(":focus-visible", ":focus").replace("</script>", "<\\/script>")
+    global _PLOTLY_JS
+    if _PLOTLY_JS is None:
+        _PLOTLY_JS = (
+            get_plotlyjs()
+            .replace(":focus-visible", ":focus")
+            .replace("</script>", "<\\/script>")
+        )
+    return _PLOTLY_JS
+
+
+def _overlay_max_points() -> int:
+    from ..platform_support.config import load_config
+
+    return int(load_config().plot_selection_overlay_max_points)
+
+
+def _interactive_plot_shell_html_for(overlay_max: int) -> str:
+    html = _SHELL_HTML.get(overlay_max)
+    if html is not None:
+        return html
+    plotly_js = sanitized_plotly_js()
+    template = _SHELL_HTML_PATH.read_text(encoding="utf-8")
+    html = template.replace("__PLOTLY_JS__", plotly_js).replace(
+        "__OVERLAY_MAX__", str(overlay_max)
+    )
+    _SHELL_HTML[overlay_max] = html
+    return html
 
 
 def interactive_plot_shell_html() -> str:
     """HTML document with Plotly, QWebChannel bridge, selection, and Plotter-specific click handlers."""
-    from ..platform_support.config import load_config
+    return _interactive_plot_shell_html_for(_overlay_max_points())
 
-    plotly_js = sanitized_plotly_js()
-    overlay_max = int(load_config().plot_selection_overlay_max_points)
-    template = _SHELL_HTML_PATH.read_text(encoding="utf-8")
-    return template.replace("__PLOTLY_JS__", plotly_js).replace("__OVERLAY_MAX__", str(overlay_max))
+
+def ensure_interactive_plot_shell() -> Path:
+    """On-disk Plotly shell, written once per overlay-max in this process."""
+    overlay_max = _overlay_max_points()
+    path = _SHELL_PATHS.get(overlay_max)
+    if path is not None and path.is_file():
+        return path
+    path = Path(tempfile.gettempdir()) / f"MOLMANAGER_plot_shell_{overlay_max}.html"
+    path.write_text(_interactive_plot_shell_html_for(overlay_max), encoding="utf-8")
+    _SHELL_PATHS[overlay_max] = path
+    return path
 
 
 def write_interactive_plot_shell(path: Path) -> None:

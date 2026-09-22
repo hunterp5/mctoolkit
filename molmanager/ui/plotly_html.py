@@ -23,7 +23,6 @@ from pathlib import Path
 
 from plotly import graph_objects as go
 from plotly.io import to_json as plotly_to_json
-from plotly.offline import get_plotlyjs
 
 from ..plotting.plotly_legend import (  # noqa: F401  re-exported for ui plot modules
     finalize_plot_legend,
@@ -120,9 +119,9 @@ def write_self_contained_plotly_html(fig: go.Figure, path: Path) -> None:
 
     Escapes ``:focus-visible`` CSS (Qt/Chromium can reject it) and ``</script>`` in JS.
     """
-    plotly_js = (
-        get_plotlyjs().replace(":focus-visible", ":focus").replace("</script>", "<\\/script>")
-    )
+    from .plotly_shell import sanitized_plotly_js
+
+    plotly_js = sanitized_plotly_js()
     payload = figure_payload_json(fig)
     html = f"""<!doctype html>
 <html>

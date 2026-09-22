@@ -116,7 +116,7 @@ class PlotlyInteractiveView(QWidget):
         self._web_channel.registerObject("chemBridge", self._bridge)
         self.web.page().setWebChannel(self._web_channel)
         self.web.loadFinished.connect(self._on_web_load_finished)
-        self._load_plot_shell()
+        QTimer.singleShot(0, self._load_plot_shell)
 
     def push_figure(
         self,
@@ -336,10 +336,13 @@ class PlotlyInteractiveView(QWidget):
     def _load_plot_shell(self) -> None:
         if self.web is None:
             return
-        from .plotly_shell import write_interactive_plot_shell
+        from .plotly_shell import ensure_interactive_plot_shell
 
-        write_interactive_plot_shell(self._plot_shell_path)
-        self.web.load(QUrl.fromLocalFile(str(self._plot_shell_path)))
+        try:
+            self._plot_shell_path = ensure_interactive_plot_shell()
+            self.web.load(QUrl.fromLocalFile(str(self._plot_shell_path)))
+        except RuntimeError:
+            return
 
     def _apply_pending_payload(self) -> None:
         if not self._web_ready or not self._pending_payload_json:

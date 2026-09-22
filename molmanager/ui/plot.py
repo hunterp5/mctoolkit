@@ -530,7 +530,7 @@ class PlotWidget(
         self.zmin.editingFinished.connect(self._schedule_plot)
         self.zmax.editingFinished.connect(self._schedule_plot)
 
-        self._load_plot_shell()
+        QTimer.singleShot(0, self._load_plot_shell)
         self._reload_color_columns()
         self._refresh_radar_spoke_columns()
         self._on_axis_change()

@@ -55,3 +55,15 @@ def test_interactive_plot_shell_bakes_overlay_max_from_config(monkeypatch):
     monkeypatch.setenv("MOLMANAGER_PLOT_SELECTION_OVERLAY_MAX", "250")
     html = interactive_plot_shell_html()
     assert "var SELECTION_OVERLAY_MAX = 250;" in html
+
+
+def test_ensure_interactive_plot_shell_reuses_file(monkeypatch):
+    from molmanager.ui import plotly_shell as shell
+
+    monkeypatch.setattr(shell, "_SHELL_PATHS", {})
+    first = shell.ensure_interactive_plot_shell()
+    second = shell.ensure_interactive_plot_shell()
+    assert first == second
+    assert first.is_file()
+    assert first.stat().st_size > 1000
+

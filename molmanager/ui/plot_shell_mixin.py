@@ -66,10 +66,13 @@ class PlotShellMixin:
     def _load_plot_shell(self) -> None:
         if self.web is None:
             return
-        from .plotly_shell import write_interactive_plot_shell
+        from .plotly_shell import ensure_interactive_plot_shell
 
-        write_interactive_plot_shell(self._plot_shell_path)
-        self.web.load(QUrl.fromLocalFile(str(self._plot_shell_path)))
+        try:
+            self._plot_shell_path = ensure_interactive_plot_shell()
+            self.web.load(QUrl.fromLocalFile(str(self._plot_shell_path)))
+        except RuntimeError:
+            return
 
     def _annotate_scatter_selection_meta(self, fig: go.Figure) -> None:
         """Tell the Plotly shell which traces map to table row indices (skip fit lines, etc.)."""

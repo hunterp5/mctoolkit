@@ -65,7 +65,9 @@ class PlotDialog(QDialog):
         self.setWindowModality(Qt.NonModal)
         self.setAttribute(Qt.WA_DeleteOnClose, True)
         self._force_close = False
-        for btn in self.findChildren(QPushButton):
+        footer = getattr(self._plot_widget, "_footer_bar", None)
+        buttons = footer.findChildren(QPushButton) if footer is not None else ()
+        for btn in buttons:
             btn.setAutoDefault(False)
             btn.setDefault(False)
 
