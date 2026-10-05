@@ -151,7 +151,11 @@ class PlotDockHost:
         return min_w
 
     def _ensure_plot_panel_width(self, preferred: int | None = None) -> None:
-        """Give the plot region a usable width when the outer splitter is horizontal."""
+        """Give the plot region a usable width when the outer splitter is horizontal.
+
+        Prefer growing an already-open plot side toward ``preferred``; never shrink it.
+        That stops dock/undock/redock from ratcheting the pane smaller each cycle.
+        """
         from .dockable_plot import PLOT_PANEL_COLLAPSED_WIDTH
 
         mgr = self.workspace()
@@ -181,16 +185,19 @@ class PlotDockHost:
             want = max(min_w, int(preferred))
         else:
             want = max(min_w, content_pref)
+        # Grow-only once the plot region is already open.
+        if plot_w >= PLOT_PANEL_COLLAPSED_WIDTH and plot_w >= want:
+            return
         total = max(table_w + plot_w, want + 200)
         new_plot = min(want, max(min_w, total - 200))
-        if preferred is None and plot_w >= new_plot:
+        if plot_w >= new_plot:
             return
         new_table = max(200, total - new_plot)
         splitter.setSizes([new_table, new_plot])
 
     @staticmethod
     def _widget_pixel_size(widget) -> tuple[int, int]:
-        """Best-effort on-screen size of a plot panel or its floating host."""
+        """Best-effort on-screen size of a plot panel (content geometry first)."""
         try:
             w, h = int(widget.width()), int(widget.height())
             if w > 50 and h > 50:
@@ -207,8 +214,31 @@ class PlotDockHost:
             pass
         return 0, 0
 
+    def _round_trip_pixel_size(self, widget) -> tuple[int, int]:
+        """Size used to match dock pane <-> floating host without chrome ratchet.
+
+        Prefer the outer floating window when the plot is undocked so dialog frame
+        pixels are not lost on the next dock. When already docked, use content size
+        so the floating dialog opens near the pane the user just left.
+        """
+        if widget is None:
+            return 0, 0
+        try:
+            win = widget.window()
+        except RuntimeError:
+            win = None
+        # Floating host (dialog / top-level other than the main window).
+        try:
+            if win is not None and win is not widget and win is not self._app:
+                w, h = int(win.width()), int(win.height())
+                if w > 50 and h > 50:
+                    return w, h
+        except RuntimeError:
+            pass
+        return self._widget_pixel_size(widget)
+
     def _match_vertical_pane_height(self, pane, height: int) -> None:
-        """When the pane sits in a vertical splitter, give it ``height`` pixels."""
+        """When the pane sits in a vertical splitter, grow it toward ``height`` pixels."""
         from PyQt5.QtCore import Qt
 
         mgr = self.workspace()
@@ -230,8 +260,14 @@ class PlotDockHost:
         index = next((i for i in range(count) if splitter.widget(i) is pane), -1)
         if index < 0 or len(sizes) != count or count < 2:
             return
+        current = sizes[index]
+        # Grow-only: do not steal height from sibling panes on redock.
+        if current >= 80 and current >= int(height):
+            return
         total = sum(sizes) if sum(sizes) > 0 else max(int(splitter.height()), height + 50)
         want = max(80, min(int(height), total - 80))
+        if current >= want:
+            return
         new_sizes = [0] * count
         new_sizes[index] = want
         remain = total - want
@@ -244,7 +280,7 @@ class PlotDockHost:
         splitter.setSizes(new_sizes)
 
     def _match_pane_to_plot_size(self, pane, width: int, height: int) -> None:
-        """Resize the destination pane toward the plot's current pixel size before dock."""
+        """Grow the destination pane toward the plot's current pixel size before dock."""
         if width > 50:
             self._ensure_plot_panel_width(preferred=width)
         if height > 50:
@@ -288,8 +324,8 @@ class PlotDockHost:
         if mgr is None:
             return False
 
-        # Capture floating size before reparent so the pane can match it.
-        src_w, src_h = self._widget_pixel_size(plot_widget)
+        # Capture floating host size before reparent so the pane can grow to match.
+        src_w, src_h = self._round_trip_pixel_size(plot_widget)
         target = pane if pane is not None else self._target_plot_pane()
         if target is None:
             return False
@@ -299,8 +335,10 @@ class PlotDockHost:
             prior_teardown()
         self._match_pane_to_plot_size(target, src_w, src_h)
         mgr.dock_into_pane(target, plot_widget)
+        # dock_into_pane restores prior splitter sizes; re-apply grow-only match.
+        self._match_pane_to_plot_size(target, src_w, src_h)
         self.show_docked_plot_panel(preferred=src_w if src_w > 50 else None)
-        # Paint the docked plot first; scope wire + selection fan-out can wait a tick.
+        # Paint the docked plot first; per-widget wire/selection can wait a tick.
         QTimer.singleShot(0, lambda w=plot_widget: self._wire_docked_plot_widget(w))
         kind = self._docked_widget_kind(plot_widget)
         pane_n = mgr.plot_panes().index(target) + 1
@@ -335,14 +373,19 @@ class PlotDockHost:
             plot_widget.destroyed.connect(self._on_docked_plot_destroyed)
         except RuntimeError:
             return
-        # Footer chrome already adopted in the pane; only refresh selection mirrors.
-        self._app._sync_active_plots_from_table_selection()
+        # Footer chrome already adopted in the pane; refresh only this plot's selection.
+        sync = getattr(plot_widget, "sync_from_table_selection", None)
+        if callable(sync):
+            try:
+                sync()
+            except RuntimeError:
+                pass
 
     def _float_released_plot_widget(self, plot_widget) -> None:
         """Open a released docked plot in a floating dialog when possible."""
         if plot_widget is None:
             return
-        src_w, src_h = self._widget_pixel_size(plot_widget)
+        src_w, src_h = self._round_trip_pixel_size(plot_widget)
         factory = getattr(plot_widget, "create_floating_dialog", None)
         try:
             if callable(factory):
@@ -567,8 +610,8 @@ class PlotDockHost:
         if plot_widget is None:
             return False
 
-        # Capture docked size before release so the floating window can match it.
-        src_w, src_h = self._widget_pixel_size(plot_widget)
+        # Capture docked content size before release so the floating window can match it.
+        src_w, src_h = self._round_trip_pixel_size(plot_widget)
         factory = getattr(plot_widget, "create_floating_dialog", None)
         if callable(factory):
             # Show the floating window before chrome sync so undock paints first.

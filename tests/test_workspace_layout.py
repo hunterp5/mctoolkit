@@ -238,6 +238,35 @@ def test_dock_appends_and_paginates_in_same_pane(qapp):
     assert list(mgr.iter_docked_widgets()) == [w0, w1]
 
 
+def test_plot_pane_presizes_non_current_stack_pages(qapp):
+    """Hidden pages should match stack geometry before the user pages to them."""
+    pane = PlotPane("pane_presize")
+    pane.resize(420, 360)
+    pane.show()
+    qapp.processEvents()
+
+    w0 = QLabel("first")
+    w0._window_title = "Alpha"
+    w1 = QLabel("second")
+    w1._window_title = "Beta"
+    pane.add_plot_widget(w0)
+    pane.add_plot_widget(w1)
+    qapp.processEvents()
+
+    stack = pane._stack
+    sw, sh = stack.width(), stack.height()
+    assert sw >= 100 and sh >= 100
+    pane._presize_stack_pages()
+    qapp.processEvents()
+    assert w0.width() == sw and w0.height() == sh
+    assert w1.width() == sw and w1.height() == sh
+
+    pane.show_previous_page()
+    qapp.processEvents()
+    assert pane.plot_widget() is w0
+    assert w1.width() == stack.width() and w1.height() == stack.height()
+
+
 def test_reorder_arrows_move_current_plot_in_pane(qapp):
     mgr = _manager(qapp)
     pane = mgr.plot_panes()[0]

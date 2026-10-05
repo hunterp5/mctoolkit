@@ -1323,9 +1323,21 @@
           console.error('molmanager Plotly embed failed:', e);
         }
       };
+      var lastResizeW = -1;
+      var lastResizeH = -1;
       function resizePlot() {
         try {
-          if (gd && gd.data) Plotly.Plots.resize(gd);
+          if (!gd || !gd.data) return;
+          var w = gd.clientWidth || 0;
+          var h = gd.clientHeight || 0;
+          // Skip no-op resizes (show/hide / reparent often fire window.resize
+          // without a meaningful geometry change and flash like a recalculation).
+          if (w > 1 && h > 1 && Math.abs(w - lastResizeW) < 1 && Math.abs(h - lastResizeH) < 1) {
+            return;
+          }
+          lastResizeW = w;
+          lastResizeH = h;
+          Plotly.Plots.resize(gd);
         } catch (_r) {}
         schedulePinnedHoverReposition();
       }

@@ -101,6 +101,19 @@ class _PaneActivateFilter(QObject):
         return False
 
 
+class _StackPresizeFilter(QObject):
+    """Keep non-current stack pages at the stack size so WebEngine/Plotly do not cold-resize."""
+
+    def __init__(self, pane: "PlotPane"):
+        super().__init__(pane)
+        self._pane = pane
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt API
+        if event.type() == QEvent.Resize and obj is self._pane._stack:
+            self._pane._presize_stack_pages()
+        return False
+
+
 class PlotPane(QFrame):
     """Host for one or more docked plot widgets, with pager chrome when stacked."""
 
@@ -234,6 +247,8 @@ class PlotPane(QFrame):
         if stack_ly is not None and hasattr(stack_ly, "setSizeAdjustPolicy"):
             stack_ly.setSizeAdjustPolicy(QStackedLayout.AdjustIgnored)
         self._stack.currentChanged.connect(self._on_stack_current_changed)
+        self._stack_presize_filter = _StackPresizeFilter(self)
+        self._stack.installEventFilter(self._stack_presize_filter)
         self._stack.hide()
 
         self._placeholder = QLabel("Plot pane\n(Add to Main Window…)")
@@ -459,6 +474,7 @@ class PlotPane(QFrame):
         embed_in_plot_pane(widget)
         if widget in self._pages:
             self._stack.setCurrentWidget(widget)
+            self._presize_stack_pages()
             self._refresh_pager()
             self._sync_visible_footer()
             return
@@ -466,6 +482,7 @@ class PlotPane(QFrame):
         self._stack.addWidget(widget)
         self._install_activate_filter(widget)
         self._stack.setCurrentWidget(widget)
+        self._presize_stack_pages()
         self._refresh_pager()
         self._sync_visible_footer()
 
@@ -541,8 +558,41 @@ class PlotPane(QFrame):
         self._stack.setCurrentIndex(max(0, min(int(index), len(self._pages) - 1)))
 
     def _on_stack_current_changed(self, _index: int) -> None:
+        self._presize_stack_pages()
         self._refresh_pager()
         self._sync_visible_footer()
+
+    def _presize_stack_pages(self) -> None:
+        """Force every page (and nested WebEngine views) to the stack geometry.
+
+        Hidden ``QWebEngineView`` pages often keep a stale size until shown; matching
+        them here avoids a visible Plotly resize flash when paging.
+        """
+        stack = getattr(self, "_stack", None)
+        if stack is None:
+            return
+        try:
+            sw, sh = int(stack.width()), int(stack.height())
+        except RuntimeError:
+            return
+        if sw < 20 or sh < 20:
+            return
+        web_cls = _web_engine_view_type()
+        for page in list(self._pages):
+            try:
+                if page.width() != sw or page.height() != sh:
+                    page.resize(sw, sh)
+                if web_cls is None:
+                    continue
+                for view in page.findChildren(web_cls):
+                    if view.width() != sw or view.height() != sh:
+                        view.resize(sw, sh)
+                    # Let Chromium accept the geometry while the page is still
+                    # non-current (QStackedWidget keeps the page widget hidden).
+                    if stack.currentWidget() is not page:
+                        view.show()
+            except RuntimeError:
+                continue
 
     def _sync_visible_footer(self) -> None:
         current = self.plot_widget()
@@ -551,6 +601,16 @@ class PlotPane(QFrame):
             restore_dock_header_buttons(owner)
             self._header_button_owner = None
         if current is None:
+            return
+        # Same page still owns the header: skip restore/adopt so content geometry
+        # does not jitter (Plotly would look like it recalculated).
+        if owner is current:
+            sync = getattr(current, "_sync_footer_chrome", None)
+            if callable(sync):
+                try:
+                    sync()
+                except RuntimeError:
+                    pass
             return
         # ParentChange footer sync is suspended during dock/undock reparent, so this
         # remains the single visibility + adopt pass for the visible page.

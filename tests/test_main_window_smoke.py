@@ -797,6 +797,102 @@ def test_undock_resizes_floating_dialog_to_docked_size(qapp, monkeypatch):  # no
     assert abs(host.height() - src_h) <= 40
 
 
+def test_redock_does_not_shrink_open_plot_panel(qapp, monkeypatch):  # noqa: ARG001
+    """Grow-only matching: docking a smaller floating plot must not ratchet the pane down."""
+    from PyQt5.QtWidgets import QDialog, QLabel, QVBoxLayout
+
+    from molmanager.ui.main_window.workspace_layout import LAYOUT_TABLE_SINGLE
+
+    w = ChemistryWorkspaceWindow()
+    w.resize(1200, 800)
+    w.show()
+    w._reveal_workspace_ready()
+    qapp.processEvents()
+    w.apply_workspace_layout(LAYOUT_TABLE_SINGLE)
+    qapp.processEvents()
+
+    plot = QLabel("plot")
+    plot.dockable_in_workspace = True
+    pane = w._workspace_layout.plot_panes()[0]
+    w._workspace_layout.dock_into_pane(pane, plot)
+    qapp.processEvents()
+    w._ensure_plot_panel_width(preferred=560)
+    qapp.processEvents()
+    before = w._plot_panel_splitter_sizes()
+    assert before is not None
+    assert before[1] >= 540
+
+    class _Dlg(QDialog):
+        def __init__(self, parent=None, panel=None):
+            super().__init__(parent)
+            self.resize(960, 900)
+            self._panel = panel
+            ly = QVBoxLayout(self)
+            if panel is not None:
+                ly.addWidget(panel, 1)
+
+    plot.create_floating_dialog = lambda app: _Dlg(app, panel=plot)
+    monkeypatch.setattr(w, "_prepare_tool_dialog", lambda *_a, **_k: None)
+    monkeypatch.setattr(w, "_bind_undocked_browser_dialog", lambda *_a, **_k: False)
+    monkeypatch.setattr(w, "_register_floating_result_dialog", lambda *_a, **_k: None)
+
+    assert w.undock_plot_to_window(plot) is True
+    qapp.processEvents()
+    host = plot.window()
+    assert isinstance(host, _Dlg)
+    # Simulate a smaller floating host (chrome / content loss between cycles).
+    host.resize(360, 300)
+    qapp.processEvents()
+
+    assert w.dock_plot_widget(plot) is True
+    qapp.processEvents()
+    after = w._plot_panel_splitter_sizes()
+    assert after is not None
+    assert after[1] >= before[1] - 2
+
+
+def test_dock_wire_syncs_only_docked_plot(qapp, monkeypatch):  # noqa: ARG001
+    from PyQt5.QtWidgets import QLabel
+
+    from molmanager.ui.main_window.workspace_layout import LAYOUT_TABLE_SINGLE
+
+    w = ChemistryWorkspaceWindow()
+    w.apply_workspace_layout(LAYOUT_TABLE_SINGLE)
+    pane = w._workspace_layout.plot_panes()[0]
+
+    existing = QLabel("existing")
+    existing.dockable_in_workspace = True
+    existing._sync_calls = 0
+
+    def _sync_existing(*_a, **_k):
+        existing._sync_calls += 1
+
+    existing.sync_from_table_selection = _sync_existing
+    w._workspace_layout.dock_into_pane(pane, existing)
+
+    incoming = QLabel("incoming")
+    incoming.dockable_in_workspace = True
+    incoming._sync_calls = 0
+
+    def _sync_incoming(*_a, **_k):
+        incoming._sync_calls += 1
+
+    incoming.sync_from_table_selection = _sync_incoming
+
+    fanout = []
+    monkeypatch.setattr(
+        w, "_sync_active_plots_from_table_selection", lambda: fanout.append(True)
+    )
+    monkeypatch.setattr(w, "_prepare_tool_plot", lambda *_a, **_k: None)
+
+    assert w.dock_plot_widget(incoming) is True
+    qapp.processEvents()
+
+    assert fanout == []
+    assert incoming._sync_calls >= 1
+    assert existing._sync_calls == 0
+
+
 def test_close_docked_plot_closes_without_prompt(qapp, monkeypatch):  # noqa: ARG001
     from PyQt5.QtWidgets import QLabel, QMessageBox
 
