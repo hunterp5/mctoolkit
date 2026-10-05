@@ -22,6 +22,7 @@ import logging
 import re
 import threading
 import time
+import traceback
 from collections import deque
 from dataclasses import dataclass
 
@@ -109,7 +110,8 @@ class SessionLogHandler(logging.Handler):
         try:
             msg = record.getMessage()
             if record.exc_info:
-                msg = f"{msg}\n{self.formatException(record.exc_info)}"
+                # Handler has no formatException; mirror logging.Formatter behavior.
+                msg = f"{msg}\n{''.join(traceback.format_exception(*record.exc_info)).rstrip()}"
             session_log_buffer().add(
                 levelno=int(record.levelno),
                 levelname=str(record.levelname),

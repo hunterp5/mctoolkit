@@ -91,24 +91,30 @@ def apply_plot_chrome_glyphs(widget: QWidget | None) -> None:
         return
     opts = getattr(widget, "_opts_btn", None)
     if isinstance(opts, QPushButton):
-        tip = opts.toolTip() or "Plot Options"
-        style_plot_chrome_glyph_button(opts, plot_options_glyph_icon(), tip)
+        with suppress(RuntimeError):
+            tip = opts.toolTip() or "Plot Options"
+            style_plot_chrome_glyph_button(opts, plot_options_glyph_icon(), tip)
     clear = getattr(widget, "_clear_sel_btn", None)
     if isinstance(clear, QPushButton):
-        tip = clear.toolTip() or "Clear the current table and plot selection."
-        style_plot_chrome_glyph_button(clear, clear_selection_glyph_icon(), tip)
+        with suppress(RuntimeError):
+            tip = clear.toolTip() or "Clear the current table and plot selection."
+            style_plot_chrome_glyph_button(clear, clear_selection_glyph_icon(), tip)
     add = getattr(widget, "_add_to_main_btn", None)
     if isinstance(add, QPushButton):
-        tip = add.toolTip() or "Add to Main Window"
-        style_plot_chrome_glyph_button(add, add_to_main_glyph_icon(), tip)
+        with suppress(RuntimeError):
+            tip = add.toolTip() or "Add to Main Window"
+            style_plot_chrome_glyph_button(add, add_to_main_glyph_icon(), tip)
     send = getattr(widget, "_send_window_btn", None)
     if isinstance(send, QPushButton):
-        tip = send.toolTip() or "Send to New Window"
-        style_plot_chrome_glyph_button(send, send_to_window_glyph_icon(), tip)
+        with suppress(RuntimeError):
+            tip = send.toolTip() or "Send to New Window"
+            style_plot_chrome_glyph_button(send, send_to_window_glyph_icon(), tip)
     for name in _DOCK_TEXT_CHROME_ATTRS:
         btn = getattr(widget, name, None)
-        if isinstance(btn, QPushButton) and (btn.text() or "").strip():
-            style_plot_footer_text_button(btn)
+        if isinstance(btn, QPushButton):
+            with suppress(RuntimeError):
+                if (btn.text() or "").strip():
+                    style_plot_footer_text_button(btn)
 
 
 def confirm_close_plot(

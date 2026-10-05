@@ -551,6 +551,54 @@ def test_table_only_early_out_requires_non_splitter_root(qapp):
     assert not isinstance(mgr._workspace_root, QSplitter)
 
 
+def test_take_plot_widgets_restores_adopted_header_buttons(qapp):
+    """Layout rebuild must not delete Plot Options chrome with the old pane."""
+    from PyQt5 import sip
+    from PyQt5.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+
+    from molmanager.ui.dockable_plot_chrome import apply_plot_chrome_glyphs
+    from molmanager.ui.dockable_plot_embed import adopt_dock_header_buttons
+
+    plot = QWidget()
+    foot_host = QWidget(plot)
+    foot = QHBoxLayout(foot_host)
+    opts = QPushButton("opts", foot_host)
+    opts.setToolTip("Plot Options")
+    plot._opts_btn = opts
+    foot.addWidget(opts)
+    root = QVBoxLayout(plot)
+    root.addWidget(foot_host)
+    plot._footer_bar = foot_host
+    plot.show()
+    opts.show()
+    qapp.processEvents()
+
+    pane = PlotPane("pane_chrome")
+    pane.show()
+    qapp.processEvents()
+    pane.add_plot_widget(plot)
+    adopt_dock_header_buttons(
+        pane._chrome_ly,
+        plot,
+        leading_opts_layout=pane._leading_opts_ly,
+        send_window_layout=pane._send_ly,
+        trailing_close_layout=pane._trailing_close_ly,
+    )
+    pane._header_button_owner = plot
+    qapp.processEvents()
+    assert opts.parentWidget() is not foot_host
+
+    old_pane = pane
+    taken = pane.take_plot_widgets()
+    assert taken == [plot]
+    old_pane.deleteLater()
+    qapp.processEvents()
+    assert not sip.isdeleted(opts)
+    assert opts.toolTip() == "Plot Options"
+    apply_plot_chrome_glyphs(plot)
+    assert not sip.isdeleted(opts)
+
+
 
 def test_plot_pane_refresh_theme_reapplies_selection_outline(qapp):
     del qapp

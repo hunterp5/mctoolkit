@@ -324,9 +324,19 @@ class PlotPane(QFrame):
         return not self._pages
 
     def take_plot_widgets(self) -> list[QWidget]:
-        """Detach pages for a layout rebuild without unembed or chrome restore."""
+        """Detach pages for a layout rebuild.
+
+        Restores pane-adopted header buttons onto each plot first so a following
+        ``deleteLater`` of this pane cannot destroy Plot Options / Close chrome.
+        """
         widgets = list(self._pages)
-        self._header_button_owner = None
+        owner = getattr(self, "_header_button_owner", None)
+        if owner is not None:
+            restore_dock_header_buttons(owner)
+            self._header_button_owner = None
+        for widget in widgets:
+            if widget is not owner:
+                restore_dock_header_buttons(widget)
         self._stack.blockSignals(True)
         try:
             for widget in widgets:
@@ -341,6 +351,7 @@ class PlotPane(QFrame):
             self._pages = []
         finally:
             self._stack.blockSignals(False)
+        self._refresh_pager()
         return widgets
 
     def display_title(self) -> str:

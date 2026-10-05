@@ -96,6 +96,22 @@ def test_record_ui_log_and_python_logging():
     assert log.levelno == logging.WARNING
 
 
+def test_session_log_handler_includes_exception_text():
+    ensure_session_log_handler()
+    session_log_buffer().clear()
+    try:
+        raise RuntimeError("chrome button gone")
+    except RuntimeError:
+        logging.getLogger("molmanager.ui.plot_dock_host").exception(
+            "Failed to float released plot widget"
+        )
+    entries, _seq, _gen = session_log_buffer().snapshot()
+    assert entries
+    assert "Failed to float released plot widget" in entries[-1].message
+    assert "chrome button gone" in entries[-1].message
+    assert "RuntimeError" in entries[-1].message
+
+
 def test_record_ui_log_does_not_double_via_handler():
     ensure_session_log_handler()
     record_ui_log("once only")
