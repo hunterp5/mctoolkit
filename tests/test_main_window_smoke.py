@@ -720,6 +720,81 @@ def test_docking_from_table_only_uses_split_view(qapp):  # noqa: ARG001
     assert w._workspace_layout.layout_id == LAYOUT_TABLE_SINGLE
     assert len(w._workspace_layout.plot_panes()) == 1
     assert w._workspace_layout.preferred_pane() is pane
+    # Incremental expand path (not a full apply_layout rebuild from the picker).
+    assert w._workspace_layout.ensure_single_plot_pane() is pane
+
+
+def test_dock_matches_pane_width_to_floating_plot_size(qapp):  # noqa: ARG001
+    from PyQt5.QtWidgets import QLabel
+
+    from molmanager.ui.main_window.workspace_layout import LAYOUT_TABLE_SINGLE
+
+    w = ChemistryWorkspaceWindow()
+    w.resize(1200, 800)
+    w.show()
+    w._reveal_workspace_ready()
+    qapp.processEvents()
+    w.apply_workspace_layout(LAYOUT_TABLE_SINGLE)
+    qapp.processEvents()
+
+    plot = QLabel("plot")
+    plot.dockable_in_workspace = True
+    plot.resize(520, 400)
+    plot.show()
+    qapp.processEvents()
+    assert plot.width() == 520
+
+    assert w.dock_plot_widget(plot) is True
+    qapp.processEvents()
+    sizes = w._plot_panel_splitter_sizes()
+    assert sizes is not None
+    assert sizes[1] >= 500
+
+
+def test_undock_resizes_floating_dialog_to_docked_size(qapp, monkeypatch):  # noqa: ARG001
+    from PyQt5.QtWidgets import QDialog, QLabel, QVBoxLayout
+
+    from molmanager.ui.main_window.workspace_layout import LAYOUT_TABLE_SINGLE
+
+    w = ChemistryWorkspaceWindow()
+    w.resize(1100, 700)
+    w.show()
+    w._reveal_workspace_ready()
+    qapp.processEvents()
+    w.apply_workspace_layout(LAYOUT_TABLE_SINGLE)
+    qapp.processEvents()
+
+    plot = QLabel("plot")
+    plot.dockable_in_workspace = True
+    pane = w._workspace_layout.plot_panes()[0]
+    w._workspace_layout.dock_into_pane(pane, plot)
+    qapp.processEvents()
+    # Force a known docked geometry for the assertion.
+    w._ensure_plot_panel_width(preferred=480)
+    qapp.processEvents()
+    src_w, src_h = plot.width(), plot.height()
+    assert src_w > 50 and src_h > 50
+
+    class _Dlg(QDialog):
+        def __init__(self, parent=None, panel=None):
+            super().__init__(parent)
+            self.resize(960, 900)
+            self._panel = panel
+            ly = QVBoxLayout(self)
+            if panel is not None:
+                ly.addWidget(panel, 1)
+
+    plot.create_floating_dialog = lambda app: _Dlg(app, panel=plot)
+    monkeypatch.setattr(w, "_prepare_tool_dialog", lambda *_a, **_k: None)
+    monkeypatch.setattr(w, "_bind_undocked_browser_dialog", lambda *_a, **_k: False)
+    monkeypatch.setattr(w, "_register_floating_result_dialog", lambda *_a, **_k: None)
+
+    assert w.undock_plot_to_window(plot) is True
+    qapp.processEvents()
+    host = plot.window()
+    assert isinstance(host, _Dlg)
+    assert abs(host.width() - src_w) <= 40
+    assert abs(host.height() - src_h) <= 40
 
 
 def test_close_docked_plot_closes_without_prompt(qapp, monkeypatch):  # noqa: ARG001

@@ -552,6 +552,8 @@ class PlotPane(QFrame):
             self._header_button_owner = None
         if current is None:
             return
+        # ParentChange footer sync is suspended during dock/undock reparent, so this
+        # remains the single visibility + adopt pass for the visible page.
         sync = getattr(current, "_sync_footer_chrome", None)
         if callable(sync):
             try:

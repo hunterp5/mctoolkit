@@ -206,9 +206,11 @@ class WorkspaceLayoutManager(QWidget):
         snapshot = self.collect_splitter_sizes()
         previous = pane.plot_widget()
         other = self.pane_for_widget(widget)
-        if other is not None and other is not pane:
-            other.remove_plot_widget(widget)
-        pane.add_plot_widget(widget)
+        # One chrome pass after reparent; skip ParentChange footer work mid-move.
+        with suspend_parent_change_chrome():
+            if other is not None and other is not pane:
+                other.remove_plot_widget(widget)
+            pane.add_plot_widget(widget)
         self.restore_splitter_sizes(snapshot)
         self.set_preferred_pane(pane)
         return previous if previous is not widget else None
@@ -217,7 +219,42 @@ class WorkspaceLayoutManager(QWidget):
         pane = self.pane_for_widget(widget)
         if pane is None:
             return False
-        return pane.remove_plot_widget(widget, discard=discard)
+        with suspend_parent_change_chrome():
+            return pane.remove_plot_widget(widget, discard=discard)
+
+    def ensure_single_plot_pane(self) -> PlotPane | None:
+        """Return a plot pane, expanding Table Only to table|1 plot without a full rebuild."""
+        if self._panes:
+            return self.preferred_pane()
+
+        old_root = self._workspace_root
+        if old_root is not None:
+            _hide_discarded_chrome(old_root)
+        self._stash(self._table_area)
+        if old_root is not None and old_root is not self._table_area:
+            self._discard_workspace_root(old_root)
+        elif old_root is self._table_area:
+            with suppress(RuntimeError):
+                self._root_ly.removeWidget(old_root)
+        self._workspace_root = None
+        self._splitters.clear()
+        self._panes.clear()
+        self._preferred_pane_id = None
+
+        self._begin_layout_freeze()
+        try:
+            self._layout_id = LAYOUT_TABLE_SINGLE
+            root = self._build_table_with_plot_area(None, 1)
+            self._workspace_root = root
+            self._root_ly.addWidget(root, 1)
+            with suppress(RuntimeError):
+                self._table_area.show()
+            pref = self.preferred_pane()
+            self.set_preferred_pane(pref)
+            self.layout_changed.emit(self._layout_id)
+            return pref
+        finally:
+            self._end_layout_freeze()
 
     def collect_splitter_sizes(self) -> dict:
         """Serializable nested splitter sizes for the current layout."""

@@ -551,6 +551,31 @@ def test_table_only_early_out_requires_non_splitter_root(qapp):
     assert not isinstance(mgr._workspace_root, QSplitter)
 
 
+def test_ensure_single_plot_pane_expands_table_only(qapp):
+    """First dock from Table Only must add one pane without a full layout picker rebuild."""
+    from PyQt5.QtWidgets import QSplitter
+
+    table = QWidget()
+    mgr = WorkspaceLayoutManager(table)
+    mgr.resize(1000, 700)
+    mgr.show()
+    qapp.processEvents()
+    assert mgr.layout_id == LAYOUT_TABLE_ONLY
+    assert mgr.plot_panes() == []
+    assert not isinstance(mgr._workspace_root, QSplitter)
+
+    pane = mgr.ensure_single_plot_pane()
+    qapp.processEvents()
+    assert pane is not None
+    assert mgr.layout_id == LAYOUT_TABLE_SINGLE
+    assert mgr.plot_panes() == [pane]
+    assert isinstance(mgr._workspace_root, QSplitter)
+    assert mgr.isAncestorOf(table)
+    assert mgr._workspace_root is not table
+    # Idempotent when a pane already exists.
+    assert mgr.ensure_single_plot_pane() is pane
+
+
 def test_take_plot_widgets_restores_adopted_header_buttons(qapp):
     """Layout rebuild must not delete Plot Options chrome with the old pane."""
     from PyQt5 import sip

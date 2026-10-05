@@ -91,8 +91,8 @@ class PlotToolsMixin:
     def _sync_plot_panel_bottom_visibility(self) -> None:
         self.plot_dock._sync_plot_panel_bottom_visibility()
 
-    def show_docked_plot_panel(self) -> None:
-        self.plot_dock.show_docked_plot_panel()
+    def show_docked_plot_panel(self, preferred: int | None = None) -> None:
+        self.plot_dock.show_docked_plot_panel(preferred=preferred)
 
     def hide_docked_plot_panel(self) -> None:
         self.plot_dock.hide_docked_plot_panel()
@@ -109,8 +109,8 @@ class PlotToolsMixin:
     def close_plot_pane(self, pane=None) -> None:
         self.plot_dock.close_plot_pane(pane)
 
-    def _release_plot_widget_from_panel_host(self, plot_widget) -> None:
-        self.plot_dock._release_plot_widget_from_panel_host(plot_widget)
+    def _release_plot_widget_from_panel_host(self, plot_widget, **kwargs) -> None:
+        self.plot_dock._release_plot_widget_from_panel_host(plot_widget, **kwargs)
 
     def undock_plot_to_window(self, plot_widget=None) -> bool:
         return self.plot_dock.undock_plot_to_window(plot_widget)
