@@ -333,6 +333,8 @@ class PlotPane(QFrame):
                 self._uninstall_activate_filter(widget)
                 self._stack.removeWidget(widget)
                 try:
+                    # Hide first so Qt does not flash a top-level window.
+                    widget.hide()
                     widget.setParent(None)
                 except RuntimeError:
                     pass

@@ -33,9 +33,21 @@ def _seed_two_rows(w: ChemistryWorkspaceWindow) -> None:
     w.next_oid = 2
 
 
+def test_cold_start_shows_idle_loading_page(qapp):  # noqa: ARG001
+    from molmanager.ui.strings import LOADING_DETAIL_IDLE
+
+    w = ChemistryWorkspaceWindow()
+    assert w._table_stack.currentIndex() == 0
+    assert w._loading_detail.text() == LOADING_DETAIL_IDLE
+    assert w._ingest_loading is False
+
+
 def test_clear_all_resets_table_and_ingest_flags(qapp):  # noqa: ARG001
+    from molmanager.ui.strings import LOADING_DETAIL_IDLE
+
     w = ChemistryWorkspaceWindow()
     _seed_two_rows(w)
+    w._reveal_workspace_ready()
     w._selected_oids_override = frozenset({0})
 
     w.clear_all()
@@ -46,6 +58,8 @@ def test_clear_all_resets_table_and_ingest_flags(qapp):  # noqa: ARG001
     assert w.next_oid == 0
     assert w._selected_oids_override is None
     assert w._ingest_loading is False
+    assert w._table_stack.currentIndex() == 0
+    assert w._loading_detail.text() == LOADING_DETAIL_IDLE
 
 
 def test_clear_all_keeps_loading_overlay_during_open(qapp):  # noqa: ARG001

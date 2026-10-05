@@ -653,9 +653,10 @@ class ChemistryWorkspaceWindow(
         self._workspace_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._workspace_stack.addWidget(self._loading_page)
         self._workspace_stack.addWidget(self._workspace_ready_page)
-        self._workspace_stack.setCurrentIndex(1)
         # Loading overlay covers table, plots, Search, and the filter panel.
         self._table_stack = self._workspace_stack
+        # Cold start: no table until a file or session is loaded.
+        self._show_idle_workspace()
         main_v.addWidget(self._workspace_stack, 1)
         status_row = QHBoxLayout()
         status_row.setContentsMargins(8, 6, 8, 6)

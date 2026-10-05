@@ -237,12 +237,24 @@ class TableUIMixin(
         except Exception:
             log_swallowed_exception(logger, "microstate_cache.clear failed during clear_all")
         self._table_model.clear()
+        discard_plots = getattr(self, "_discard_docked_plot_widgets", None)
+        if callable(discard_plots):
+            discard_plots()
+        mgr = getattr(self, "_workspace_layout", None)
+        if mgr is not None:
+            from .workspace_layout import LAYOUT_TABLE_ONLY
+
+            mgr.apply_layout(LAYOUT_TABLE_ONLY, preserve_plots=False)
         if not keep_loading:
-            set_stack = getattr(self, "_set_workspace_stack_index", None)
-            if callable(set_stack):
-                set_stack(1)
-            elif getattr(self, "_table_stack", None) is not None:
-                self._table_stack.setCurrentIndex(1)
+            show_idle = getattr(self, "_show_idle_workspace", None)
+            if callable(show_idle):
+                show_idle()
+            else:
+                set_stack = getattr(self, "_set_workspace_stack_index", None)
+                if callable(set_stack):
+                    set_stack(0)
+                elif getattr(self, "_table_stack", None) is not None:
+                    self._table_stack.setCurrentIndex(0)
         self.zoomed_ids = set()
         for f in self.filters:
             f.deleteLater()
@@ -267,9 +279,13 @@ class TableUIMixin(
         if callable(reset_search):
             reset_search()
         if not keep_loading:
+            # Floating hosts from a prior session; do not reveal the empty table page.
             show_ws = getattr(self, "_show_session_workspace_when_ready", None)
             if callable(show_ws):
                 show_ws()
+            show_idle = getattr(self, "_show_idle_workspace", None)
+            if callable(show_idle):
+                show_idle()
         self._restore_render2d_batch_environment()
         self._session_restore_ctx = None
         abort_csv = getattr(self, "_abort_csv_session_load", None)

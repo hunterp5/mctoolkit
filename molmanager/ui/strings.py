@@ -62,6 +62,10 @@ LOADING_DETAIL_SESSION = (
     "Loading session…\n"
     "Restoring table, filters, and plots. 2D images continue after the workspace is shown."
 )
+LOADING_DETAIL_IDLE = (
+    "Open a file or session to begin.\n"
+    "The table and plot panes appear after data is loaded."
+)
 LOADING_DETAIL_PROTEIN_VIEWER = (
     "Loading structures…\nDrawing the 3D view. The window stays open while this finishes."
 )

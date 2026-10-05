@@ -208,10 +208,9 @@ class GuiSettingsMixin:
         self._apply_status_bar_visible(bool(checked), persist=True)
 
     def _apply_status_bar_visible(self, visible: bool, *, persist: bool = True) -> None:
-        overlay = False
-        overlay_fn = getattr(self, "_workspace_loading_overlay_visible", None)
-        if callable(overlay_fn):
-            overlay = bool(overlay_fn())
+        # Hide the status strip only during an active file/session load — not the idle
+        # "open a file" page, which should still show Ready / memory.
+        overlay = bool(getattr(self, "_ingest_loading", False))
         show = bool(visible) and not overlay
         host = getattr(self, "_status_host", None)
         if host is not None:

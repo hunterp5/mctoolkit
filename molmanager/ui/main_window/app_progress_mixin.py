@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 class AppProgressMixin:
     def _workspace_loading_overlay_visible(self) -> bool:
-        """True while file/session load is covering the workspace."""
+        """True while the loading/idle page covers the table and plot panes."""
         if bool(getattr(self, "_ingest_loading", False)):
             return True
         stack = getattr(self, "_table_stack", None)
@@ -42,6 +42,22 @@ class AppProgressMixin:
             return stack is not None and int(stack.currentIndex()) == 0
         except RuntimeError:
             return False
+
+    def _show_idle_workspace(self) -> None:
+        """Cover the empty table with the same full-page chrome used during loads."""
+        from ..strings import LOADING_DETAIL_IDLE
+
+        detail = getattr(self, "_loading_detail", None)
+        if detail is not None:
+            try:
+                detail.setText(LOADING_DETAIL_IDLE)
+            except RuntimeError:
+                pass
+        self._set_workspace_stack_index(0)
+
+    def _reveal_workspace_ready(self) -> None:
+        """Show the table/plot workspace after data is present."""
+        self._set_workspace_stack_index(1)
 
     def _session_overlay_owns_loading_detail(self) -> bool:
         """True while session restore is writing the loading page (not tool progress)."""
@@ -83,8 +99,9 @@ class AppProgressMixin:
 
         ``isVisible()`` is False until the top-level window is shown, so it
         cannot be used during ``__init__`` to decide whether polling starts.
+        Idle (no file) still polls; only an active ingest/session load pauses it.
         """
-        if self._workspace_loading_overlay_visible():
+        if bool(getattr(self, "_ingest_loading", False)):
             return False
         host = getattr(self, "_status_host", None)
         return host is None or not host.isHidden()

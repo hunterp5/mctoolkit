@@ -53,10 +53,13 @@ def _manager(qapp) -> WorkspaceLayoutManager:
 
 
 def test_default_layout_is_table_only(qapp):
+    del qapp
     table = QWidget()
     mgr = WorkspaceLayoutManager(table)
     assert mgr.layout_id == DEFAULT_LAYOUT_ID == LAYOUT_TABLE_ONLY
     assert mgr.plot_panes() == []
+    assert mgr._workspace_root is not None
+    assert mgr.isAncestorOf(table)
 
 
 def test_apply_layout_pane_counts(qapp):
@@ -470,6 +473,82 @@ def test_remove_last_pane_switches_to_table_only(qapp):
     assert mgr.plot_panes() == []
     assert table.parentWidget() is not None
     assert table.parentWidget() is not table
+    # Table must stay nested under a host; promoting it to workspace root breaks layouts.
+    assert mgr._workspace_root is not table
+    assert mgr.isAncestorOf(table)
+
+
+def test_layout_roundtrip_clears_plot_panes(qapp):
+    mgr = _manager(qapp)
+    table = mgr._table_area
+    mgr.apply_layout(LAYOUT_TABLE_STACK, preserve_plots=False)
+    mgr.dock_into_pane(mgr.plot_panes()[0], QLabel("a"))
+    mgr.dock_into_pane(mgr.plot_panes()[1], QLabel("b"))
+    extras = mgr.apply_layout(LAYOUT_TABLE_ONLY, preserve_plots=True)
+    assert mgr.layout_id == LAYOUT_TABLE_ONLY
+    assert mgr.plot_panes() == []
+    assert len(extras) == 2
+    assert mgr._workspace_root is not table
+    assert mgr.isAncestorOf(table)
+    # Collapse via pane close, then picker-style layout changes must stay robust.
+    mgr.apply_layout(LAYOUT_TABLE_STACK, preserve_plots=False)
+    assert mgr.remove_pane(mgr.plot_panes()[1]) is True
+    assert mgr.remove_pane(mgr.plot_panes()[0]) is True
+    assert mgr._workspace_root is not table
+    mgr.apply_layout(LAYOUT_TABLE_SIDE, preserve_plots=False)
+    assert len(mgr.plot_panes()) == 2
+    mgr.apply_layout(LAYOUT_TABLE_ONLY, preserve_plots=True)
+    assert mgr.plot_panes() == []
+    assert mgr._workspace_root is not table
+
+
+def test_table_only_after_split_reclaims_full_width(qapp):
+    """table_only → split → table_only must drop splitters and give the table full span."""
+    from PyQt5.QtWidgets import QSplitter
+
+    mgr = _manager(qapp)
+    mgr.resize(1000, 700)
+    mgr.show()
+    qapp.processEvents()
+    table = mgr._table_area
+
+    mgr.apply_layout(LAYOUT_TABLE_ONLY, preserve_plots=False)
+    qapp.processEvents()
+    assert table.width() == mgr.width()
+
+    mgr.apply_layout(LAYOUT_TABLE_SINGLE, preserve_plots=False)
+    qapp.processEvents()
+    assert len(mgr.plot_panes()) == 1
+    assert isinstance(mgr._workspace_root, QSplitter)
+    assert table.width() < mgr.width() - 50
+
+    mgr.apply_layout(LAYOUT_TABLE_ONLY, preserve_plots=True)
+    qapp.processEvents()
+    assert mgr.layout_id == LAYOUT_TABLE_ONLY
+    assert mgr.plot_panes() == []
+    assert mgr._splitters == []
+    assert not isinstance(mgr._workspace_root, QSplitter)
+    assert mgr.findChildren(QSplitter) == []
+    assert table.width() == mgr.width()
+    assert mgr._layout_tree_matches(LAYOUT_TABLE_ONLY)
+
+
+def test_table_only_early_out_requires_non_splitter_root(qapp):
+    """Stale splitter trees labeled table_only must still rebuild."""
+    from PyQt5.QtWidgets import QSplitter
+
+    mgr = _manager(qapp)
+    mgr.apply_layout(LAYOUT_TABLE_SINGLE, preserve_plots=False)
+    # Poisoned state: id says table_only but the splitter tree remains.
+    mgr._layout_id = LAYOUT_TABLE_ONLY
+    mgr._panes.clear()
+    assert isinstance(mgr._workspace_root, QSplitter)
+    assert not mgr._layout_tree_matches(LAYOUT_TABLE_ONLY)
+
+    mgr.apply_layout(LAYOUT_TABLE_ONLY, preserve_plots=False)
+    assert mgr.plot_panes() == []
+    assert mgr._splitters == []
+    assert not isinstance(mgr._workspace_root, QSplitter)
 
 
 
