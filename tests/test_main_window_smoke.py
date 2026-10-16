@@ -793,8 +793,9 @@ def test_undock_resizes_floating_dialog_to_docked_size(qapp, monkeypatch):  # no
     qapp.processEvents()
     host = plot.window()
     assert isinstance(host, _Dlg)
-    assert abs(host.width() - src_w) <= 40
-    assert abs(host.height() - src_h) <= 40
+    # Dialog chrome may make the outer window larger; content must match docked size.
+    assert abs(plot.width() - src_w) <= 40
+    assert abs(plot.height() - src_h) <= 40
 
 
 def test_redock_does_not_shrink_open_plot_panel(qapp, monkeypatch):  # noqa: ARG001
