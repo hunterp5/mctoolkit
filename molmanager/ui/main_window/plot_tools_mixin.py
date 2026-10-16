@@ -342,6 +342,7 @@ class PlotToolsMixin:
         from ..pose_browser import PoseBrowserDialog
         from ..random_molecule_browser import RandomMoleculeBrowserDialog
         from ..selection_browser import SelectionBrowserDialog
+        from ..session_notepad import NotepadDialog
         from ..som_browser import SomBrowserDialog
 
         if isinstance(dlg, SelectionBrowserDialog):
@@ -378,6 +379,14 @@ class PlotToolsMixin:
                 dlg.destroyed.connect(self._on_random_molecule_browser_dialog_destroyed)
             except Exception:
                 pass
+            return True
+        if isinstance(dlg, NotepadDialog):
+            host = getattr(self, "session_notepad", None)
+            if host is not None:
+                host.dialog = dlg
+                panel = getattr(dlg, "_panel", None)
+                if panel is not None:
+                    host.panel = panel
             return True
         return False
 
