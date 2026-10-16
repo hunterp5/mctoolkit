@@ -31,6 +31,7 @@ from PyQt5.QtWidgets import (
     QLayout,
     QShortcut,
     QSizePolicy,
+    QSpinBox,
     QTableWidget,
     QVBoxLayout,
     QWidget,
@@ -41,6 +42,7 @@ from ...table.structure_depiction_layout import (
     BROWSER_STRUCTURE_PREVIEW_MIN_WIDTH,
 )
 from ..dockable_plot import PLOT_BODY_MARGINS, PLOT_BODY_SPACING
+from ..dockable_plot_constants import _BROWSER_NAV_BTN_HEIGHT
 from ..qt_widget_utils import make_window_minimizable
 
 # RDKit depictions sit on white; keep the well white in light and dark app themes.
@@ -175,6 +177,27 @@ def configure_browser_mol_drawer(drawer: Any, width: int) -> None:
         cfg(drawer, width)
     except Exception:
         pass
+
+
+class BrowserIndexSpinBox(QSpinBox):
+    """Index field. Focus selects the current value so typing replaces it."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setRange(1, 1)
+        self.setAlignment(Qt.AlignCenter)
+        self.setButtonSymbols(QSpinBox.NoButtons)
+        self.setKeyboardTracking(False)
+        self.setFixedWidth(72)
+        self.setFixedHeight(_BROWSER_NAV_BTN_HEIGHT)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setToolTip("Type a number and press Enter to jump.")
+
+    def focusInEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().focusInEvent(event)
+        edit = self.lineEdit()
+        if edit is not None:
+            edit.selectAll()
 
 
 def install_browser_nav_shortcuts(
