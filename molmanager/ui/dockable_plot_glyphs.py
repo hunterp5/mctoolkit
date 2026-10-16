@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import QPointF, QRectF, QSize, Qt
-from PyQt5.QtGui import QColor, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PyQt5.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PyQt5.QtWidgets import QLineEdit, QPushButton, QSizePolicy
 
 from .dockable_plot_constants import (
@@ -307,28 +307,94 @@ def style_browser_nav_buttons(
         style_browser_select_button(select, checkable=select_checkable)
 
 
+def _add_compact_nav_widgets(layout, widgets) -> None:
+    """Pin index fields and checkboxes to their size while nav buttons share the row."""
+    if widgets is None:
+        return
+    if not isinstance(widgets, (list, tuple)):
+        widgets = (widgets,)
+    for widget in widgets:
+        policy = QSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        policy.setHorizontalStretch(0)
+        widget.setSizePolicy(policy)
+        layout.addWidget(widget, 0)
+
+
 def add_centered_browser_nav(
     layout,
     buttons: list,
     *,
+    leading=None,
     trailing=None,
 ) -> None:
-    """Share leftover row width across nav buttons; trailing chrome stays compact."""
+    """Share leftover row width across nav buttons; side chrome stays compact."""
+    _add_compact_nav_widgets(layout, leading)
     for btn in buttons:
         policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         policy.setHorizontalStretch(1)
         btn.setSizePolicy(policy)
         layout.addWidget(btn, 1)
-    extras = trailing
-    if extras is None:
-        return
-    if not isinstance(extras, (list, tuple)):
-        extras = (extras,)
-    for widget in extras:
-        policy = QSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        policy.setHorizontalStretch(0)
-        widget.setSizePolicy(policy)
-        layout.addWidget(widget, 0)
+    _add_compact_nav_widgets(layout, trailing)
+
+
+def _paint_format_letter(
+    painter: QPainter,
+    size: float,
+    letter: str,
+    *,
+    bold: bool = False,
+    italic: bool = False,
+) -> None:
+    font = QFont("Segoe UI")
+    font.setBold(bold)
+    font.setItalic(italic)
+    font.setPixelSize(max(8, int(size * 0.72)))
+    painter.setFont(font)
+    painter.setPen(_GLYPH_INK)
+    painter.drawText(QRectF(0, 0, size, size), int(Qt.AlignCenter), letter)
+
+
+def bold_glyph_icon(size: int = _GLYPH_ICON_SIZE) -> QIcon:
+    """Bold mark for notepad text."""
+
+    def paint(painter: QPainter, span: float) -> None:
+        _paint_format_letter(painter, span, "B", bold=True)
+
+    return _paint_glyph_icon(paint, size)
+
+
+def italic_glyph_icon(size: int = _GLYPH_ICON_SIZE) -> QIcon:
+    """Italic mark for notepad text."""
+
+    def paint(painter: QPainter, span: float) -> None:
+        _paint_format_letter(painter, span, "I", italic=True)
+
+    return _paint_glyph_icon(paint, size)
+
+
+def underline_glyph_icon(size: int = _GLYPH_ICON_SIZE) -> QIcon:
+    """Underline mark for notepad text."""
+
+    def paint(painter: QPainter, span: float) -> None:
+        _paint_format_letter(painter, span, "U")
+        painter.setPen(_glyph_pen(max(1.3, span * 0.1)))
+        y = span * 0.84
+        painter.drawLine(QPointF(span * 0.22, y), QPointF(span * 0.78, y))
+
+    return _paint_glyph_icon(paint, size)
+
+
+def text_color_glyph_icon(color: QColor, size: int = _GLYPH_ICON_SIZE) -> QIcon:
+    """Letter with a bar in *color* for notepad text color."""
+    ink = QColor(color) if color.isValid() else QColor(_GLYPH_INK)
+
+    def paint(painter: QPainter, span: float) -> None:
+        _paint_format_letter(painter, span * 0.86, "A", bold=True)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(ink)
+        painter.drawRoundedRect(QRectF(span * 0.14, span * 0.74, span * 0.72, span * 0.16), 1, 1)
+
+    return _paint_glyph_icon(paint, size)
 
 
 def style_plot_pane_nav_arrow(btn: QPushButton, direction: str, tooltip: str = "") -> None:
