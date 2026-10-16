@@ -56,6 +56,7 @@ from .dockable_plot_glyphs import (
     text_color_glyph_icon,
     underline_glyph_icon,
 )
+from .qt_widget_utils import qobject_is_deleted
 
 NOTE_FONT_FAMILY = "Segoe UI"
 DEFAULT_NOTE_PT = 12
@@ -81,15 +82,8 @@ def _parse_color(value: object) -> QColor:
 
 
 def _live(widget: Any) -> Any:
-    if widget is None:
+    if widget is None or qobject_is_deleted(widget):
         return None
-    try:
-        from PyQt5 import sip
-
-        if sip.isdeleted(widget):
-            return None
-    except Exception:
-        pass
     return widget
 
 
@@ -171,7 +165,9 @@ class NotepadWidget(QWidget):
         self._italic = self._format_button(italic_glyph_icon(), "Italic")
         self._underline = self._format_button(underline_glyph_icon(), "Underline")
         self._color_btn = QPushButton(self._header_left)
-        style_plot_chrome_glyph_button(self._color_btn, text_color_glyph_icon(self._color), "Text color")
+        style_plot_chrome_glyph_button(
+            self._color_btn, text_color_glyph_icon(self._color), "Text color"
+        )
         self._color_btn.clicked.connect(self._pick_color)
         left.addWidget(size_label)
         left.addWidget(self._size)
