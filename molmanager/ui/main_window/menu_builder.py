@@ -55,7 +55,9 @@ def _install_into_menu(window: Any, menu: QMenu, spec: MenuItem) -> None:
         menu.aboutToShow.connect(getattr(window, spec.about_to_show))
     for item in spec.items:
         if item.kind == KIND_SEPARATOR:
-            menu.addSeparator()
+            sep = menu.addSeparator()
+            if item.attr:
+                setattr(window, item.attr, sep)
         elif item.kind == KIND_SUBMENU:
             child = menu.addMenu(item.title)
             _install_into_menu(window, child, item)
