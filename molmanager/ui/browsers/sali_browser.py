@@ -14,21 +14,39 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Browse SALI pairs side-by-side with activity and properties."""
+"""Browse SALI pairs side-by-side with a data table for the current pair."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtWidgets import QLabel, QVBoxLayout
+from PyQt5.QtGui import QBrush, QImage, QPixmap
+from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QSizePolicy,
+    QStyle,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 from rdkit import Chem
 from rdkit.Chem.Draw import rdMolDraw2D
 
 from ...analysis.sali_analysis import SaliPoint
-from .chrome import configure_browser_mol_drawer, style_browser_emphasis_label
+from .chrome import (
+    BrowserIndexSpinBox,
+    configure_browser_mol_drawer,
+    style_browser_data_table,
+    style_browser_emphasis_label,
+)
 from .pair_browser import PairBrowserDialog
+
+_PAIR_TABLE_ROW_HEIGHT = 28
 
 
 class SaliBrowserDialog(PairBrowserDialog):
@@ -55,6 +73,7 @@ class SaliBrowserDialog(PairBrowserDialog):
         if self._all_points and 0 <= self._idx < len(self._all_points):
             p0 = self._all_points[self._idx]
             self._prefer_keys = (int(p0.oid_a), int(p0.oid_b))
+        self._pair_index_syncing = False
         super().__init__(parent, activity_column=activity_column)
 
     def _populate_header(self, root: QVBoxLayout) -> None:
@@ -64,6 +83,91 @@ class SaliBrowserDialog(PairBrowserDialog):
         self._metrics_label.setWordWrap(True)
         style_browser_emphasis_label(self._metrics_label)
         root.addWidget(self._metrics_label)
+
+    def _add_comparison_section(self, root: QVBoxLayout) -> None:
+        """Two-row table of the current pair, matching Data → Browser."""
+        self._row_table = QTableWidget(0, 0, self)
+        self._row_table.setObjectName("BrowserRowTable")
+        self._row_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._row_table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._row_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._row_table.setFocusPolicy(Qt.NoFocus)
+        self._row_table.verticalHeader().setVisible(True)
+        self._row_table.verticalHeader().setDefaultAlignment(Qt.AlignCenter)
+        self._row_table.verticalHeader().setDefaultSectionSize(_PAIR_TABLE_ROW_HEIGHT)
+        self._row_table.horizontalHeader().setHighlightSections(False)
+        self._row_table.horizontalHeader().setStretchLastSection(True)
+        self._row_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self._row_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._row_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._row_table.setWordWrap(False)
+        self._row_table.setShowGrid(True)
+        self._row_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        style_browser_data_table(self._row_table)
+        bar = self._row_table.horizontalScrollBar()
+        if bar is not None:
+            bar.rangeChanged.connect(lambda *_a: self._fit_pair_table_height())
+        self._fit_pair_table_height()
+        root.addWidget(self._row_table)
+
+    def _prepare_nav_extras(self) -> None:
+        host = QWidget()
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 10, 0)
+        row.setSpacing(4)
+        pair_label = QLabel("Pair")
+        pair_label.setAlignment(Qt.AlignVCenter)
+        self._pair_index = BrowserIndexSpinBox(host)
+        self._pair_index.setToolTip("Type a pair number and press Enter to jump to that pair.")
+        n = len(self._points)
+        if n > 0:
+            self._pair_index.setRange(1, n)
+            self._pair_index.setValue(min(self._idx + 1, n))
+        self._pair_count_label = QLabel("/ 0" if n <= 0 else f"/ {n}")
+        self._pair_count_label.setAlignment(Qt.AlignVCenter)
+        row.addWidget(pair_label)
+        row.addWidget(self._pair_index)
+        row.addWidget(self._pair_count_label)
+        self._pair_index_host = host
+        self._pair_index.valueChanged.connect(self._on_pair_index_changed)
+
+    def _nav_leading_widgets(self) -> list[QWidget]:
+        return [self._pair_index_host]
+
+    def _nav_trailing_widgets(self) -> list[QWidget]:
+        return [self._cb_selected_only]
+
+    def _on_pair_index_changed(self, value: int) -> None:
+        if self._pair_index_syncing:
+            return
+        n = self._item_count()
+        if n <= 0:
+            return
+        target = max(0, min(int(value) - 1, n - 1))
+        if target == self._idx:
+            return
+        self._idx = target
+        self._update_ui()
+
+    def _sync_pair_index(self, count: int) -> None:
+        spin = self._pair_index
+        self._pair_index_syncing = True
+        spin.blockSignals(True)
+        try:
+            if count <= 0:
+                spin.setRange(1, 1)
+                spin.setValue(1)
+                spin.setEnabled(False)
+                self._pair_count_label.setText("/ 0")
+            else:
+                shown = max(1, min(self._idx + 1, count))
+                spin.setEnabled(True)
+                spin.setRange(1, count)
+                spin.setValue(shown)
+                self._pair_count_label.setText(f"/ {count}")
+        finally:
+            spin.blockSignals(False)
+            self._pair_index_syncing = False
 
     def _item_count(self) -> int:
         return len(self._points)
@@ -158,21 +262,26 @@ class SaliBrowserDialog(PairBrowserDialog):
         n = len(self._points)
         self._sync_nav_enabled(count=n)
         if n <= 0:
+            self._meta.setVisible(True)
             if self._cb_selected_only.isChecked():
                 self._meta.setText("No SALI pairs involve the current table selection.")
             else:
                 self._meta.setText("No SALI pairs to browse.")
             self._metrics_label.setText("")
+            self._sync_pair_index(0)
             self._clear_pair_panels()
             self._update_property_values()
             return
 
         self._idx = max(0, min(self._idx, n - 1))
         point = self._points[self._idx]
+        self._meta.clear()
+        self._meta.setVisible(False)
+        self._sync_pair_index(n)
         fp_txt = self._fp_choice or "fingerprint"
-        self._meta.setText(f"Pair {self._idx + 1} of {n}  ·  {fp_txt} / {self._metric}")
         sign = "+" if point.signed_delta >= 0 else ""
         self._metrics_label.setText(
+            f"{fp_txt} / {self._metric}  ·  "
             f"similarity = {point.similarity:.3f}  ·  "
             f"Δ{self._activity_column} = {sign}{point.signed_delta:.4g}  ·  "
             f"SALI = {point.sali:.4g}"
@@ -181,6 +290,104 @@ class SaliBrowserDialog(PairBrowserDialog):
         self._right_panel["box"].setTitle(f"Molecule B  (ID {point.oid_b})")
         self._refresh_previews()
         self._update_property_values()
+
+    def _refresh_property_columns(self) -> None:
+        self._fill_pair_table()
+
+    def _update_property_values(self) -> None:
+        self._fill_pair_table()
+
+    def _visible_data_columns(self) -> list[tuple[int, str]]:
+        """Visible non-structure table columns in visual order."""
+        app = self._app
+        if app is None:
+            return []
+        headers = list(getattr(app, "headers", []) or [])
+        table = getattr(app, "table", None)
+        vis_fn = getattr(app, "_visual_logical_columns", None)
+        logical = vis_fn() if callable(vis_fn) else list(range(len(headers)))
+        out: list[tuple[int, str]] = []
+        for i in logical:
+            if i < 0 or i >= len(headers):
+                continue
+            name = str(headers[i])
+            if name in ("ID_HIDDEN", "Structure"):
+                continue
+            if table is not None:
+                try:
+                    if table.isColumnHidden(i):
+                        continue
+                except RuntimeError:
+                    pass
+            out.append((i, name))
+        return out
+
+    def _pair_table_item(self, oid: int, col: int, header: str) -> QTableWidgetItem:
+        item = QTableWidgetItem()
+        item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        text = self._cell_text_for_oid(int(oid), header)
+        item.setText(text)
+        if text:
+            item.setToolTip(text)
+        app = self._app
+        model = getattr(app, "_table_model", None) if app is not None else None
+        if model is None:
+            return item
+        try:
+            row = app.logical_row_for_oid(int(oid))
+        except Exception:
+            return item
+        if row is None or int(row) < 0:
+            return item
+        try:
+            index = model.index(int(row), int(col))
+            bg = model.data(index, Qt.BackgroundRole)
+        except Exception:
+            return item
+        if bg is not None:
+            item.setBackground(bg if isinstance(bg, QBrush) else QBrush(bg))
+        return item
+
+    def _fit_pair_table_height(self) -> None:
+        table = getattr(self, "_row_table", None)
+        if table is None:
+            return
+        hdr_h = int(table.horizontalHeader().sizeHint().height())
+        frame = 2 * int(table.frameWidth())
+        style = table.style()
+        extent = int(style.pixelMetric(QStyle.PM_ScrollBarExtent, None, table))
+        bar = table.horizontalScrollBar()
+        hinted = int(bar.sizeHint().height()) if bar is not None else 0
+        scroll = max(extent, hinted, 16)
+        table.setFixedHeight(hdr_h + 2 * _PAIR_TABLE_ROW_HEIGHT + frame + scroll + 4)
+
+    def _fill_pair_table(self) -> None:
+        table = getattr(self, "_row_table", None)
+        if table is None:
+            return
+        cols = self._visible_data_columns()
+        names = [name for _col, name in cols]
+        current = []
+        for i in range(table.columnCount()):
+            header_item = table.horizontalHeaderItem(i)
+            current.append("" if header_item is None else header_item.text())
+        table.blockSignals(True)
+        if current != names:
+            table.setColumnCount(len(names))
+            if names:
+                table.setHorizontalHeaderLabels(names)
+        oids = self._current_pair_oids()
+        if oids is None:
+            table.setRowCount(0)
+        else:
+            table.setRowCount(2)
+            table.setVerticalHeaderLabels(["A", "B"])
+            for row, oid in enumerate(oids):
+                for i, (col, name) in enumerate(cols):
+                    table.setItem(row, i, self._pair_table_item(int(oid), col, name))
+                table.setRowHeight(row, _PAIR_TABLE_ROW_HEIGHT)
+        table.blockSignals(False)
+        self._fit_pair_table_height()
 
     def _mol_for_oid(self, oid: int) -> Chem.Mol | None:
         app = self._app
