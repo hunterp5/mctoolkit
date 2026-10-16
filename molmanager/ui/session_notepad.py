@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt5.QtCore import QEvent, Qt
-from PyQt5.QtGui import QBrush, QColor, QFont, QTextCharFormat, QTextCursor
+from PyQt5.QtGui import QBrush, QColor, QFont, QTextCharFormat, QTextCursor, QTextListFormat
 from PyQt5.QtWidgets import (
     QColorDialog,
     QHBoxLayout,
@@ -44,15 +44,19 @@ from .dockable_plot import (
     discard_host_dialog_after_dock,
     make_add_to_main_button,
     make_send_window_button,
-    style_plot_chrome_glyph_button,
     style_plot_footer_text_button,
     sync_docked_footer_bar,
     sync_footer_on_parent_change,
 )
-from .dockable_plot_constants import _GLYPH_BTN_SIZE
 from .dockable_plot_glyphs import (
+    FORMAT_GLYPH_BTN_SIZE,
     bold_glyph_icon,
+    bullet_glyph_icon,
     italic_glyph_icon,
+    numbering_glyph_icon,
+    style_format_glyph_button,
+    subscript_glyph_icon,
+    superscript_glyph_icon,
     text_color_glyph_icon,
     underline_glyph_icon,
 )
@@ -85,6 +89,24 @@ def _live(widget: Any) -> Any:
     if widget is None or qobject_is_deleted(widget):
         return None
     return widget
+
+
+def _blocks_touched_by_cursor(editor: QTextEdit, cursor: QTextCursor) -> list:
+    """Paragraphs covered by *cursor*, including the caret paragraph when nothing is selected."""
+    document = editor.document()
+    if document is None:
+        return []
+    start = min(cursor.position(), cursor.anchor())
+    end = max(cursor.position(), cursor.anchor())
+    block = document.findBlock(start)
+    end_block = document.findBlock(end - 1) if end > start else block
+    blocks = []
+    while block.isValid():
+        blocks.append(block)
+        if block == end_block:
+            break
+        block = block.next()
+    return blocks
 
 
 def _mark_notepad_dirty(app: Any) -> None:
@@ -144,7 +166,7 @@ class NotepadWidget(QWidget):
 
         self._footer_bar = QWidget(self)
         self._footer_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        self._footer_bar.setMinimumHeight(_GLYPH_BTN_SIZE)
+        self._footer_bar.setMinimumHeight(FORMAT_GLYPH_BTN_SIZE)
         foot = QHBoxLayout(self._footer_bar)
         foot.setContentsMargins(0, 0, 0, 0)
         foot.setSpacing(4)
@@ -159,22 +181,28 @@ class NotepadWidget(QWidget):
         self._size.setRange(MIN_NOTE_PT, MAX_NOTE_PT)
         self._size.setValue(DEFAULT_NOTE_PT)
         self._size.setSuffix(" pt")
-        self._size.setFixedHeight(_GLYPH_BTN_SIZE)
+        self._size.setFixedHeight(FORMAT_GLYPH_BTN_SIZE)
         self._size.setToolTip("Text size. Settings → Font does not change the notepad.")
         self._bold = self._format_button(bold_glyph_icon(), "Bold")
         self._italic = self._format_button(italic_glyph_icon(), "Italic")
         self._underline = self._format_button(underline_glyph_icon(), "Underline")
         self._color_btn = QPushButton(self._header_left)
-        style_plot_chrome_glyph_button(
-            self._color_btn, text_color_glyph_icon(self._color), "Text color"
-        )
+        style_format_glyph_button(self._color_btn, text_color_glyph_icon(self._color), "Text color")
         self._color_btn.clicked.connect(self._pick_color)
+        self._subscript = self._format_button(subscript_glyph_icon(), "Subscript")
+        self._superscript = self._format_button(superscript_glyph_icon(), "Superscript")
+        self._bullet = self._format_button(bullet_glyph_icon(), "Bulleted list")
+        self._number = self._format_button(numbering_glyph_icon(), "Numbered list")
         left.addWidget(size_label)
         left.addWidget(self._size)
         left.addWidget(self._bold)
         left.addWidget(self._italic)
         left.addWidget(self._underline)
         left.addWidget(self._color_btn)
+        left.addWidget(self._subscript)
+        left.addWidget(self._superscript)
+        left.addWidget(self._bullet)
+        left.addWidget(self._number)
         left.addStretch(1)
 
         self._meta = QLabel(self._footer_bar)
@@ -217,6 +245,10 @@ class NotepadWidget(QWidget):
         self._bold.clicked.connect(self._toggle_bold)
         self._italic.clicked.connect(self._toggle_italic)
         self._underline.clicked.connect(self._toggle_underline)
+        self._subscript.clicked.connect(self._toggle_subscript)
+        self._superscript.clicked.connect(self._toggle_superscript)
+        self._bullet.clicked.connect(self._toggle_bullet)
+        self._number.clicked.connect(self._toggle_numbering)
         self._edit.textChanged.connect(self._notify_changed)
         self._edit.cursorPositionChanged.connect(self._sync_format_buttons)
         self._edit.selectionChanged.connect(self._sync_format_buttons)
@@ -225,12 +257,7 @@ class NotepadWidget(QWidget):
 
     def _format_button(self, icon, tooltip: str) -> QPushButton:
         btn = QPushButton(self._header_left)
-        style_plot_chrome_glyph_button(btn, icon, tooltip)
-        btn.setCheckable(True)
-        btn.setStyleSheet(
-            "QPushButton { padding: 0px; margin: 0px; }"
-            "QPushButton:checked { background-color: palette(midlight); }"
-        )
+        style_format_glyph_button(btn, icon, tooltip, checkable=True)
         return btn
 
     def rebind_parent_app(self, parent_app: Any) -> None:
@@ -480,7 +507,7 @@ class NotepadWidget(QWidget):
             self._notify_changed()
 
     def _refresh_color_glyph(self) -> None:
-        style_plot_chrome_glyph_button(
+        style_format_glyph_button(
             self._color_btn,
             text_color_glyph_icon(self._color),
             "Text color",
@@ -507,6 +534,58 @@ class NotepadWidget(QWidget):
         fmt.setFontUnderline(self._underline.isChecked())
         self._merge_format(fmt)
 
+    def _toggle_subscript(self) -> None:
+        fmt = QTextCharFormat()
+        alignment = (
+            QTextCharFormat.AlignSubScript
+            if self._subscript.isChecked()
+            else QTextCharFormat.AlignNormal
+        )
+        fmt.setVerticalAlignment(alignment)
+        self._merge_format(fmt)
+
+    def _toggle_superscript(self) -> None:
+        fmt = QTextCharFormat()
+        alignment = (
+            QTextCharFormat.AlignSuperScript
+            if self._superscript.isChecked()
+            else QTextCharFormat.AlignNormal
+        )
+        fmt.setVerticalAlignment(alignment)
+        self._merge_format(fmt)
+
+    def _toggle_bullet(self) -> None:
+        self._apply_list(QTextListFormat.ListDisc, enable=self._bullet.isChecked())
+
+    def _toggle_numbering(self) -> None:
+        self._apply_list(QTextListFormat.ListDecimal, enable=self._number.isChecked())
+
+    def _apply_list(self, style: QTextListFormat.Style, *, enable: bool) -> None:
+        """Turn the current paragraphs into a list, or take them back out of one."""
+        cursor = self._edit.textCursor()
+        if enable:
+            fmt = QTextListFormat()
+            fmt.setStyle(style)
+            current = cursor.currentList()
+            if current is not None:
+                fmt.setIndent(max(1, int(current.format().indent())))
+            cursor.createList(fmt)
+        else:
+            self._remove_lists(cursor)
+        self._sync_format_buttons()
+        self._notify_changed()
+
+    def _remove_lists(self, cursor: QTextCursor) -> None:
+        blocks = _blocks_touched_by_cursor(self._edit, cursor)
+        cursor.beginEditBlock()
+        try:
+            for block in blocks:
+                text_list = block.textList()
+                if text_list is not None:
+                    text_list.remove(block)
+        finally:
+            cursor.endEditBlock()
+
     def _pick_color(self) -> None:
         cursor = self._edit.textCursor()
         chosen = QColorDialog.getColor(self._color, self.window(), "Text color")
@@ -522,10 +601,17 @@ class NotepadWidget(QWidget):
         self._format_syncing = True
         try:
             fmt = self._edit.currentCharFormat()
+            align = fmt.verticalAlignment()
+            text_list = self._edit.textCursor().currentList()
+            list_style = text_list.format().style() if text_list is not None else None
             for btn, checked in (
                 (self._bold, fmt.fontWeight() >= QFont.Bold),
                 (self._italic, fmt.fontItalic()),
                 (self._underline, fmt.fontUnderline()),
+                (self._subscript, align == QTextCharFormat.AlignSubScript),
+                (self._superscript, align == QTextCharFormat.AlignSuperScript),
+                (self._bullet, list_style == QTextListFormat.ListDisc),
+                (self._number, list_style == QTextListFormat.ListDecimal),
             ):
                 btn.blockSignals(True)
                 btn.setChecked(checked)

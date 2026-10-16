@@ -24,6 +24,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QBrush, QImage, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -43,6 +44,7 @@ from .chrome import (
     configure_browser_mol_drawer,
     style_browser_data_table,
     style_browser_emphasis_label,
+    style_browser_group_box,
 )
 from .pair_browser import PairBrowserDialog
 
@@ -76,16 +78,20 @@ class SaliBrowserDialog(PairBrowserDialog):
         self._pair_index_syncing = False
         super().__init__(parent, activity_column=activity_column)
 
-    def _populate_header(self, root: QVBoxLayout) -> None:
-        self._metrics_label = QLabel()
+    def _add_comparison_section(self, root: QVBoxLayout) -> None:
+        """Pair metrics, then a two-row table of the current pair."""
+        self._metrics_box = QGroupBox()
+        style_browser_group_box(self._metrics_box)
+        metrics_layout = QVBoxLayout(self._metrics_box)
+        metrics_layout.setContentsMargins(8, 8, 8, 8)
+        self._metrics_label = QLabel(self._metrics_box)
         self._metrics_label.setAlignment(Qt.AlignCenter)
         self._metrics_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._metrics_label.setWordWrap(True)
         style_browser_emphasis_label(self._metrics_label)
-        root.addWidget(self._metrics_label)
+        metrics_layout.addWidget(self._metrics_label)
+        root.addWidget(self._metrics_box)
 
-    def _add_comparison_section(self, root: QVBoxLayout) -> None:
-        """Two-row table of the current pair, matching Data → Browser."""
         self._row_table = QTableWidget(0, 0, self)
         self._row_table.setObjectName("BrowserRowTable")
         self._row_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -278,11 +284,9 @@ class SaliBrowserDialog(PairBrowserDialog):
         self._meta.clear()
         self._meta.setVisible(False)
         self._sync_pair_index(n)
-        fp_txt = self._fp_choice or "fingerprint"
         sign = "+" if point.signed_delta >= 0 else ""
         self._metrics_label.setText(
-            f"{fp_txt} / {self._metric}  ·  "
-            f"similarity = {point.similarity:.3f}  ·  "
+            f"Similarity = {point.similarity:.3f}  ·  "
             f"Δ{self._activity_column} = {sign}{point.signed_delta:.4g}  ·  "
             f"SALI = {point.sali:.4g}"
         )

@@ -20,6 +20,19 @@ from molmanager.analysis.sali_analysis import build_sali_points, sali_index
 from molmanager.ui.sali_plot import build_sali_figure
 
 
+def test_sali_dialog_defaults_to_finer_morgan(qapp):  # noqa: ARG001
+    from molmanager.ui.dialogs.sali import SaliDialog
+
+    dlg = SaliDialog(
+        structure_sources=["Structure"],
+        activity_columns=["pIC50"],
+        selected_row_count=0,
+    )
+    assert dlg.fp_combo.currentText() == "Morgan (r=3, n=2048)"
+    assert dlg.params().fp_choice == "Morgan (r=3, n=2048)"
+    dlg.deleteLater()
+
+
 def test_sali_index_basic():
     assert abs(sali_index(1.0, 0.5) - 2.0) < 1e-12
     assert abs(sali_index(2.0, 0.0) - 2.0) < 1e-12

@@ -42,7 +42,7 @@ def _glyph_pen(width: float) -> QPen:
     return pen
 
 
-def _paint_glyph_pixmap(paint_fn, size: int = _GLYPH_ICON_SIZE) -> QPixmap:
+def _paint_glyph_pixmap(paint_fn, size: int = _GLYPH_ICON_SIZE, *, pad: float = 1.0) -> QPixmap:
     """Rasterize a glyph with stroke inset so ink stays centered and unclipped."""
     dpr = 2.0
     pm = QPixmap(int(size * dpr), int(size * dpr))
@@ -50,16 +50,16 @@ def _paint_glyph_pixmap(paint_fn, size: int = _GLYPH_ICON_SIZE) -> QPixmap:
     pm.setDevicePixelRatio(dpr)
     painter = QPainter(pm)
     painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setRenderHint(QPainter.TextAntialiasing, True)
     # Inset by ~½ stroke so edge strokes are not clipped asymmetrically.
-    pad = 1.0
     painter.translate(pad, pad)
     paint_fn(painter, float(size) - 2.0 * pad)
     painter.end()
     return pm
 
 
-def _paint_glyph_icon(paint_fn, size: int = _GLYPH_ICON_SIZE) -> QIcon:
-    return QIcon(_paint_glyph_pixmap(paint_fn, size))
+def _paint_glyph_icon(paint_fn, size: int = _GLYPH_ICON_SIZE, *, pad: float = 1.0) -> QIcon:
+    return QIcon(_paint_glyph_pixmap(paint_fn, size, pad=pad))
 
 
 def plot_options_glyph_icon(size: int = _GLYPH_ICON_SIZE) -> QIcon:
@@ -337,64 +337,131 @@ def add_centered_browser_nav(
     _add_compact_nav_widgets(layout, trailing)
 
 
+# Notepad format marks are larger than plot-chrome glyphs so the letters stay readable.
+FORMAT_GLYPH_ICON_SIZE = 20
+FORMAT_GLYPH_BTN_SIZE = 26
+_FORMAT_GLYPH_PAD = 0.35
+
+
 def _paint_format_letter(
     painter: QPainter,
-    size: float,
+    box: QRectF,
     letter: str,
     *,
-    bold: bool = False,
+    weight: int = QFont.Black,
     italic: bool = False,
 ) -> None:
     font = QFont("Segoe UI")
-    font.setBold(bold)
+    font.setWeight(weight)
     font.setItalic(italic)
-    font.setPixelSize(max(8, int(size * 0.72)))
+    font.setPixelSize(max(8, int(box.height() * 0.92)))
     painter.setFont(font)
     painter.setPen(_GLYPH_INK)
-    painter.drawText(QRectF(0, 0, size, size), int(Qt.AlignCenter), letter)
+    painter.drawText(box, int(Qt.AlignCenter), letter)
 
 
-def bold_glyph_icon(size: int = _GLYPH_ICON_SIZE) -> QIcon:
-    """Bold mark for notepad text."""
-
-    def paint(painter: QPainter, span: float) -> None:
-        _paint_format_letter(painter, span, "B", bold=True)
-
-    return _paint_glyph_icon(paint, size)
+def _format_glyph_icon(paint_fn, size: int = FORMAT_GLYPH_ICON_SIZE) -> QIcon:
+    return _paint_glyph_icon(paint_fn, size, pad=_FORMAT_GLYPH_PAD)
 
 
-def italic_glyph_icon(size: int = _GLYPH_ICON_SIZE) -> QIcon:
-    """Italic mark for notepad text."""
+def bold_glyph_icon(size: int = FORMAT_GLYPH_ICON_SIZE) -> QIcon:
+    """Heavy bold mark for notepad text."""
 
     def paint(painter: QPainter, span: float) -> None:
-        _paint_format_letter(painter, span, "I", italic=True)
+        _paint_format_letter(painter, QRectF(0, 0, span, span), "B")
 
-    return _paint_glyph_icon(paint, size)
+    return _format_glyph_icon(paint, size)
 
 
-def underline_glyph_icon(size: int = _GLYPH_ICON_SIZE) -> QIcon:
-    """Underline mark for notepad text."""
+def italic_glyph_icon(size: int = FORMAT_GLYPH_ICON_SIZE) -> QIcon:
+    """Heavy italic mark for notepad text."""
 
     def paint(painter: QPainter, span: float) -> None:
-        _paint_format_letter(painter, span, "U")
-        painter.setPen(_glyph_pen(max(1.3, span * 0.1)))
-        y = span * 0.84
-        painter.drawLine(QPointF(span * 0.22, y), QPointF(span * 0.78, y))
+        _paint_format_letter(painter, QRectF(0, 0, span, span), "I", weight=QFont.Bold, italic=True)
 
-    return _paint_glyph_icon(paint, size)
+    return _format_glyph_icon(paint, size)
 
 
-def text_color_glyph_icon(color: QColor, size: int = _GLYPH_ICON_SIZE) -> QIcon:
-    """Letter with a bar in *color* for notepad text color."""
+def underline_glyph_icon(size: int = FORMAT_GLYPH_ICON_SIZE) -> QIcon:
+    """Heavy underline mark for notepad text."""
+
+    def paint(painter: QPainter, span: float) -> None:
+        _paint_format_letter(painter, QRectF(0, 0, span, span * 0.72), "U")
+        painter.setPen(_glyph_pen(max(2.2, span * 0.14)))
+        y = span * 0.88
+        painter.drawLine(QPointF(span * 0.06, y), QPointF(span * 0.94, y))
+
+    return _format_glyph_icon(paint, size)
+
+
+def text_color_glyph_icon(color: QColor, size: int = FORMAT_GLYPH_ICON_SIZE) -> QIcon:
+    """Heavy letter with a thick bar in *color* for notepad text color."""
     ink = QColor(color) if color.isValid() else QColor(_GLYPH_INK)
 
     def paint(painter: QPainter, span: float) -> None:
-        _paint_format_letter(painter, span * 0.86, "A", bold=True)
+        _paint_format_letter(painter, QRectF(0, 0, span, span * 0.68), "A")
+        bar_h = max(3.0, span * 0.22)
         painter.setPen(Qt.NoPen)
         painter.setBrush(ink)
-        painter.drawRoundedRect(QRectF(span * 0.14, span * 0.74, span * 0.72, span * 0.16), 1, 1)
+        painter.drawRoundedRect(
+            QRectF(span * 0.06, span - bar_h, span * 0.88, bar_h * 0.82), 1.2, 1.2
+        )
 
-    return _paint_glyph_icon(paint, size)
+    return _format_glyph_icon(paint, size)
+
+
+def subscript_glyph_icon(size: int = FORMAT_GLYPH_ICON_SIZE) -> QIcon:
+    """Letter with a lowered numeral for subscript."""
+
+    def paint(painter: QPainter, span: float) -> None:
+        _paint_format_letter(painter, QRectF(0, 0, span * 0.64, span * 0.70), "A")
+        _paint_format_letter(
+            painter,
+            QRectF(span * 0.48, span * 0.50, span * 0.52, span * 0.50),
+            "2",
+        )
+
+    return _format_glyph_icon(paint, size)
+
+
+def superscript_glyph_icon(size: int = FORMAT_GLYPH_ICON_SIZE) -> QIcon:
+    """Letter with a raised numeral for superscript."""
+
+    def paint(painter: QPainter, span: float) -> None:
+        _paint_format_letter(painter, QRectF(0, span * 0.30, span * 0.64, span * 0.70), "A")
+        _paint_format_letter(painter, QRectF(span * 0.48, 0, span * 0.52, span * 0.50), "2")
+
+    return _format_glyph_icon(paint, size)
+
+
+def bullet_glyph_icon(size: int = FORMAT_GLYPH_ICON_SIZE) -> QIcon:
+    """Three heavy bullets with rules for a bulleted list."""
+
+    def paint(painter: QPainter, span: float) -> None:
+        line_pen = _glyph_pen(max(2.0, span * 0.12))
+        radius = span * 0.12
+        for frac in (0.24, 0.50, 0.76):
+            cy = span * frac
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(_GLYPH_INK)
+            painter.drawEllipse(QPointF(span * 0.16, cy), radius, radius)
+            painter.setPen(line_pen)
+            painter.drawLine(QPointF(span * 0.40, cy), QPointF(span * 0.94, cy))
+
+    return _format_glyph_icon(paint, size)
+
+
+def numbering_glyph_icon(size: int = FORMAT_GLYPH_ICON_SIZE) -> QIcon:
+    """Heavy numeral beside rules for a numbered list."""
+
+    def paint(painter: QPainter, span: float) -> None:
+        _paint_format_letter(painter, QRectF(0, span * 0.06, span * 0.42, span * 0.88), "1")
+        painter.setPen(_glyph_pen(max(2.0, span * 0.12)))
+        for frac in (0.28, 0.50, 0.72):
+            y = span * frac
+            painter.drawLine(QPointF(span * 0.50, y), QPointF(span * 0.96, y))
+
+    return _format_glyph_icon(paint, size)
 
 
 def style_plot_pane_nav_arrow(btn: QPushButton, direction: str, tooltip: str = "") -> None:
@@ -426,6 +493,30 @@ def style_plot_chrome_glyph_button(btn: QPushButton, icon: QIcon, tooltip: str) 
     btn.setFlat(False)
     # Zero padding so the icon is optically centered in the square button.
     btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
+
+
+def style_format_glyph_button(
+    btn: QPushButton,
+    icon: QIcon,
+    tooltip: str,
+    *,
+    checkable: bool = False,
+) -> None:
+    """Square notepad format control, larger than plot chrome so the glyph reads clearly."""
+    btn.setText("")
+    btn.setIcon(icon)
+    btn.setIconSize(QSize(FORMAT_GLYPH_ICON_SIZE, FORMAT_GLYPH_ICON_SIZE))
+    btn.setFixedSize(FORMAT_GLYPH_BTN_SIZE, FORMAT_GLYPH_BTN_SIZE)
+    btn.setToolTip(tooltip)
+    btn.setAutoDefault(False)
+    btn.setDefault(False)
+    btn.setFocusPolicy(Qt.NoFocus)
+    btn.setFlat(False)
+    btn.setCheckable(checkable)
+    sheet = "QPushButton { padding: 0px; margin: 0px; }"
+    if checkable:
+        sheet += "QPushButton:checked { background-color: palette(midlight); }"
+    btn.setStyleSheet(sheet)
 
 
 def style_plot_footer_text_button(btn: QPushButton) -> None:

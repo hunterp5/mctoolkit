@@ -20,10 +20,11 @@ from __future__ import annotations
 
 import pytest
 from PyQt5.QtCore import QEvent
-from PyQt5.QtGui import QColor, QFont, QTextCursor
+from PyQt5.QtGui import QColor, QFont, QTextCharFormat, QTextCursor, QTextListFormat
 from PyQt5.QtWidgets import QLabel
 from rdkit import Chem
 
+from molmanager.ui.dockable_plot_glyphs import FORMAT_GLYPH_BTN_SIZE, FORMAT_GLYPH_ICON_SIZE
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
 from molmanager.ui.session_notepad import (
     DEFAULT_NOTE_COLOR,
@@ -76,13 +77,28 @@ def test_utilities_menu_opens_floating_notepad(qapp):  # noqa: ARG001
     assert panel._close_btn.isHidden()
     labels = [label.text() for label in panel.findChildren(QLabel)]
     assert "Color" not in labels
-    for btn in (panel._bold, panel._italic, panel._underline, panel._color_btn):
+    for btn in (
+        panel._bold,
+        panel._italic,
+        panel._underline,
+        panel._color_btn,
+        panel._subscript,
+        panel._superscript,
+        panel._bullet,
+        panel._number,
+    ):
         assert btn.text() == ""
         assert not btn.icon().isNull()
+        assert btn.width() == FORMAT_GLYPH_BTN_SIZE
+        assert btn.iconSize().width() == FORMAT_GLYPH_ICON_SIZE
     assert panel._bold.toolTip() == "Bold"
     assert panel._italic.toolTip() == "Italic"
     assert panel._underline.toolTip() == "Underline"
     assert panel._color_btn.toolTip() == "Text color"
+    assert panel._subscript.toolTip() == "Subscript"
+    assert panel._superscript.toolTip() == "Superscript"
+    assert panel._bullet.toolTip() == "Bulleted list"
+    assert panel._number.toolTip() == "Numbered list"
 
     panel.set_text("check the amide series")
     dialog.close()
@@ -113,6 +129,34 @@ def test_notepad_format_glyphs_apply_to_selection(qapp):  # noqa: ARG001
     assert panel._bold.isChecked()
     assert panel._italic.isChecked()
     assert panel._underline.isChecked()
+
+    panel._subscript.click()
+    assert _document_format(panel).verticalAlignment() == QTextCharFormat.AlignSubScript
+    assert panel._subscript.isChecked()
+    panel._superscript.click()
+    assert _document_format(panel).verticalAlignment() == QTextCharFormat.AlignSuperScript
+    assert panel._superscript.isChecked()
+    assert not panel._subscript.isChecked()
+    panel._superscript.click()
+    assert _document_format(panel).verticalAlignment() == QTextCharFormat.AlignNormal
+
+    panel.set_text("one\ntwo")
+    cursor = panel._edit.textCursor()
+    cursor.select(QTextCursor.Document)
+    panel._edit.setTextCursor(cursor)
+    panel._bullet.click()
+    first = panel._edit.document().begin()
+    assert first.textList() is not None
+    assert first.textList().format().style() == QTextListFormat.ListDisc
+    assert first.next().textList().format().style() == QTextListFormat.ListDisc
+    assert panel._bullet.isChecked()
+    panel._number.click()
+    first = panel._edit.document().begin()
+    assert first.textList().format().style() == QTextListFormat.ListDecimal
+    assert panel._number.isChecked()
+    assert not panel._bullet.isChecked()
+    panel._number.click()
+    assert panel._edit.document().begin().textList() is None
 
     panel.set_color(QColor("#aa1133"))
     colored = _document_format(panel)

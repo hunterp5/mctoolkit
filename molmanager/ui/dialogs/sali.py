@@ -37,6 +37,9 @@ from ..strings import TOOL_SALI_MAP
 from .mmp import activity_columns_for_mmp, select_preferred_activity_column
 from .scope import selection_scope_checked
 
+# Radius 3 / 2048 bits, so close analogs are less likely to share one fingerprint.
+_DEFAULT_SALI_FINGERPRINT = "Morgan (r=3, n=2048)"
+
 
 @dataclass(frozen=True)
 class SaliDialogParams:
@@ -91,7 +94,14 @@ class SaliDialog(QDialog):
 
         self.fp_combo = QComboBox()
         self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
-        self.fp_combo.setToolTip("Fingerprint type for pairwise chemical similarity.")
+        default_fp = self.fp_combo.findText(_DEFAULT_SALI_FINGERPRINT)
+        if default_fp >= 0:
+            self.fp_combo.setCurrentIndex(default_fp)
+        self.fp_combo.setToolTip(
+            "Fingerprint for pairwise chemical similarity. "
+            "Morgan radius 3 with 2048 bits is the default so close analogs "
+            "are less likely to share an identical fingerprint."
+        )
         form.addRow("Fingerprint:", self.fp_combo)
 
         self.metric_combo = QComboBox()

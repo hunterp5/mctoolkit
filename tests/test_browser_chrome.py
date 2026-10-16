@@ -132,7 +132,18 @@ def test_sali_browser_pair_table_and_jump_field(qapp):  # noqa: ARG001
     assert dlg.layout().indexOf(dlg._pair_index_host) == -1
     assert dlg._pair_index.value() == 1
     assert dlg._pair_count_label.text() == "/ 3"
-    assert "Morgan / Tanimoto" in dlg._metrics_label.text()
+    assert dlg._metrics_label.text().startswith("Similarity = ")
+    assert "Morgan" not in dlg._metrics_label.text()
+    assert "Tanimoto" not in dlg._metrics_label.text()
+    root = dlg.layout()
+    pair_index = next(
+        i
+        for i in range(root.count())
+        if root.itemAt(i).layout() is not None
+        and root.itemAt(i).layout().indexOf(dlg._left_panel["box"]) >= 0
+    )
+    assert dlg._metrics_box.styleSheet() == BROWSER_GROUP_QSS
+    assert pair_index < root.indexOf(dlg._metrics_box) < root.indexOf(dlg._row_table)
     assert dlg._row_table.rowCount() == 2
     assert dlg._row_table.verticalHeaderItem(0).text() == "A"
     assert dlg._row_table.verticalHeaderItem(1).text() == "B"
