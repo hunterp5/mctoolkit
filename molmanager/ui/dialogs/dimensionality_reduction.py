@@ -82,9 +82,15 @@ class PCAPlotPanel(DimensionReductionPanel):
         self.pca_components.setRange(2, 50)
         self.pca_components.setValue(2)
         self.pca_components.setToolTip(
-            "Number of principal components to compute (plot uses PC1 vs PC2)."
+            "Number of principal components to compute. The plot shows the first two or three, "
+            "depending on Target Dimensions."
         )
         form.addRow("Components:", self.pca_components)
+
+    def _on_target_dimensions_changed(self, is_3d: bool) -> None:
+        self.pca_components.setMinimum(3 if is_3d else 2)
+        if is_3d and self.pca_components.value() < 3:
+            self.pca_components.setValue(3)
 
     def _method_params(self) -> dict:
         return {"n_components": int(self.pca_components.value())}
@@ -273,6 +279,15 @@ class SOMPlotPanel(DimensionReductionPanel):
         self.som_grid_h.setToolTip("Number of map rows (Y). Nodes = width × height (max 2,500).")
         form.addRow("Map height:", self.som_grid_h)
 
+        self.som_grid_d = QSpinBox()
+        self.som_grid_d.setRange(2, 20)
+        self.som_grid_d.setValue(5)
+        self.som_grid_d.setToolTip(
+            "Number of map layers (Z) when Target Dimensions is 3D. "
+            "Nodes = width × height × depth (max 2,500)."
+        )
+        form.addRow("Map depth:", self.som_grid_d)
+
         self.som_epochs = QSpinBox()
         self.som_epochs.setRange(5, 500)
         self.som_epochs.setValue(50)
@@ -324,10 +339,14 @@ class SOMPlotPanel(DimensionReductionPanel):
         self.som_seed.setValue(42)
         form.addRow("Random seed:", self.som_seed)
 
+    def _on_target_dimensions_changed(self, is_3d: bool) -> None:
+        self.som_grid_d.setEnabled(is_3d)
+
     def _method_params(self) -> dict:
         return {
             "grid_width": int(self.som_grid_w.value()),
             "grid_height": int(self.som_grid_h.value()),
+            "grid_depth": int(self.som_grid_d.value()),
             "n_epochs": int(self.som_epochs.value()),
             "learning_rate": float(self.som_lr.value()),
             "sigma": float(self.som_sigma.value()),
@@ -342,6 +361,7 @@ class SOMPlotPanel(DimensionReductionPanel):
         for key, spin in (
             ("grid_width", self.som_grid_w),
             ("grid_height", self.som_grid_h),
+            ("grid_depth", self.som_grid_d),
             ("n_epochs", self.som_epochs),
             ("max_points", self.som_max_points),
             ("random_state", self.som_seed),
