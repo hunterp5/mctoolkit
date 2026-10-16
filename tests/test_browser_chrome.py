@@ -92,7 +92,6 @@ def test_pair_browsers_use_shared_group_and_structure_theme(qapp):  # noqa: ARG0
     for dlg in (mmp, sali):
         assert dlg._left_panel["struct"].styleSheet() == BROWSER_PREVIEW_STRUCT_QSS
         assert dlg._right_panel["struct"].styleSheet() == BROWSER_PREVIEW_STRUCT_QSS
-        assert dlg._prop_box.styleSheet() == BROWSER_GROUP_QSS
         assert dlg._left_panel["box"].styleSheet() == BROWSER_GROUP_QSS
         margins = dlg.layout().contentsMargins()
         assert (
@@ -101,4 +100,94 @@ def test_pair_browsers_use_shared_group_and_structure_theme(qapp):  # noqa: ARG0
             margins.right(),
             margins.bottom(),
         ) == PLOT_BODY_MARGINS
-        dlg.deleteLater()
+    assert mmp._prop_box.styleSheet() == BROWSER_GROUP_QSS
+    assert sali._row_table.styleSheet() == BROWSER_DATA_TABLE_QSS
+    mmp.deleteLater()
+    sali.deleteLater()
+
+
+def test_sali_browser_pair_table_and_jump_field(qapp):  # noqa: ARG001
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtTest import QTest
+    from PyQt5.QtWidgets import QLineEdit
+
+    from molmanager.analysis.sali_analysis import SaliPoint
+
+    points = [
+        SaliPoint(0, 1, 2, 0.8, 2.0, 2.0, 10.0),
+        SaliPoint(1, 3, 4, 0.5, 1.0, -1.0, 2.0),
+        SaliPoint(2, 5, 6, 0.2, 4.0, 4.0, 5.0),
+    ]
+    dlg = SaliBrowserDialog(
+        None,
+        points,
+        activity_column="pIC50",
+        fp_choice="Morgan",
+        metric="Tanimoto",
+        start_index=0,
+    )
+    assert not dlg._meta.isVisibleTo(dlg)
+    assert dlg._nav_layout.indexOf(dlg._pair_index_host) < dlg._nav_layout.indexOf(dlg._btn_first)
+    assert dlg._nav_layout.indexOf(dlg._cb_selected_only) > dlg._nav_layout.indexOf(dlg._btn_select)
+    assert dlg.layout().indexOf(dlg._pair_index_host) == -1
+    assert dlg._pair_index.value() == 1
+    assert dlg._pair_count_label.text() == "/ 3"
+    assert "Morgan / Tanimoto" in dlg._metrics_label.text()
+    assert dlg._row_table.rowCount() == 2
+    assert dlg._row_table.verticalHeaderItem(0).text() == "A"
+    assert dlg._row_table.verticalHeaderItem(1).text() == "B"
+
+    class _FakeApp:
+        headers = ["ID_HIDDEN", "Structure", "Name", "pIC50"]
+        mols: dict = {}
+        table = None
+
+        def logical_row_for_oid(self, oid: int) -> int:
+            return {1: 0, 2: 1}.get(int(oid), -1)
+
+        def _table_cell_text(self, row: int, col: int) -> str:
+            return {
+                (0, 2): "alpha",
+                (0, 3): "1.0",
+                (1, 2): "beta",
+                (1, 3): "2.0",
+            }.get((row, col), "")
+
+    dlg._app = _FakeApp()
+    dlg._update_ui()
+    assert [dlg._row_table.horizontalHeaderItem(i).text() for i in range(2)] == [
+        "Name",
+        "pIC50",
+    ]
+    assert dlg._row_table.item(0, 0).text() == "alpha"
+    assert dlg._row_table.item(1, 0).text() == "beta"
+    assert dlg._row_table.item(0, 1).text() == "1.0"
+    assert dlg._row_table.item(1, 1).text() == "2.0"
+
+    edit = dlg._pair_index.lineEdit()
+    assert isinstance(edit, QLineEdit)
+    edit.setText("3")
+    dlg._pair_index.interpretText()
+    assert dlg._idx == 2
+    assert dlg._pair_index.value() == 3
+    assert dlg._row_table.item(0, 0).text() == ""
+
+    dlg._pair_index.setFocus()
+    qapp.processEvents()
+    QTest.keyClick(dlg._pair_index, Qt.Key_Left)
+    QTest.keyClick(dlg._pair_index, Qt.Key_Home)
+    assert dlg._idx == 2
+
+    dlg._step(-1)
+    assert dlg._idx == 1
+    assert dlg._pair_index.value() == 2
+
+    empty = SaliBrowserDialog(None, [], activity_column="pIC50")
+    assert empty._meta.isVisibleTo(empty)
+    assert "No SALI pairs" in empty._meta.text()
+    assert not empty._pair_index.isEnabled()
+    assert empty._pair_count_label.text() == "/ 0"
+    assert empty._row_table.rowCount() == 0
+
+    dlg.deleteLater()
+    empty.deleteLater()
