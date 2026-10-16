@@ -42,6 +42,7 @@ from ...chem.molecule_conversion import (
 from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
 
 from ..filters import FilterPanelMixin
+from .row_lists_mixin import RowListsMixin
 from .table_edit_mixin import TableEditMixin
 from .table_menu_mixin import TableMenuMixin
 from .table_search_mixin import TableSearchMixin
@@ -53,6 +54,7 @@ class TableUIMixin(
     TableEditMixin,
     TableMenuMixin,
     TableSearchMixin,
+    RowListsMixin,
     FilterPanelMixin,
 ):
     def _open_column_color_dialog(self, col: int) -> None:
@@ -278,6 +280,8 @@ class TableUIMixin(
         reset_search = getattr(self, "_reset_table_search_panel", None)
         if callable(reset_search):
             reset_search()
+        self.clear_row_lists()
+        self.clear_notepad()
         if not keep_loading:
             # Floating hosts from a prior session; do not reveal the empty table page.
             show_ws = getattr(self, "_show_session_workspace_when_ready", None)
