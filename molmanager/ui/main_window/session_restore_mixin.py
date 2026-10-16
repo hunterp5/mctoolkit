@@ -511,6 +511,12 @@ class SessionRestoreMixin:
         restore_search = getattr(self, "restore_table_search_session", None)
         if callable(restore_search):
             restore_search(doc.get("table_search"))
+        restore_lists = getattr(self, "restore_row_lists_session", None)
+        if callable(restore_lists):
+            restore_lists(doc.get("row_lists"))
+        restore_notepad = getattr(self, "restore_notepad_session", None)
+        if callable(restore_notepad):
+            restore_notepad(doc.get("notepad"))
         self._session_awaiting_ready = True
         self._session_plot_wait_deadline = None
         self._hide_session_workspace_until_ready()
