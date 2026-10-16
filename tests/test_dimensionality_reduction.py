@@ -60,6 +60,15 @@ def test_run_pca_returns_two_components():
     assert "PC1" in summary
 
 
+def test_run_pca_three_dimensions_keeps_extra_components_in_the_summary():
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 6))
+    coords, ratios, summary = run_pca(X, standardize=True, n_components=4, plot_dims=3)
+    assert coords.shape == (40, 3)
+    assert len(ratios) == 4
+    assert "Plot shows PC1, PC2, and PC3." in summary
+
+
 def test_run_umap_subsample_note():
     pytest.importorskip("umap")
     rng = np.random.default_rng(2)
@@ -115,6 +124,46 @@ def test_run_som_returns_grid_coords_and_summary():
     assert coords[:, 0].max() < 5.2
     assert coords[:, 1].min() >= -0.2
     assert coords[:, 1].max() < 4.2
+
+
+def test_run_tsne_three_dimensions():
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(36, 5))
+    coords, _used, summary = run_tsne(
+        X, n_components=3, max_iter=250, max_points=None, random_state=0
+    )
+    assert coords.shape == (36, 3)
+    assert "Dimensions: 3" in summary
+
+
+def test_run_umap_three_dimensions():
+    pytest.importorskip("umap")
+    rng = np.random.default_rng(2)
+    X = rng.normal(size=(40, 5))
+    coords, _used, summary = run_umap(X, n_components=3, max_points=None, random_state=0)
+    assert coords.shape == (40, 3)
+    assert "Dimensions: 3" in summary
+
+
+def test_run_som_three_dimensions():
+    rng = np.random.default_rng(3)
+    X = rng.normal(size=(30, 4))
+    coords, used, summary = run_som(
+        X,
+        grid_width=4,
+        grid_height=3,
+        grid_depth=3,
+        n_epochs=4,
+        max_points=None,
+        random_state=0,
+        jitter=0.2,
+    )
+    assert coords.shape == (30, 3)
+    assert len(used) == 30
+    assert "Grid: 4 × 3 × 3" in summary
+    assert "layer (Z)" in summary
+    assert coords[:, 2].min() >= -0.2
+    assert coords[:, 2].max() < 3.2
 
 
 def test_run_som_rejects_oversized_grid():
@@ -230,6 +279,43 @@ def test_high_dim_som_pca_preprocess_note():
     assert coords.shape == (80, 2)
     assert "PCA-preprocessed to 50 components (from 80 features)." in summary
     assert "Features: 50" in summary
+
+
+def test_build_reduction_result_three_dimensions_draws_scatter3d():
+    df = pd.DataFrame({"mw": [100.0, 200.0]})
+    coords = np.array([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])
+    result = build_reduction_result(
+        "umap",
+        coords,
+        df,
+        [10, 20],
+        np.arange(2),
+        title="UMAP",
+        summary="ok",
+    )
+    assert result.z == [2.0, 5.0]
+    fig = build_dimension_reduction_figure(result, zaxis_title="Depth")
+    assert fig.data[0].type == "scatter3d"
+    assert list(fig.data[0].z) == [2.0, 5.0]
+    assert fig.layout.scene.zaxis.title.text == "Depth"
+    assert fig.layout.dragmode != "lasso"
+
+
+def test_subset_dimension_reduction_result_keeps_z():
+    from molmanager.analysis.dimensionality_reduction import subset_dimension_reduction_result
+
+    result = build_reduction_result(
+        "pca",
+        np.array([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0], [6.0, 7.0, 8.0]]),
+        pd.DataFrame({"mw": [1.0, 2.0, 3.0]}),
+        [10, 20, 30],
+        np.arange(3),
+        title="PCA",
+        summary="ok",
+    )
+    subset = subset_dimension_reduction_result(result, frozenset({10, 30}))
+    assert subset.z == [2.0, 8.0]
+    assert subset.x == [0.0, 6.0]
 
 
 def test_build_reduction_result_hover():
