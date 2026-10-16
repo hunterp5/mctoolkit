@@ -513,6 +513,7 @@ class DockableResultPlotPanel(QWidget):
             (self._titles.plot_title_edit, "plot_title"),
             (self._titles.xaxis_title_edit, "xaxis_title"),
             (self._titles.yaxis_title_edit, "yaxis_title"),
+            (self._titles.zaxis_title_edit, "zaxis_title"),
         ):
             val = state.get(key)
             if isinstance(val, str):
