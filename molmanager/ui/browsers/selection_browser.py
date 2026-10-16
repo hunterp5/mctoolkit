@@ -61,6 +61,7 @@ from ..dockable_plot import (
 from ..table_selection import item_selection_for_view_rows
 from .chrome import (
     BrowserHostDialog,
+    BrowserIndexSpinBox,
     apply_browser_body_layout,
     floating_browser_minimum_width,
     install_browser_nav_shortcuts,
@@ -187,6 +188,21 @@ class SelectionBrowserWidget(QWidget):
             self._btn_toggle_select,
             select_checkable=True,
         )
+        self._index_syncing = False
+        self._index_host = QWidget(self._nav_bar)
+        index_row = QHBoxLayout(self._index_host)
+        index_row.setContentsMargins(0, 0, 10, 0)
+        index_row.setSpacing(4)
+        self._index_scope_label = QLabel("Row", self._index_host)
+        self._index_scope_label.setAlignment(Qt.AlignVCenter)
+        self._index_edit = BrowserIndexSpinBox(self._index_host)
+        self._index_edit.setToolTip("Type a number and press Enter to jump to that row.")
+        self._index_count_label = QLabel("/ 0", self._index_host)
+        self._index_count_label.setAlignment(Qt.AlignVCenter)
+        index_row.addWidget(self._index_scope_label)
+        index_row.addWidget(self._index_edit)
+        index_row.addWidget(self._index_count_label)
+        self._index_edit.valueChanged.connect(self._on_index_edited)
         add_centered_browser_nav(
             row_btns,
             [
@@ -196,6 +212,7 @@ class SelectionBrowserWidget(QWidget):
                 self._btn_last,
                 self._btn_toggle_select,
             ],
+            leading=self._index_host,
             trailing=self._cb_only_selected,
         )
         root.addWidget(self._nav_bar)
@@ -748,10 +765,45 @@ class SelectionBrowserWidget(QWidget):
         self._sync_caption(logical_row)
         self._update_preview(logical_row)
 
-    def _sync_caption(self, logical_row: int) -> None:
+    def _on_index_edited(self, value: int) -> None:
+        if self._index_syncing:
+            return
         n = len(self._rows)
-        scope = "Selected set" if self._cb_only_selected.isChecked() else "Table"
-        self._meta.setText(f"{scope}: {self._idx + 1} / {n}  ·  Row {logical_row + 1}")
+        if n <= 0:
+            return
+        target = max(0, min(int(value) - 1, n - 1))
+        resolved = self._first_navigable_index(target, +1)
+        if resolved == self._idx:
+            self._sync_index_field(n)
+            return
+        self._idx = resolved
+        self._focus_row(self._rows[self._idx])
+
+    def _sync_index_field(self, count: int) -> None:
+        self._index_scope_label.setText("Selected" if self._cb_only_selected.isChecked() else "Row")
+        spin = self._index_edit
+        self._index_syncing = True
+        spin.blockSignals(True)
+        try:
+            if count <= 0:
+                spin.setRange(1, 1)
+                spin.setValue(1)
+                spin.setEnabled(False)
+                self._index_count_label.setText("/ 0")
+            else:
+                shown = max(1, min(self._idx + 1, count))
+                spin.setEnabled(True)
+                spin.setRange(1, count)
+                spin.setValue(shown)
+                self._index_count_label.setText(f"/ {count}")
+        finally:
+            spin.blockSignals(False)
+            self._index_syncing = False
+
+    def _sync_caption(self, _logical_row: int) -> None:
+        self._meta.clear()
+        self._meta.setVisible(False)
+        self._sync_index_field(len(self._rows))
         self._update_property_values()
 
     def _visible_data_columns(self) -> list[tuple[int, str]]:
@@ -1038,12 +1090,14 @@ class SelectionBrowserWidget(QWidget):
         self._btn_back.setEnabled(not single and has_rows)
         self._btn_fwd.setEnabled(not single and has_rows)
         if n == 0:
+            self._meta.setVisible(True)
             if self._cb_only_selected.isChecked():
                 self._meta.setText(
                     "No rows selected — uncheck “Browse Selected” or select rows in the table."
                 )
             else:
                 self._meta.setText("Table is empty.")
+            self._sync_index_field(0)
             self._struct_label.clear()
             self._struct_label.setPixmap(QPixmap())
             self._struct_label.setText("")
