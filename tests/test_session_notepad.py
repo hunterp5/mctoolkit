@@ -71,6 +71,8 @@ def test_utilities_menu_opens_floating_notepad(qapp):  # noqa: ARG001
     assert panel is dialog._panel
     assert not dialog.isHidden()
     assert dialog.windowTitle() == "Notepad"
+    assert panel.color_hex() == "#000000"
+    assert panel._edit.placeholderText() == ""
     assert not panel._is_docked_in_main_window()
     assert not panel._add_to_main_btn.isHidden()
     assert panel._send_window_btn.isHidden()

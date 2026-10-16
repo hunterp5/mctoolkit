@@ -64,7 +64,7 @@ from .qt_widget_utils import qobject_is_deleted
 
 NOTE_FONT_FAMILY = "Segoe UI"
 DEFAULT_NOTE_PT = 12
-DEFAULT_NOTE_COLOR = "#202020"
+DEFAULT_NOTE_COLOR = "#000000"
 NOTE_PAPER = "#ffffff"
 MIN_NOTE_PT = 8
 MAX_NOTE_PT = 72
@@ -124,7 +124,6 @@ class _NoteEditor(QTextEdit):
         self.setObjectName("SessionNotepadEdit")
         self.setAcceptRichText(True)
         self.setLineWrapMode(QTextEdit.WidgetWidth)
-        self.setPlaceholderText("Notes for this session")
         self.setUndoRedoEnabled(True)
         self.setStyleSheet(
             "QTextEdit#SessionNotepadEdit {"
@@ -240,6 +239,7 @@ class NotepadWidget(QWidget):
         self._edit = _NoteEditor(self)
         root.addWidget(self._edit, 1)
         self._apply_base_font()
+        self._apply_uniform_format()
         self._refresh_color_glyph()
         self._size.valueChanged.connect(self._on_size_changed)
         self._bold.clicked.connect(self._toggle_bold)
