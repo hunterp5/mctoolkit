@@ -46,6 +46,7 @@ from ...analysis.dimensionality_reduction import (
     EMBEDDING_PCA_DIM_MAX,
     DimensionReductionResult,
     is_fingerprint_bitcount_column,
+    normalize_target_dimensions,
     subset_dimension_reduction_result,
 )
 from ...workers import SIMILARITY_FP_TYPE_LABELS
@@ -99,7 +100,9 @@ class DimensionReductionPanel(DockableResultPlotPanel):
             opts_title=f"{window_title} — Plot Options",
             opts_min_width=640,
             opts_min_height=480,
-            opts_tooltip="Configure features, method parameters, color, and On Hover options.",
+            opts_tooltip=(
+                "Configure target dimensions, features, method parameters, color, and On Hover options."
+            ),
             pair_encoding=False,
             defer_initial_reload=True,
         )
@@ -161,6 +164,15 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         self._opts_form = QFormLayout(method_opts)
         features_opts_row.addWidget(method_opts, 1)
         extras.addLayout(features_opts_row)
+
+        self.target_dimensions = QComboBox()
+        self.target_dimensions.addItem("2D", 2)
+        self.target_dimensions.addItem("3D", 3)
+        self.target_dimensions.setToolTip(
+            "Embed into two or three dimensions. 3D draws a rotatable scatter. "
+            "Run again after changing this."
+        )
+        self._opts_form.addRow("Target Dimensions:", self.target_dimensions)
 
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
@@ -236,7 +248,9 @@ class DimensionReductionPanel(DockableResultPlotPanel):
 
     def _wire_dimred_ui(self, parent: ChemistryWorkspaceWindow | None) -> None:
         self.fp_combo.currentIndexChanged.connect(self._on_fp_selection_changed)
+        self.target_dimensions.currentIndexChanged.connect(self._sync_target_dimension_controls)
         self.only_selected_cb.stateChanged.connect(self._reload_columns)
+        self._sync_target_dimension_controls()
         if self._pca_preprocess_cb is not None:
             self._pca_preprocess_cb.toggled.connect(self._sync_pca_preprocess_controls)
             self._sync_pca_preprocess_controls()
@@ -344,9 +358,31 @@ class DimensionReductionPanel(DockableResultPlotPanel):
             if widget is not None:
                 widget.setEnabled(on)
 
+    def _target_n_components(self) -> int:
+        return normalize_target_dimensions(self.target_dimensions.currentData())
+
+    def _sync_target_dimension_controls(self) -> None:
+        is_3d = self._target_n_components() == 3
+        self._titles.set_z_visible(is_3d)
+        self._on_target_dimensions_changed(is_3d)
+
+    def _on_target_dimensions_changed(self, is_3d: bool) -> None:
+        """Subclass hook for controls that only apply in 3D."""
+        return None
+
+    def _apply_target_dimensions(self, params: dict) -> None:
+        if "target_dimensions" not in params:
+            return
+        n = normalize_target_dimensions(params.get("target_dimensions"))
+        idx = self.target_dimensions.findData(n)
+        if idx >= 0:
+            self.target_dimensions.setCurrentIndex(idx)
+        self._sync_target_dimension_controls()
+
     def _job_method_params(self) -> dict:
         params = dict(self._method_params())
         params.update(self._embedding_pca_params())
+        params["target_dimensions"] = self._target_n_components()
         return params
 
     def _apply_method_params(self, params: dict | None) -> None:
@@ -428,6 +464,7 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         if isinstance(params, dict):
             self._apply_method_params(params)
             self._apply_pca_preprocess_param(params)
+            self._apply_target_dimensions(params)
         self._on_fp_selection_changed()
         raw_result = state.get("result")
         if isinstance(raw_result, dict):
@@ -787,10 +824,12 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         if self.parent_app is not None:
             shown = self._displayed_dimred_result()
             n = len(shown.oids) if shown is not None else 0
-            msg = (
-                f"{self._window_title}: rendered {n:,} point(s). "
-                "Lasso or click to select table rows."
+            select_hint = (
+                "Click a point to select its table row."
+                if result.z
+                else "Lasso or click to select table rows."
             )
+            msg = f"{self._window_title}: rendered {n:,} point(s). {select_hint}"
             finish = getattr(self.parent_app, "_finish_tool_progress", None)
             if callable(finish):
                 finish(self._window_title, status_message=msg, job_id=job_id)
