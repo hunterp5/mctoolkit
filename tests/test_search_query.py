@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from molmanager.ui.search_query import (
     SearchCondition,
+    combine_search_row_sets,
     evaluate_search_condition,
     evaluate_search_conditions,
     evaluate_search_expression,
@@ -105,6 +106,14 @@ def test_and_or_combination_legacy_flat():
     assert evaluate_search_conditions(
         "12", conds, match_and=False, partial=True, case_sensitive=False
     )
+
+
+def test_combine_search_row_sets_not():
+    assert combine_search_row_sets([None, "not"], [{0, 1, 2}, {1}]) == {0, 2}
+    assert combine_search_row_sets([None, "or", "not"], [{0, 1}, {2}, {1, 2}]) == {0}
+    assert combine_search_row_sets([None, "and", "not"], [{0, 1, 2}, {0, 1}, {1}]) == {0}
+    assert combine_search_row_sets([None, "and"], [{0, 1}, {1}]) == {1}
+    assert combine_search_row_sets([None, "or"], [{0}, {1}]) == {0, 1}
 
 
 def test_compound_and_or_expression():
