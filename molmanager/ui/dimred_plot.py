@@ -25,6 +25,7 @@ from plotly import graph_objects as go
 
 from ..analysis.dimensionality_reduction import DimensionReductionResult
 from ..plotting.plot_marker_color import (
+    DEFAULT_MARKER_SIZE_3D_PX,
     DEFAULT_PLOT_COLORSCALE,
     DEFAULT_SELECTED_MARKER_SIZE_PX,
     attach_marker_size_legend,
@@ -55,6 +56,21 @@ def dimension_reduction_result_with_color(
     )
 
 
+def _axis_labels(method: str) -> tuple[str, str, str]:
+    if method == "pca":
+        return "PC1", "PC2", "PC3"
+    if method == "umap":
+        return "UMAP 1", "UMAP 2", "UMAP 3"
+    if method == "som":
+        return "SOM column", "SOM row", "SOM layer"
+    return "t-SNE 1", "t-SNE 2", "t-SNE 3"
+
+
+def _result_is_3d(result: DimensionReductionResult) -> bool:
+    z = result.z
+    return z is not None and len(z) == len(result.x) and len(result.x) > 0
+
+
 def build_dimension_reduction_figure(
     result: DimensionReductionResult,
     *,
@@ -68,18 +84,14 @@ def build_dimension_reduction_figure(
     plot_title: str = "",
     xaxis_title: str = "",
     yaxis_title: str = "",
+    zaxis_title: str = "",
 ) -> go.Figure:
-    if result.method == "pca":
-        x_label, y_label = "PC1", "PC2"
-    elif result.method == "umap":
-        x_label, y_label = "UMAP 1", "UMAP 2"
-    elif result.method == "som":
-        x_label, y_label = "SOM column", "SOM row"
-    else:
-        x_label, y_label = "t-SNE 1", "t-SNE 2"
+    is_3d = _result_is_3d(result)
+    x_label, y_label, z_label = _axis_labels(result.method)
     title = resolve_plot_title_text(plot_title, "")
     x_label = resolve_plot_title_text(xaxis_title, x_label)
     y_label = resolve_plot_title_text(yaxis_title, y_label)
+    z_label = resolve_plot_title_text(zaxis_title, z_label)
     marker_kwargs: dict[str, Any] = {
         "color_label": result.color_label,
         "colorscale": colorscale,
@@ -91,45 +103,67 @@ def build_dimension_reduction_figure(
         marker_kwargs["size_min_px"] = size_min_px
     if size_max_px is not None:
         marker_kwargs["size_max_px"] = size_max_px
+    if is_3d:
+        marker_kwargs["point_size"] = DEFAULT_MARKER_SIZE_3D_PX
     marker = scatter_marker_from_column_values(
         result.color_values,
         **marker_kwargs,
     )
-    fig = go.Figure(
-        data=[
-            go.Scatter(
-                x=result.x,
-                y=result.y,
-                mode="markers",
-                customdata=[[int(oid)] for oid in result.oids],
-                hoverinfo="none",
-                marker=marker,
-                showlegend=False,
-                unselected={"marker": {"opacity": 0.35}},
-                selected={
-                    "marker": {
-                        "size": DEFAULT_SELECTED_MARKER_SIZE_PX,
-                        "color": "#d62828",
-                        "opacity": 1.0,
-                    }
-                },
-            )
-        ]
-    )
-    fig.update_layout(
-        title=title or None,
-        xaxis_title=x_label,
-        yaxis_title=y_label,
-        template="plotly_white",
-        dragmode="lasso",
-        clickmode="event+select",
-        showlegend=False,
-        margin=dict(l=48, r=24, t=24 if not title else 48, b=48),
-        meta={
+    customdata = [[int(oid)] for oid in result.oids]
+    if is_3d:
+        trace = go.Scatter3d(
+            x=result.x,
+            y=result.y,
+            z=result.z,
+            mode="markers",
+            customdata=customdata,
+            hoverinfo="none",
+            marker=marker,
+            showlegend=False,
+        )
+    else:
+        trace = go.Scatter(
+            x=result.x,
+            y=result.y,
+            mode="markers",
+            customdata=customdata,
+            hoverinfo="none",
+            marker=marker,
+            showlegend=False,
+            unselected={"marker": {"opacity": 0.35}},
+            selected={
+                "marker": {
+                    "size": DEFAULT_SELECTED_MARKER_SIZE_PX,
+                    "color": "#d62828",
+                    "opacity": 1.0,
+                }
+            },
+        )
+    fig = go.Figure(data=[trace])
+    layout: dict[str, Any] = {
+        "title": title or None,
+        "template": "plotly_white",
+        "clickmode": "event+select",
+        "showlegend": False,
+        "margin": dict(l=48, r=24, t=24 if not title else 48, b=48),
+        "meta": {
             "molmanager_selection_traces": [0],
             "molmanager_hover_persist": False,
         },
-    )
+    }
+    if is_3d:
+        layout["scene"] = {
+            "xaxis_title": x_label,
+            "yaxis_title": y_label,
+            "zaxis_title": z_label,
+            "aspectmode": "cube",
+            "dragmode": "turntable",
+        }
+    else:
+        layout["xaxis_title"] = x_label
+        layout["yaxis_title"] = y_label
+        layout["dragmode"] = "lasso"
+    fig.update_layout(**layout)
     attach_marker_size_legend(
         fig,
         size_label=size_label,
