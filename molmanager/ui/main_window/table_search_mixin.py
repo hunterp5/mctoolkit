@@ -37,6 +37,7 @@ from ...platform_support.config import load_config
 from ...workers import SubstructureFilterWorker
 from ..search_panel import SearchCriterionRow
 from ..search_query import (
+    combine_search_row_sets,
     evaluate_search_expression,
     parse_search_expression,
     parse_search_term_groups,
@@ -51,7 +52,7 @@ class _SearchCriterionSpec:
     col: int
     query: str
     term_groups: list[list[str]]
-    glue: str | None  # None for first row; ``and`` / ``or`` vs previous
+    glue: str | None  # None for first row; ``and`` / ``or`` / ``not`` vs previous
     partial: bool
     case_sensitive: bool
     substructure: bool
@@ -490,16 +491,7 @@ class TableSearchMixin:
     def _combine_search_row_sets(
         self, specs: list[_SearchCriterionSpec], row_sets: list[set[int]]
     ) -> set[int]:
-        if not row_sets:
-            return set()
-        result = set(row_sets[0])
-        for i in range(1, len(row_sets)):
-            glue = specs[i].glue or "and"
-            if glue == "or":
-                result |= row_sets[i]
-            else:
-                result &= row_sets[i]
-        return result
+        return combine_search_row_sets([spec.glue for spec in specs], row_sets)
 
     def _select_table_rows(self, rows: list[int]) -> bool:
         """Select *rows* in the table view; return False if nothing selected."""
@@ -751,7 +743,7 @@ class TableSearchMixin:
             row.case_cb.setChecked(bool(spec.get("case_sensitive", False)))
             row.substructure_cb.setChecked(bool(spec.get("substructure", False)))
             glue = spec.get("glue")
-            if i > 0 and glue in ("and", "or"):
+            if i > 0 and glue in ("and", "or", "not"):
                 idx = row.glue_combo.findData(glue)
                 if idx >= 0:
                     row.glue_combo.setCurrentIndex(idx)
