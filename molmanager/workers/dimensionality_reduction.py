@@ -28,6 +28,7 @@ from PyQt5.QtCore import QObject, QRunnable, pyqtSignal
 from ..analysis.dimensionality_reduction import (
     DimensionReductionResult,
     build_reduction_result,
+    normalize_target_dimensions,
     run_pca,
     run_som,
     run_tsne,
@@ -140,10 +141,16 @@ def _compute(params: dict) -> DimensionReductionResult:
     except (TypeError, ValueError):
         pca_min_variance = 0.0
     pca_whiten = bool(params.get("pca_whiten", False))
+    target_dimensions = normalize_target_dimensions(params.get("target_dimensions", 2))
 
     if method == "pca":
-        n_components = int(params.get("n_components", 2))
-        coords, _ratios, summary = run_pca(X, standardize=standardize, n_components=n_components)
+        n_components = max(int(params.get("n_components", target_dimensions)), target_dimensions)
+        coords, _ratios, summary = run_pca(
+            X,
+            standardize=standardize,
+            n_components=n_components,
+            plot_dims=target_dimensions,
+        )
         title = "Principal Component Analysis"
         row_ix = np.arange(coords.shape[0])
         return build_reduction_result(
@@ -168,6 +175,7 @@ def _compute(params: dict) -> DimensionReductionResult:
             pca_dim=pca_dim,
             pca_min_variance=pca_min_variance,
             pca_whiten=pca_whiten,
+            n_components=target_dimensions,
         )
         title = "t-SNE Visualization"
         return build_reduction_result(
@@ -191,6 +199,7 @@ def _compute(params: dict) -> DimensionReductionResult:
             pca_dim=pca_dim,
             pca_min_variance=pca_min_variance,
             pca_whiten=pca_whiten,
+            n_components=target_dimensions,
         )
         title = "UMAP Visualization"
         return build_reduction_result(
@@ -206,6 +215,12 @@ def _compute(params: dict) -> DimensionReductionResult:
     if method == "som":
         sigma_raw = params.get("sigma")
         sigma = None if sigma_raw is None or float(sigma_raw) <= 0 else float(sigma_raw)
+        grid_depth = 1
+        if target_dimensions == 3:
+            try:
+                grid_depth = int(params.get("grid_depth") or 5)
+            except (TypeError, ValueError):
+                grid_depth = 5
         coords, used_idx, summary = run_som(
             X,
             standardize=standardize,
@@ -220,6 +235,7 @@ def _compute(params: dict) -> DimensionReductionResult:
             pca_dim=pca_dim,
             pca_min_variance=pca_min_variance,
             pca_whiten=pca_whiten,
+            grid_depth=grid_depth,
         )
         title = "Self-Organizing Map"
         return build_reduction_result(
