@@ -1,6 +1,6 @@
 # Search
 
-Search builds multi-criterion queries across columns with AND/OR logic, optional partial/case options, and SMARTS/substructure mode for structure columns.
+Search builds multi-criterion queries across columns with AND/OR/NOT logic, optional partial/case options, and SMARTS/substructure mode for structure columns.
 
 ## Goal
 
@@ -16,7 +16,7 @@ Searches the current table columns. Structure criteria need a valid structure/SM
 
 ## Options
 
-- Criterion rows with **AND** / **OR** combinators.
+- Criterion rows with **AND** / **OR** / **NOT** combinators.
 - **Column** chooser and query field.
 - **Partial match** and **Case Sensitive** options.
 - **Substructure** / SMARTS mode for structure search.
@@ -26,7 +26,7 @@ Searches the current table columns. Structure criteria need a valid structure/SM
 ## Workflow
 
 1. Open **Search** and set the first column + query.
-2. Add more criteria with **AND** or **OR** as required.
+2. Add more criteria with **AND**, **OR**, or **NOT** as required. **NOT** removes rows that match that criterion from the matches so far.
 3. Enable **Substructure** when querying with SMARTS.
 4. Jump to or select matches, then optionally promote logic into Filters.
 
@@ -38,4 +38,4 @@ Searches the current table columns. Structure criteria need a valid structure/SM
 
 ## Tips and limits
 
-AND/OR mixes follow the criterion list order - keep queries simple when unsure. Invalid SMARTS yield no matches. Search is complementary to Filters; use Filters for persistent constraints. An open Search panel and its active query rows are stored in the session file and restored on Open. Toggling Search off keeps the current queries; use **−** to delete a row, or the last **−** to clear Search and close the panel.
+AND/OR/NOT mixes follow the criterion list order - keep queries simple when unsure. Invalid SMARTS yield no matches. Search is complementary to Filters; use Filters for persistent constraints. An open Search panel and its active query rows are stored in the session file and restored on Open. Toggling Search off keeps the current queries; use **−** to delete a row, or the last **−** to clear Search and close the panel.
