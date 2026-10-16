@@ -74,6 +74,7 @@ from ..process_queue import ProcessQueueManager
 from ..table_session import TableSession
 from ..table_write_service import TableWriteService
 from ..tool_dialog_scope import ToolDialogScope
+from ..session_notepad import SessionNotepadHost
 from ..workspace_tools import WorkspaceTools
 from .activity_cliff_mixin import ActivityCliffMixin
 from .app_lifecycle_mixin import AppLifecycleMixin
@@ -233,6 +234,7 @@ class ChemistryWorkspaceWindow(
         self.build_pipeline = TableBuildPipeline(self)
         self.session = SessionController(self)
         self.workspace_tools = WorkspaceTools(self)
+        self.session_notepad = SessionNotepadHost(self)
         _qc = Qt.QueuedConnection
         self.signals.mols_loaded.connect(self.on_file_loaded, _qc)
         self.signals.structure_source_probe.connect(self._on_structure_source_probe, _qc)
@@ -722,6 +724,7 @@ install_window_forwards(
         SessionCsvMixin,
     ),
 )
+install_window_forwards(ChemistryWorkspaceWindow, "session_notepad", (SessionNotepadHost,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.cluster", (ClusterMixin,))
 install_window_forwards(
     ChemistryWorkspaceWindow, "workspace_tools.dimension_reduction", (DimensionReductionMixin,)
