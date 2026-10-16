@@ -284,6 +284,16 @@ class SessionSaveMixin:
             search_payload = collect_search()
             if search_payload:
                 doc["table_search"] = search_payload
+        collect_lists = getattr(self, "collect_row_lists_session", None)
+        if callable(collect_lists):
+            lists_payload = collect_lists(oids=want)
+            if lists_payload:
+                doc["row_lists"] = lists_payload
+        collect_notepad = getattr(self, "collect_notepad_session", None)
+        if callable(collect_notepad):
+            notepad_payload = collect_notepad()
+            if notepad_payload:
+                doc["notepad"] = notepad_payload
         return doc
 
     def _confs_sidecar_for_session(self, oids: set[int] | None) -> dict[tuple[int, str], str]:
