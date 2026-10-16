@@ -163,7 +163,12 @@ class PlotlyInteractiveView(QWidget):
             if indices:
                 meta["molmanager_selection_traces"] = indices
         meta["molmanager_hover_persist"] = bool(self._hover_persist)
-        fig.update_layout(meta=meta, clickmode="event+select", dragmode="lasso")
+        has_3d = any(getattr(tr, "type", None) == "scatter3d" for tr in fig.data)
+        layout_updates = {"meta": meta, "clickmode": "event+select"}
+        # Lasso is a 2D drag mode. 3D scenes keep orbit/turntable so the plot can rotate.
+        if not has_3d:
+            layout_updates["dragmode"] = "lasso"
+        fig.update_layout(**layout_updates)
 
         custom = [[int(oid)] for oid in oids]
         sel_traces = meta.get("molmanager_selection_traces") or [0]
