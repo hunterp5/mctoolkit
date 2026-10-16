@@ -1325,8 +1325,23 @@
       };
       var lastResizeW = -1;
       var lastResizeH = -1;
+      var resizeHold = false;
+      var resizeHeld = false;
+      // Hold Plotly.Plots.resize during dock/undock so the figure paints once
+      // at the final geometry instead of flashing through intermediate sizes.
+      window.molmanagerHoldResize = function(hold) {
+        resizeHold = !!hold;
+        if (!resizeHold && resizeHeld) {
+          resizeHeld = false;
+          resizePlot();
+        }
+      };
       function resizePlot() {
         try {
+          if (resizeHold) {
+            resizeHeld = true;
+            return;
+          }
           if (!gd || !gd.data) return;
           var w = gd.clientWidth || 0;
           var h = gd.clientHeight || 0;
