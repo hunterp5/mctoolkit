@@ -69,8 +69,12 @@ class SearchCriterionRow(QWidget):
         self.glue_combo = QComboBox(self)
         self.glue_combo.addItem("AND", "and")
         self.glue_combo.addItem("OR", "or")
+        self.glue_combo.addItem("NOT", "not")
         self.glue_combo.setFixedWidth(58)
-        self.glue_combo.setToolTip("Combine this criterion with the row above (AND or OR).")
+        self.glue_combo.setToolTip(
+            "Combine this criterion with the rows above. "
+            "AND keeps rows in both, OR keeps either, NOT drops rows that match this criterion."
+        )
         lay.addWidget(self.glue_combo)
         self.glue_combo.setVisible(show_glue)
 
@@ -121,6 +125,6 @@ class SearchCriterionRow(QWidget):
         self.substructure_cb.setChecked(other.substructure_cb.isChecked())
 
     def glue(self) -> str:
-        """``and`` or ``or`` (only meaningful when the glue control is visible)."""
+        """``and``, ``or``, or ``not`` (only meaningful when the glue control is visible)."""
         data = self.glue_combo.currentData()
-        return data if data in ("and", "or") else "and"
+        return data if data in ("and", "or", "not") else "and"
