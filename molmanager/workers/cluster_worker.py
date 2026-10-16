@@ -19,8 +19,16 @@
 from __future__ import annotations
 
 import logging
+import multiprocessing
+import os
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    ProcessPoolExecutor,
+    TimeoutError as FuturesTimeout,
+    wait,
+)
 
 import numpy as np
 from PyQt5.QtCore import QRunnable
@@ -29,14 +37,30 @@ from rdkit import DataStructs
 from rdkit.ML.Cluster import Butina
 from rdkit.SimDivFilters.rdSimDivPickers import LeaderPicker
 
+from ..chem.fingerprint_cache import get as cache_get
+from ..chem.fingerprint_cache import store as cache_store
+from ..chem.rdkit_fingerprints import (
+    fingerprint_bitvect_for_row,
+    fingerprint_is_gil_heavy,
+    spec_for_label,
+)
+from ..platform_support.config import load_config
 from .fingerprint_similarity import fingerprint_bitvect_for_ui_choice
-from ..chem.rdkit_fingerprints import fingerprint_bitvect_for_row
+from .process_pool_utils import (
+    register_process_pool,
+    should_terminate_process_pool,
+    shutdown_process_pool_executor,
+)
 from .signals import emit_partial_results_if_cancelled
 
 logger = logging.getLogger(__name__)
 
 
 _SKLEARN_CLUSTER_METHODS = frozenset({"kmeans", "agglomerative", "dbscan"})
+
+# Fingerprints for exploratory trials, installed once in the child process.
+_CHILD_FPS: list | None = None
+_CHILD_X: np.ndarray | None = None
 
 # Combo labels (and explore-table short names) for each worker method key.
 CLUSTER_METHOD_LABELS: tuple[tuple[str, str], ...] = (
@@ -471,8 +495,425 @@ def _format_params(method: str, params: dict) -> str:
     return repr(params)
 
 
+class _PoolCancelled(Exception):
+    """Parent stopped waiting because the job was cancelled."""
+
+
+def _cluster_process_min_rows() -> int:
+    """Row count at which fingerprint and fit work move to child processes."""
+    return int(load_config().descriptor_fp_process_pool_min_rows)
+
+
+def _use_fp_process_pool(n_rows: int, fp_choice: str) -> bool:
+    """True when fingerprint generation should leave the GUI process.
+
+    RDKit fingerprint code holds the GIL. Gobbi pharmacophore fingerprints do so
+    for a long time per molecule; other types do once the table is large.
+    """
+    n = int(n_rows)
+    if n < 2:
+        return False
+    if fingerprint_is_gil_heavy(fp_choice):
+        return True
+    return n >= _cluster_process_min_rows()
+
+
+def _use_fit_process_pool(n_fps: int) -> bool:
+    """True when clustering itself should leave the GUI process.
+
+    Butina, LeaderPicker, Jarvis–Patrick, and scikit-learn fits hold the GIL for
+    the whole call. A child process lets the Qt thread keep running. The threshold
+    is capped so a high descriptor-fingerprint setting cannot leave a large fit
+    on the GUI interpreter.
+    """
+    threshold = min(_cluster_process_min_rows(), 64)
+    return int(n_fps) >= max(2, threshold)
+
+
+def _spawn_context() -> multiprocessing.context.BaseContext:
+    # Spawn (not fork) so the child does not inherit the Qt GUI state.
+    return multiprocessing.get_context("spawn")
+
+
+def _process_workers(n_tasks: int) -> int:
+    cpu = max(2, (os.cpu_count() or 4) - 1)
+    return max(1, min(cpu, 8, int(n_tasks)))
+
+
+def _wait_future(
+    fut,
+    cancel_event: threading.Event | None,
+    pulse: Callable[[], None] | None = None,
+):
+    """Block on *fut* without holding the GIL between timeout slices."""
+    while True:
+        if should_terminate_process_pool(cancel_event):
+            raise _PoolCancelled()
+        try:
+            return fut.result(timeout=0.25)
+        except FuturesTimeout:
+            if pulse is not None:
+                pulse()
+
+
+def _explore_record(
+    method: str,
+    params: dict,
+    *,
+    stats: dict | None = None,
+    notes: str = "",
+) -> dict:
+    sil = None if stats is None else stats.get("silhouette")
+    largest = None if stats is None else stats.get("largest_pct")
+    noise = None if stats is None else stats.get("noise_pct")
+    return {
+        "method": method,
+        "params": dict(params),
+        "settings": _format_params(method, params),
+        "n_clusters": None if stats is None else stats.get("n_clusters"),
+        "silhouette": None if sil is None else round(float(sil), 4),
+        "largest_pct": None if largest is None else round(float(largest), 2),
+        "noise_pct": None if noise is None else round(float(noise), 2),
+        "notes": notes,
+    }
+
+
+def _fingerprints_from_index(
+    rows: Sequence[tuple[int, Chem.Mol]],
+    fp_by_index: Sequence,
+    *,
+    cancelled: bool,
+) -> tuple[list[int], list, bool]:
+    oids: list[int] = []
+    fps: list = []
+    for (oid, _mol), fp in zip(rows, fp_by_index):
+        if fp is None:
+            continue
+        oids.append(int(oid))
+        fps.append(fp)
+    return oids, fps, cancelled
+
+
+def _collect_fingerprints_inline(
+    rows: Sequence[tuple[int, Chem.Mol]],
+    fp_choice: str,
+    *,
+    cancel_event: threading.Event | None,
+    on_progress: Callable[[int, int], None] | None,
+) -> tuple[list[int], list, bool]:
+    """In-process fingerprints. One cancel check per row, before that row is computed."""
+    oids: list[int] = []
+    fps: list = []
+    tot = max(len(rows), 1)
+    cancelled = False
+    for i, (oid, mol) in enumerate(rows, start=1):
+        if cancel_event is not None and cancel_event.is_set():
+            cancelled = True
+            break
+        if on_progress is not None:
+            on_progress(i, tot)
+        try:
+            fp = fingerprint_bitvect_for_row(int(oid), mol, fp_choice)
+            if fp is None:
+                fp = fingerprint_bitvect_for_ui_choice(mol, fp_choice)
+        except Exception:
+            fp = None
+        if fp is None:
+            continue
+        try:
+            fps.append(fp)
+            oids.append(int(oid))
+        except Exception:
+            logger.debug("Fingerprint conversion failed for oid=%s", oid, exc_info=True)
+    return oids, fps, cancelled
+
+
+def _mp_cluster_fp_batch(args: tuple) -> list[tuple[int, object | None]]:
+    """Fingerprints for one batch of ``(row_index, mol_bytes)`` in a child process."""
+    items, fp_choice = args
+    out: list[tuple[int, object | None]] = []
+    for idx, mol_bytes in items:
+        if not mol_bytes:
+            out.append((int(idx), None))
+            continue
+        try:
+            mol = Chem.Mol(mol_bytes)
+            fp = fingerprint_bitvect_for_ui_choice(mol, str(fp_choice)) if mol is not None else None
+        except Exception:
+            fp = None
+        out.append((int(idx), fp))
+    return out
+
+
+def _collect_fingerprints_pooled(
+    rows: Sequence[tuple[int, Chem.Mol]],
+    fp_choice: str,
+    *,
+    cancel_event: threading.Event | None,
+    on_progress: Callable[[int, int], None] | None,
+) -> tuple[list[int], list, bool]:
+    """Compute missing fingerprints in child processes. The parent only waits."""
+    n = len(rows)
+    spec = spec_for_label(fp_choice)
+    internal_key = spec.internal_key if spec is not None else ""
+    fp_by_index: list = [None] * n
+    missing: list[tuple[int, bytes]] = []
+    done = 0
+    for i, (oid, mol) in enumerate(rows):
+        if cancel_event is not None and cancel_event.is_set():
+            return _fingerprints_from_index(rows, fp_by_index, cancelled=True)
+        cached = cache_get(int(oid), internal_key) if internal_key else None
+        if cached is not None:
+            fp_by_index[i] = cached
+            done += 1
+            if on_progress is not None:
+                on_progress(done, n)
+            continue
+        blob = b""
+        if mol is not None:
+            try:
+                blob = mol.ToBinary()
+            except Exception:
+                blob = b""
+        missing.append((i, blob))
+
+    if not missing:
+        return _fingerprints_from_index(rows, fp_by_index, cancelled=False)
+
+    batch_size = max(1, int(load_config().descriptor_process_pool_batch_size))
+    batches = [missing[s : s + batch_size] for s in range(0, len(missing), batch_size)]
+    ex = register_process_pool(
+        ProcessPoolExecutor(
+            max_workers=_process_workers(len(batches)),
+            mp_context=_spawn_context(),
+        )
+    )
+    cancelled = False
+    try:
+        pending = {ex.submit(_mp_cluster_fp_batch, (batch, fp_choice)): batch for batch in batches}
+        while pending:
+            if should_terminate_process_pool(cancel_event):
+                cancelled = True
+                break
+            completed, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
+            if not completed:
+                if on_progress is not None:
+                    on_progress(done, max(n, 1))
+                continue
+            for fut in completed:
+                if fut.cancelled():
+                    continue
+                for idx, fp in fut.result():
+                    done += 1
+                    if fp is None:
+                        continue
+                    fp_by_index[int(idx)] = fp
+                    if internal_key:
+                        cache_store(int(rows[int(idx)][0]), internal_key, fp)
+                if on_progress is not None:
+                    on_progress(min(done, n), max(n, 1))
+    finally:
+        shutdown_process_pool_executor(
+            ex,
+            kill_workers=cancelled or should_terminate_process_pool(cancel_event),
+        )
+    return _fingerprints_from_index(rows, fp_by_index, cancelled=cancelled)
+
+
+def _collect_fingerprints(
+    rows: Sequence[tuple[int, Chem.Mol]],
+    fp_choice: str,
+    *,
+    cancel_event: threading.Event | None,
+    on_progress: Callable[[int, int], None] | None,
+) -> tuple[list[int], list, bool]:
+    if _use_fp_process_pool(len(rows), fp_choice):
+        return _collect_fingerprints_pooled(
+            rows,
+            fp_choice,
+            cancel_event=cancel_event,
+            on_progress=on_progress,
+        )
+    return _collect_fingerprints_inline(
+        rows,
+        fp_choice,
+        cancel_event=cancel_event,
+        on_progress=on_progress,
+    )
+
+
+def _mp_fit_labels(args: tuple) -> np.ndarray:
+    """Cluster in a child process. Returns labels aligned with *fps*."""
+    method, params, fps = args
+    x = _dense_fingerprint_matrix(fps) if _method_needs_dense_matrix(method) else None
+    labels = _run_clustering(method, params, X=x, fps=fps, cancel_event=None)
+    if labels is None:
+        raise RuntimeError("Clustering produced no labels.")
+    return labels
+
+
+def _fit_labels_off_gil(
+    method: str,
+    params: dict,
+    fps: Sequence,
+    cancel_event: threading.Event | None,
+    *,
+    on_wait: Callable[[], None] | None = None,
+) -> np.ndarray:
+    ex = register_process_pool(ProcessPoolExecutor(max_workers=1, mp_context=_spawn_context()))
+    try:
+        fut = ex.submit(_mp_fit_labels, (method, dict(params), list(fps)))
+        return _wait_future(fut, cancel_event, on_wait)
+    finally:
+        shutdown_process_pool_executor(ex, kill_workers=should_terminate_process_pool(cancel_event))
+
+
+def _assign_cluster_labels(
+    method: str,
+    params: dict,
+    fps: Sequence,
+    *,
+    cancel_event: threading.Event | None,
+    on_wait: Callable[[], None] | None = None,
+) -> np.ndarray | None:
+    # A large partial set (fingerprint collection already cancelled) still has to run
+    # off the GIL. Pass cancel_event=None in that case so the fit is not killed immediately.
+    if _use_fit_process_pool(len(fps)):
+        return _fit_labels_off_gil(method, params, fps, cancel_event, on_wait=on_wait)
+    x = _dense_fingerprint_matrix(fps) if _method_needs_dense_matrix(method) else None
+    return _run_clustering(method, params, X=x, fps=fps, cancel_event=cancel_event)
+
+
+def _mp_init_cluster_fps(fps: list) -> None:
+    global _CHILD_FPS, _CHILD_X
+    _CHILD_FPS = fps
+    _CHILD_X = None
+
+
+def _mp_explore_trial(args: tuple) -> dict:
+    """One exploratory trial inside the fingerprint child process."""
+    global _CHILD_X
+    method, params, build_matrix = args
+    fps = _CHILD_FPS or []
+    try:
+        if build_matrix and _CHILD_X is None:
+            _CHILD_X = _dense_fingerprint_matrix(fps)
+        x_stats = _CHILD_X if build_matrix else None
+        x_fit = x_stats if method in _SKLEARN_CLUSTER_METHODS else None
+        labels = _run_clustering(method, params, X=x_fit, fps=fps, cancel_event=None)
+    except Exception as exc:
+        return _explore_record(method, params, notes=str(exc)[:120])
+    if labels is None:
+        return _explore_record(method, params, notes="Clustering produced no labels.")
+    return _explore_record(method, params, stats=_summarize_partition(labels, x_stats))
+
+
+def _explore_trials_inline(
+    fps: Sequence,
+    trials: Sequence[tuple[str, dict]],
+    *,
+    cancel_event: threading.Event | None,
+    on_trial: Callable[[int, int], None] | None,
+) -> tuple[list[dict], bool]:
+    needs_x = any(method in _SKLEARN_CLUSTER_METHODS for method, _params in trials)
+    x = _dense_fingerprint_matrix(fps) if needs_x else None
+    n_trials = max(len(trials), 1)
+    results: list[dict] = []
+    for method, params in trials:
+        if cancel_event is not None and cancel_event.is_set():
+            return results, True
+        if on_trial is not None:
+            on_trial(len(results) + 1, n_trials)
+        try:
+            labels = _run_clustering(method, params, X=x, fps=fps, cancel_event=cancel_event)
+        except Exception as exc:
+            logger.debug("Explore trial failed: %s %s", method, params, exc_info=True)
+            results.append(_explore_record(method, params, notes=str(exc)[:120]))
+            continue
+        if labels is None:
+            return results, True
+        results.append(_explore_record(method, params, stats=_summarize_partition(labels, x)))
+    return results, False
+
+
+def _explore_trials_off_gil(
+    fps: Sequence,
+    trials: Sequence[tuple[str, dict]],
+    *,
+    cancel_event: threading.Event | None,
+    on_trial: Callable[[int, int], None] | None,
+) -> tuple[list[dict], bool]:
+    """Run exploratory trials in one child so each fit does not hold the GUI GIL."""
+    n_trials = max(len(trials), 1)
+    build_matrix = any(method in _SKLEARN_CLUSTER_METHODS for method, _params in trials)
+    ex = register_process_pool(
+        ProcessPoolExecutor(
+            max_workers=1,
+            mp_context=_spawn_context(),
+            initializer=_mp_init_cluster_fps,
+            initargs=(list(fps),),
+        )
+    )
+    results: list[dict] = []
+    cancelled = False
+
+    def _pulse() -> None:
+        if on_trial is not None:
+            on_trial(len(results), n_trials)
+
+    try:
+        for method, params in trials:
+            if should_terminate_process_pool(cancel_event):
+                cancelled = True
+                break
+            fut = ex.submit(
+                _mp_explore_trial,
+                (method, dict(params), build_matrix),
+            )
+            try:
+                results.append(_wait_future(fut, cancel_event, _pulse))
+            except _PoolCancelled:
+                cancelled = True
+                break
+            if on_trial is not None:
+                on_trial(len(results), n_trials)
+        return results, cancelled
+    finally:
+        shutdown_process_pool_executor(
+            ex,
+            kill_workers=cancelled or should_terminate_process_pool(cancel_event),
+        )
+
+
+def _run_explore_trials(
+    fps: Sequence,
+    trials: Sequence[tuple[str, dict]],
+    *,
+    cancel_event: threading.Event | None,
+    on_trial: Callable[[int, int], None] | None,
+) -> tuple[list[dict], bool]:
+    if _use_fit_process_pool(len(fps)):
+        return _explore_trials_off_gil(
+            fps,
+            trials,
+            cancel_event=cancel_event,
+            on_trial=on_trial,
+        )
+    return _explore_trials_inline(
+        fps,
+        trials,
+        cancel_event=cancel_event,
+        on_trial=on_trial,
+    )
+
+
 class ClusterWorker(QRunnable):
-    """Build a fingerprint matrix and assign cluster labels; writes via ``WorkerSignals.calculated``."""
+    """Cluster rows off the GUI GIL.
+
+    Fingerprints and the fit run in child processes once the table is large enough
+    (or the fingerprint type holds the GIL). The parent thread only waits, so Qt
+    can keep processing events.
+    """
 
     def __init__(
         self,
@@ -511,37 +952,30 @@ class ClusterWorker(QRunnable):
         from ..platform_support.tool_progress import report_tool_progress
 
         cancel_ev = self.cancel_event
-        oids: list[int] = []
-        fps: list = []
         tot = max(len(self.rows), 1)
-        cancelled = False
         throttle = [0, 0.0]
 
-        for i, (oid, mol) in enumerate(self.rows, start=1):
-            if cancel_ev is not None and cancel_ev.is_set():
-                cancelled = True
-                break
+        def _on_fp(done: int, total: int) -> None:
             report_tool_progress(
                 message="Clustering",
-                done=i,
-                total=tot,
+                done=done,
+                total=total,
                 progress_state=self.progress_state,
                 signals=self.signals,
                 throttle=throttle,
             )
-            try:
-                fp = fingerprint_bitvect_for_row(int(oid), mol, self.fp_choice)
-                if fp is None:
-                    fp = fingerprint_bitvect_for_ui_choice(mol, self.fp_choice)
-            except Exception:
-                fp = None
-            if fp is None:
-                continue
-            try:
-                fps.append(fp)
-                oids.append(int(oid))
-            except Exception:
-                logger.debug("Fingerprint conversion failed for oid=%s", oid, exc_info=True)
+
+        try:
+            oids, fps, cancelled = _collect_fingerprints(
+                self.rows,
+                self.fp_choice,
+                cancel_event=cancel_ev,
+                on_progress=_on_fp,
+            )
+        except Exception as e:
+            logger.exception("Clustering fingerprint collection failed")
+            self.signals.cluster_failed.emit(str(e) or "Clustering failed.")
+            return
 
         if len(fps) < 2:
             if cancelled and len(fps) == 1 and oids:
@@ -559,16 +993,24 @@ class ClusterWorker(QRunnable):
             )
             return
 
-        X = _dense_fingerprint_matrix(fps) if _method_needs_dense_matrix(self.method) else None
-
         try:
-            labels = _run_clustering(
+            labels = _assign_cluster_labels(
                 self.method,
                 self.params,
-                X=X,
-                fps=fps,
+                fps,
                 cancel_event=None if cancelled else cancel_ev,
+                on_wait=lambda: report_tool_progress(
+                    message="Clustering",
+                    done=tot,
+                    total=tot,
+                    progress_state=self.progress_state,
+                    signals=self.signals,
+                    throttle=throttle,
+                ),
             )
+        except _PoolCancelled:
+            self.signals.cluster_failed.emit("Cancelled.")
+            return
         except Exception as e:
             logger.exception("Clustering fit failed")
             self.signals.cluster_failed.emit(str(e) or "Clustering failed.")
@@ -622,40 +1064,54 @@ class ClusterExploreWorker(QRunnable):
         self.cancel_event = cancel_event
         self.progress_state = progress_state
 
+    def _emit_explore_cancel(self, results: list, n_trials: int) -> None:
+        from ..platform_support.tool_progress import report_tool_progress
+
+        report_tool_progress(
+            message="Exploring clusters",
+            done=min(len(results), n_trials),
+            total=n_trials,
+            progress_state=self.progress_state,
+            signals=self.signals,
+            force_signal=True,
+        )
+        self.signals.cluster_explore_finished.emit(results)
+        try:
+            self.signals.partial_results.emit("Cluster explore", len(results), n_trials)
+        except Exception:
+            pass
+        self.signals.cluster_failed.emit("Cancelled.")
+
     def run(self) -> None:
         from ..platform_support.tool_progress import report_tool_progress
 
         cancel_ev = self.cancel_event
-        oids: list[int] = []
-        fps: list = []
-        tot = max(len(self.rows), 1)
         fp_throttle = [0, 0.0]
 
-        for i, (oid, mol) in enumerate(self.rows, start=1):
-            if cancel_ev is not None and cancel_ev.is_set():
-                self.signals.cluster_failed.emit("Cancelled.")
-                return
+        def _on_fp(done: int, total: int) -> None:
             report_tool_progress(
                 message="Exploring clusters",
-                done=i,
-                total=tot,
+                done=done,
+                total=total,
                 progress_state=self.progress_state,
                 signals=self.signals,
                 throttle=fp_throttle,
             )
-            try:
-                fp = fingerprint_bitvect_for_row(int(oid), mol, self.fp_choice)
-                if fp is None:
-                    fp = fingerprint_bitvect_for_ui_choice(mol, self.fp_choice)
-            except Exception:
-                fp = None
-            if fp is None:
-                continue
-            try:
-                fps.append(fp)
-                oids.append(int(oid))
-            except Exception:
-                logger.debug("Fingerprint conversion failed for oid=%s", oid, exc_info=True)
+
+        try:
+            _oids, fps, cancelled = _collect_fingerprints(
+                self.rows,
+                self.fp_choice,
+                cancel_event=cancel_ev,
+                on_progress=_on_fp,
+            )
+        except Exception as e:
+            logger.exception("Cluster explore fingerprint collection failed")
+            self.signals.cluster_failed.emit(str(e) or "Clustering failed.")
+            return
+        if cancelled:
+            self.signals.cluster_failed.emit("Cancelled.")
+            return
 
         if len(fps) < 2:
             self.signals.cluster_failed.emit(
@@ -665,8 +1121,7 @@ class ClusterExploreWorker(QRunnable):
 
         n = len(fps)
         trials = generate_explore_trials(n, self.max_runs, self.include)
-        needs_sk = any(m in ("kmeans", "agglomerative", "dbscan") for m, _ in trials)
-        X = _dense_fingerprint_matrix(fps) if needs_sk else None
+        needs_sk = any(m in _SKLEARN_CLUSTER_METHODS for m, _params in trials)
         if needs_sk:
             try:
                 from sklearn.cluster import KMeans  # noqa: F401
@@ -680,75 +1135,36 @@ class ClusterExploreWorker(QRunnable):
                 return
 
         n_trials = max(len(trials), 1)
-        results: list[dict] = []
-
         trial_throttle = [0, 0.0]
-        for ti, (method, params) in enumerate(trials):
-            if cancel_ev is not None and cancel_ev.is_set():
-                report_tool_progress(
-                    message="Exploring clusters",
-                    done=min(ti, n_trials),
-                    total=n_trials,
-                    progress_state=self.progress_state,
-                    signals=self.signals,
-                    force_signal=True,
-                )
-                self.signals.cluster_explore_finished.emit(results)
-                try:
-                    self.signals.partial_results.emit("Cluster explore", len(results), n_trials)
-                except Exception:
-                    pass
-                self.signals.cluster_failed.emit("Cancelled.")
-                return
+
+        def _on_trial(done: int, total: int) -> None:
             report_tool_progress(
                 message="Exploring clusters",
-                done=ti + 1,
-                total=n_trials,
+                done=done,
+                total=total,
                 progress_state=self.progress_state,
                 signals=self.signals,
                 throttle=trial_throttle,
             )
-            try:
-                labels = _run_clustering(method, params, X=X, fps=fps, cancel_event=cancel_ev)
-            except Exception as e:
-                logger.debug("Explore trial failed: %s %s", method, params, exc_info=True)
-                results.append(
-                    {
-                        "method": method,
-                        "params": dict(params),
-                        "settings": _format_params(method, params),
-                        "n_clusters": None,
-                        "silhouette": None,
-                        "largest_pct": None,
-                        "noise_pct": None,
-                        "notes": str(e)[:120],
-                    }
-                )
-                continue
-            if labels is None:
-                self.signals.cluster_explore_finished.emit(results)
-                try:
-                    self.signals.partial_results.emit("Cluster explore", len(results), n_trials)
-                except Exception:
-                    pass
-                self.signals.cluster_failed.emit("Cancelled.")
-                return
-            stats = _summarize_partition(labels, X)
-            sil = stats["silhouette"]
-            results.append(
-                {
-                    "method": method,
-                    "params": dict(params),
-                    "settings": _format_params(method, params),
-                    "n_clusters": stats["n_clusters"],
-                    "silhouette": None if sil is None else round(float(sil), 4),
-                    "largest_pct": None
-                    if stats["largest_pct"] is None
-                    else round(float(stats["largest_pct"]), 2),
-                    "noise_pct": round(float(stats["noise_pct"]), 2),
-                    "notes": "",
-                }
+
+        try:
+            results, trial_cancelled = _run_explore_trials(
+                fps,
+                trials,
+                cancel_event=cancel_ev,
+                on_trial=_on_trial,
             )
+        except _PoolCancelled:
+            self._emit_explore_cancel([], n_trials)
+            return
+        except Exception as e:
+            logger.exception("Cluster explore failed")
+            self.signals.cluster_failed.emit(str(e) or "Clustering failed.")
+            return
+
+        if trial_cancelled:
+            self._emit_explore_cancel(results, n_trials)
+            return
 
         report_tool_progress(
             message="Exploring clusters",
