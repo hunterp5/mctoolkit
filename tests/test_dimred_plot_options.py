@@ -128,6 +128,58 @@ def test_embedding_pca_compress_option_defaults_on(qapp):
             _close_dimred_panel(panel, qapp)
 
 
+def test_target_dimensions_switches_pca_between_2d_and_3d(qapp):
+    dlg = PCADialog(None)
+    try:
+        panel = dlg._panel
+        panel.present_initial_ui()
+        qapp.processEvents()
+        assert panel.target_dimensions.currentText() == "2D"
+        assert panel._job_method_params()["target_dimensions"] == 2
+        assert not panel._titles.zaxis_title_edit.isVisible()
+        assert panel.pca_components.minimum() == 2
+
+        panel.target_dimensions.setCurrentText("3D")
+        qapp.processEvents()
+        assert panel._job_method_params()["target_dimensions"] == 3
+        assert panel.pca_components.minimum() == 3
+        assert panel.pca_components.value() >= 3
+        assert panel._titles.zaxis_title_edit.isVisible()
+
+        panel.pca_components.setValue(8)
+        panel.apply_session_state({"method_params": {"target_dimensions": 2, "n_components": 4}})
+        qapp.processEvents()
+        assert panel.target_dimensions.currentText() == "2D"
+        assert panel.pca_components.value() == 4
+        assert panel.pca_components.minimum() == 2
+        assert not panel._titles.zaxis_title_edit.isVisible()
+    finally:
+        panel._opts_dialog.hide()
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_som_map_depth_is_used_for_3d_only(qapp):
+    panel = SOMPlotPanel(None)
+    try:
+        assert not panel.som_grid_d.isEnabled()
+        assert panel.som_grid_d.value() == 5
+        params = panel._job_method_params()
+        assert params["target_dimensions"] == 2
+        assert params["grid_depth"] == 5
+
+        panel.target_dimensions.setCurrentText("3D")
+        qapp.processEvents()
+        assert panel.som_grid_d.isEnabled()
+        panel.som_grid_d.setValue(4)
+        params = panel._job_method_params()
+        assert params["target_dimensions"] == 3
+        assert params["grid_depth"] == 4
+    finally:
+        _close_dimred_panel(panel, qapp)
+
+
 def test_pca_plot_has_no_preprocess_checkbox(qapp):
     dlg = PCADialog(None)
     try:
