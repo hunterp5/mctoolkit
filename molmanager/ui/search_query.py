@@ -638,6 +638,28 @@ def evaluate_search_conditions(
     return all(results) if match_and else any(results)
 
 
+def combine_search_row_sets(glues: list[str | None], row_sets: list[set[int]]) -> set[int]:
+    """
+    Combine per-criterion row sets left to right.
+
+    ``and`` is intersection, ``or`` is union, and ``not`` removes rows that match
+    that criterion from the result so far. The first set is the starting result.
+    """
+    if not row_sets:
+        return set()
+    result = set(row_sets[0])
+    for i in range(1, len(row_sets)):
+        glue = glues[i] if i < len(glues) and glues[i] else "and"
+        nxt = row_sets[i]
+        if glue == "or":
+            result |= nxt
+        elif glue == "not":
+            result -= nxt
+        else:
+            result &= nxt
+    return result
+
+
 def evaluate_search_expression(
     cell_text: str,
     expression: list[list[SearchCondition]],
