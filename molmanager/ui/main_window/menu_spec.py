@@ -472,6 +472,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 ),
                 tooltips_visible=True,
             ),
+            action(
+                "&Notepad",
+                "open_notepad",
+                tooltip=(
+                    "Open a floating notepad for session notes. Dock it like a plot or browser. "
+                    "Size, color, and style stay independent of Settings → Font."
+                ),
+            ),
             tooltips_visible=True,
         ),
         submenu(
@@ -698,6 +706,25 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             hotkey="tools.search",
             tooltip="Open or hide the in-table search panel (Ctrl+F). Queries stay until deleted with −.",
         ),
+        tooltips_visible=True,
+    ),
+    submenu(
+        "&Lists",
+        action(
+            "Add Selected to List…",
+            "add_selected_to_list",
+            tooltip="Save the selected rows as a named list. An existing name adds to that list.",
+            attr="_act_add_selected_to_list",
+        ),
+        MenuItem(kind=KIND_SEPARATOR, attr="_act_lists_footer_separator"),
+        action(
+            "Manage Lists…",
+            "manage_row_lists",
+            tooltip="Delete named row lists.",
+            attr="_act_manage_lists",
+        ),
+        attr="_lists_menu",
+        about_to_show="_rebuild_lists_menu",
         tooltips_visible=True,
     ),
     SETTINGS,
