@@ -84,19 +84,7 @@ class PairBrowserDialog(QDialog):
         pair_row.addWidget(self._right_panel["box"], 1)
         root.addLayout(pair_row, 1)
 
-        self._prop_box, self._prop_form = make_pair_prop_box()
-        self._prop_combo_1 = QComboBox()
-        self._prop_combo_2 = QComboBox()
-        self._prop_combo_3 = QComboBox()
-        for cb in (self._prop_combo_1, self._prop_combo_2, self._prop_combo_3):
-            cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-        self._prop_value_1 = make_pair_prop_value_row()
-        self._prop_value_2 = make_pair_prop_value_row()
-        self._prop_value_3 = make_pair_prop_value_row()
-        self._prop_form.addRow(self._prop_combo_1, self._prop_value_1["host"])
-        self._prop_form.addRow(self._prop_combo_2, self._prop_value_2["host"])
-        self._prop_form.addRow(self._prop_combo_3, self._prop_value_3["host"])
-        root.addWidget(self._prop_box)
+        self._add_comparison_section(root)
 
         self._prepare_nav_extras()
         nav = QHBoxLayout()
@@ -133,8 +121,10 @@ class PairBrowserDialog(QDialog):
                 self._btn_last,
                 self._btn_select,
             ],
+            leading=self._nav_leading_widgets(),
             trailing=self._nav_trailing_widgets(),
         )
+        self._nav_layout = nav
         root.addLayout(nav)
 
         self._btn_first.clicked.connect(self._go_first)
@@ -143,9 +133,6 @@ class PairBrowserDialog(QDialog):
         self._btn_last.clicked.connect(self._go_last)
         self._btn_select.clicked.connect(self._select_current_pair)
         self._cb_selected_only.toggled.connect(self._on_selected_only_toggled)
-        self._prop_combo_1.currentIndexChanged.connect(lambda _i: self._update_property_values())
-        self._prop_combo_2.currentIndexChanged.connect(lambda _i: self._update_property_values())
-        self._prop_combo_3.currentIndexChanged.connect(lambda _i: self._update_property_values())
         install_browser_nav_shortcuts(
             self,
             go_first=self._go_first,
@@ -167,8 +154,28 @@ class PairBrowserDialog(QDialog):
     def _populate_header(self, root: QVBoxLayout) -> None:
         """Optional widgets between the caption and the pair cards."""
 
+    def _add_comparison_section(self, root: QVBoxLayout) -> None:
+        """Column pickers under the pair cards. Subclasses may show a data table instead."""
+        self._prop_box, self._prop_form = make_pair_prop_box()
+        self._prop_combo_1 = QComboBox()
+        self._prop_combo_2 = QComboBox()
+        self._prop_combo_3 = QComboBox()
+        for cb in (self._prop_combo_1, self._prop_combo_2, self._prop_combo_3):
+            cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+            cb.currentIndexChanged.connect(lambda _i: self._update_property_values())
+        self._prop_value_1 = make_pair_prop_value_row()
+        self._prop_value_2 = make_pair_prop_value_row()
+        self._prop_value_3 = make_pair_prop_value_row()
+        self._prop_form.addRow(self._prop_combo_1, self._prop_value_1["host"])
+        self._prop_form.addRow(self._prop_combo_2, self._prop_value_2["host"])
+        self._prop_form.addRow(self._prop_combo_3, self._prop_value_3["host"])
+        root.addWidget(self._prop_box)
+
     def _prepare_nav_extras(self) -> None:
-        """Create extra trailing nav widgets before the nav row is assembled."""
+        """Create extra nav widgets before the nav row is assembled."""
+
+    def _nav_leading_widgets(self) -> list[QWidget]:
+        return []
 
     def _nav_trailing_widgets(self) -> list[QWidget]:
         return [self._cb_selected_only]
