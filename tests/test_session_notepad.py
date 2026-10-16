@@ -14,17 +14,22 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Dockable session notepad: font isolation and session restore."""
+"""Floating session notepad: chrome, formatting, font isolation, and restore."""
 
 from __future__ import annotations
 
 import pytest
 from PyQt5.QtCore import QEvent
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QFont, QTextCursor
+from PyQt5.QtWidgets import QLabel
 from rdkit import Chem
 
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
-from molmanager.ui.session_notepad import DEFAULT_NOTE_COLOR, DEFAULT_NOTE_PT
+from molmanager.ui.session_notepad import (
+    DEFAULT_NOTE_COLOR,
+    DEFAULT_NOTE_PT,
+    NotepadDialog,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -46,43 +51,97 @@ def _utilities_menu(window: ChemistryWorkspaceWindow):
     )
 
 
-def test_utilities_menu_opens_notepad(qapp):  # noqa: ARG001
+def _document_format(panel):
+    cursor = panel._edit.textCursor()
+    cursor.select(QTextCursor.Document)
+    return cursor.charFormat()
+
+
+def test_utilities_menu_opens_floating_notepad(qapp):  # noqa: ARG001
     window = ChemistryWorkspaceWindow()
     action = next(
         act for act in _utilities_menu(window).actions() if act.text().replace("&", "") == "Notepad"
     )
     action.trigger()
-    dock = window.session_notepad.dock
-    assert dock is not None
-    assert not dock.isHidden()
-    assert window.dockWidgetArea(dock) != 0
-    dock.set_text("check the amide series")
-    dock.close()
-    assert dock.isHidden()
-    assert dock.text() == "check the amide series"
+    host = window.session_notepad
+    dialog = host.dialog
+    panel = host.panel
+    assert isinstance(dialog, NotepadDialog)
+    assert panel is dialog._panel
+    assert not dialog.isHidden()
+    assert dialog.windowTitle() == "Notepad"
+    assert not panel._is_docked_in_main_window()
+    assert not panel._add_to_main_btn.isHidden()
+    assert panel._send_window_btn.isHidden()
+    assert panel._close_btn.isHidden()
+    labels = [label.text() for label in panel.findChildren(QLabel)]
+    assert "Color" not in labels
+    for btn in (panel._bold, panel._italic, panel._underline, panel._color_btn):
+        assert btn.text() == ""
+        assert not btn.icon().isNull()
+    assert panel._bold.toolTip() == "Bold"
+    assert panel._italic.toolTip() == "Italic"
+    assert panel._underline.toolTip() == "Underline"
+    assert panel._color_btn.toolTip() == "Text color"
+
+    panel.set_text("check the amide series")
+    dialog.close()
+    assert dialog.isHidden()
+    assert panel.text() == "check the amide series"
     window.open_notepad()
-    assert not dock.isHidden()
-    assert dock.text() == "check the amide series"
+    assert not dialog.isHidden()
+    assert panel.text() == "check the amide series"
+    window.close()
+
+
+def test_notepad_format_glyphs_apply_to_selection(qapp):  # noqa: ARG001
+    window = ChemistryWorkspaceWindow()
+    window.open_notepad()
+    panel = window.session_notepad.panel
+    assert panel is not None
+    panel.set_text("abc")
+    cursor = panel._edit.textCursor()
+    cursor.select(QTextCursor.Document)
+    panel._edit.setTextCursor(cursor)
+    panel._bold.click()
+    panel._italic.click()
+    panel._underline.click()
+    fmt = _document_format(panel)
+    assert fmt.fontWeight() >= QFont.Bold
+    assert fmt.fontItalic()
+    assert fmt.fontUnderline()
+    assert panel._bold.isChecked()
+    assert panel._italic.isChecked()
+    assert panel._underline.isChecked()
+
+    panel.set_color(QColor("#aa1133"))
+    colored = _document_format(panel)
+    assert colored.foreground().color().name() == "#aa1133"
+    assert panel.color_hex() == "#aa1133"
     window.close()
 
 
 def test_notepad_font_ignores_application_font(qapp):  # noqa: ARG001
     window = ChemistryWorkspaceWindow()
     window.open_notepad()
-    dock = window.session_notepad.dock
-    assert dock is not None
-    dock.set_font_pt(22)
-    dock.set_color(QColor("#aa1133"))
+    panel = window.session_notepad.panel
+    assert panel is not None
+    panel.set_text("note")
+    panel.set_font_pt(22)
+    panel.set_color(QColor("#aa1133"))
     previous = int(window._app_font_pt)
     window._set_app_font_pt(9, persist=False)
-    qapp.sendEvent(dock._edit, QEvent(QEvent.ApplicationFontChange))
+    qapp.sendEvent(panel._edit, QEvent(QEvent.ApplicationFontChange))
     qapp.processEvents()
     try:
-        assert dock.font_pt() == 22
-        assert dock._edit.font().pointSize() == 22
-        sheet = dock._edit.styleSheet()
-        assert "22pt" in sheet
-        assert "#aa1133" in sheet
+        assert panel.font_pt() == 22
+        assert panel._edit.font().pointSize() == 22
+        assert panel.color_hex() == "#aa1133"
+        sheet = panel._edit.styleSheet()
+        assert "22pt" not in sheet
+        assert "9pt" not in sheet
+        assert "#aa1133" not in sheet
+        assert _document_format(panel).foreground().color().name() == "#aa1133"
         assert window._app_font_pt == 9
     finally:
         window._set_app_font_pt(previous, persist=False)
@@ -97,35 +156,64 @@ def test_session_roundtrip_restores_notepad(qapp):  # noqa: ARG001
     window.mols[0] = Chem.MolFromSmiles("C")
     window.next_oid = 1
     window.open_notepad()
-    dock = window.session_notepad.dock
-    assert dock is not None
-    dock.set_text("assay notes\nsecond line")
-    dock.set_font_pt(18)
-    dock.set_color(QColor("#003366"))
+    panel = window.session_notepad.panel
+    assert panel is not None
+    panel.set_text("assay notes\nsecond line")
+    panel.set_font_pt(18)
+    panel.set_color(QColor("#003366"))
 
     doc = window._build_session_document()
     assert doc["notepad"]["text"] == "assay notes\nsecond line"
     assert doc["notepad"]["font_pt"] == 18
     assert doc["notepad"]["color"] == "#003366"
     assert doc["notepad"]["visible"] is True
+    assert doc["notepad"]["docked"] is False
+    assert "003366" in doc["notepad"]["html"].lower()
     selected = window._build_session_document(oids={0})
     assert selected["notepad"]["text"] == "assay notes\nsecond line"
 
     restored = ChemistryWorkspaceWindow()
     restored._apply_session_document(doc)
-    restored_dock = restored.session_notepad.dock
-    assert restored_dock is not None
-    assert restored_dock.text() == "assay notes\nsecond line"
-    assert restored_dock.font_pt() == 18
-    assert restored_dock.color_hex() == "#003366"
-    assert not restored_dock.isHidden()
-    assert "18pt" in restored_dock._edit.styleSheet()
+    restored_panel = restored.session_notepad.panel
+    restored_dialog = restored.session_notepad.dialog
+    assert restored_panel is not None
+    assert isinstance(restored_dialog, NotepadDialog)
+    assert restored_panel.text() == "assay notes\nsecond line"
+    assert restored_panel.font_pt() == 18
+    assert restored_panel.color_hex() == "#003366"
+    assert not restored_dialog.isHidden()
+    assert restored_panel._edit.font().pointSize() == 18
+    assert _document_format(restored_panel).foreground().color().name() == "#003366"
 
     restored.clear_all()
-    assert restored_dock.text() == ""
-    assert restored_dock.font_pt() == DEFAULT_NOTE_PT
-    assert restored_dock.color_hex() == DEFAULT_NOTE_COLOR
-    assert restored_dock.isHidden()
+    assert restored_panel.text() == ""
+    assert restored_panel.font_pt() == DEFAULT_NOTE_PT
+    assert restored_panel.color_hex() == DEFAULT_NOTE_COLOR
+    assert restored_dialog.isHidden()
     assert restored.collect_notepad_session() is None
     window.close()
     restored.close()
+
+
+def test_notepad_docks_like_a_browser_and_close_keeps_notes(qapp):  # noqa: ARG001
+    window = ChemistryWorkspaceWindow()
+    window.open_notepad()
+    panel = window.session_notepad.panel
+    assert panel is not None
+    panel.set_text("keep me")
+    panel._add_to_main_window()
+    assert window.is_plot_docked(panel)
+    assert not panel._send_window_btn.isHidden()
+    assert not panel._close_btn.isHidden()
+    assert panel._add_to_main_btn.isHidden()
+    panel._close_btn.click()
+    assert not window.is_plot_docked(panel)
+    assert panel.text() == "keep me"
+    window.open_notepad()
+    dialog = window.session_notepad.dialog
+    assert isinstance(dialog, NotepadDialog)
+    assert dialog._panel is panel
+    assert not dialog.isHidden()
+    assert not panel._is_docked_in_main_window()
+    assert panel.text() == "keep me"
+    window.close()
