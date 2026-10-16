@@ -51,6 +51,7 @@ def test_top_level_menu_order():
         "Tools",
         "Protein",
         "Data",
+        "Lists",
         "Settings",
         "Help",
     ]
@@ -118,6 +119,23 @@ def test_reaction_menu_outline():
     ]
 
 
+def test_lists_menu_sits_between_data_and_settings():
+    labels = []
+    for item in MAIN_WINDOW_MENUS:
+        outline = menu_outline((item,))[0]
+        labels.append(next(iter(outline)) if isinstance(outline, dict) else outline)
+    assert labels[labels.index("Data") + 1] == "Lists"
+    assert labels[labels.index("Lists") + 1] == "Settings"
+    lists = find_submenu(MAIN_WINDOW_MENUS, "Lists")
+    assert lists.attr == "_lists_menu"
+    assert lists.about_to_show == "_rebuild_lists_menu"
+    assert menu_outline(lists.items) == [
+        "Add Selected to List…",
+        "",
+        "Manage Lists…",
+    ]
+
+
 def test_help_follows_settings():
     labels = []
     for item in MAIN_WINDOW_MENUS:
@@ -157,6 +175,7 @@ def test_utilities_menu_outline():
     assert menu_outline(utilities.items) == [
         "Calculator…",
         {"Random": ["Number…", "Molecule…"]},
+        "Notepad",
     ]
 
 
