@@ -115,7 +115,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "file_sessions",
                 "Sessions",
                 "Sessions",
-                "Open, save, save selected rows, create, and duplicate sessions.",
+                "Open, save, save selected rows, create, duplicate, and close sessions.",
             ),
             _e(
                 "file_export",
@@ -368,6 +368,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Uni-pKa macro pKa values from a structure column or SMILES.",
             ),
             _e("data_qsar", "QSAR", "QSAR", "Train and apply QSAR models on table features."),
+            _e(
+                "data_free_wilson",
+                "Free-Wilson",
+                "Free-Wilson",
+                "Additive substituent contributions and predicted missing analogs.",
+            ),
             _e("data_mpo", "MPO Scoring", "MPO Scoring", "Multi-parameter desirability scores."),
         ),
     ),

@@ -1306,9 +1306,6 @@ function molmanagerInitView() {
       try { v.zoom(0.85); } catch (eZoom) {}
       v.render();
     };
-    window.addEventListener("resize", function () {
-      if (window.molmanagerResizeKeepView) window.molmanagerResizeKeepView();
-    });
   } catch (e) {
     document.body.innerHTML = "<pre style='padding:12px;font-family:monospace'>3Dmol error: " + e + "</pre>";
   }

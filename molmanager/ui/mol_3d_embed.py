@@ -78,13 +78,8 @@ class Molecule3DEmbedView(QWidget):
         self._ensure_web()
         self.schedule_refit()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        if self._web_ready:
-            self.schedule_refit()
-
     def schedule_refit(self) -> None:
-        """Debounce resize/zoom so the model fills the frame after layout settles."""
+        """Debounced zoom-to-fit after show/load; live resizes are handled in the page."""
         self._refit_timer.start()
 
     def refit_view(self) -> None:

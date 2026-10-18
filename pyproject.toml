@@ -73,6 +73,7 @@ molmanager = [
     "ui/static/*",
     "ui/plotly_shell.html",
     "ui/protein_viewer.js",
+    "ui/web_resize_scheduler.js",
     "resources/README.md",
     "resources/help/**/*.md",
     "resources/unipka/**",

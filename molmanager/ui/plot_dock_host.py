@@ -19,12 +19,39 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtWidgets import QMessageBox
 
+from .layout_flags import FLAG_DIRECT_FLOAT_SHOW, FLAG_SNAPSHOT_TRANSITIONS, layout_flag
+from .layout_geometry import grow_horizontal_plot_split, grow_vertical_pane_split
+from .layout_perf import perf_span
+
 logger = logging.getLogger(__name__)
+
+
+class _SplitterSizeBatch:
+    """Apply ``setSizes`` once per splitter at the end of a dock/undock transition."""
+
+    def __init__(self) -> None:
+        self._items: list[tuple[Any, list[int]]] = []
+        self.defer_hold_release = False
+
+    def set_sizes(self, splitter, sizes: list[int]) -> None:
+        self._items.append((splitter, [max(0, int(s)) for s in sizes]))
+
+    def apply(self) -> None:
+        latest: dict[int, tuple[Any, list[int]]] = {}
+        for splitter, sizes in self._items:
+            latest[id(splitter)] = (splitter, sizes)
+        for splitter, sizes in latest.values():
+            try:
+                splitter.setSizes(sizes)
+            except RuntimeError:
+                continue
+        self._items.clear()
 
 
 def _plot_dialog_and_widget_types():
@@ -45,6 +72,7 @@ class PlotDockHost:
 
     def __init__(self, app: Any) -> None:
         self._app = app
+        self._active_transitions: set[int] = set()
 
     def workspace(self):
         return getattr(self._app, "_workspace_layout", None)
@@ -150,12 +178,10 @@ class PlotDockHost:
             min_w = PLOT_PANEL_BASE_MINIMUM_WIDTH
         return min_w
 
-    def _ensure_plot_panel_width(self, preferred: int | None = None) -> None:
-        """Give the plot region a usable width when the outer splitter is horizontal.
-
-        Prefer growing an already-open plot side toward ``preferred``; never shrink it.
-        That stops dock/undock/redock from ratcheting the pane smaller each cycle.
-        """
+    def _ensure_plot_panel_width(
+        self, preferred: int | None = None, batch: _SplitterSizeBatch | None = None
+    ) -> None:
+        """Give the plot region a usable width when the outer splitter is horizontal."""
         from .dockable_plot import PLOT_PANEL_COLLAPSED_WIDTH
 
         mgr = self.workspace()
@@ -165,8 +191,6 @@ class PlotDockHost:
             return
         splitter = mgr._splitters[0]
         try:
-            from PyQt5.QtCore import Qt
-
             if splitter.orientation() != Qt.Horizontal:
                 return
             sizes = [int(s) for s in splitter.sizes()]
@@ -174,26 +198,22 @@ class PlotDockHost:
             return
         if len(sizes) < 2:
             return
-        table_w, plot_w = sizes[0], sizes[1]
-        # Existing panes already have a share of the window; do not grow them to
-        # the docked widget's floating sizeHint / preferred width unless asked.
-        if preferred is None and plot_w >= PLOT_PANEL_COLLAPSED_WIDTH:
-            return
         min_w = self._apply_plot_panel_minimum_width()
         _content_min, content_pref = self._docked_plot_content_widths()
-        if preferred is not None:
-            want = max(min_w, int(preferred))
+        pair = grow_horizontal_plot_split(
+            sizes[0],
+            sizes[1],
+            preferred=preferred,
+            min_plot_w=min_w,
+            content_pref_w=content_pref,
+            collapsed_plot_w=PLOT_PANEL_COLLAPSED_WIDTH,
+        )
+        if pair is None:
+            return
+        if batch is not None:
+            batch.set_sizes(splitter, list(pair))
         else:
-            want = max(min_w, content_pref)
-        # Grow-only once the plot region is already open.
-        if plot_w >= PLOT_PANEL_COLLAPSED_WIDTH and plot_w >= want:
-            return
-        total = max(table_w + plot_w, want + 200)
-        new_plot = min(want, max(min_w, total - 200))
-        if plot_w >= new_plot:
-            return
-        new_table = max(200, total - new_plot)
-        splitter.setSizes([new_table, new_plot])
+            splitter.setSizes(list(pair))
 
     @staticmethod
     def _widget_pixel_size(widget) -> tuple[int, int]:
@@ -237,10 +257,10 @@ class PlotDockHost:
             pass
         return self._widget_pixel_size(widget)
 
-    def _match_vertical_pane_height(self, pane, height: int) -> None:
+    def _match_vertical_pane_height(
+        self, pane, height: int, batch: _SplitterSizeBatch | None = None
+    ) -> None:
         """When the pane sits in a vertical splitter, grow it toward ``height`` pixels."""
-        from PyQt5.QtCore import Qt
-
         mgr = self.workspace()
         if mgr is None or height < 50:
             return
@@ -258,33 +278,78 @@ class PlotDockHost:
         except RuntimeError:
             return
         index = next((i for i in range(count) if splitter.widget(i) is pane), -1)
-        if index < 0 or len(sizes) != count or count < 2:
+        if index < 0 or len(sizes) != count:
             return
-        current = sizes[index]
-        # Grow-only: do not steal height from sibling panes on redock.
-        if current >= 80 and current >= int(height):
+        new_sizes = grow_vertical_pane_split(sizes, index, int(height))
+        if new_sizes is None:
             return
-        total = sum(sizes) if sum(sizes) > 0 else max(int(splitter.height()), height + 50)
-        want = max(80, min(int(height), total - 80))
-        if current >= want:
-            return
-        new_sizes = [0] * count
-        new_sizes[index] = want
-        remain = total - want
-        others = [i for i in range(count) if i != index]
-        base, rem = divmod(max(remain, 0), len(others))
-        for n, i in enumerate(others):
-            new_sizes[i] = max(80, base + (1 if n < rem else 0))
-        drift = total - sum(new_sizes)
-        new_sizes[others[-1]] = max(80, new_sizes[others[-1]] + drift)
-        splitter.setSizes(new_sizes)
+        if batch is not None:
+            batch.set_sizes(splitter, new_sizes)
+        else:
+            splitter.setSizes(new_sizes)
 
-    def _match_pane_to_plot_size(self, pane, width: int, height: int) -> None:
+    def _match_pane_to_plot_size(
+        self,
+        pane,
+        width: int,
+        height: int,
+        batch: _SplitterSizeBatch | None = None,
+    ) -> None:
         """Grow the destination pane toward the plot's current pixel size before dock."""
         if width > 50:
-            self._ensure_plot_panel_width(preferred=width)
+            self._ensure_plot_panel_width(preferred=width, batch=batch)
         if height > 50:
-            self._match_vertical_pane_height(pane, height)
+            self._match_vertical_pane_height(pane, height, batch=batch)
+
+    @contextmanager
+    def _dock_transition(self, plot_widget) -> Iterator[_SplitterSizeBatch | None]:
+        """Guard dock/undock: one transition per widget, batched splitter sizes, resize hold."""
+        if plot_widget is None:
+            yield None
+            return
+        try:
+            from PyQt5 import sip
+
+            if sip.isdeleted(plot_widget):
+                yield None
+                return
+        except Exception:
+            pass
+        key = id(plot_widget)
+        if key in self._active_transitions:
+            yield None
+            return
+        self._active_transitions.add(key)
+        batch = _SplitterSizeBatch()
+        self._set_dock_transition_buttons(plot_widget, False)
+        self._set_plot_resize_hold(plot_widget, True)
+        try:
+            plot_widget.setUpdatesEnabled(False)
+        except RuntimeError:
+            pass
+        try:
+            yield batch
+            batch.apply()
+        finally:
+            try:
+                plot_widget.setUpdatesEnabled(True)
+            except RuntimeError:
+                pass
+            if not batch.defer_hold_release:
+                self._set_plot_resize_hold(plot_widget, False)
+            self._set_dock_transition_buttons(plot_widget, True)
+            self._active_transitions.discard(key)
+
+    @staticmethod
+    def _set_dock_transition_buttons(plot_widget, enabled: bool) -> None:
+        for name in ("_add_to_main_btn", "_send_window_btn"):
+            btn = getattr(plot_widget, name, None)
+            if btn is None:
+                continue
+            try:
+                btn.setEnabled(bool(enabled))
+            except RuntimeError:
+                continue
 
     @staticmethod
     def _apply_floating_dialog_size(dialog, width: int, height: int) -> None:
@@ -340,6 +405,122 @@ class PlotDockHost:
                 page.runJavaScript(js)
             except RuntimeError:
                 continue
+
+    def _begin_snapshot_placeholder(self, plot_widget):
+        """Show a static grab of the web view during reparent when the flag is enabled."""
+        if not layout_flag(FLAG_SNAPSHOT_TRANSITIONS):
+            return None
+        views = list(self._iter_web_engine_views(plot_widget))
+        if not views:
+            return None
+        view = views[0]
+        try:
+            pixmap = view.grab()
+        except RuntimeError:
+            return None
+        if pixmap is None or pixmap.isNull():
+            return None
+        from PyQt5.QtWidgets import QLabel
+
+        overlay = QLabel(plot_widget)
+        overlay.setPixmap(pixmap)
+        try:
+            overlay.setGeometry(view.geometry())
+        except RuntimeError:
+            overlay.deleteLater()
+            return None
+        overlay.show()
+        overlay.raise_()
+
+        def cleanup() -> None:
+            try:
+                overlay.hide()
+                overlay.deleteLater()
+            except RuntimeError:
+                pass
+
+        return cleanup
+
+    def _register_floating_dialog(self, dlg, plot_widget) -> None:
+        if not self._app._bind_undocked_browser_dialog(dlg):
+            plot_dialog_cls, _plot_cls = _plot_dialog_and_widget_types()
+            if plot_dialog_cls is not None and isinstance(dlg, plot_dialog_cls):
+                self._app._register_plot_dialog(dlg)
+            else:
+                self._app._register_floating_result_dialog(dlg)
+
+    def _show_floating_host(
+        self,
+        dlg,
+        plot_widget,
+        content_w: int,
+        content_h: int,
+        *,
+        batch: _SplitterSizeBatch | None = None,
+    ) -> None:
+        """Reveal a floating host at the plot's last docked size."""
+        if layout_flag(FLAG_DIRECT_FLOAT_SHOW):
+            self._apply_floating_dialog_size(dlg, content_w, content_h)
+            try:
+                dlg.ensurePolished()
+                layout = dlg.layout()
+                if layout is not None:
+                    layout.activate()
+            except RuntimeError:
+                pass
+            plot_widget.show()
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+            if batch is not None:
+                batch.defer_hold_release = True
+            QTimer.singleShot(0, lambda w=plot_widget: self._set_plot_resize_hold(w, False))
+            try:
+                plot_widget.setFocus(Qt.OtherFocusReason)
+            except RuntimeError:
+                pass
+            return
+        self._prepare_floating_host_geometry(dlg, plot_widget, content_w, content_h)
+        plot_widget.show()
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _float_widget(self, plot_widget, content_w: int, content_h: int) -> bool:
+        """Move a docked plot into a floating dialog (single code path)."""
+        factory = getattr(plot_widget, "create_floating_dialog", None)
+        _dialog_cls, plot_cls = _plot_dialog_and_widget_types()
+        snapshot_cleanup = self._begin_snapshot_placeholder(plot_widget)
+        with self._dock_transition(plot_widget) as batch:
+            if batch is None:
+                if snapshot_cleanup is not None:
+                    snapshot_cleanup()
+                return False
+            self._release_plot_widget_from_panel_host(plot_widget, sync_chrome=False)
+            dlg = None
+            if callable(factory):
+                dlg = factory(self._app)
+            elif plot_cls is not None and isinstance(plot_widget, plot_cls):
+                from .plot import PlotDialog
+
+                dlg = PlotDialog(self._app, plot_widget=plot_widget)
+            if dlg is None:
+                if snapshot_cleanup is not None:
+                    snapshot_cleanup()
+                return False
+            self._app._prepare_tool_dialog(dlg)
+            self._register_floating_dialog(dlg, plot_widget)
+            self._show_floating_host(
+                dlg, plot_widget, content_w, content_h, batch=batch
+            )
+        if snapshot_cleanup is not None:
+            snapshot_cleanup()
+        kind = self._docked_widget_kind(plot_widget)
+        self._app.status_label.setText(f"{kind}: moved to separate window.")
+        mark = getattr(self._app, "_mark_session_dirty", None)
+        if callable(mark):
+            mark()
+        return True
 
     def _prepare_floating_host_geometry(self, dialog, plot_widget, content_w: int, content_h: int) -> None:
         """Size ``dialog`` off-screen so ``plot_widget`` matches docked content on first paint."""
@@ -416,6 +597,10 @@ class PlotDockHost:
 
     def dock_plot_widget(self, plot_widget, pane=None) -> bool:
         """Move a plot or viewer widget into the active workspace plot pane."""
+        with perf_span("dock_plot_widget"):
+            return self._dock_plot_widget(plot_widget, pane)
+
+    def _dock_plot_widget(self, plot_widget, pane=None) -> bool:
         from .dockable_plot import is_dockable_workspace_widget
 
         if not is_dockable_workspace_widget(plot_widget):
@@ -435,28 +620,22 @@ class PlotDockHost:
         prior_teardown = getattr(plot_widget, "_scope_sync_disconnect", None)
         if callable(prior_teardown):
             prior_teardown()
-        self._set_plot_resize_hold(plot_widget, True)
-        try:
-            plot_widget.setUpdatesEnabled(False)
-        except RuntimeError:
-            pass
-        try:
-            self._match_pane_to_plot_size(target, src_w, src_h)
-            mgr.dock_into_pane(target, plot_widget)
-            # dock_into_pane restores prior splitter sizes; re-apply grow-only match.
-            self._match_pane_to_plot_size(target, src_w, src_h)
-            # Apply width now (not on a timer) so the first paint uses final geometry.
+        snapshot_cleanup = self._begin_snapshot_placeholder(plot_widget)
+        with self._dock_transition(plot_widget) as batch:
+            if batch is None:
+                if snapshot_cleanup is not None:
+                    snapshot_cleanup()
+                return False
             if src_w > 50:
-                self._ensure_plot_panel_width(preferred=src_w)
+                self._match_pane_to_plot_size(target, src_w, src_h, batch=batch)
             else:
-                self.show_docked_plot_panel()
+                self._ensure_plot_panel_width(preferred=None, batch=batch)
+            mgr.dock_into_pane(
+                target, plot_widget, restore_splitter_snapshot=False
+            )
             self._finalize_docked_plot_geometry(target, plot_widget)
-        finally:
-            try:
-                plot_widget.setUpdatesEnabled(True)
-            except RuntimeError:
-                pass
-            self._set_plot_resize_hold(plot_widget, False)
+        if snapshot_cleanup is not None:
+            snapshot_cleanup()
         # Paint the docked plot first; per-widget wire/selection can wait a tick.
         QTimer.singleShot(0, lambda w=plot_widget: self._wire_docked_plot_widget(w))
         kind = self._docked_widget_kind(plot_widget)
@@ -505,36 +684,8 @@ class PlotDockHost:
         if plot_widget is None:
             return
         content_w, content_h = self._widget_pixel_size(plot_widget)
-        factory = getattr(plot_widget, "create_floating_dialog", None)
         try:
-            if callable(factory):
-                self._set_plot_resize_hold(plot_widget, True)
-                try:
-                    plot_widget.setUpdatesEnabled(False)
-                except RuntimeError:
-                    pass
-                try:
-                    dlg = factory(self._app)
-                    self._prepare_floating_host_geometry(
-                        dlg, plot_widget, content_w, content_h
-                    )
-                    self._app._prepare_tool_dialog(dlg)
-                    if not self._app._bind_undocked_browser_dialog(dlg):
-                        plot_dialog_cls, _plot_cls = _plot_dialog_and_widget_types()
-                        if plot_dialog_cls is not None and isinstance(dlg, plot_dialog_cls):
-                            self._app._register_plot_dialog(dlg)
-                        else:
-                            self._app._register_floating_result_dialog(dlg)
-                    plot_widget.show()
-                    dlg.show()
-                    dlg.raise_()
-                    dlg.activateWindow()
-                finally:
-                    try:
-                        plot_widget.setUpdatesEnabled(True)
-                    except RuntimeError:
-                        pass
-                    self._set_plot_resize_hold(plot_widget, False)
+            if self._float_widget(plot_widget, content_w, content_h):
                 return
         except Exception:
             logger.exception("Failed to float released plot widget")
@@ -731,6 +882,10 @@ class PlotDockHost:
 
     def undock_plot_to_window(self, plot_widget=None) -> bool:
         """Move a docked plot into a floating window."""
+        with perf_span("undock_plot_to_window"):
+            return self._undock_plot_to_window(plot_widget)
+
+    def _undock_plot_to_window(self, plot_widget=None) -> bool:
         mgr = self.workspace()
         if mgr is None:
             return False
@@ -745,74 +900,11 @@ class PlotDockHost:
         if plot_widget is None:
             return False
 
-        # Capture docked content size before release so the floating window can match it.
         content_w, content_h = self._widget_pixel_size(plot_widget)
-        factory = getattr(plot_widget, "create_floating_dialog", None)
-        if callable(factory):
-            # Size the floating host off-screen, then reveal at the final geometry.
-            self._set_plot_resize_hold(plot_widget, True)
-            try:
-                plot_widget.setUpdatesEnabled(False)
-            except RuntimeError:
-                pass
-            try:
-                self._release_plot_widget_from_panel_host(plot_widget, sync_chrome=False)
-                dlg = factory(self._app)
-                self._prepare_floating_host_geometry(dlg, plot_widget, content_w, content_h)
-                self._app._prepare_tool_dialog(dlg)
-                if not self._app._bind_undocked_browser_dialog(dlg):
-                    plot_dialog_cls, _plot_cls = _plot_dialog_and_widget_types()
-                    if plot_dialog_cls is not None and isinstance(dlg, plot_dialog_cls):
-                        self._app._register_plot_dialog(dlg)
-                    else:
-                        self._app._register_floating_result_dialog(dlg)
-                plot_widget.show()
-                dlg.show()
-                dlg.raise_()
-                dlg.activateWindow()
-            finally:
-                try:
-                    plot_widget.setUpdatesEnabled(True)
-                except RuntimeError:
-                    pass
-                self._set_plot_resize_hold(plot_widget, False)
-            # Footer chrome is synced during dialog construction / off-screen sizing.
-            kind = self._docked_widget_kind(plot_widget)
-            self._app.status_label.setText(f"{kind}: moved to separate window.")
-            mark = getattr(self._app, "_mark_session_dirty", None)
-            if callable(mark):
-                mark()
+        if self._float_widget(plot_widget, content_w, content_h):
             return True
-
         _dialog_cls, plot_cls = _plot_dialog_and_widget_types()
         if plot_cls is None or not isinstance(plot_widget, plot_cls):
             self._release_plot_widget_from_panel_host(plot_widget)
             return False
-
-        from .plot import PlotDialog
-
-        self._set_plot_resize_hold(plot_widget, True)
-        try:
-            plot_widget.setUpdatesEnabled(False)
-        except RuntimeError:
-            pass
-        try:
-            self._release_plot_widget_from_panel_host(plot_widget, sync_chrome=False)
-            dlg = PlotDialog(self._app, plot_widget=plot_widget)
-            self._prepare_floating_host_geometry(dlg, plot_widget, content_w, content_h)
-            self._app._register_plot_dialog(dlg)
-            self._app._prepare_tool_dialog(dlg)
-            dlg.show()
-            dlg.raise_()
-            dlg.activateWindow()
-        finally:
-            try:
-                plot_widget.setUpdatesEnabled(True)
-            except RuntimeError:
-                pass
-            self._set_plot_resize_hold(plot_widget, False)
-        self._app.status_label.setText("Plot: moved to separate window.")
-        mark = getattr(self._app, "_mark_session_dirty", None)
-        if callable(mark):
-            mark()
-        return True
+        return False

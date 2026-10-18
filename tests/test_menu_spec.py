@@ -68,6 +68,7 @@ def test_file_session_submenu_outline():
         "Save Selected to Session…",
         "New Session",
         "Duplicate Session",
+        "Close Session",
     ]
 
 

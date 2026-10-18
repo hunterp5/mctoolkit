@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import QEvent, QObject, Qt, pyqtSignal
+from PyQt5.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication,
     QFrame,
@@ -46,6 +46,7 @@ from ..dockable_plot import (
     style_plot_pane_title_edit,
     unembed_from_plot_pane,
 )
+from ..layout_perf import perf_span
 
 _WEB_ENGINE_VIEW_UNSET = object()
 _WEB_ENGINE_VIEW_CLS = _WEB_ENGINE_VIEW_UNSET
@@ -65,42 +66,6 @@ def _web_engine_view_type():
     return _WEB_ENGINE_VIEW_CLS
 
 
-def _iter_activate_filter_widgets(widget: QWidget):
-    """Yield ``widget`` and chrome children, but not WebEngine internals."""
-    web_cls = _web_engine_view_type()
-    try:
-        yield widget
-        stack = [child for child in widget.children() if isinstance(child, QWidget)]
-    except RuntimeError:
-        return
-    while stack:
-        child = stack.pop()
-        try:
-            yield child
-            if web_cls is not None and isinstance(child, web_cls):
-                continue
-            stack.extend(
-                grandchild
-                for grandchild in child.children()
-                if isinstance(grandchild, QWidget)
-            )
-        except RuntimeError:
-            continue
-
-
-class _PaneActivateFilter(QObject):
-    """Forward mouse presses on a docked plot to activate its host pane."""
-
-    def __init__(self, pane: "PlotPane"):
-        super().__init__(pane)
-        self._pane = pane
-
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt API
-        if event.type() == QEvent.MouseButtonPress:
-            self._pane.activated.emit(self._pane)
-        return False
-
-
 class _StackPresizeFilter(QObject):
     """Keep non-current stack pages at the stack size so WebEngine/Plotly do not cold-resize."""
 
@@ -110,7 +75,8 @@ class _StackPresizeFilter(QObject):
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt API
         if event.type() == QEvent.Resize and obj is self._pane._stack:
-            self._pane._presize_stack_pages()
+            with perf_span("presize_stack_pages"):
+                self._pane._presize_stack_pages(live_only=True)
         return False
 
 
@@ -124,7 +90,12 @@ class PlotPane(QFrame):
         super().__init__(parent)
         self.pane_id = pane_id
         self._pages: list[QWidget] = []
-        self._activate_filter = _PaneActivateFilter(self)
+        self._page_web_views: dict[int, list] = {}
+        self._stale_pages: set[int] = set()
+        self._settle_presize_timer = QTimer(self)
+        self._settle_presize_timer.setSingleShot(True)
+        self._settle_presize_timer.setInterval(150)
+        self._settle_presize_timer.timeout.connect(self._presize_stale_pages)
         self.setObjectName("PlotPane")
         # Border width is owned by the stylesheet; avoid QFrame chrome fighting it.
         self.setFrameShape(QFrame.NoFrame)
@@ -355,7 +326,7 @@ class PlotPane(QFrame):
         self._stack.blockSignals(True)
         try:
             for widget in widgets:
-                self._uninstall_activate_filter(widget)
+                self._forget_page_web_cache(widget)
                 self._stack.removeWidget(widget)
                 try:
                     # Hide first so Qt does not flash a top-level window.
@@ -364,6 +335,8 @@ class PlotPane(QFrame):
                 except RuntimeError:
                     pass
             self._pages = []
+            self._page_web_views.clear()
+            self._stale_pages.clear()
         finally:
             self._stack.blockSignals(False)
         self._refresh_pager()
@@ -442,18 +415,19 @@ class PlotPane(QFrame):
                 restore_dock_header_buttons(owner)
                 self._header_button_owner = None
             for old in list(self._pages):
-                self._uninstall_activate_filter(old)
                 self._stack.removeWidget(old)
                 old.setParent(None)
+                self._forget_page_web_cache(old)
                 unembed_from_plot_pane(old)
             self._pages = []
+            self._stale_pages.clear()
             for widget in widgets:
                 if widget is None:
                     continue
                 embed_in_plot_pane(widget)
                 self._pages.append(widget)
                 self._stack.addWidget(widget)
-                self._install_activate_filter(widget)
+                self._remember_page_web_views(widget)
             if self._pages:
                 idx = 0
                 if current is not None:
@@ -480,7 +454,7 @@ class PlotPane(QFrame):
             return
         self._pages.append(widget)
         self._stack.addWidget(widget)
-        self._install_activate_filter(widget)
+        self._remember_page_web_views(widget)
         self._stack.setCurrentWidget(widget)
         self._presize_stack_pages()
         self._refresh_pager()
@@ -495,8 +469,8 @@ class PlotPane(QFrame):
                 restore_dock_header_buttons(widget)
             self._header_button_owner = None
         idx = self._pages.index(widget)
-        self._uninstall_activate_filter(widget)
         self._pages.remove(widget)
+        self._forget_page_web_cache(widget)
         self._stack.removeWidget(widget)
         try:
             widget.setParent(None)
@@ -514,6 +488,7 @@ class PlotPane(QFrame):
         n = len(self._pages)
         if n < 2:
             return
+        self._ensure_stale_pages_presized()
         self._stack.setCurrentIndex((self.page_index() - 1) % n)
         self.activated.emit(self)
 
@@ -521,6 +496,7 @@ class PlotPane(QFrame):
         n = len(self._pages)
         if n < 2:
             return
+        self._ensure_stale_pages_presized()
         self._stack.setCurrentIndex((self.page_index() + 1) % n)
         self.activated.emit(self)
 
@@ -555,42 +531,101 @@ class PlotPane(QFrame):
     def set_page(self, index: int) -> None:
         if not self._pages:
             return
+        self._ensure_stale_pages_presized()
         self._stack.setCurrentIndex(max(0, min(int(index), len(self._pages) - 1)))
 
     def _on_stack_current_changed(self, _index: int) -> None:
+        self._ensure_stale_pages_presized()
         self._presize_stack_pages()
         self._refresh_pager()
         self._sync_visible_footer()
 
-    def _presize_stack_pages(self) -> None:
-        """Force every page (and nested WebEngine views) to the stack geometry.
+    def _remember_page_web_views(self, page: QWidget) -> None:
+        web_cls = _web_engine_view_type()
+        views: list = []
+        if web_cls is not None:
+            try:
+                views = page.findChildren(web_cls)
+            except RuntimeError:
+                views = []
+        self._page_web_views[id(page)] = views
 
-        Hidden ``QWebEngineView`` pages often keep a stale size until shown; matching
-        them here avoids a visible Plotly resize flash when paging.
-        """
+    def _forget_page_web_cache(self, page: QWidget) -> None:
+        self._page_web_views.pop(id(page), None)
+        self._stale_pages.discard(id(page))
+
+    def _stack_content_size(self) -> tuple[int, int] | None:
         stack = getattr(self, "_stack", None)
         if stack is None:
-            return
+            return None
         try:
             sw, sh = int(stack.width()), int(stack.height())
         except RuntimeError:
-            return
+            return None
         if sw < 20 or sh < 20:
+            return None
+        return sw, sh
+
+    def _apply_page_geometry(self, page: QWidget, sw: int, sh: int) -> None:
+        try:
+            if page.width() != sw or page.height() != sh:
+                page.resize(sw, sh)
+        except RuntimeError:
             return
-        web_cls = _web_engine_view_type()
+        for view in self._page_web_views.get(id(page), ()):
+            try:
+                if view.width() != sw or view.height() != sh:
+                    view.resize(sw, sh)
+            except RuntimeError:
+                continue
+
+    def _schedule_stale_presize(self) -> None:
+        if self._stale_pages:
+            self._settle_presize_timer.start()
+
+    def _presize_stale_pages(self) -> None:
+        size = self._stack_content_size()
+        if size is None:
+            return
+        sw, sh = size
+        for key in list(self._stale_pages):
+            page = next((p for p in self._pages if id(p) == key), None)
+            if page is None:
+                self._stale_pages.discard(key)
+                continue
+            self._apply_page_geometry(page, sw, sh)
+            self._stale_pages.discard(key)
+
+    def _ensure_stale_pages_presized(self) -> None:
+        if not self._stale_pages:
+            return
+        self._settle_presize_timer.stop()
+        self._presize_stale_pages()
+
+    def _presize_stack_pages(self, *, live_only: bool = False) -> None:
+        """Match stack pages to the pane content area.
+
+        During splitter drags only the visible page is resized live; hidden pages are
+        updated on a short settle timer or before a page switch.
+        """
+        size = self._stack_content_size()
+        if size is None:
+            return
+        sw, sh = size
+        stack = self._stack
+        current = stack.currentWidget() if stack is not None else None
+        if live_only:
+            if current is not None:
+                self._apply_page_geometry(current, sw, sh)
+            for page in self._pages:
+                if page is not current:
+                    self._stale_pages.add(id(page))
+            self._schedule_stale_presize()
+            return
         for page in list(self._pages):
             try:
-                if page.width() != sw or page.height() != sh:
-                    page.resize(sw, sh)
-                if web_cls is None:
-                    continue
-                for view in page.findChildren(web_cls):
-                    if view.width() != sw or view.height() != sh:
-                        view.resize(sw, sh)
-                    # Let Chromium accept the geometry while the page is still
-                    # non-current (QStackedWidget keeps the page widget hidden).
-                    if stack.currentWidget() is not page:
-                        view.show()
+                self._apply_page_geometry(page, sw, sh)
+                self._stale_pages.discard(id(page))
             except RuntimeError:
                 continue
 
@@ -676,17 +711,6 @@ class PlotPane(QFrame):
             self._move_earlier_btn.setToolTip("Move this plot earlier in the pane")
             self._move_later_btn.setToolTip("Move this plot later in the pane")
         self._title_edit.setToolTip(f"{title}\nDouble-click to rename")
-
-    def _install_activate_filter(self, widget: QWidget) -> None:
-        for target in _iter_activate_filter_widgets(widget):
-            target.installEventFilter(self._activate_filter)
-
-    def _uninstall_activate_filter(self, widget: QWidget) -> None:
-        for target in _iter_activate_filter_widgets(widget):
-            try:
-                target.removeEventFilter(self._activate_filter)
-            except RuntimeError:
-                pass
 
     def clear_plot_widget(self) -> QWidget | None:
         """Remove the currently visible plot; other pages stay."""

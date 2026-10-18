@@ -689,23 +689,6 @@ class TableEditMixin:
             return
         self._confirm_and_push_delete_rows(oids=self._selected_oids_for_delete())
 
-    def clear_table_after_confirm(self) -> None:
-        """Clear the entire table only after explicit user confirmation."""
-        reply = QMessageBox.question(
-            self,
-            "Clear Table",
-            "Remove all rows, columns, filters, and molecules from this session?\n\n"
-            "This cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if reply == QMessageBox.Yes:
-            self.clear_all()
-            mark = getattr(self, "_mark_session_dirty", None)
-            if callable(mark):
-                mark()
-            self.status_label.setText("Table cleared.")
-
     def _apply_pasted_cell_value(self, row: int, col: int, oid: int, text: str) -> bool:
         """Write one pasted value without refreshing bounds or filters."""
         if not text and col == CompoundTableModel.STRUCTURE_COL:

@@ -531,7 +531,8 @@ class Molecule3DViewerWidget(Mol3DConfMixin, Mol3DChromeMixin, QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         web = getattr(self, "_standalone_web", None)
-        if web is None:
+        # After the first zoom, the page's resize scheduler keeps the canvas sized.
+        if web is None or getattr(self, "_web_did_initial_zoom", False):
             return
         size = (int(web.width()), int(web.height()))
         if size == getattr(self, "_web_refit_size", None):

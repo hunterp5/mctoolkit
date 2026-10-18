@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Lazy leaf-tool adapters (cluster, dimred, QSAR, MPO, medchem, structure-prep).
+"""Lazy leaf-tool adapters (cluster, dimred, QSAR, Free-Wilson, MPO, medchem, structure-prep).
 
 Importing this module does not import the tool mixins or their dialogs.
 First use of a property loads that mixin and binds it to the kernel.
@@ -76,6 +76,9 @@ class WorkspaceTools:
         )
         self.qsar = _LazyMixinHost(
             app, lambda: _load("molmanager.ui.main_window.qsar_mixin", "QsarMixin")
+        )
+        self.free_wilson = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.free_wilson_mixin", "FreeWilsonMixin")
         )
         self.mpo = _LazyMixinHost(
             app, lambda: _load("molmanager.ui.main_window.mpo_mixin", "MpoMixin")

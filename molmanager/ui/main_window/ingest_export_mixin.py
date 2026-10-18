@@ -41,6 +41,7 @@ class IngestExportMixin:
             self.import_file(path)
 
     def load_file(self, path: str) -> None:
+        self._accept_file_ingest_results()
         self._ingest_append_mode = False
         self._structure_field_override = None
         self._session_mutation_paused = True
@@ -77,6 +78,7 @@ class IngestExportMixin:
 
     def import_file(self, path: str) -> None:
         """Load molecules from disk and append them to the current table (merge columns as needed)."""
+        self._accept_file_ingest_results()
         self._pending_batches = []
         self._processing_batches = False
         self._last_batch_received = False
@@ -102,6 +104,16 @@ class IngestExportMixin:
                 )
             ),
         )
+
+    def _accept_file_ingest_results(self) -> None:
+        """Let the next file-load batches reach the table after a Close Session."""
+        generation = int(getattr(self, "_file_ingest_generation", 0)) + 1
+        self._file_ingest_generation = generation
+        self._file_ingest_epoch = generation
+
+    def _reject_file_ingest_results(self) -> None:
+        """Drop batches from a file load that was in flight when the session closed."""
+        self._file_ingest_generation = int(getattr(self, "_file_ingest_generation", 0)) + 1
 
     def _ensure_structure_choice_event(self) -> threading.Event:
         ev = getattr(self, "_structure_choice_event", None)

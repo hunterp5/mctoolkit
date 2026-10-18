@@ -37,7 +37,11 @@ def test_interactive_plot_shell_includes_bridge_handlers():
     assert "radarTraceClicked" in html
     assert "molmanager_selection_traces" in html
     assert "Plotly.Plots.resize" in html
-    assert "addEventListener('resize'" in html
+    assert "molmanagerCreateResizeScheduler" in html
+    assert "ResizeObserver" in html
+    assert "window.molmanagerHoldResize" in html
+    assert "window.molmanagerPerfStats" in html
+    assert "__RESIZE_SCHEDULER_JS__" not in html
     assert "SELECTION_OVERLAY_MAX" in html
     assert "idxs.length > SELECTION_OVERLAY_MAX" in html
     assert 'typeof payloadJson === "string"' in html

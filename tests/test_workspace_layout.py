@@ -448,22 +448,26 @@ def test_plot_pane_has_close_button(qapp):
     assert not pane._next_btn.icon().isNull()
 
 
-def test_activate_filter_skips_webengine_descendants(qapp, monkeypatch):
-    from molmanager.ui.main_window import plot_pane as plot_pane_mod
+def test_workspace_pane_activate_filter_on_descendant(qapp):
+    from PyQt5.QtCore import QPoint, Qt
+    from PyQt5.QtGui import QMouseEvent
 
-    class FakeWeb(QWidget):
-        pass
-
-    monkeypatch.setattr(plot_pane_mod, "_web_engine_view_type", lambda: FakeWeb)
-    root = QWidget()
-    chrome = QLabel("chrome", root)
-    web = FakeWeb(root)
-    inner = QLabel("chromium", web)
-    targets = list(plot_pane_mod._iter_activate_filter_widgets(root))
-    assert root in targets
-    assert chrome in targets
-    assert web in targets
-    assert inner not in targets
+    mgr = _manager(qapp)
+    pane = mgr.plot_panes()[0]
+    child = QLabel("plot chrome", pane)
+    child.show()
+    activated: list = []
+    pane.activated.connect(lambda p: activated.append(p))
+    filt = mgr._pane_activate_filter
+    press = QMouseEvent(
+        QMouseEvent.MouseButtonPress,
+        QPoint(4, 4),
+        Qt.LeftButton,
+        Qt.LeftButton,
+        Qt.NoModifier,
+    )
+    filt.eventFilter(child, press)
+    assert activated == [pane]
 
 
 def test_remove_pane_reduces_pane_count(qapp):

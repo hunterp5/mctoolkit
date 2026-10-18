@@ -64,6 +64,157 @@ class SessionSaveMixin:
         except Exception as e:
             QMessageBox.warning(self, "New Session", str(e))
 
+    def close_session(self) -> None:
+        """Discard the current session and return to the empty start screen."""
+        if not self._confirm_close_session():
+            return
+        self._reset_to_idle_session()
+
+    def _confirm_close_session(self) -> bool:
+        """Ask before discarding unsaved work. Headless tests skip the prompt."""
+        if getattr(self, "_suppress_exit_session_prompt", False):
+            return True
+        if not self._session_has_workspace_content():
+            return True
+        confirm_protein = getattr(self, "_confirm_protein_viewer_before_quit", None)
+        if callable(confirm_protein) and not confirm_protein():
+            return False
+        if self._session_has_unsaved_changes():
+            reply = QMessageBox.question(
+                self,
+                "Close Session",
+                "Save the current session before closing?",
+                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                QMessageBox.Save,
+            )
+            if reply == QMessageBox.Cancel:
+                return False
+            if reply == QMessageBox.Save:
+                save = getattr(self, "save_session_as", None)
+                if not callable(save) or not save():
+                    return False
+                wait = getattr(self, "_wait_session_save", None)
+                if callable(wait):
+                    wait()
+                if not getattr(self, "_session_save_last_ok", True):
+                    return False
+            return True
+        reply = QMessageBox.question(
+            self,
+            "Close Session",
+            "Close the current session and return to the start screen?\n\n"
+            "The table, filters, plots, lists, notepad, and Protein Viewer "
+            "for this session will be cleared.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return reply == QMessageBox.Yes
+
+    def _session_has_workspace_content(self) -> bool:
+        """True when this window holds data that Close Session would discard."""
+        model = getattr(self, "_table_model", None)
+        if model is not None and model.rowCount() > 0:
+            return True
+        if getattr(self, "filters", None):
+            return True
+        if getattr(self, "_session_source_path", None):
+            return True
+        has_unsaved = getattr(self, "_session_has_unsaved_changes", None)
+        if callable(has_unsaved) and has_unsaved():
+            return True
+        if getattr(self, "_protein_viewer_session", None):
+            return True
+        dlg = getattr(self, "_protein_viewer_dialog", None)
+        if dlg is not None:
+            try:
+                if dlg.isVisible():
+                    return True
+            except RuntimeError:
+                pass
+        if getattr(self, "_plot_dialogs", None) or getattr(self, "_floating_result_dialogs", None):
+            return True
+        mgr = getattr(self, "_workspace_layout", None)
+        if mgr is not None:
+            for pane in mgr.plot_panes():
+                if pane.plot_widgets():
+                    return True
+        collect_notepad = getattr(self, "collect_notepad_session", None)
+        if callable(collect_notepad) and collect_notepad():
+            return True
+        store_fn = getattr(self, "_row_list_store", None)
+        if callable(store_fn) and store_fn().names():
+            return True
+        if getattr(self, "_last_dock_results", None):
+            return True
+        if getattr(self, "_mmp_last_pairs", None):
+            return True
+        if getattr(self, "_som_browse_records", None):
+            return True
+        return False
+
+    def _reset_to_idle_session(self) -> None:
+        """Drop session state and cover the workspace with the start screen."""
+        from ...analysis.mmp_session import restore_mmp_ledger_for_session
+
+        self._session_mutation_paused = True
+        try:
+            self._cancel_in_flight_session_work()
+            discard_plots = getattr(self, "_discard_floating_plot_dialogs", None)
+            if callable(discard_plots):
+                discard_plots()
+            discard_protein = getattr(self, "_discard_protein_viewer", None)
+            if callable(discard_protein):
+                discard_protein()
+            self.clear_all()
+            if callable(discard_plots):
+                discard_plots()
+            restore_mmp_ledger_for_session(self, None)
+            self._session_source_path = None
+            panel = getattr(self, "f_panel", None)
+            if panel is not None:
+                panel.setVisible(False)
+            show_idle = getattr(self, "_show_idle_workspace", None)
+            if callable(show_idle):
+                show_idle()
+        finally:
+            self._session_mutation_paused = False
+            self._pending_session_clean_on_ready = False
+        clear_dirty = getattr(self, "_clear_session_dirty", None)
+        if callable(clear_dirty):
+            clear_dirty()
+        self._sqlite_store_dirty = False
+        label = getattr(self, "status_label", None)
+        if label is not None:
+            label.setText("Ready.")
+
+    def _cancel_in_flight_session_work(self) -> None:
+        """Stop jobs that would write back into a session that is closing."""
+        reject = getattr(self, "_reject_file_ingest_results", None)
+        if callable(reject):
+            reject()
+        self._sql_load_generation = int(getattr(self, "_sql_load_generation", 0)) + 1
+        cancel_sql = getattr(self, "_sql_load_cancel_event", None)
+        if cancel_sql is not None:
+            cancel_sql.set()
+        invalidate = getattr(self, "_invalidate_substructure_async_jobs", None)
+        if callable(invalidate):
+            invalidate()
+        for name in ("cancel_render_2d_batch", "cancel_gnina_dock"):
+            cancel_tool = getattr(self, name, None)
+            if callable(cancel_tool):
+                cancel_tool()
+        from ..background_jobs import cancel_background_job
+
+        for job_id in list((getattr(self, "_background_job_cancels", None) or {}).keys()):
+            cancel_background_job(self, job_id)
+        queue = getattr(self, "process_queue", None)
+        if queue is None:
+            return
+        queue.clear_queued()
+        queue.cancel_running()
+        for job_id in list(getattr(queue, "_fast_running", {}) or {}):
+            queue.cancel_fast_job(job_id)
+
     def duplicate_session(self) -> None:
         """Launch a new MolManager instance with the current table state."""
         try:

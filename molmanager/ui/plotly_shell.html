@@ -78,6 +78,7 @@
     <svg id="mol-hover-connectors" xmlns="http://www.w3.org/2000/svg"></svg>
   </div>
   <script>__PLOTLY_JS__</script>
+  <script>__RESIZE_SCHEDULER_JS__</script>
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <script>
     (function() {
@@ -634,8 +635,9 @@
         }
       }
       function schedulePinnedHoverReposition(delayMs) {
-        // Skip while navigating; settle handlers schedule a follow-up update.
+        // Skip while navigating or resizing; settle handlers schedule a follow-up update.
         if (middlePan || viewNavBusy) return;
+        if (resizeScheduler && resizeScheduler.isActive()) return;
         if (hoverReposTimer) clearTimeout(hoverReposTimer);
         var wait = (typeof delayMs === "number" && delayMs >= 0) ? delayMs : 160;
         hoverReposTimer = setTimeout(function() {
@@ -1325,42 +1327,41 @@
       };
       var lastResizeW = -1;
       var lastResizeH = -1;
-      var resizeHold = false;
-      var resizeHeld = false;
-      // Hold Plotly.Plots.resize during dock/undock so the figure paints once
-      // at the final geometry instead of flashing through intermediate sizes.
-      window.molmanagerHoldResize = function(hold) {
-        resizeHold = !!hold;
-        if (!resizeHold && resizeHeld) {
-          resizeHeld = false;
-          resizePlot();
-        }
-      };
-      function resizePlot() {
+      function resizePlot(info) {
+        var settle = !!(info && info.settle);
+        var op = null;
         try {
-          if (resizeHold) {
-            resizeHeld = true;
-            return;
-          }
-          if (!gd || !gd.data) return;
+          if (!gd || !gd.data) return null;
           var w = gd.clientWidth || 0;
           var h = gd.clientHeight || 0;
-          // Skip no-op resizes (show/hide / reparent often fire window.resize
+          // Skip no-op resizes (show/hide / reparent often report a resize
           // without a meaningful geometry change and flash like a recalculation).
-          if (w > 1 && h > 1 && Math.abs(w - lastResizeW) < 1 && Math.abs(h - lastResizeH) < 1) {
-            return;
+          var unchanged = w > 1 && h > 1
+            && Math.abs(w - lastResizeW) < 1 && Math.abs(h - lastResizeH) < 1;
+          if (!unchanged) {
+            lastResizeW = w;
+            lastResizeH = h;
+            // Pinned cards would trail the figure mid-drag; re-place them on settle.
+            if (!settle && hoverLayer && hoverLayer.childElementCount > 1) {
+              hoverLayer.style.visibility = "hidden";
+            }
+            op = Plotly.Plots.resize(gd);
           }
-          lastResizeW = w;
-          lastResizeH = h;
-          Plotly.Plots.resize(gd);
-        } catch (_r) {}
-        schedulePinnedHoverReposition();
+        } catch (_r) {
+          op = null;
+        }
+        if (settle) schedulePinnedHoverReposition(0);
+        return op;
       }
-      var resizeTimer = null;
-      window.addEventListener('resize', function() {
-        if (resizeTimer) clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(resizePlot, 50);
+      var resizeScheduler = window.molmanagerCreateResizeScheduler({
+        target: gd,
+        onResize: resizePlot
       });
+      // Hold resizes during dock/undock so the figure paints once at the final
+      // geometry; the scheduler releases a forgotten hold on its own.
+      window.molmanagerHoldResize = function(hold) {
+        resizeScheduler.hold(!!hold);
+      };
     })();
   </script>
 </body>

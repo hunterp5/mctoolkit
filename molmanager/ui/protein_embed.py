@@ -120,12 +120,8 @@ class ProteinEmbedView(QWidget):
             QTimer.singleShot(0, self._ensure_web)
         self.schedule_resize_keep_view()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        if self._web_ready:
-            self.schedule_resize_keep_view()
-
     def schedule_resize_keep_view(self) -> None:
+        """Debounced canvas resize after show/load; live resizes are handled in the page."""
         self._resize_timer.start()
 
     def resize_keep_view(self) -> None:

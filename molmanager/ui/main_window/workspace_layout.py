@@ -21,8 +21,9 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import Callable
 
-from PyQt5.QtCore import QCoreApplication, QEvent, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QCoreApplication, QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
+    QApplication,
     QSizePolicy,
     QSplitter,
     QSplitterHandle,
@@ -31,6 +32,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ..dockable_plot import PLOT_PANEL_DEFAULT_WIDTH, suspend_parent_change_chrome
+from ..layout_perf import perf_span
 from .plot_pane import PlotPane
 
 LAYOUT_TABLE_ONLY = "table_only"
@@ -93,6 +95,28 @@ def _flush_deferred_deletes() -> None:
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
+class _WorkspacePaneActivateFilter(QObject):
+    """Activate the plot pane under a mouse press anywhere in the workspace tree."""
+
+    def __init__(self, manager: "WorkspaceLayoutManager"):
+        super().__init__(manager)
+        self._manager = manager
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt API
+        if event.type() != QEvent.MouseButtonPress:
+            return False
+        if not isinstance(obj, QWidget):
+            return False
+        for pane in self._manager.plot_panes():
+            try:
+                if pane is obj or pane.isAncestorOf(obj):
+                    pane.activated.emit(pane)
+                    break
+            except RuntimeError:
+                continue
+        return False
+
+
 def _equalize_splitter(splitter: QSplitter) -> None:
     """Give each splitter child the same share of the current span."""
     try:
@@ -141,6 +165,10 @@ class WorkspaceLayoutManager(QWidget):
         self._graveyard.hide()
         self._graveyard.setAttribute(Qt.WA_DontShowOnScreen, True)
         self._graveyard.resize(0, 0)
+        self._pane_activate_filter = _WorkspacePaneActivateFilter(self)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self._pane_activate_filter)
         self.apply_layout(DEFAULT_LAYOUT_ID, preserve_plots=False)
 
     @property
@@ -201,9 +229,15 @@ class WorkspaceLayoutManager(QWidget):
                 return p
         return None
 
-    def dock_into_pane(self, pane: PlotPane, widget: QWidget) -> QWidget | None:
+    def dock_into_pane(
+        self,
+        pane: PlotPane,
+        widget: QWidget,
+        *,
+        restore_splitter_snapshot: bool = True,
+    ) -> QWidget | None:
         """Dock ``widget`` into ``pane`` (appends; does not replace other plots)."""
-        snapshot = self.collect_splitter_sizes()
+        snapshot = self.collect_splitter_sizes() if restore_splitter_snapshot else None
         previous = pane.plot_widget()
         other = self.pane_for_widget(widget)
         # One chrome pass after reparent; skip ParentChange footer work mid-move.
@@ -211,7 +245,8 @@ class WorkspaceLayoutManager(QWidget):
             if other is not None and other is not pane:
                 other.remove_plot_widget(widget)
             pane.add_plot_widget(widget)
-        self.restore_splitter_sizes(snapshot)
+        if restore_splitter_snapshot:
+            self.restore_splitter_sizes(snapshot)
         self.set_preferred_pane(pane)
         return previous if previous is not widget else None
 
@@ -364,18 +399,19 @@ class WorkspaceLayoutManager(QWidget):
         if layout_id == self._layout_id and self._layout_tree_matches(layout_id):
             return []
 
-        # Hide/park the old tree with painting enabled. Freezing the backing store
-        # during hide leaves splitter handles and pane chrome painted on screen.
-        kept_stacks = self._release_current_workspace(preserve_plots=preserve_plots)
-        self._begin_layout_freeze()
-        try:
-            return self._build_layout_now(
-                layout_id,
-                kept_stacks=kept_stacks,
-                on_extra_plot=on_extra_plot,
-            )
-        finally:
-            self._end_layout_freeze()
+        with perf_span("apply_layout"):
+            # Hide/park the old tree with painting enabled. Freezing the backing store
+            # during hide leaves splitter handles and pane chrome painted on screen.
+            kept_stacks = self._release_current_workspace(preserve_plots=preserve_plots)
+            self._begin_layout_freeze()
+            try:
+                return self._build_layout_now(
+                    layout_id,
+                    kept_stacks=kept_stacks,
+                    on_extra_plot=on_extra_plot,
+                )
+            finally:
+                self._end_layout_freeze()
 
     def _stash(self, widget: QWidget) -> None:
         """Park a reused widget in the hidden graveyard (never a top-level window)."""

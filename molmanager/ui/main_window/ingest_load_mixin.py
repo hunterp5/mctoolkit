@@ -299,6 +299,12 @@ class IngestLoadMixin:
         batch.append((int(oid), mol, source_blob, str(cells.get("SMILES") or "")))
 
     def on_file_loaded(self, mols_list, headers, is_first, is_last):
+        # A Close Session bumps the generation so a load still in flight cannot refill the table.
+        if getattr(self, "_file_ingest_epoch", 0) != getattr(self, "_file_ingest_generation", 0):
+            self._pending_batches = []
+            self._processing_batches = False
+            self._last_batch_received = False
+            return
         # Append batch to pending queue and schedule incremental processing
         if is_first:
             self._clear_filter_target_smiles_cache()

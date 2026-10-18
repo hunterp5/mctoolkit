@@ -156,7 +156,44 @@ def test_file_session_submenu_lists_session_actions(qapp):  # noqa: ARG001
         "Save Selected to Session…",
         "New Session",
         "Duplicate Session",
+        "Close Session",
     ]
+
+
+def test_close_session_returns_to_idle_screen(qapp):  # noqa: ARG001
+    from molmanager.ui.strings import LOADING_DETAIL_IDLE
+
+    w = ChemistryWorkspaceWindow()
+    _seed_two_rows(w)
+    w._reveal_workspace_ready()
+    w._session_source_path = "example.cms"
+    w._mark_session_dirty()
+    w.f_panel.setVisible(True)
+
+    w.close_session()
+
+    assert w._table_model.rowCount() == 0
+    assert w.headers == []
+    assert w._session_source_path is None
+    assert not w._session_has_unsaved_changes()
+    assert w._table_stack.currentIndex() == 0
+    assert w._loading_detail.text() == LOADING_DETAIL_IDLE
+    assert w.f_panel.isVisible() is False
+    assert w.status_label.text() == "Ready."
+
+
+def test_close_session_cancel_keeps_table(qapp, monkeypatch):  # noqa: ARG001
+    from PyQt5.QtWidgets import QMessageBox
+
+    w = ChemistryWorkspaceWindow()
+    _seed_two_rows(w)
+    w._suppress_exit_session_prompt = False
+    w._clear_session_dirty()
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.No)
+
+    w.close_session()
+
+    assert w._table_model.rowCount() == 2
 
 
 def test_save_selected_to_session_writes_subset_without_clearing_dirty(qapp, monkeypatch, tmp_path):  # noqa: ARG001

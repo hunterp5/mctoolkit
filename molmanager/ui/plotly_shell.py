@@ -23,6 +23,8 @@ from pathlib import Path
 
 from plotly.offline import get_plotlyjs
 
+from .web_resize_scheduler import web_resize_scheduler_js
+
 _SHELL_HTML_PATH = Path(__file__).with_name("plotly_shell.html")
 _PLOTLY_JS: str | None = None
 _SHELL_HTML: dict[int, str] = {}
@@ -53,8 +55,11 @@ def _interactive_plot_shell_html_for(overlay_max: int) -> str:
         return html
     plotly_js = sanitized_plotly_js()
     template = _SHELL_HTML_PATH.read_text(encoding="utf-8")
-    html = template.replace("__PLOTLY_JS__", plotly_js).replace(
-        "__OVERLAY_MAX__", str(overlay_max)
+    # Plotly.js is large and could contain placeholder-like text; substitute it last.
+    html = (
+        template.replace("__RESIZE_SCHEDULER_JS__", web_resize_scheduler_js())
+        .replace("__OVERLAY_MAX__", str(overlay_max))
+        .replace("__PLOTLY_JS__", plotly_js)
     )
     _SHELL_HTML[overlay_max] = html
     return html

@@ -151,6 +151,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             action("Save Selected to Session…", "save_selected_to_session"),
             action("&New Session", "new_session"),
             action("&Duplicate Session", "duplicate_session"),
+            action("Close Session", "close_session", hotkey="file.close_session"),
         ),
     ),
     submenu(
@@ -184,11 +185,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             "clear_table_selection",
             hotkey="edit.clear_selection",
             tooltip="Clear the current cell/row selection (Ctrl+Shift+D).",
-        ),
-        action(
-            "Clear Table…",
-            "clear_table_after_confirm",
-            hotkey="edit.clear_table",
         ),
     ),
     submenu(
@@ -616,6 +612,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltip=(
                 "Find matched molecular pairs (RDKit MMPA) and open the transform ledger "
                 "ranked by support and activity effect."
+            ),
+        ),
+        action(
+            "Free-&Wilson…",
+            "open_free_wilson_dialog",
+            tooltip=(
+                "Fit an additive Free-Wilson model on a shared core and list predicted "
+                "activities for missing substituent combinations."
             ),
         ),
         SEPARATOR,

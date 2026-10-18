@@ -37,6 +37,8 @@ from .mol_viewer_3d import (
     _wire_webengine_console_logger,
     bundled_3dmol_available,
 )
+from .mol_3d_html import RESIZE_KEEP_VIEW_JS
+from .web_resize_scheduler import resize_scheduler_binding_html
 
 logger = logging.getLogger(__name__)
 
@@ -426,9 +428,6 @@ def _viewer_dock_complex_init_script() -> str:
             keepViewResize(v);
           }
         };
-        window.addEventListener("resize", function () {
-          if (window.molmanagerResizeKeepView) window.molmanagerResizeKeepView();
-        });
       } catch (e) {
         document.body.innerHTML = "<pre style='padding:12px;font-family:monospace'>3Dmol error: " + e + "</pre>";
       }
@@ -447,6 +446,7 @@ def _assemble_dock_complex_page(*, script_src: str) -> str:
 </head>
 <body>
   <div id="v"></div>
+{resize_scheduler_binding_html(RESIZE_KEEP_VIEW_JS)}
 {_reset_structure_menu_html()}
 {_viewer_dock_complex_init_script()}
   <script src="{script_src}" onload="molmanagerInitView()"></script>
@@ -499,13 +499,8 @@ class DockComplexEmbedView(QWidget):
         self._ensure_web()
         self.schedule_resize_keep_view()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        if self._web_ready:
-            self.schedule_resize_keep_view()
-
     def schedule_resize_keep_view(self) -> None:
-        """Debounce canvas resize; keep the current camera (no zoom-to-fit)."""
+        """Debounced canvas resize after show/load; live resizes are handled in the page."""
         self._resize_timer.start()
 
     def resize_keep_view(self) -> None:

@@ -27,10 +27,18 @@ from pathlib import Path
 from rdkit import Chem
 
 from ..platform_support.qt_webengine_flags import webengine_views_supported
+from .web_resize_scheduler import resize_scheduler_binding_html
 
 logger = logging.getLogger(__name__)
 
 _BUNDLED_3DMOL = Path(__file__).resolve().parent / "static" / "3Dmol-min.js"
+
+#: Resize the WebGL canvas and keep the current camera.
+RESIZE_KEEP_ZOOM_JS = "if (window.molmanagerRefit) window.molmanagerRefit({zoom: false});"
+#: Resize and zoom-to-fit (sketcher side panel keeps the whole structure framed).
+RESIZE_REFIT_JS = "if (window.molmanagerRefit) window.molmanagerRefit();"
+#: Resize the canvas while keeping the camera (protein / dock-complex viewers).
+RESIZE_KEEP_VIEW_JS = "if (window.molmanagerResizeKeepView) window.molmanagerResizeKeepView();"
 
 # Stick colors for superposed conformers. Overlay slots use unique entries (no wrap).
 _SUPERPOSE_PALETTE = (
@@ -390,9 +398,6 @@ def _viewer_embed_init_script_fragment(mol_b64: str = "", *, flat: bool = False)
           }
         };
         window.molmanagerSetMolB64("__MOLB64__");
-        window.addEventListener("resize", function () {
-          if (window.molmanagerRefit) window.molmanagerRefit();
-        });
       } catch (e) {
         document.body.innerHTML = "<pre style='padding:12px;font-family:monospace'>3Dmol error: " + e + "</pre>";
       }
@@ -411,11 +416,16 @@ def assemble_3dmol_shell_page(
     init_html: str,
     extra_scripts: str = "",
     background: str = "",
+    resize_js: str = "",
 ) -> str:
-    """Minimal 3Dmol host page: canvas, reset menu, init HTML, then the library script."""
+    """Minimal 3Dmol host page: canvas, reset menu, init HTML, then the library script.
+
+    ``resize_js`` runs through the shared resize scheduler whenever ``#v`` changes size.
+    """
     bg = f"background:{background};" if background else ""
     reset_menu = _reset_structure_menu_html()
     extra = extra_scripts.rstrip() + "\n" if extra_scripts else ""
+    resize = resize_scheduler_binding_html(resize_js) if resize_js else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -425,6 +435,7 @@ def assemble_3dmol_shell_page(
 </head>
 <body>
   <div id="v"></div>
+{resize}
 {reset_menu}
 {init_html}
 {extra}  <script src="{script_src}" onload="molmanagerInitView()"></script>
@@ -444,6 +455,7 @@ def _assemble_viewer_page(
     help_html = _viewer_help_overlay_html() if show_mouse_help else ""
     atom_panel = _atom_info_panel_html() if show_atom_panel else ""
     reset_menu = _reset_structure_menu_html()
+    resize = resize_scheduler_binding_html(RESIZE_KEEP_ZOOM_JS)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -453,6 +465,7 @@ def _assemble_viewer_page(
 </head>
 <body>
   <div id="v"></div>
+{resize}
 {atom_panel}
 {reset_menu}
 {init}
@@ -466,6 +479,7 @@ def _assemble_embed_viewer_page(mol_b64: str, *, script_src: str, flat: bool = F
     """Sketcher-embedded page: no atom boxes or mouse-controls overlay."""
     init = _viewer_embed_init_script_fragment(mol_b64, flat=flat)
     reset_menu = _reset_structure_menu_html()
+    resize = resize_scheduler_binding_html(RESIZE_REFIT_JS)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -475,6 +489,7 @@ def _assemble_embed_viewer_page(mol_b64: str, *, script_src: str, flat: bool = F
 </head>
 <body>
   <div id="v"></div>
+{resize}
 {reset_menu}
 {init}
   <script src="{script_src}" onload="molmanagerInitView()"></script>
@@ -829,6 +844,7 @@ def _assemble_viewer_page_multiconf(
 <body>
   <div id="v"></div>
   <div id="chem-conf-legend"></div>
+{resize_scheduler_binding_html(RESIZE_KEEP_ZOOM_JS)}
 {_reset_structure_menu_html()}
 {init}
   <script src="{script_src}" onload="molmanagerInitView()"></script>

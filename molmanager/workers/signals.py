@@ -82,6 +82,9 @@ class WorkerSignals(QObject):
     # Matched molecular pairs: (pairs, activity_column)
     mmp_finished = pyqtSignal(list, str)
     mmp_failed = pyqtSignal(str)
+    # Free-Wilson: FreeWilsonResult
+    free_wilson_finished = pyqtSignal(object)
+    free_wilson_failed = pyqtSignal(str)
     # Activity cliff map: (pairs, activity_column, x_mode)
     activity_cliff_finished = pyqtSignal(list, str, str)
     activity_cliff_failed = pyqtSignal(str)

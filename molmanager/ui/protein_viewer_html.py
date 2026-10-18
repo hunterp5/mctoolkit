@@ -23,6 +23,7 @@ from pathlib import Path
 
 from .mol_3d_html import (
     _RESET_STRUCTURE_JS,
+    RESIZE_KEEP_VIEW_JS,
     assemble_3dmol_shell_page,
     bundled_3dmol_available,
 )
@@ -45,6 +46,7 @@ def _assemble_protein_page(*, script_src: str) -> str:
         init_html=_viewer_protein_init_script(),
         extra_scripts='  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>\n',
         background="#fff",
+        resize_js=RESIZE_KEEP_VIEW_JS,
     )
 
 

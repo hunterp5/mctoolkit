@@ -730,6 +730,29 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 LIC_GPL3,
                 notes="SALI = |Δactivity| / (1 − similarity). Implemented in MolManager using RDKit fingerprints.",
             ),
+            _t(
+                "free_wilson",
+                "Free-Wilson",
+                "Data → Free-Wilson (additive substituent contributions on a shared core).",
+                (
+                    (
+                        "Free, S. M.; Wilson, J. W. A Mathematical Contribution to Structure-Activity "
+                        "Studies. J. Med. Chem. 1964, 7, 395–399.",
+                        "https://doi.org/10.1021/jm00334a001",
+                    ),
+                    (
+                        "Fujita, T.; Ban, T. Structure-Activity Study of Phenethylamines as Substrates "
+                        "of Biosynthetic Enzymes of Sympathetic Transmitters. J. Med. Chem. 1971, 14, 148–152.",
+                        "https://doi.org/10.1021/jm00284a016",
+                    ),
+                ),
+                LIC_GPL3,
+                notes=(
+                    "One additive least-squares fit. Fujita-Ban (default) reports the change versus "
+                    "a reference substituent; classic Free-Wilson recenters the same fit so "
+                    "occurrence-weighted coefficients sum to zero. Implemented in MolManager."
+                ),
+            ),
         ),
     ),
     CitationSection(
