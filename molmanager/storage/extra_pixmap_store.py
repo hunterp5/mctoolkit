@@ -44,7 +44,11 @@ def pixmap_to_png_bytes(pixmap: QPixmap | None) -> bytes | None:
 
 
 class ExtraPixmapStore:
-    """Holds extra-column images as PNG bytes on disk; only a bounded LRU is decoded."""
+    """Holds extra-column images as PNG bytes on disk; only a bounded LRU is decoded.
+
+    The set of stored ``(oid, header)`` keys is mirrored in memory so lookups for cells
+    without an image (the common case on every table repaint) never touch SQLite.
+    """
 
     def __init__(
         self,
@@ -68,20 +72,22 @@ class ExtraPixmapStore:
         self._conn.commit()
         self._lru: OrderedDict[tuple[int, str], QPixmap] = OrderedDict()
         self._max_decoded = max(32, int(max_decoded_pixmaps))
-        self._count = self._count_rows()
+        self._keys: set[tuple[int, str]] = self._load_keys()
         self._closed = False
 
-    def _count_rows(self) -> int:
-        row = self._conn.execute("SELECT COUNT(*) FROM images").fetchone()
-        return int(row[0] if row else 0)
+    def _load_keys(self) -> set[tuple[int, str]]:
+        return {
+            (int(oid), str(header))
+            for oid, header in self._conn.execute("SELECT oid, header FROM images")
+        }
 
     def close(self) -> None:
         if getattr(self, "_closed", False):
             return
         self._closed = True
         self._lru.clear()
+        self._keys.clear()
         close_owned_sqlite(self._path, self._conn, owns_path=self._owns_path)
-        self._count = 0
 
     def __del__(self) -> None:
         try:
@@ -93,23 +99,14 @@ class ExtraPixmapStore:
         self._conn.execute("DELETE FROM images")
         self._conn.commit()
         self._lru.clear()
-        self._count = 0
+        self._keys.clear()
 
     def __len__(self) -> int:
-        return int(self._count)
+        return len(self._keys)
 
     def __contains__(self, key: object) -> bool:
         parsed = self._parse_key(key)
-        if parsed is None:
-            return False
-        oid, header = parsed
-        if (oid, header) in self._lru:
-            return True
-        row = self._conn.execute(
-            "SELECT 1 FROM images WHERE oid = ? AND header = ? LIMIT 1",
-            (oid, header),
-        ).fetchone()
-        return row is not None
+        return parsed is not None and parsed in self._keys
 
     @staticmethod
     def _parse_key(key: object) -> tuple[int, str] | None:
@@ -121,6 +118,8 @@ class ExtraPixmapStore:
             return None
 
     def _raw(self, oid: int, header: str) -> bytes | None:
+        if (oid, header) not in self._keys:
+            return None
         row = self._conn.execute(
             "SELECT blob FROM images WHERE oid = ? AND header = ?",
             (oid, header),
@@ -160,10 +159,10 @@ class ExtraPixmapStore:
         kk = (oid_i, header)
         self._lru.pop(kk, None)
         raw = self._raw(oid_i, header)
-        cur = self._conn.execute("DELETE FROM images WHERE oid = ? AND header = ?", (oid_i, header))
-        self._conn.commit()
-        if cur.rowcount > 0:
-            self._count = max(0, self._count - 1)
+        if kk in self._keys:
+            self._conn.execute("DELETE FROM images WHERE oid = ? AND header = ?", kk)
+            self._conn.commit()
+            self._keys.discard(kk)
         if raw is None:
             return default
         pm = QPixmap.fromImage(QImage.fromData(raw))
@@ -201,69 +200,53 @@ class ExtraPixmapStore:
 
     def set_pixmap(self, oid: int, header_name: str, pixmap: QPixmap | None) -> None:
         key = (int(oid), str(header_name))
-        raw = pixmap_to_png_bytes(pixmap)
+        self._store_png(key, pixmap_to_png_bytes(pixmap))
+
+    def copy_png(self, src: tuple[int, str], dest: tuple[int, str]) -> None:
+        raw = self._raw(int(src[0]), str(src[1]))
+        self._store_png((int(dest[0]), str(dest[1])), raw)
+
+    def _store_png(self, key: tuple[int, str], raw: bytes | None) -> None:
+        """Write *raw* PNG bytes under *key*, or delete the entry when *raw* is empty."""
         self._lru.pop(key, None)
-        existed = self._conn.execute(
-            "SELECT 1 FROM images WHERE oid = ? AND header = ? LIMIT 1",
-            key,
-        ).fetchone()
         if not raw:
-            if existed is not None:
+            if key in self._keys:
                 self._conn.execute("DELETE FROM images WHERE oid = ? AND header = ?", key)
                 self._conn.commit()
-                self._count = max(0, self._count - 1)
+                self._keys.discard(key)
             return
         self._conn.execute(
             "INSERT OR REPLACE INTO images (oid, header, blob) VALUES (?, ?, ?)",
             (key[0], key[1], raw),
         )
         self._conn.commit()
-        if existed is None:
-            self._count += 1
-
-    def copy_png(self, src: tuple[int, str], dest: tuple[int, str]) -> None:
-        raw = self._raw(int(src[0]), str(src[1]))
-        dest_key = (int(dest[0]), str(dest[1]))
-        self._lru.pop(dest_key, None)
-        existed = self._conn.execute(
-            "SELECT 1 FROM images WHERE oid = ? AND header = ? LIMIT 1",
-            dest_key,
-        ).fetchone()
-        if not raw:
-            if existed is not None:
-                self._conn.execute("DELETE FROM images WHERE oid = ? AND header = ?", dest_key)
-                self._conn.commit()
-                self._count = max(0, self._count - 1)
-            return
-        self._conn.execute(
-            "INSERT OR REPLACE INTO images (oid, header, blob) VALUES (?, ?, ?)",
-            (dest_key[0], dest_key[1], raw),
-        )
-        self._conn.commit()
-        if existed is None:
-            self._count += 1
+        self._keys.add(key)
 
     def remove_oid(self, oid: int) -> None:
         oid_i = int(oid)
-        cur = self._conn.execute("DELETE FROM images WHERE oid = ?", (oid_i,))
+        dropped = {k for k in self._keys if k[0] == oid_i}
+        if not dropped:
+            return
+        self._conn.execute("DELETE FROM images WHERE oid = ?", (oid_i,))
         self._conn.commit()
-        dropped = max(0, int(cur.rowcount or 0))
-        self._count = max(0, self._count - dropped)
-        for key in [k for k in self._lru if k[0] == oid_i]:
+        self._keys -= dropped
+        for key in dropped:
             self._lru.pop(key, None)
 
     def remove_header(self, header_name: str) -> None:
         header = str(header_name)
-        cur = self._conn.execute("DELETE FROM images WHERE header = ?", (header,))
+        dropped = {k for k in self._keys if k[1] == header}
+        if not dropped:
+            return
+        self._conn.execute("DELETE FROM images WHERE header = ?", (header,))
         self._conn.commit()
-        dropped = max(0, int(cur.rowcount or 0))
-        self._count = max(0, self._count - dropped)
-        for key in [k for k in self._lru if k[1] == header]:
+        self._keys -= dropped
+        for key in dropped:
             self._lru.pop(key, None)
 
     def keep_headers(self, headers: set[str]) -> None:
         keep = set(headers)
-        current = {str(h) for (h,) in self._conn.execute("SELECT DISTINCT header FROM images")}
+        current = {header for _oid, header in self._keys}
         for header in current - keep:
             self.remove_header(header)
 
@@ -283,4 +266,4 @@ class ExtraPixmapStore:
         for oid, _blob in rows:
             self._lru.pop((int(oid), old_h), None)
             self._lru.pop((int(oid), new_h), None)
-        self._count = self._count_rows()
+        self._keys = self._load_keys()

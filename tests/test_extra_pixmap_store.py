@@ -39,6 +39,27 @@ def test_extra_pixmap_store_lru_keeps_png_bytes(qapp):  # noqa: ARG001
     assert store.pixmap(1, "Copy") is not None
 
 
+def test_extra_pixmap_store_misses_skip_sqlite(qapp):  # noqa: ARG001
+    store = ExtraPixmapStore()
+    pm = QPixmap(8, 8)
+    pm.fill()
+    store.set_pixmap(1, "Frag", pm)
+    store.set_pixmap(2, "Other", pm)
+    statements: list[str] = []
+    store._conn.set_trace_callback(statements.append)
+    assert store.get((5, "Frag")) is None
+    assert (5, "Frag") not in store
+    assert statements == []
+    store._conn.set_trace_callback(None)
+
+    store.rename_header("Frag", "Renamed")
+    assert (1, "Renamed") in store and (1, "Frag") not in store
+    store.remove_oid(2)
+    assert len(store) == 1
+    store.pop((1, "Renamed"))
+    assert len(store) == 0
+
+
 def test_compound_table_extra_pixmap_roundtrip(qapp):  # noqa: ARG001
     model = CompoundTableModel(["ID_HIDDEN", "Structure", "Protonated"])
     model.append_row(1, {"Protonated": "CCO"})
