@@ -28,20 +28,6 @@ These rules apply to all new or modified code in this repository.
 - Keep UI responsive by offloading heavy work off the GUI thread.
 - Keep changes cohesive; avoid drive-by refactors unless required.
 - Prefer narrow `except` clauses. Do not use `except Exception: pass`.
-- Intentional swallows: `molmanager.platform_support.exception_policy.log_swallowed_exception`
-  plus `# noqa: BLE001` when catching `Exception`.
-- New silent/blind `except` fails CI (`BLE001`, `S110`, `SIM105`). Existing files are in
-  `ruff.exception-ratchet.toml`; remove a file from that list when it is clean. Never add files.
-
-### Mixins vs composition
-
-- Most `*_mixin.py` files are **file-splits of one Qt host**, not reusable mixins.
-- Do **not** add mixin bases to `ChemistryWorkspaceWindow`. New tools go on `WorkspaceTools`
-  (or a collaborator) plus `install_window_forwards`. See `docs/ARCHITECTURE.md`.
-- True mixins (keep): filter-card chrome and `ProteinStructureSourceMixin`.
-- Do not add empty composite mixins (`ChemistryMixin`-style).
-- `bind_mixin_methods` is a **legacy** bridge (mixin body, window `self`). New collaborator
-  methods use `self._app`.
 
 ### Git commits
 
