@@ -67,6 +67,8 @@ from ..compound_table_model import (
 from ..filter_proxy_model import FilterProxyModel
 from ..filters.cards import FilterCardsHost
 from ..progress_controller import ProgressController
+from ..selection_store import SelectionStore
+from ..table_row_selection import TableRowSelectionController
 from ..session_controller import SessionController
 from ..table_build_pipeline import TableBuildPipeline
 from ..table_selection_delegate import RowHighlightDelegate
@@ -311,6 +313,8 @@ class ChemistryWorkspaceWindow(
         self._undo_stack = QUndoStack(self)
         self._undo_stack.setUndoLimit(load_config().table_undo_limit)
         self._filter_proxy_model: FilterProxyModel | None = None
+        self.selection_store = SelectionStore(self)
+        self.selection_store.changed.connect(self._on_selection_store_changed)
         bootstrap_application_gui(QApplication.instance())
         self.init_ui()
         self._apply_filters_timer = QTimer(self)
@@ -341,15 +345,11 @@ class ChemistryWorkspaceWindow(
         self._dock_result_windows: list = []
         self._last_dock_results: dict | None = None
         self._dock_results_mode = False
-        self._cached_plot_selected_oids: frozenset[int] | None = None
-        self._selected_oids_override: frozenset[int] | None = None
-        self._in_programmatic_table_selection = False
-        self._table_selection_job_gen = 0
-        self._table_selection_ctx = None
         self._column_selection_anchor: int | None = None
         self._plot_table_sync_timer = QTimer(self)
         self._plot_table_sync_timer.setSingleShot(True)
-        self._plot_table_sync_timer.timeout.connect(self._sync_active_plots_from_table_selection)
+        self._plot_table_sync_timer.timeout.connect(self._on_plot_selection_throttle_elapsed)
+        self._plot_table_sync_pending = False
         self._selection_browser_dialog = None
         self._pose_browser_dialog = None
         self._som_browser_dialog = None
@@ -532,6 +532,8 @@ class ChemistryWorkspaceWindow(
         content_h = QHBoxLayout(self._workspace_ready_page)
         content_h.setContentsMargins(0, 0, 0, 0)
         self._table_model = CompoundTableModel([])
+        self._table_model.modelReset.connect(self._prune_selection_store)
+        self._table_model.rowsRemoved.connect(self._prune_selection_store)
         self.table = CompoundTableView()
         self.table.set_compound_model(self._table_model)
         # Always route the view through the filter proxy: per-row setRowHidden does not scale
@@ -571,9 +573,11 @@ class ChemistryWorkspaceWindow(
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_table_menu)
         self.table.doubleClicked.connect(self._on_table_double_clicked)
-        sm = self.table.selectionModel()
-        if sm is not None:
-            sm.selectionChanged.connect(self._on_user_table_selection_changed)
+        self.table.set_row_selection_controller(
+            TableRowSelectionController(
+                self.table, self.selection_store, oids_for_view_rows=self._oids_for_view_rows
+            )
+        )
         self._search_panel = QFrame(cw)
         self._search_panel.setVisible(False)
         self._search_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -736,9 +740,7 @@ install_window_forwards(
     ChemistryWorkspaceWindow, "workspace_tools.medchem_space", (MedChemSpaceMixin,)
 )
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.qsar", (QsarMixin,))
-install_window_forwards(
-    ChemistryWorkspaceWindow, "workspace_tools.free_wilson", (FreeWilsonMixin,)
-)
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.free_wilson", (FreeWilsonMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.mpo", (MpoMixin,))
 install_window_forwards(
     ChemistryWorkspaceWindow,

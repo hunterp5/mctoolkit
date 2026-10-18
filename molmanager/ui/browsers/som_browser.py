@@ -484,7 +484,7 @@ class SomBrowserWidget(QWidget):
         self._idx = 0
         self._preview_cache: dict[tuple, QPixmap] = {}
         self._emphasized_atom: int | None = None
-        self._selection_model = None
+        self._connected_selection_store = None
 
         root = QVBoxLayout(self)
         apply_browser_body_layout(root)
@@ -742,17 +742,12 @@ class SomBrowserWidget(QWidget):
     def _on_only_selected_toggled(self, _checked: bool = False) -> None:
         self._apply_record_scope(preserve_oid=True)
 
-    def _selected_oids(self) -> set[int]:
-        app = self._app
-        if app is None:
-            return set()
-        getter = getattr(app, "_selected_oids_set", None)
-        if not callable(getter):
-            return set()
-        try:
-            return {int(x) for x in getter()}
-        except Exception:
-            return set()
+    def _selected_oids(self) -> frozenset[int]:
+        store = self._selection_store_or_none()
+        return store.oids if store is not None else frozenset()
+
+    def _selection_store_or_none(self):
+        return getattr(self._app, "selection_store", None) if self._app is not None else None
 
     def _apply_record_scope(self, *, preserve_oid: bool) -> None:
         cur_oid = None
@@ -775,25 +770,23 @@ class SomBrowserWidget(QWidget):
 
     def _connect_table_selection(self) -> None:
         self._disconnect_table_selection()
-        app = self._app
-        table = getattr(app, "table", None) if app is not None else None
-        sm = table.selectionModel() if table is not None else None
-        if sm is None:
+        store = self._selection_store_or_none()
+        if store is None:
             return
-        sm.selectionChanged.connect(self._on_table_selection_changed)
-        self._selection_model = sm
+        store.changed.connect(self._on_table_selection_changed)
+        self._connected_selection_store = store
 
     def _disconnect_table_selection(self) -> None:
-        sm = getattr(self, "_selection_model", None)
-        if sm is None:
+        store = getattr(self, "_connected_selection_store", None)
+        if store is None:
             return
         try:
-            sm.selectionChanged.disconnect(self._on_table_selection_changed)
-        except TypeError:
+            store.changed.disconnect(self._on_table_selection_changed)
+        except (TypeError, RuntimeError):
             pass
-        self._selection_model = None
+        self._connected_selection_store = None
 
-    def _on_table_selection_changed(self, *_args) -> None:
+    def _on_table_selection_changed(self, _origin: object = None) -> None:
         if not self._cb_only_selected.isChecked():
             return
         timer = getattr(self, "_selection_timer", None)

@@ -25,6 +25,7 @@ from molmanager.ui.plot_table_sync import (
     selected_oids_for_plot,
     selection_visual_push_key,
 )
+from molmanager.ui.selection_store import SelectionStore
 
 
 def test_point_indices_for_oids() -> None:
@@ -53,105 +54,46 @@ def test_point_indices_for_oids_uses_index_and_partners() -> None:
     assert point_indices_for_oids(plotted, {10, 31}, oid_index=index) == {0, 2}
 
 
-class _FakeModel:
-    def __init__(
-        self, oids_by_row: dict[int, int], highlighted: frozenset[int] | None = None
-    ) -> None:
-        self._oids_by_row = oids_by_row
-        self._highlighted = highlighted
+def _app_with_store(selected: set[int], oids_by_row: dict[int, int]):
+    """MagicMock window with a real ``SelectionStore`` and row → OID mapping."""
+    from unittest.mock import MagicMock
 
-    def row_oid(self, row: int) -> int:
-        return self._oids_by_row[row]
-
-    def highlighted_oids(self) -> frozenset[int] | None:
-        return self._highlighted
+    app = MagicMock()
+    app.selection_store = SelectionStore()
+    app.selection_store.set(selected)
+    app._oids_for_source_rows.side_effect = lambda rows: frozenset(oids_by_row[r] for r in rows)
+    return app
 
 
-class _FakeApp:
-    def __init__(self) -> None:
-        self._selected_oids_override = None
-        self._logical_rows: list[int] = []
-        self._table_model = _FakeModel({0: 10, 1: 20, 2: 30})
-
-    def _selected_logical_rows(self) -> list[int]:
-        return list(self._logical_rows)
-
-
-def test_selected_oids_for_plot_qt_selection() -> None:
-    app = _FakeApp()
-    app._logical_rows = [0, 2]
+def test_selected_oids_for_plot_reads_store(qapp) -> None:  # noqa: ARG001
+    app = _app_with_store({10, 30}, {})
     assert selected_oids_for_plot(app) == {10, 30}
 
 
-def test_selected_oids_for_plot_override() -> None:
-    app = _FakeApp()
-    app._selected_oids_override = frozenset({99})
-    app._logical_rows = [0]
-    assert selected_oids_for_plot(app) == {99}
-
-
-def test_selected_oids_for_plot_highlighted_fallback() -> None:
-    app = _FakeApp()
-    app._table_model = _FakeModel({0: 10, 1: 20}, highlighted=frozenset({20}))
-    assert selected_oids_for_plot(app) == {20}
-
-
-def test_apply_table_selection_skips_identical_selection() -> None:
+def test_apply_table_selection_skips_identical_selection(qapp) -> None:  # noqa: ARG001
     """Re-applying the same plot selection must not scroll / re-select (snap-back loop)."""
-    from unittest.mock import MagicMock
-
-    sm = MagicMock()
-    row0 = MagicMock()
-    row0.row.return_value = 0
-    row2 = MagicMock()
-    row2.row.return_value = 2
-    sm.selectedRows.return_value = [row0, row2]
-
-    table = MagicMock()
-    table.selectionModel.return_value = sm
-    view_model = MagicMock()
-    view_model.columnCount.return_value = 3
-    table.model.return_value = view_model
-
-    app = MagicMock()
-    app.table = table
-    app._source_rows_to_view_rows.return_value = [0, 2]
-    app._in_programmatic_table_selection = False
-    app._selected_oids_override = None
+    app = _app_with_store({10, 30}, {0: 10, 2: 30})
 
     apply_table_selection_for_source_rows(app, [0, 2], scroll=True)
 
-    sm.select.assert_not_called()
-    table.scrollTo.assert_not_called()
+    app.table.scrollTo.assert_not_called()
     app.select_table_rows.assert_not_called()
 
 
-def test_apply_table_selection_uses_select_table_rows() -> None:
-    """Plot→table should use the app chunked/OID path when available."""
-    from unittest.mock import MagicMock
+def test_apply_table_selection_selects_immediately_with_origin(qapp) -> None:  # noqa: ARG001
+    """Plot→table is not debounced; the plot is the origin and the table is not revealed."""
+    app = _app_with_store({10}, {0: 10, 1: 20})
+    plot = object()
 
-    sm = MagicMock()
-    sm.selectedRows.return_value = []
-    table = MagicMock()
-    table.selectionModel.return_value = sm
-    table.model.return_value = MagicMock()
+    apply_table_selection_for_source_rows(app, [1, 0], scroll=False, origin=plot)
 
-    app = MagicMock()
-    app.table = table
-    app._source_rows_to_view_rows.return_value = [0, 1]
-    app._selected_oids_override = None
-
-    apply_table_selection_for_source_rows(app, [0, 1], scroll=False)
-
-    app.select_table_rows.assert_called_once_with([0, 1])
-    sm.select.assert_not_called()
+    app.select_table_rows.assert_called_once_with([0, 1], origin=plot, reveal=False)
 
 
-def test_clear_table_selection_from_plot_uses_app_clear() -> None:
+def test_clear_table_selection_from_plot_passes_origin() -> None:
     from unittest.mock import MagicMock
 
     app = MagicMock()
-    app._plot_table_select_timer = None
-    clear_table_selection_from_plot(app)
-    app.clear_table_selection.assert_called_once()
-    app.table.clearSelection.assert_not_called()
+    plot = object()
+    clear_table_selection_from_plot(app, origin=plot)
+    app.clear_table_selection.assert_called_once_with(origin=plot)

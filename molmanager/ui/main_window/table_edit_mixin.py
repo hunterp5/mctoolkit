@@ -80,13 +80,7 @@ class TableEditMixin:
 
     def _paste_origin_source_cell(self) -> tuple[int, int] | None:
         """Top-left source cell of the current selection (or the current index)."""
-        cells: list[tuple[int, int]] = []
-        sm = self.table.selectionModel()
-        if sm is not None:
-            for ix in sm.selectedIndexes():
-                mapped = self._source_cell_from_view_index(ix)
-                if mapped is not None:
-                    cells.append(mapped)
+        cells = self._selected_source_cells()
         if not cells:
             mapped = self._source_cell_from_view_index(self.table.currentIndex())
             if mapped is not None:
@@ -99,24 +93,31 @@ class TableEditMixin:
         t0 = self._table_model.cell_text(row, 0)
         return int(t0) if t0.isdigit() else None
 
+    def _selected_source_cells(self) -> list[tuple[int, int]]:
+        """Source cells of selected Qt cells plus every shown cell of the selected entries."""
+        cells: list[tuple[int, int]] = []
+        sm = self.table.selectionModel()
+        if sm is not None:
+            for ix in sm.selectedIndexes():
+                mapped = self._source_cell_from_view_index(ix)
+                if mapped is not None:
+                    cells.append(mapped)
+        cells.extend(self._selected_entry_source_cells())
+        return cells
+
     def edit_copy(self) -> None:
         """Copy the current selection to the clipboard (tab-separated columns, newline-separated rows)."""
-        sm = self.table.selectionModel()
-        indexes = list(sm.selectedIndexes()) if sm is not None else []
-        if not indexes:
-            ix = self.table.currentIndex()
-            if ix.isValid():
-                indexes = [ix]
-        if not indexes:
+        source_cells = self._selected_source_cells()
+        if not source_cells:
+            mapped = self._source_cell_from_view_index(self.table.currentIndex())
+            if mapped is not None:
+                source_cells = [mapped]
+        if not source_cells:
             self.status_label.setText("Copy: nothing selected.")
             return
         cells: dict[tuple[int, int], str] = {}
-        for ix in indexes:
-            mapped = self._source_cell_from_view_index(ix)
-            if mapped is None:
-                continue
-            row, col = mapped
-            if col == 0:
+        for row, col in source_cells:
+            if (row, col) in cells or col == 0:
                 continue
             oid = self._oid_for_source_row(row)
             ok, txt = self._copy_text_for_table_cell(row, col, oid)
@@ -353,13 +354,7 @@ class TableEditMixin:
         return cols
 
     def _has_full_row_selection(self) -> bool:
-        override = getattr(self, "_selected_oids_override", None)
-        if override:
-            return True
-        sm = self.table.selectionModel()
-        if sm is None:
-            return False
-        return any(ix.isValid() for ix in sm.selectedRows())
+        return not self.selection_store.is_empty()
 
     def _selected_clearable_cells(self) -> list[tuple[int, str, str]]:
         """``(oid, header, old_text)`` for selected text cells that currently have a value."""

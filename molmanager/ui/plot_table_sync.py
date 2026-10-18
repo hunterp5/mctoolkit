@@ -20,16 +20,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PyQt5.QtCore import QItemSelectionModel, QTimer
-from PyQt5.QtWidgets import QAbstractItemView
-
-from .table_selection import item_selection_for_view_rows
+from .layout_perf import perf_span
 
 if TYPE_CHECKING:
     from .main_window import ChemistryWorkspaceWindow
-
-# Coalesce rapid plot→table updates (lasso echo / additive clicks).
-_PLOT_TABLE_SELECT_DEBOUNCE_MS = 60
 
 
 def visible_oids_for_plot(app: ChemistryWorkspaceWindow | None) -> frozenset[int] | None:
@@ -68,29 +62,8 @@ def run_javascript_set_selection(
 
 
 def selected_oids_for_plot(parent_app: ChemistryWorkspaceWindow) -> set[int]:
-    """
-    OIDs that should drive plot highlighting — matches what the table shows as selected.
-
-    Includes Qt selection, large-selection override, and model-level highlighted OIDs.
-    Reuses a short-lived fan-out cache when the main window is syncing many plots.
-    """
-    cached = getattr(parent_app, "_cached_plot_selected_oids", None)
-    if cached is not None:
-        return set(cached)
-    override = getattr(parent_app, "_selected_oids_override", None)
-    if override:
-        return {int(x) for x in override}
-    oids: set[int] = set()
-    model = parent_app._table_model
-    for r in parent_app._selected_logical_rows():
-        try:
-            oids.add(int(model.row_oid(r)))
-        except (IndexError, ValueError, TypeError):
-            continue
-    highlighted = model.highlighted_oids()
-    if highlighted:
-        oids |= {int(x) for x in highlighted}
-    return oids
+    """OIDs that should drive plot highlighting (the window's entry selection)."""
+    return set(parent_app.selection_store.oids)
 
 
 def build_oid_point_index(
@@ -171,93 +144,11 @@ def source_rows_for_point_indices(
 def _source_rows_already_selected(
     parent_app: ChemistryWorkspaceWindow, source_rows: list[int]
 ) -> bool:
-    """True when the table already reflects this source-row selection."""
-    uniq = sorted({int(r) for r in source_rows})
-    override = getattr(parent_app, "_selected_oids_override", None)
-    model = getattr(parent_app, "_table_model", None)
-    if override is not None and model is not None:
-        want: set[int] = set()
-        for r in uniq:
-            try:
-                want.add(int(model.row_oid(r)))
-            except (IndexError, ValueError, TypeError):
-                continue
-        return want == {int(x) for x in override}
-    sm = parent_app.table.selectionModel()
-    if sm is None:
+    """True when the entry selection already holds exactly these source rows."""
+    store = parent_app.selection_store
+    if store.count() != len(source_rows):
         return False
-    view_rows = parent_app._source_rows_to_view_rows(uniq)
-    current_view = {ix.row() for ix in sm.selectedRows()}
-    return current_view == set(view_rows)
-
-
-def _apply_table_selection_now(
-    parent_app: ChemistryWorkspaceWindow,
-    source_rows: list[int],
-    *,
-    scroll: bool,
-) -> None:
-    """Select visible proxy rows for source-model row indices (plot lasso / click)."""
-    if not source_rows:
-        return
-    uniq = sorted({int(r) for r in source_rows})
-    if _source_rows_already_selected(parent_app, uniq):
-        return
-
-    # Large sets: use the app's chunked / OID-override path (keeps UI responsive).
-    select_rows = getattr(parent_app, "select_table_rows", None)
-    if callable(select_rows):
-        select_rows(uniq)
-        if scroll:
-            _scroll_table_to_first_source_row(parent_app, uniq)
-        return
-
-    sm = parent_app.table.selectionModel()
-    if sm is None:
-        return
-    view_model = parent_app.table.model()
-    if view_model is None:
-        return
-    view_rows = parent_app._source_rows_to_view_rows(uniq)
-    if not view_rows:
-        return
-    col_last = max(0, view_model.columnCount() - 1)
-    selection = item_selection_for_view_rows(view_model, view_rows, last_col=col_last)
-    if selection.isEmpty():
-        return
-    table = parent_app.table
-    was_programmatic = bool(getattr(parent_app, "_in_programmatic_table_selection", False))
-    parent_app._in_programmatic_table_selection = True
-    table.setUpdatesEnabled(False)
-    try:
-        sm.select(selection, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
-        anchor_col = 1 if col_last > 1 else 0
-        idx = view_model.index(view_rows[0], anchor_col)
-        sm.setCurrentIndex(idx, QItemSelectionModel.NoUpdate)
-        if scroll and idx.isValid():
-            table.scrollTo(idx, QAbstractItemView.PositionAtCenter)
-    finally:
-        table.setUpdatesEnabled(True)
-        parent_app._in_programmatic_table_selection = was_programmatic
-    table.viewport().update()
-
-
-def _scroll_table_to_first_source_row(
-    parent_app: ChemistryWorkspaceWindow, source_rows: list[int]
-) -> None:
-    if not source_rows:
-        return
-    view_rows = parent_app._source_rows_to_view_rows(source_rows[:1])
-    if not view_rows:
-        return
-    view_model = parent_app.table.model()
-    if view_model is None:
-        return
-    col_last = max(0, view_model.columnCount() - 1)
-    anchor_col = 1 if col_last > 1 else 0
-    idx = view_model.index(view_rows[0], anchor_col)
-    if idx.isValid():
-        parent_app.table.scrollTo(idx, QAbstractItemView.PositionAtCenter)
+    return parent_app._oids_for_source_rows(source_rows) == store.oids
 
 
 def apply_table_selection_for_source_rows(
@@ -265,55 +156,26 @@ def apply_table_selection_for_source_rows(
     source_rows: list[int],
     *,
     scroll: bool = True,
-    debounce: bool = False,
+    origin: object = None,
 ) -> None:
-    """Select visible proxy rows for source-model row indices (plot lasso / click).
+    """Replace the entry selection with source-model rows picked in a plot (lasso / click).
 
-    When ``scroll`` is True (user-driven plot select), reveal the first selected row.
-    Re-sync paths should pass ``scroll=False`` so table scrolling is not fought.
-
-    When ``debounce`` is True, coalesce rapid updates (large lassos / echo events).
+    ``scroll`` reveals and focuses the first selected row in the table; plots that should
+    keep keyboard focus (Shift+select in floating plots) pass ``False``. ``origin`` is the
+    plot, so its own ``selection_store.changed`` can be told apart from other writers.
+    Re-applying the current selection is a no-op, which absorbs Plotly echo events.
     """
     if not source_rows:
         return
     uniq = sorted({int(r) for r in source_rows})
-    if not debounce or len(uniq) <= 1:
-        _apply_table_selection_now(parent_app, uniq, scroll=scroll)
-        return
-
-    parent_app._plot_table_select_pending = (uniq, scroll)  # type: ignore[attr-defined]
-    timer = getattr(parent_app, "_plot_table_select_timer", None)
-    if timer is None:
-        timer = QTimer(parent_app)
-        timer.setSingleShot(True)
-
-        def _flush() -> None:
-            pending = getattr(parent_app, "_plot_table_select_pending", None)
-            parent_app._plot_table_select_pending = None  # type: ignore[attr-defined]
-            if not pending:
-                return
-            rows, do_scroll = pending
-            _apply_table_selection_now(parent_app, rows, scroll=bool(do_scroll))
-
-        timer.timeout.connect(_flush)
-        parent_app._plot_table_select_timer = timer  # type: ignore[attr-defined]
-    timer.start(_PLOT_TABLE_SELECT_DEBOUNCE_MS)
+    with perf_span("selection.plot_to_table"):
+        if _source_rows_already_selected(parent_app, uniq):
+            return
+        parent_app.select_table_rows(uniq, origin=origin, reveal=scroll)
 
 
-def clear_table_selection_from_plot(parent_app: ChemistryWorkspaceWindow) -> None:
-    """Clear Qt, logical, and highlight selection when a plot deselects."""
-    timer = getattr(parent_app, "_plot_table_select_timer", None)
-    if timer is not None:
-        timer.stop()
-    parent_app._plot_table_select_pending = None  # type: ignore[attr-defined]
-    clear_fn = getattr(parent_app, "clear_table_selection", None)
-    if callable(clear_fn):
-        clear_fn()
-        return
-    parent_app._selected_oids_override = None
-    model = getattr(parent_app, "_table_model", None)
-    if model is not None and callable(getattr(model, "set_highlighted_oids", None)):
-        model.set_highlighted_oids(None)
-    table = parent_app.table
-    table.clearSelection()
-    table.viewport().update()
+def clear_table_selection_from_plot(
+    parent_app: ChemistryWorkspaceWindow, *, origin: object = None
+) -> None:
+    """Clear the entry selection when a plot deselects."""
+    parent_app.clear_table_selection(origin=origin)

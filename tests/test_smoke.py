@@ -140,7 +140,7 @@ def test_chemistry_workspace_window_constructible(qapp):  # noqa: ARG001
 
 
 def test_app_table_search_selects_matching_row(qapp):  # noqa: ARG001
-    """Integration: table + search bar selects every cell in rows whose column matches the query."""
+    """Integration: table + search bar selects the entries whose column matches the query."""
     from rdkit import Chem
 
     w = ChemistryWorkspaceWindow()
@@ -168,12 +168,8 @@ def test_app_table_search_selects_matching_row(qapp):  # noqa: ARG001
     w._run_table_search()
     qapp.processEvents()
 
-    sm = w.table.selectionModel()
-    indexes = sm.selectedIndexes()
-    ncols = w._table_model.columnCount()
-    rows_hit = {ix.row() for ix in indexes}
-    assert rows_hit == {0}
-    assert len(indexes) == ncols
+    assert w._selected_oids_set() == {0}
+    assert not w.table.selectionModel().hasSelection()
 
 
 def test_app_table_search_works_when_sqlite_index_stale(qapp):  # noqa: ARG001
@@ -198,9 +194,7 @@ def test_app_table_search_works_when_sqlite_index_stale(qapp):  # noqa: ARG001
     w._run_table_search()
     qapp.processEvents()
 
-    sm = w.table.selectionModel()
-    rows_hit = {ix.row() for ix in sm.selectedIndexes()}
-    assert rows_hit == {42}
+    assert w._selected_logical_rows() == [42]
 
 
 def test_search_minus_deletes_last_row_and_toggle_keeps_query(qapp):  # noqa: ARG001

@@ -152,7 +152,6 @@ class PlotWidget(
         self._pending_table_selection_sync = False
         self._pending_payload_json: str | None = None
         self._prev_range_axis: dict[str, str] = {"x": "", "y": "", "z": ""}
-        self._ignore_plot_clear_until: float = 0.0
         self._hist_edges: list[float] = []
         self._hist_vals: list[float] = []
         self._hist_oids: list[int] = []

@@ -41,11 +41,13 @@ def test_interactive_plot_shell_includes_bridge_handlers():
     assert "ResizeObserver" in html
     assert "window.molmanagerHoldResize" in html
     assert "window.molmanagerPerfStats" in html
+    assert "window.molmanagerSelectionPerfStats" in html
+    assert "window.molmanagerResetSelectionPerfStats" in html
     assert "__RESIZE_SCHEDULER_JS__" not in html
     assert "SELECTION_OVERLAY_MAX" in html
     assert "idxs.length > SELECTION_OVERLAY_MAX" in html
     assert 'typeof payloadJson === "string"' in html
-    assert "viewNavBusy || middlePan" in html
+    assert "applyInFlight || viewNavBusy || !!middlePan || selectionPaintInFlight" in html
     assert "captureAxisView" in html
     assert "afterSelectionDraw" in html
     assert "savedViewOnPointerDown" in html
@@ -53,6 +55,16 @@ def test_interactive_plot_shell_includes_bridge_handlers():
     assert "scene.camera" in html
     assert "viewForSelectionRestore" in html
     assert "forgetSavedAxisView" in html
+
+
+def test_plot_bridge_mute_is_scoped_to_programmatic_updates():
+    """Echo suppression is a hold released when the update settles, not a fixed window."""
+    html = interactive_plot_shell_html()
+    assert "holdPlotBridge" in html
+    assert "releasePlotBridgeAfter(finalOp, releaseBridge)" in html
+    assert "releasePlotBridgeAfter(postApplyOp, releaseApply)" in html
+    assert "beginSuppressPlotBridge" not in html
+    assert "cancelPendingEmptyClear" in html
 
 
 def test_interactive_plot_shell_bakes_overlay_max_from_config(monkeypatch):
@@ -70,4 +82,3 @@ def test_ensure_interactive_plot_shell_reuses_file(monkeypatch):
     assert first == second
     assert first.is_file()
     assert first.stat().st_size > 1000
-

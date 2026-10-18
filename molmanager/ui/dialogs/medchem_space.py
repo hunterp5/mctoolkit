@@ -396,7 +396,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
 
     def _snapshot_collect_chunk_size(self) -> int:
         cfg = load_config()
-        return max(512, int(cfg.table_selection_chunk_rows))
+        return max(512, int(cfg.tool_table_chunk_rows))
 
     def _snapshot_scope_row_count(self, scope_rows: list[int] | None) -> int:
         assert self.parent_app is not None
@@ -779,7 +779,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self._table_writer = ChunkedTableWriter(
             table=app.table,
             total=len(updates),
-            chunk=max(500, load_config().table_selection_chunk_rows // 4),
+            chunk=max(500, load_config().tool_table_chunk_rows // 4),
             write_chunk=write_chunk,
             on_progress=lambda done, total: app._tool_progress_state.update(
                 label, done, total, job_id=write_job_id

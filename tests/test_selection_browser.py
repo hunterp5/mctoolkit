@@ -155,6 +155,43 @@ def test_selection_browser_preview_mode_uses_item_data(qapp):  # noqa: ARG001
     w.close()
 
 
+def test_selection_browser_ignores_selection_when_browsing_all_rows(qapp, monkeypatch):  # noqa: ARG001
+    """With "Browse Selected" off, a selection change only restates the toggle button."""
+    w = ChemistryWorkspaceWindow()
+    _seed_row(w)
+    panel = SelectionBrowserWidget(w)
+    panel._cb_only_selected.setChecked(False)
+    panel.refresh_from_app()
+    refreshes: list[dict] = []
+    monkeypatch.setattr(panel, "refresh_from_app", lambda **k: refreshes.append(k))
+
+    w.select_table_oids({0})
+
+    assert not panel._selection_refresh_timer.isActive()
+    assert not panel._auto_refresh_timer.isActive()
+    assert panel._btn_toggle_select.isChecked()
+    assert refreshes == []
+    panel.deleteLater()
+    w.close()
+
+
+def test_selection_browser_rescope_keeps_previews(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _seed_row(w)
+    panel = SelectionBrowserWidget(w)
+    panel._cb_only_selected.setChecked(True)
+    panel._preview_pix_cache["sentinel"] = object()
+
+    w.select_table_oids({0})
+    assert panel._selection_refresh_timer.isActive()
+    panel._selection_refresh_timer.timeout.emit()
+
+    assert "sentinel" in panel._preview_pix_cache
+    assert panel._rows == [0]
+    panel.deleteLater()
+    w.close()
+
+
 def test_selection_browser_focus_oid_walks_to_row(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     _seed_row(w)

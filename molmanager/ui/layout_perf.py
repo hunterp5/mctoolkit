@@ -14,11 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Local timing spans for workspace layout, dock/undock, and plot resize paths.
+"""Local timing spans for workspace layout, dock/undock, plot resize, and selection sync.
 
 Enabled only when ``MOLMANAGER_LAYOUT_PERF=1``. Spans log at DEBUG level and keep an
-in-process history (no file or network output) so ``scripts/bench_docking.py`` can
-report percentiles.
+in-process history (no file or network output) so ``scripts/benchmark_docking.py`` and
+``scripts/benchmark_selection.py`` can report percentiles.
 """
 
 from __future__ import annotations

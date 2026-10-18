@@ -91,12 +91,47 @@
           bridge = channel.objects.chemBridge || null;
         });
       } catch (_e) {}
-      var suppressPlotBridge = false;
-      var suppressPlotBridgeGen = 0;
+      // Count of programmatic Plotly updates whose echo events must not reach the bridge.
+      var plotBridgeHolds = 0;
       var lastNonemptyPlotSelection = 0;
       var applyInFlight = false;
+      // One selection paint at a time; newer selections wait in pendingSelectionJson.
+      var selectionPaintInFlight = false;
       var pendingSelectionJson = null;
+      var pendingSelectionQueuedAt = 0;
       var selectionApplyRaf = null;
+      // Local selection-paint timings for scripts/benchmark_selection.py (never sent anywhere).
+      var SELECTION_PERF_KEEP = 240;
+      var selectionPerf = newSelectionPerf();
+      function newSelectionPerf() {
+        return {count: 0, points: [], queueMs: [], restyleMs: [], relayoutMs: [], paintMs: []};
+      }
+      function perfNow() {
+        try { return performance.now(); } catch (_pn) { return Date.now(); }
+      }
+      function pushSelectionPerf(list, value) {
+        list.push(value);
+        if (list.length > SELECTION_PERF_KEEP) list.shift();
+      }
+      function finishSelectionPerf(perf, op) {
+        Promise.resolve(op).then(function() {
+          var end = perfNow();
+          selectionPerf.count += 1;
+          pushSelectionPerf(selectionPerf.points, perf.points);
+          pushSelectionPerf(selectionPerf.paintMs, end - perf.start);
+          if (perf.queuedAt) pushSelectionPerf(selectionPerf.queueMs, perf.start - perf.queuedAt);
+          if (perf.opDoneAt) {
+            pushSelectionPerf(selectionPerf.restyleMs, perf.opDoneAt - perf.start);
+            pushSelectionPerf(selectionPerf.relayoutMs, end - perf.opDoneAt);
+          }
+        }).catch(function() {});
+      }
+      window.molmanagerSelectionPerfStats = function() {
+        try { return JSON.stringify(selectionPerf); } catch (_sp) { return "{}"; }
+      };
+      window.molmanagerResetSelectionPerfStats = function() {
+        selectionPerf = newSelectionPerf();
+      };
       var hoverPersist = false;
       var hoverPinned = false;
       var hoverReqGen = 0;
@@ -228,10 +263,11 @@
         }
       }
 
-      function afterSelectionDraw(op, view) {
+      function afterSelectionDraw(op, view, perf) {
         freezeAxisAutorange();
         var v = view || viewForSelectionRestore();
         return Promise.resolve(op).then(function() {
+          if (perf) perf.opDoneAt = perfNow();
           return restoreCapturedView(v, {selections: []});
         }).catch(function() {});
       }
@@ -261,20 +297,7 @@
           if (!viewNavBusy && hoverLayer) hoverLayer.style.visibility = "";
         } catch (_vb) {}
         // Apply deferred selection after pan/zoom so restyle does not fight relayout.
-        if (wasBusy && !viewNavBusy) {
-          try {
-            if (pendingSelectionJson !== null && !applyInFlight) {
-              if (selectionApplyRaf != null) {
-                try { cancelAnimationFrame(selectionApplyRaf); } catch (_caf) {}
-                selectionApplyRaf = null;
-              }
-              selectionApplyRaf = requestAnimationFrame(function() {
-                selectionApplyRaf = null;
-                if (!viewNavBusy && !middlePan) flushPendingSelection();
-              });
-            }
-          } catch (_flushNav) {}
-        }
+        if (wasBusy && !viewNavBusy) scheduleSelectionFlush();
       }
 
       function axisValueAtPixel(axis, pixelAlongAxis) {
@@ -509,7 +532,7 @@
             down = null;
             // Drag / lasso / long press — leave selection alone.
             if (dx > 5 || dy > 5 || dt > 450) return;
-            if (middlePan || viewNavBusy || suppressPlotBridge) return;
+            if (middlePan || viewNavBusy || plotBridgeMuted()) return;
             if (shiftHeld) return;
             var t = ev.target;
             if (!t) return;
@@ -517,26 +540,61 @@
               if (t.closest(".hoverlayer, .mol-hover-card, .mol-hover-overflow, .legend, .modebar, .colorbar")) return;
               if (t.closest(".points, .point")) return;
             }
-            if (bridge && bridge.pointsSelected) {
-              bridge.pointsSelected("[]", false);
-            }
+            // Plotly's drag cover sits above the points, so a point click lands here too.
+            // Plotly emits plotly_click later in this same mouseup dispatch; defer one task
+            // so that handler can cancel the clear.
+            cancelPendingEmptyClear();
+            pendingEmptyClear = setTimeout(function() {
+              pendingEmptyClear = null;
+              if (plotBridgeMuted()) return;
+              if (bridge && bridge.pointsSelected) bridge.pointsSelected("[]", false);
+            }, 0);
           } catch (_emptyClr) {}
         }, true);
       }
-      function clearSelectionShapes() {
-        try {
-          if (!gd || !gd.layout) return;
-          restoreCapturedView(viewForSelectionRestore(), {selections: []});
-        } catch (_clrSel) {}
+      var pendingEmptyClear = null;
+      function cancelPendingEmptyClear() {
+        if (pendingEmptyClear === null) return;
+        clearTimeout(pendingEmptyClear);
+        pendingEmptyClear = null;
       }
-      function beginSuppressPlotBridge(ms) {
-        // Generation token so an earlier timeout cannot clear a later suppress window.
-        suppressPlotBridge = true;
-        var hold = (typeof ms === "number" && ms >= 0) ? ms : 250;
-        var gen = ++suppressPlotBridgeGen;
-        setTimeout(function() {
-          if (gen === suppressPlotBridgeGen) suppressPlotBridge = false;
-        }, hold);
+      function clearSelectionShapes() {
+        var release = holdPlotBridge();
+        var op = null;
+        try {
+          if (gd && gd.layout) {
+            op = restoreCapturedView(viewForSelectionRestore(), {selections: []});
+          }
+        } catch (_clrSel) {
+        } finally {
+          releasePlotBridgeAfter(op, release);
+        }
+      }
+      function plotBridgeMuted() {
+        return plotBridgeHolds > 0;
+      }
+      function holdPlotBridge() {
+        // Mute selection events to Python for the lifetime of one programmatic update.
+        // Returns an idempotent release function.
+        plotBridgeHolds += 1;
+        var released = false;
+        return function() {
+          if (released) return;
+          released = true;
+          plotBridgeHolds = Math.max(0, plotBridgeHolds - 1);
+        };
+      }
+      function releasePlotBridgeAfter(op, release) {
+        // Plotly emits plotly_selected / plotly_deselect echoes while an update settles and
+        // on the next frame; keep the hold until the op resolves plus two frames.
+        function afterFrames() {
+          try {
+            requestAnimationFrame(function() { requestAnimationFrame(release); });
+          } catch (_rafRel) {
+            setTimeout(release, 32);
+          }
+        }
+        Promise.resolve(op).then(afterFrames, afterFrames);
       }
       function scheduleClearSelectionShapes() {
         setTimeout(clearSelectionShapes, 0);
@@ -991,16 +1049,21 @@
         if (!Number.isFinite(ti) || ti < 0 || !gd.data || ti >= gd.data.length) ti = 0;
         return { ti: ti, main: (gd.data && gd.data[ti]) || null, selTraces: selTraces };
       }
-      function applySelectionIndices(indicesJson) {
+      function applySelectionIndices(indicesJson, queuedAt) {
+        var perf = {start: perfNow(), queuedAt: queuedAt || 0, opDoneAt: 0, points: 0};
+        var finalOp = null;
+        // Restyle and lasso-shape clearing re-fire plotly_selected; mute the bridge while we paint.
+        var releaseBridge = holdPlotBridge();
+        selectionPaintInFlight = true;
         try {
-          // Clearing Plotly lasso shapes can re-fire plotly_selected; ignore bridge while we paint.
-          beginSuppressPlotBridge(500);
           freezeAxisAutorange();
           var view = viewForSelectionRestore();
           function keepView(op) {
-            return afterSelectionDraw(op, view);
+            finalOp = afterSelectionDraw(op, view, perf);
+            return finalOp;
           }
           var idxs = parseSelectionIndices(indicesJson);
+          perf.points = idxs.length;
           if (!gd || !gd.data || !gd.data.length) return;
           var resolved = primarySelectionTraceInfo();
           var selTraces = resolved.selTraces;
@@ -1121,31 +1184,61 @@
             selPatch["unselected.marker.opacity"].push(0.35);
           }
           keepView(Plotly.restyle(gd, selPatch, selTraces));
-        } catch (_selVis) {}
+        } catch (_selVis) {
+        } finally {
+          finishSelectionPerf(perf, finalOp);
+          releasePlotBridgeAfter(finalOp, releaseBridge);
+          // The promise settles before the browser renders the restyle (style/layout/paint
+          // of every marker); wait for one rendered frame so paints never stack up.
+          var paintDone = function() {
+            selectionPaintInFlight = false;
+            scheduleSelectionFlush();
+          };
+          var afterRenderedFrame = function() {
+            try {
+              requestAnimationFrame(function() { requestAnimationFrame(paintDone); });
+            } catch (_rafDone) {
+              setTimeout(paintDone, 32);
+            }
+          };
+          Promise.resolve(finalOp).then(afterRenderedFrame, afterRenderedFrame);
+        }
       }
       function flushPendingSelection() {
         if (pendingSelectionJson === null) return;
         var ps = pendingSelectionJson;
+        var queuedAt = pendingSelectionQueuedAt;
         pendingSelectionJson = null;
-        applySelectionIndices(ps);
+        pendingSelectionQueuedAt = 0;
+        applySelectionIndices(ps, queuedAt);
       }
-      window.molmanagerSetSelection = function(indicesJson) {
-        pendingSelectionJson = indicesJson;
-        // Coalesce while Plotly.react / pan / zoom is in flight.
-        if (applyInFlight || viewNavBusy || middlePan) return;
-        if (selectionApplyRaf != null) return;
+      function selectionPaintBlocked() {
+        return applyInFlight || viewNavBusy || !!middlePan || selectionPaintInFlight;
+      }
+      function scheduleSelectionFlush() {
+        // Paint the newest pending selection on the next frame once nothing blocks it.
+        // Whatever unblocks (react done, pan/zoom end, previous paint settled) calls this again.
+        if (pendingSelectionJson === null || selectionApplyRaf != null) return;
+        if (selectionPaintBlocked()) return;
         try {
           selectionApplyRaf = requestAnimationFrame(function() {
             selectionApplyRaf = null;
-            if (applyInFlight || viewNavBusy || middlePan) return;
-            flushPendingSelection();
+            if (!selectionPaintBlocked()) flushPendingSelection();
           });
         } catch (_rafSel) {
           selectionApplyRaf = null;
-          if (!applyInFlight && !viewNavBusy && !middlePan) flushPendingSelection();
+          flushPendingSelection();
         }
+      }
+      window.molmanagerSetSelection = function(indicesJson) {
+        if (pendingSelectionJson === null) pendingSelectionQueuedAt = perfNow();
+        pendingSelectionJson = indicesJson;
+        scheduleSelectionFlush();
       };
       window.molmanagerApply = function(payloadJson) {
+        // Plotly.react and the follow-up resize fire selection echoes; mute until they settle.
+        var releaseApply = holdPlotBridge();
+        var postApplyOp = null;
         try {
           var payload = (typeof payloadJson === "string")
             ? JSON.parse(payloadJson)
@@ -1154,7 +1247,6 @@
           var layout = payload.layout || {};
           var config = payload.config || {};
           if (config.scrollZoom === undefined) config.scrollZoom = false;
-          beginSuppressPlotBridge(800);
           applyInFlight = true;
           pendingSelectionJson = null;
           hoverPinned = false;
@@ -1199,6 +1291,7 @@
             gd.on('plotly_click', function(ev) {
               try {
                 if (!ev || !ev.points || !ev.points.length || !gd.data || !gd.data.length) return;
+                cancelPendingEmptyClear();
                 var pt = ev.points[0];
                 var trace = gd.data[pt.curveNumber];
                 if (trace && trace.type === "scatterpolar") {
@@ -1254,7 +1347,7 @@
             gd.on('plotly_selected', function(ev) {
               try {
                 scheduleClearSelectionShapes();
-                if (suppressPlotBridge) return;
+                if (plotBridgeMuted()) return;
                 if (!bridge || !bridge.pointsSelected) return;
                 var idxs = [];
                 if (ev && ev.points && ev.points.length) {
@@ -1275,7 +1368,7 @@
             gd.on('plotly_deselect', function() {
               try {
                 scheduleClearSelectionShapes();
-                if (suppressPlotBridge) return;
+                if (plotBridgeMuted()) return;
                 if (Date.now() - lastNonemptyPlotSelection < 450) return;
                 if (shiftHeld) return;
                 if (bridge && bridge.pointsSelected) bridge.pointsSelected("[]", false);
@@ -1313,15 +1406,15 @@
               } catch (_rl) {}
             });
             applyInFlight = false;
-            flushPendingSelection();
-            try { Plotly.Plots.resize(gd); } catch (_rz) {}
+            scheduleSelectionFlush();
+            try { postApplyOp = Plotly.Plots.resize(gd); } catch (_rz) {}
             schedulePinnedHoverReposition();
           }).finally(function() {
             applyInFlight = false;
-            // Hold a bit after react so restyle/relayout echo events stay suppressed.
-            beginSuppressPlotBridge(400);
+            releasePlotBridgeAfter(postApplyOp, releaseApply);
           });
         } catch (e) {
+          releaseApply();
           console.error('molmanager Plotly embed failed:', e);
         }
       };

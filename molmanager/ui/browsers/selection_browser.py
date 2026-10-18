@@ -58,7 +58,7 @@ from ..dockable_plot import (
     style_plot_footer_text_button,
     sync_footer_on_parent_change,
 )
-from ..table_selection import item_selection_for_view_rows
+from ..layout_perf import perf_span
 from .chrome import (
     BrowserHostDialog,
     BrowserIndexSpinBox,
@@ -324,12 +324,15 @@ class SelectionBrowserWidget(QWidget):
         self._auto_refresh_timer.timeout.connect(
             lambda: self.refresh_from_app(preserve_position=True)
         )
+        # Selection-only rescope: same coalescing, but previews are still valid.
+        self._selection_refresh_timer = QTimer(self)
+        self._selection_refresh_timer.setSingleShot(True)
+        self._selection_refresh_timer.setInterval(80)
+        self._selection_refresh_timer.timeout.connect(
+            lambda: self.refresh_from_app(preserve_position=True, keep_previews=True)
+        )
 
-        try:
-            has_sel = bool(self._app._selected_logical_rows())
-        except Exception:
-            has_sel = False
-        self._cb_only_selected.setChecked(has_sel)
+        self._cb_only_selected.setChecked(not self._app.selection_store.is_empty())
         self.refresh_from_app()
         self._wire_table_updates()
         self._sync_footer_chrome()
@@ -618,10 +621,17 @@ class SelectionBrowserWidget(QWidget):
         if proxy is not None:
             proxy.layoutChanged.connect(_schedule_refresh)
             proxy.modelReset.connect(_schedule_refresh)
-        sm = app.table.selectionModel()
-        if sm is not None:
-            sm.selectionChanged.connect(_schedule_refresh)
+        app.selection_store.changed.connect(self._on_selection_store_changed)
         self._table_updates_wired = True
+
+    def _on_selection_store_changed(self, origin: object) -> None:
+        """Rescope only when browsing the selection; otherwise just restate the toggle button."""
+        if origin is self:
+            return
+        if self._cb_only_selected.isChecked():
+            self._selection_refresh_timer.start()
+        else:
+            self._sync_select_button()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
         super().resizeEvent(event)
@@ -633,8 +643,20 @@ class SelectionBrowserWidget(QWidget):
         if self._rows and 0 <= self._idx < len(self._rows):
             self._update_preview(self._rows[self._idx])
 
-    def refresh_from_app(self, *, preserve_position: bool = False) -> None:
-        """Recompute row scope; optionally keep the current row (by OID) when the table changes."""
+    def refresh_from_app(
+        self, *, preserve_position: bool = False, keep_previews: bool = False
+    ) -> None:
+        """Recompute row scope; optionally keep the current row (by OID) when the table changes.
+
+        ``keep_previews`` skips dropping cached structure previews; pass it when only the
+        selection changed, since the row data the previews depict is unchanged.
+        """
+        with perf_span("selection.browser_refresh"):
+            self._refresh_from_app_now(
+                preserve_position=preserve_position, keep_previews=keep_previews
+            )
+
+    def _refresh_from_app_now(self, *, preserve_position: bool, keep_previews: bool) -> None:
         app = self._app
         cur_oid: int | None = None
         if preserve_position:
@@ -657,7 +679,8 @@ class SelectionBrowserWidget(QWidget):
                     except Exception:
                         continue
             self._idx = self._first_navigable_index(self._idx, +1)
-        self._preview_pix_cache.clear()
+        if not keep_previews:
+            self._preview_pix_cache.clear()
         self._update_ui(scroll_table=not preserve_position)
 
     def _rows_for_scope(self, app: Any) -> list[int]:
@@ -910,55 +933,26 @@ class SelectionBrowserWidget(QWidget):
         return self._rows[self._idx]
 
     def _is_row_selected(self, logical_row: int) -> bool:
-        app = self._app
-        override = getattr(app, "_selected_oids_override", None)
-        if override is not None:
-            try:
-                oid = int(app._table_model.row_oid(logical_row))
-                return oid in override
-            except (IndexError, ValueError, TypeError):
-                return False
-        view_rows = app._source_rows_to_view_rows([logical_row])
-        if not view_rows:
-            return False
         try:
-            sm = app.table.selectionModel()
-            view_model = app.table.model()
-            if sm is None or view_model is None:
-                return False
-            return bool(
-                sm.isRowSelected(int(view_rows[0]), view_model.index(int(view_rows[0]), 0).parent())
-            )
-        except Exception:
+            oid = int(self._app._table_model.row_oid(logical_row))
+        except (IndexError, ValueError, TypeError):
             return False
+        return self._app.selection_store.contains(oid)
 
     def _toggle_current_row_selected(self) -> None:
         r = self._current_row()
         if r is None:
             return
         app = self._app
-        sm = app.table.selectionModel()
-        view_model = app.table.model()
-        if sm is None or view_model is None:
+        try:
+            oid = int(app._table_model.row_oid(r))
+        except (IndexError, ValueError, TypeError):
             return
-        view_rows = app._source_rows_to_view_rows([r])
-        if not view_rows:
-            return
-        last_col = max(0, view_model.columnCount() - 1)
-        sel = item_selection_for_view_rows(view_model, view_rows, last_col=last_col)
-        if sel.isEmpty():
-            return
-        already = self._is_row_selected(r)
-        mode = QItemSelectionModel.Deselect if already else QItemSelectionModel.Select
-        sm.select(sel, mode | QItemSelectionModel.Rows)
+        app.select_table_oids(app.selection_store.oids ^ {oid}, origin=self, reveal=False)
 
         if self._cb_only_selected.isChecked():
-            try:
-                oid = int(app._table_model.row_oid(r))
-            except Exception:
-                oid = None
-            self.refresh_from_app()
-            if oid is not None and self._rows:
+            self.refresh_from_app(keep_previews=True)
+            if self._rows:
                 for j, rr in enumerate(self._rows):
                     try:
                         if int(app._table_model.row_oid(rr)) == oid:

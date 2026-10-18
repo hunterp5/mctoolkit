@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import tempfile
-import time
 import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -30,6 +29,7 @@ from PyQt5.QtWebChannel import QWebChannel
 from PyQt5.QtWidgets import QVBoxLayout, QWidget
 from plotly import graph_objects as go
 
+from .layout_perf import perf_span
 from .plot_hover import hover_cards_payload, resolve_default_hover_columns
 from .plot_table_sync import (
     apply_table_selection_for_source_rows,
@@ -56,11 +56,13 @@ class _PlotBridge(QObject):
 
     @pyqtSlot(int, bool)
     def pointClicked(self, point_index: int, additive: bool = False) -> None:  # noqa: N802
-        self._view._on_plot_point_clicked(int(point_index), additive=bool(additive))
+        with perf_span("selection.plot_event"):
+            self._view._on_plot_point_clicked(int(point_index), additive=bool(additive))
 
     @pyqtSlot(str, bool)
     def pointsSelected(self, points_json: str, additive: bool = False) -> None:  # noqa: N802
-        self._view._on_plot_points_selected(points_json, additive=bool(additive))
+        with perf_span("selection.plot_event"):
+            self._view._on_plot_points_selected(points_json, additive=bool(additive))
 
     @pyqtSlot(int)
     def radarTraceClicked(self, trace_index: int) -> None:  # noqa: N802
@@ -97,7 +99,6 @@ class PlotlyInteractiveView(QWidget):
         self._web_ready = False
         self._pending_table_selection_sync = False
         self._pending_payload_json: str | None = None
-        self._ignore_plot_clear_until: float = 0.0
         # Match Plotter: hover cards are transient unless the user enables persist.
         self._hover_persist = False
         self._hover_show_structure = True
@@ -203,7 +204,6 @@ class PlotlyInteractiveView(QWidget):
         if not indices or self.parent_app is None:
             return 0
         self._selected_point_indices = set(indices)
-        self._arm_ignore_plot_clear()
         self._select_rows_for_point_indices(indices)
         self.sync_selection_visual()
         return len(indices)
@@ -227,7 +227,6 @@ class PlotlyInteractiveView(QWidget):
             if self._last_pushed_selection_key is not None:
                 return
         self._selected_point_indices = new_idxs
-        self._arm_ignore_plot_clear()
         self.sync_selection_visual()
 
     def sync_selection_visual(self) -> None:
@@ -244,9 +243,8 @@ class PlotlyInteractiveView(QWidget):
 
     def clear_table_selection(self, *, update_plot: bool = True) -> None:
         self._selected_point_indices = set()
-        self._ignore_plot_clear_until = 0.0
         if self.parent_app is not None:
-            clear_table_selection_from_plot(self.parent_app)
+            clear_table_selection_from_plot(self.parent_app, origin=self)
         if update_plot:
             self.sync_selection_visual()
         else:
@@ -353,7 +351,6 @@ class PlotlyInteractiveView(QWidget):
         if not self._web_ready or not self._pending_payload_json:
             return
         run_javascript_apply_figure(self.web.page(), self._pending_payload_json)
-        self._arm_ignore_plot_clear()
         QTimer.singleShot(300, self.sync_from_table_selection)
 
     def _on_web_load_finished(self, ok: bool) -> None:
@@ -391,9 +388,6 @@ class PlotlyInteractiveView(QWidget):
         webbrowser.open(self._plot_shell_path.as_uri())
         self.parent_app.status_label.setText(f"Plot fallback: opened in browser ({reason})")
 
-    def _arm_ignore_plot_clear(self, ms: int = 500) -> None:
-        self._ignore_plot_clear_until = time.monotonic() + (ms / 1000.0)
-
     def _select_rows_for_point_indices(self, point_indices: list[int]) -> None:
         if self.parent_app is None:
             return
@@ -405,10 +399,7 @@ class PlotlyInteractiveView(QWidget):
         )
         # Avoid focus-stealing into the main table (breaks Shift+select in floating plots).
         apply_table_selection_for_source_rows(
-            self.parent_app,
-            source_rows,
-            scroll=False,
-            debounce=len(source_rows) > 1,
+            self.parent_app, source_rows, scroll=False, origin=self
         )
 
     def _on_plot_point_clicked(self, point_index: int, *, additive: bool = False) -> None:
@@ -419,7 +410,6 @@ class PlotlyInteractiveView(QWidget):
             self._selected_point_indices.add(idx)
         else:
             self._selected_point_indices = {idx}
-        self._arm_ignore_plot_clear()
         self._select_rows_for_point_indices(sorted(self._selected_point_indices))
         self.sync_selection_visual()
         n = len(self._selected_point_indices)
@@ -442,8 +432,6 @@ class PlotlyInteractiveView(QWidget):
         if not idxs:
             if additive:
                 return
-            if time.monotonic() < self._ignore_plot_clear_until:
-                return
             self.clear_table_selection()
             self.parent_app.status_label.setText("Plot: selection cleared.")
             return
@@ -454,7 +442,6 @@ class PlotlyInteractiveView(QWidget):
             self._selected_point_indices |= new_idxs
         else:
             self._selected_point_indices = new_idxs
-        self._arm_ignore_plot_clear()
         sel_sorted = sorted(self._selected_point_indices)
         self._select_rows_for_point_indices(sel_sorted)
         self.parent_app.status_label.setText(f"Plot: selected {len(sel_sorted):,} point(s).")

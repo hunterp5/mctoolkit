@@ -155,7 +155,7 @@ class PoseBrowserWidget(QWidget):
         self._receptor_path: str | None = None
         self._crystal_path: str | None = None
         self._table_oids: dict[int, int] = {}
-        self._selection_model = None
+        self._connected_selection_store = None
         self._filling_table = False
         self._sort_header: str | None = None
         self._sort_order = Qt.DescendingOrder
@@ -762,17 +762,12 @@ class PoseBrowserWidget(QWidget):
     def _on_only_selected_toggled(self, _checked: bool = False) -> None:
         self._apply_pose_scope(preserve_index=True)
 
-    def _selected_oids(self) -> set[int]:
-        app = self._app
-        if app is None:
-            return set()
-        getter = getattr(app, "_selected_oids_set", None)
-        if not callable(getter):
-            return set()
-        try:
-            return {int(x) for x in getter()}
-        except Exception:
-            return set()
+    def _selected_oids(self) -> frozenset[int]:
+        store = self._selection_store_or_none()
+        return store.oids if store is not None else frozenset()
+
+    def _selection_store_or_none(self):
+        return getattr(self._app, "selection_store", None) if self._app is not None else None
 
     def _apply_pose_scope(self, *, preserve_index: bool) -> None:
         cur = self.current_mol() if preserve_index else None
@@ -802,25 +797,25 @@ class PoseBrowserWidget(QWidget):
 
     def _connect_table_selection(self) -> None:
         self._disconnect_table_selection()
-        app = self._app
-        table = getattr(app, "table", None) if app is not None else None
-        sm = table.selectionModel() if table is not None else None
-        if sm is None:
+        store = self._selection_store_or_none()
+        if store is None:
             return
-        sm.selectionChanged.connect(self._on_table_selection_changed)
-        self._selection_model = sm
+        store.changed.connect(self._on_table_selection_changed)
+        self._connected_selection_store = store
 
     def _disconnect_table_selection(self) -> None:
-        sm = getattr(self, "_selection_model", None)
-        if sm is None:
+        store = getattr(self, "_connected_selection_store", None)
+        if store is None:
             return
         try:
-            sm.selectionChanged.disconnect(self._on_table_selection_changed)
-        except TypeError:
+            store.changed.disconnect(self._on_table_selection_changed)
+        except (TypeError, RuntimeError):
             pass
-        self._selection_model = None
+        self._connected_selection_store = None
 
-    def _on_table_selection_changed(self, *_args) -> None:
+    def _on_table_selection_changed(self, origin: object = None) -> None:
+        if origin is self:
+            return
         self._sync_select_button()
         if not self._cb_only_selected.isChecked():
             return
@@ -891,15 +886,10 @@ class PoseBrowserWidget(QWidget):
                 return
             if idx is not None:
                 self._table_oids[idx] = oid
-        selected = self._selected_oids()
-        if oid in selected:
-            selected.discard(oid)
-        else:
-            selected.add(oid)
-        select = getattr(app, "select_table_oids", None)
-        if callable(select):
-            select(selected)
+        app.select_table_oids(self._selected_oids() ^ {oid}, origin=self, reveal=False)
         self._sync_select_button()
+        if self._cb_only_selected.isChecked():
+            self._selection_timer.start()
 
     def _fit_row_table_height(self) -> None:
         table = getattr(self, "_row_table", None)
@@ -1095,7 +1085,8 @@ class PoseBrowserWidget(QWidget):
             return
         self._btn_toggle_select.setEnabled(True)
         oid = self._target_table_oid(mol)
-        selected = bool(oid is not None and oid in self._selected_oids())
+        store = self._selection_store_or_none()
+        selected = bool(oid is not None and store is not None and store.contains(oid))
         self._btn_toggle_select.setChecked(selected)
         if oid is None:
             self._btn_toggle_select.setToolTip("Add this pose to the compound table")

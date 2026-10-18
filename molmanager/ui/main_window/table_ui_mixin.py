@@ -176,10 +176,15 @@ class TableUIMixin(
         """SMILES for PubChem/ChEMBL: canonical SMILES from any resolvable chemistry in each selected row."""
         if not self.headers:
             return []
-        items = self.table.selectionModel().selectedIndexes()
-        if not items:
+        sm = self.table.selectionModel()
+        cell_rows = set()
+        for ix in sm.selectedIndexes() if sm is not None else []:
+            mapped = self._source_cell_from_view_index(ix)
+            if mapped is not None:
+                cell_rows.add(mapped[0])
+        rows = sorted(cell_rows.union(self._selected_shown_logical_rows()))
+        if not rows:
             return []
-        rows = sorted({i.row() for i in items})
         out: list[str] = []
         seen: set[str] = set()
         for r in rows:
@@ -325,7 +330,6 @@ class TableUIMixin(
         self._import_building_progress_shown = False
         self._clear_tool_progress()
         self._session_sort = None
-        self._selected_oids_override = None
 
     def _migrate_legacy_confs_cells_to_sidecar(self) -> None:
         """Move embedded v1 conformer payloads out of ``confs`` / ``superpose`` cells into ``_confs_blocks_sidecar``."""

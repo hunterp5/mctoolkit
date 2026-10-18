@@ -20,6 +20,19 @@ from molmanager.ui.compound_table_model import CompoundTableModel
 from molmanager.ui.table_selection import merge_sorted_row_indices
 
 
+def test_filter_proxy_source_rows_for_row_spans():
+    from molmanager.ui.filter_proxy_model import FilterProxyModel
+
+    model = CompoundTableModel(["ID_HIDDEN", "Structure", "MW"])
+    for oid in range(6):
+        model.append_row(oid, {"MW": str(oid)})
+    proxy = FilterProxyModel()
+    proxy.setSourceModel(model)
+    assert proxy.source_rows_for_row_spans([(1, 2), (4, 9)]) == [1, 2, 4, 5]
+    proxy.set_visible_oids(frozenset({1, 3, 5}))
+    assert proxy.source_rows_for_row_spans([(0, 0), (2, 5)]) == [1, 5]
+
+
 def test_merge_sorted_row_indices_contiguous():
     assert merge_sorted_row_indices([0, 1, 2, 5, 6]) == [(0, 2), (5, 6)]
 

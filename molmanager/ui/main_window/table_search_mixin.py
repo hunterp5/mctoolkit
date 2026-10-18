@@ -500,7 +500,10 @@ class TableSearchMixin:
         n = self.select_table_rows(rows)
         if n <= 0:
             return False
-        view_rows = self._source_rows_to_view_rows(sorted({int(r) for r in rows}))
+        first_shown = next(
+            (r for r in sorted({int(r) for r in rows}) if self._is_source_row_visible(r)), None
+        )
+        view_rows = [] if first_shown is None else self._source_rows_to_view_rows([first_shown])
         if view_rows:
             view_model = self.table.model()
             if view_model is not None:

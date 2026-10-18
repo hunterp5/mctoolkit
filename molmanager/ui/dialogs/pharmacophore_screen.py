@@ -409,7 +409,7 @@ class PharmacophoreScreenDialog(QDialog):
         n_rows = model.rowCount()
         n_scope = len(self._compare_oids)
         cfg = load_config()
-        chunked = n_rows >= max(500, int(cfg.table_selection_chunk_rows))
+        chunked = n_rows >= max(500, int(cfg.tool_table_chunk_rows))
 
         def write_chunk(start: int, end: int, is_last: bool) -> None:
             for name, oid_map in zip(names, maps):
@@ -462,24 +462,8 @@ class PharmacophoreScreenDialog(QDialog):
         if app is None:
             return
         # Select after column insert — inserting columns clears Qt selection.
-        # Keep an OID override so the hit set survives filter/header churn.
         if getattr(self, "_select_hits", False) and hit_oids:
-            source_rows: list[int] = []
-            for oid in hit_oids:
-                try:
-                    row = app.logical_row_for_oid(int(oid))
-                except (TypeError, ValueError):
-                    continue
-                if row >= 0:
-                    source_rows.append(int(row))
-            finish = getattr(app, "_finish_oid_override_selection", None)
-            if callable(finish):
-                finish(
-                    source_rows,
-                    frozenset(int(oid) for oid in hit_oids),
-                    clear_oid_override=False,
-                    extra_status="Pharmacophore hits",
-                )
+            app.select_table_oids(hit_oids, extra_status="Pharmacophore hits")
         app.status_label.setText(
             f"Pharmacophore screen: {n_hit} hit(s) of {n_scope} row(s) in scope."
         )

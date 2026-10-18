@@ -136,8 +136,8 @@ class MolManagerConfig:
     tool_progress_poll_ms: int
     status_memory_enabled: bool
     status_memory_poll_ms: int
-    table_selection_oid_override_min: int
-    table_selection_chunk_rows: int
+    selection_status_min_rows: int
+    tool_table_chunk_rows: int
     plot_scattergl_min_points: int
     plot_selection_overlay_max_points: int
     table_delete_batch_min: int
@@ -157,6 +157,30 @@ class MolManagerConfig:
     memory_guard_dimred_max_points: int
     recomp_constraint_candidate_multiplier: int
     recomp_constraint_min_candidates: int
+
+
+#: Settings renamed when entry selection moved to ``SelectionStore`` (old name -> new name).
+_RENAMED_ENV_VARS = {
+    "MOLMANAGER_TABLE_SELECTION_OID_OVERRIDE_MIN": "MOLMANAGER_SELECTION_STATUS_MIN_ROWS",
+    "MOLMANAGER_TABLE_SELECTION_CHUNK_ROWS": "MOLMANAGER_TOOL_TABLE_CHUNK_ROWS",
+}
+
+
+def _migrate_renamed_env_vars() -> None:
+    """Honor renamed ``MOLMANAGER_*`` variables under their old names when the new one is unset."""
+    migrated: list[str] = []
+    for old_key, new_key in _RENAMED_ENV_VARS.items():
+        value = os.environ.get(old_key)
+        if value is None or new_key in os.environ:
+            continue
+        os.environ[new_key] = value
+        migrated.append(f"{old_key}→{new_key}")
+    if migrated:
+        logger.warning(
+            "Renamed MolManager environment variables were mapped to their new names (%s). "
+            "Rename them; the old names will be removed in a future release.",
+            ", ".join(migrated),
+        )
 
 
 def _migrate_chemmanager_env_aliases() -> None:
@@ -190,6 +214,7 @@ def _warn_retired_custom_calc_legacy_eval() -> None:
 def load_config() -> MolManagerConfig:
     """Read current settings from ``os.environ`` (no process-wide cache — tests can monkeypatch)."""
     _migrate_chemmanager_env_aliases()
+    _migrate_renamed_env_vars()
     _warn_retired_custom_calc_legacy_eval()
     hard = _env_int("MOLMANAGER_SQL_MAX_ROWS_HARD", 2_000_000, lo=1000, hi=50_000_000)
     precowarn = _env_int("MOLMANAGER_SQL_PRECOUNT_WARN", 100_000, lo=1000, hi=hard)
@@ -288,12 +313,12 @@ def load_config() -> MolManagerConfig:
         tool_progress_poll_ms=_env_int("MOLMANAGER_TOOL_PROGRESS_POLL_MS", 200, lo=50, hi=2000),
         status_memory_enabled=_env_bool("MOLMANAGER_STATUS_MEMORY", True),
         status_memory_poll_ms=_env_int("MOLMANAGER_STATUS_MEMORY_POLL_MS", 2000, lo=500, hi=60_000),
-        table_selection_oid_override_min=_env_int(
-            "MOLMANAGER_TABLE_SELECTION_OID_OVERRIDE_MIN", 2500, lo=100, hi=10_000_000
+        # Show a "Selecting…" status before select-by-criteria row scans on tables this large.
+        selection_status_min_rows=_env_int(
+            "MOLMANAGER_SELECTION_STATUS_MIN_ROWS", 2500, lo=100, hi=10_000_000
         ),
-        table_selection_chunk_rows=_env_int(
-            "MOLMANAGER_TABLE_SELECTION_CHUNK_ROWS", 2000, lo=64, hi=100_000
-        ),
+        # Rows per GUI-thread chunk when tools read table snapshots or write results back.
+        tool_table_chunk_rows=_env_int("MOLMANAGER_TOOL_TABLE_CHUNK_ROWS", 2000, lo=64, hi=100_000),
         # WebGL scatter above this count (pan/zoom/select stay responsive on large sets).
         plot_scattergl_min_points=_env_int(
             "MOLMANAGER_PLOT_SCATTERGL_MIN_POINTS", 2000, lo=0, hi=10_000_000

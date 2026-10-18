@@ -519,22 +519,8 @@ class TableCalcMixin:
                     except Exception:
                         pass
             # Select after column insert — inserting columns clears Qt selection.
-            # Keep an OID override so Export Selected survives filter/header churn.
             if ctx.get("select_subset") and picked:
-                source_rows: list[int] = []
-                for oid in picked:
-                    try:
-                        row = self.logical_row_for_oid(int(oid))
-                    except (TypeError, ValueError):
-                        continue
-                    if row >= 0:
-                        source_rows.append(int(row))
-                self._finish_oid_override_selection(
-                    source_rows,
-                    frozenset(int(o) for o in picked),
-                    clear_oid_override=False,
-                    extra_status="",
-                )
+                self.select_table_oids(picked)
             cache_note = ""
             if n_cached or n_computed:
                 cache_note = f" ({n_cached} cached fingerprint(s), {n_computed} computed)"

@@ -332,9 +332,11 @@ class TableMenuMixin:
         )
 
     def show_row_header_menu(self, pos):
-        row = self.table.verticalHeader().logicalIndexAt(pos)
-        if row < 0:
+        view_row = self.table.verticalHeader().logicalIndexAt(pos)
+        mapped = self._source_cell_from_view_index(self.table.model().index(view_row, 0))
+        if mapped is None:
             return
+        row = mapped[0]
         menu = QMenu(self)
         dup_act = menu.addAction("Duplicate Row")
         del_act = menu.addAction("Delete Row")

@@ -48,7 +48,7 @@ def test_clear_all_resets_table_and_ingest_flags(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     _seed_two_rows(w)
     w._reveal_workspace_ready()
-    w._selected_oids_override = frozenset({0})
+    w.selection_store.set({0})
 
     w.clear_all()
 
@@ -56,7 +56,7 @@ def test_clear_all_resets_table_and_ingest_flags(qapp):  # noqa: ARG001
     assert w.mols == {}
     assert w.headers == []
     assert w.next_oid == 0
-    assert w._selected_oids_override is None
+    assert w.selection_store.is_empty()
     assert w._ingest_loading is False
     assert w._table_stack.currentIndex() == 0
     assert w._loading_detail.text() == LOADING_DETAIL_IDLE
@@ -203,7 +203,7 @@ def test_save_selected_to_session_writes_subset_without_clearing_dirty(qapp, mon
 
     w = ChemistryWorkspaceWindow()
     _seed_two_rows(w)
-    w._selected_oids_override = frozenset({1})
+    w.selection_store.set({1})
     w._mark_session_dirty()
     out = tmp_path / "selected.cms"
     monkeypatch.setattr(
@@ -454,14 +454,186 @@ def test_select_table_oids_updates_selection_set(qapp):  # noqa: ARG001
     assert w._selected_logical_rows() == [1]
 
 
-def test_selected_oids_override_preferred(qapp):  # noqa: ARG001
+def test_selection_store_is_the_selection(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     _seed_two_rows(w)
     w.select_table_oids({0})
     qapp.processEvents()
-    w._selected_oids_override = frozenset({1})
+    w.selection_store.set({1})
 
     assert w._selected_oids_set() == {1}
+    assert w._selected_logical_rows() == [1]
+    assert w._table_model.highlighted_oids() == frozenset({1})
+
+
+def test_selection_survives_filtering(qapp):  # noqa: ARG001
+    """Selection is keyed by OID, so rows hidden by a filter stay selected."""
+    w = ChemistryWorkspaceWindow()
+    _seed_two_rows(w)
+    w.select_table_oids({0, 1})
+    qapp.processEvents()
+    w._filter_proxy_model.set_visible_oids(frozenset({1}))
+    qapp.processEvents()
+
+    assert w._selected_oids_set() == {0, 1}
+
+
+def test_large_selection_pruned_on_row_delete(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _seed_two_rows(w)
+    w.selection_store.set({0, 1})
+    w._table_model.remove_row_at(0)
+    qapp.processEvents()
+
+    assert w._selected_oids_set() == {1}
+
+
+def test_plot_fanout_is_leading_edge_throttled(qapp, monkeypatch):  # noqa: ARG001
+    """First change syncs plots at once; a burst coalesces into one trailing sync."""
+    w = ChemistryWorkspaceWindow()
+    _seed_two_rows(w)
+    syncs: list[frozenset[int]] = []
+    monkeypatch.setattr(
+        w,
+        "_sync_active_plots_from_table_selection",
+        lambda: syncs.append(w.selection_store.oids),
+    )
+
+    w.selection_store.set({0})
+    assert syncs == [frozenset({0})]
+    w.selection_store.set({1})
+    w.selection_store.set({0, 1})
+    assert len(syncs) == 1
+
+    w._plot_table_sync_timer.timeout.emit()
+    assert syncs == [frozenset({0}), frozenset({0, 1})]
+    w._plot_table_sync_timer.stop()
+    w._plot_table_sync_timer.timeout.emit()
+    assert len(syncs) == 2
+
+
+def test_select_without_reveal_leaves_table_focus_and_scroll(qapp, monkeypatch):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _seed_two_rows(w)
+    revealed: list[object] = []
+    monkeypatch.setattr(w, "_refresh_table_selection_visual", lambda *a, **k: revealed.append(a))
+
+    w.select_table_rows([1], reveal=False)
+    assert revealed == []
+    assert w._selected_oids_set() == {1}
+
+    w.select_table_rows([0])
+    assert len(revealed) == 1
+
+
+def test_selection_change_origin_reaches_subscribers(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _seed_two_rows(w)
+    origins: list[object] = []
+    w.selection_store.changed.connect(origins.append)
+    plot = object()
+
+    w.select_table_rows([0], origin=plot)
+    w.clear_table_selection(origin=plot)
+
+    assert origins == [plot, plot]
+
+
+def _seed_rows(w: ChemistryWorkspaceWindow, n: int) -> None:
+    w.headers = ["ID_HIDDEN", "Structure", "SMILES", "MW"]
+    w._table_model.set_headers(list(w.headers))
+    for oid in range(n):
+        w._table_model.append_row(oid, {"SMILES": "C" * (oid + 1), "MW": str(oid)})
+    w.next_oid = n
+
+
+def test_row_header_modifiers_drive_entry_selection(qapp):  # noqa: ARG001
+    from PyQt5.QtCore import Qt
+
+    w = ChemistryWorkspaceWindow()
+    _seed_rows(w, 6)
+    ctl = w.table.row_selection_controller()
+
+    ctl.press_row(1, Qt.NoModifier)
+    assert w._selected_oids_set() == {1}
+    ctl.press_row(3, Qt.ShiftModifier)
+    assert w._selected_oids_set() == {1, 2, 3}
+    ctl.press_row(5, Qt.ControlModifier)
+    assert w._selected_oids_set() == {1, 2, 3, 5}
+    ctl.press_row(2, Qt.ControlModifier)
+    assert w._selected_oids_set() == {1, 3, 5}
+    # Ctrl+Shift adds the range from the last anchor (row 2) without dropping anything.
+    ctl.press_row(0, Qt.ControlModifier | Qt.ShiftModifier)
+    assert w._selected_oids_set() == {0, 1, 2, 3, 5}
+    assert not w.table.selectionModel().hasSelection()
+    w.close()
+
+
+def test_row_header_click_selects_entries_not_qt_rows(qapp):  # noqa: ARG001
+    from PyQt5.QtCore import QPoint, Qt
+    from PyQt5.QtTest import QTest
+
+    w = ChemistryWorkspaceWindow()
+    _seed_rows(w, 4)
+    w.resize(900, 600)
+    w._reveal_workspace_ready()
+    w.show()
+    qapp.processEvents()
+    vh = w.table.verticalHeader()
+    y = vh.sectionViewportPosition(2) + vh.sectionSize(2) // 2
+    QTest.mouseClick(vh.viewport(), Qt.LeftButton, Qt.NoModifier, QPoint(5, y))
+    qapp.processEvents()
+    assert w._selected_oids_set() == {2}
+    assert not w.table.selectionModel().hasSelection()
+    w.close()
+
+
+def test_cell_click_clears_entries_but_right_click_in_selection_keeps_them(qapp):  # noqa: ARG001
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtTest import QTest
+
+    w = ChemistryWorkspaceWindow()
+    _seed_rows(w, 4)
+    w.resize(900, 600)
+    w._reveal_workspace_ready()
+    w.show()
+    qapp.processEvents()
+    view = w.table.model()
+    w.select_table_rows([1, 2])
+    qapp.processEvents()
+
+    inside = w.table.visualRect(view.index(1, 3)).center()
+    QTest.mouseClick(w.table.viewport(), Qt.RightButton, Qt.NoModifier, inside)
+    assert w._selected_oids_set() == {1, 2}
+
+    outside = w.table.visualRect(view.index(3, 3)).center()
+    QTest.mouseClick(w.table.viewport(), Qt.LeftButton, Qt.NoModifier, outside)
+    assert w._selected_oids_set() == set()
+    assert w.table.selectionModel().isSelected(view.index(3, 3))
+    w.close()
+
+
+def test_select_all_selects_shown_entries(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _seed_rows(w, 4)
+    w.table.setRowHidden(3, True)
+    w.table.selectAll()
+    assert w._selected_oids_set() == {0, 1, 2}
+    assert not w.table.selectionModel().hasSelection()
+    w.close()
+
+
+def test_copy_includes_selected_entry_rows(qapp):  # noqa: ARG001
+    from PyQt5.QtWidgets import QApplication
+
+    w = ChemistryWorkspaceWindow()
+    _seed_rows(w, 3)
+    w.select_table_oids({0, 2})
+    assert not w.table.selectionModel().hasSelection()
+    w.edit_copy()
+    # Structure (col 1) copies the SMILES text; ID_HIDDEN is never copied.
+    assert QApplication.clipboard().text() == "C\tC\t0\nCCC\tCCC\t2"
+    w.close()
 
 
 def test_column_header_click_keeps_table_scroll(qapp):  # noqa: ARG001
@@ -526,11 +698,18 @@ def test_delete_selection_kind_rows_columns_cells(qapp):  # noqa: ARG001
     qapp.processEvents()
     assert w._delete_selection_kind() == "cells"
 
-    w._selected_oids_override = frozenset({0})
-    w._select_columns([3])
+    _select_row_and_column(w, 0, 3)
     qapp.processEvents()
     assert w._delete_selection_kind() == "both"
     w.close()
+
+
+def _select_row_and_column(w, row: int, col: int) -> None:
+    """User-style selection of one full column, then Ctrl+click on one row header."""
+    from PyQt5.QtCore import Qt
+
+    w._select_columns([col])
+    w.table.row_selection_controller().press_row(row, Qt.ControlModifier)
 
 
 def test_select_table_rows_updates_status(qapp):  # noqa: ARG001
@@ -622,8 +801,7 @@ def test_delete_selection_both_can_choose_columns(qapp, monkeypatch):  # noqa: A
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     w = ChemistryWorkspaceWindow()
     _seed_two_rows(w)
-    w._selected_oids_override = frozenset({0})
-    w._select_columns([3])
+    _select_row_and_column(w, 0, 3)
     monkeypatch.setattr(w, "_ask_delete_rows_or_columns", lambda *a, **k: "columns")
     w.edit_delete_selection()
     assert "MW" not in w.headers
@@ -636,8 +814,7 @@ def test_delete_selection_both_can_choose_rows(qapp, monkeypatch):  # noqa: ARG0
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     w = ChemistryWorkspaceWindow()
     _seed_two_rows(w)
-    w._selected_oids_override = frozenset({0})
-    w._select_columns([3])
+    _select_row_and_column(w, 0, 3)
     monkeypatch.setattr(w, "_ask_delete_rows_or_columns", lambda *a, **k: "rows")
     w.edit_delete_selection()
     assert "MW" in w.headers
@@ -699,14 +876,10 @@ def test_plot_clear_selection_drops_header_select_highlight(qapp):  # noqa: ARG0
     qapp.processEvents()
     assert w._selected_oids_set() == {0, 1}
 
-    w._selected_oids_override = frozenset({0, 1})
-    w._table_model.set_highlighted_oids(frozenset({0, 1}))
     sm = w.table.selectionModel()
-    if sm is not None:
-        sm.clearSelection()
 
     clear_table_selection_from_plot(w)
-    assert w._selected_oids_override is None
+    assert w.selection_store.is_empty()
     assert w._table_model.highlighted_oids() is None
     assert w._selected_oids_set() == set()
     assert sm is None or not sm.hasSelection()
@@ -918,9 +1091,7 @@ def test_dock_wire_syncs_only_docked_plot(qapp, monkeypatch):  # noqa: ARG001
     incoming.sync_from_table_selection = _sync_incoming
 
     fanout = []
-    monkeypatch.setattr(
-        w, "_sync_active_plots_from_table_selection", lambda: fanout.append(True)
-    )
+    monkeypatch.setattr(w, "_sync_active_plots_from_table_selection", lambda: fanout.append(True))
     monkeypatch.setattr(w, "_prepare_tool_plot", lambda *_a, **_k: None)
 
     assert w.dock_plot_widget(incoming) is True

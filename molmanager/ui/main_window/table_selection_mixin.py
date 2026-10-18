@@ -34,8 +34,10 @@ from ...services.table_selection import (
     structure_row_is_empty,
 )
 from ...chem.molecule_conversion import looks_like_mol_block
+from ..layout_perf import perf_span
 from ..qt_widget_utils import qobject_is_deleted
-from ..table_selection import item_selection_for_view_rows, merge_sorted_row_indices
+from ..selection_store import ORIGIN_TABLE
+from ..table_selection import merge_sorted_row_indices
 
 # Sentinel: visible source-row cache is empty (distinct from cached ``None`` = all rows visible).
 _VISIBLE_SOURCE_ROWS_UNSET = object()
@@ -101,8 +103,6 @@ class TableSelectionMixin:
         sm = self.table.selectionModel()
         scroll_pos = self._table_scroll_pos()
         current = sm.currentIndex() if sm is not None else None
-        was_programmatic = bool(getattr(self, "_in_programmatic_table_selection", False))
-        self._in_programmatic_table_selection = True
         try:
             if sm is not None:
                 sm.select(sel, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Columns)
@@ -111,10 +111,11 @@ class TableSelectionMixin:
                     if keep.isValid():
                         sm.setCurrentIndex(keep, QItemSelectionModel.NoUpdate)
         finally:
-            self._in_programmatic_table_selection = was_programmatic
             self.table.setSelectionBehavior(prev_behavior)
             self.table.setAutoScroll(was_auto_scroll)
             self._restore_table_scroll_pos(scroll_pos)
+        # Column selection replaces any entry selection.
+        self.selection_store.clear(origin=ORIGIN_TABLE)
         focus_col = (
             int(anchor_col)
             if anchor_col is not None and int(anchor_col) in seen
@@ -222,14 +223,10 @@ class TableSelectionMixin:
             msg = f"{msg} {extra}"
         self._set_selection_status(msg, pump=pump)
 
-    def _cancel_chunked_table_selection(self) -> None:
-        self._table_selection_job_gen = int(getattr(self, "_table_selection_job_gen", 0)) + 1
-        self._table_selection_ctx = None
-
     def _maybe_status_before_large_select(self) -> None:
         total = self._table_model.rowCount()
-        if total >= load_config().table_selection_oid_override_min:
-            self._set_selection_status(f"Selecting… (0/{total:,} rows)", pump=True)
+        if total >= load_config().selection_status_min_rows:
+            self._set_selection_status(f"Selecting from {total:,} rows…", pump=True)
 
     def _use_filter_proxy_for_table(self) -> bool:
         proxy = getattr(self, "_filter_proxy_model", None)
@@ -305,51 +302,75 @@ class TableSelectionMixin:
             vp.update()
 
     def _sync_table_selection_highlight(self) -> None:
-        """Paint row highlights from ``_selected_oids_override`` without a giant QItemSelection."""
-        override = getattr(self, "_selected_oids_override", None)
-        self._table_model.set_highlighted_oids(override)
+        """Paint every selected entry from the store (covers rows Qt does not hold, e.g.
+        large or filtered-out selections), without building a giant QItemSelection."""
+        oids = self.selection_store.oids
+        self._table_model.set_highlighted_oids(oids or None)
         self._repaint_table_selection_viewport()
+        row_header = self.table.verticalHeader()
+        if row_header is not None:
+            row_header.viewport().update()
 
-    def _schedule_plot_sync_after_programmatic_selection(self) -> None:
-        """Sync plot highlights after search / analysis / other programmatic table selection."""
-        schedule = getattr(self, "_schedule_sync_active_plots_from_table_selection", None)
-        if callable(schedule):
-            schedule()
+    def _on_selection_store_changed(self, _origin: object) -> None:
+        """Window-side fan-out for every entry-selection change, whoever made it.
 
-    def _on_user_table_selection_changed(self, *_args) -> None:
-        if getattr(self, "_in_programmatic_table_selection", False):
-            return
-        self._selected_oids_override = None
-        self._sync_table_selection_highlight()
-        self._schedule_plot_sync_after_programmatic_selection()
-        sync_dock = getattr(self, "_sync_dock_complex_viewer", None)
-        if callable(sync_dock):
-            sync_dock()
+        Paints table highlights and pushes the selection to open plots. Browsers subscribe
+        to ``selection_store.changed`` themselves.
+        """
+        with perf_span("selection.store_changed"):
+            self._sync_table_selection_highlight()
+            self._schedule_sync_active_plots_from_table_selection()
+
+    def _prune_selection_store(self, *_args) -> None:
+        """Forget selected OIDs whose rows were deleted or replaced."""
+        self.selection_store.prune(self._table_model.present_oids)
+
+    def _oids_for_view_rows(self, view_rows: list[int]) -> frozenset[int]:
+        """OIDs shown at the given table-view rows (filter-proxy rows when filtering)."""
+        if not view_rows:
+            return frozenset()
+        if self._use_filter_proxy_for_table():
+            spans = merge_sorted_row_indices(view_rows)
+            rows = self._filter_proxy_model.source_rows_for_row_spans(spans)
+        else:
+            n = self._table_model.rowCount()
+            rows = [int(r) for r in view_rows if 0 <= int(r) < n]
+        return self._oids_for_source_rows(rows)
+
+    def _clear_qt_cell_selection(self) -> None:
+        sm = self.table.selectionModel()
+        if sm is not None and sm.hasSelection():
+            sm.clearSelection()
 
     def select_table_rows(
         self,
         rows: list[int],
         *,
-        clear_oid_override: bool = True,
         extra_status: str = "",
+        origin: object = None,
+        reveal: bool = True,
     ) -> int:
-        """Replace the selection with the given source-model row indices (skips invalid indices)."""
-        self._cancel_chunked_table_selection()
-        return self._apply_table_row_selection(
-            rows, clear_oid_override=clear_oid_override, extra_status=extra_status
-        )
+        """Replace the selection with the given source-model rows (an empty list clears it).
+
+        Rows hidden by filters stay selected. ``origin`` tags the resulting
+        ``selection_store.changed`` so a subscriber can recognise its own change.
+        ``reveal`` moves the current cell to the first row, scrolls to it, and focuses the
+        table; plots pass ``False`` so a click does not steal focus or jump the table.
+        """
+        with perf_span("selection.select_rows"):
+            return self._apply_table_row_selection(
+                rows, extra_status=extra_status, origin=origin, reveal=reveal
+            )
 
     def select_table_oids(
         self,
         oids: list[int] | set[int] | frozenset[int],
         *,
-        clear_oid_override: bool = True,
         extra_status: str = "",
+        origin: object = None,
+        reveal: bool = True,
     ) -> int:
-        """Select rows for the given OIDs; uses chunked selection when the set is large."""
-        if not oids:
-            self._report_table_selection_status(0, extra=extra_status)
-            return 0
+        """Replace the selection with the given OIDs (an empty set clears it)."""
         source_rows: list[int] = []
         for oid in oids:
             try:
@@ -358,13 +379,8 @@ class TableSelectionMixin:
                 continue
             if row >= 0:
                 source_rows.append(int(row))
-        if not source_rows:
-            self._report_table_selection_status(0, extra=extra_status)
-            return 0
         return self.select_table_rows(
-            source_rows,
-            clear_oid_override=clear_oid_override,
-            extra_status=extra_status,
+            source_rows, extra_status=extra_status, origin=origin, reveal=reveal
         )
 
     def _source_rows_to_view_rows(self, source_rows: list[int]) -> list[int]:
@@ -383,329 +399,55 @@ class TableSelectionMixin:
     def _oids_for_source_rows(self, source_rows: list[int]) -> frozenset[int]:
         return oids_for_source_rows(source_rows, row_oid=self._table_model.row_oid)
 
-    def _apply_qt_view_row_selection(
-        self,
-        source_rows: list[int],
-        view_rows: list[int],
-        *,
-        clear_oid_override: bool,
-        extra_status: str = "",
-        mode_flags=None,
-    ) -> int:
-        if clear_oid_override:
-            self._selected_oids_override = None
-        sm = self.table.selectionModel()
-        view_model = self.table.model()
-        if sm is None or view_model is None or not view_rows:
-            return 0
-        last_col = max(0, view_model.columnCount() - 1)
-        flags = mode_flags or (QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
-        prev_mode = self.table.selectionMode()
-        prev_behavior = self.table.selectionBehavior()
-        self.table.setSelectionMode(QAbstractItemView.MultiSelection)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._in_programmatic_table_selection = True
-        try:
-            if flags & QItemSelectionModel.Clear:
-                sm.clearSelection()
-            selection = item_selection_for_view_rows(view_model, view_rows, last_col=last_col)
-            if not selection.isEmpty():
-                sm.select(selection, flags)
-        finally:
-            self._in_programmatic_table_selection = False
-        self.table.setSelectionMode(prev_mode)
-        self.table.setSelectionBehavior(prev_behavior)
-        self._sync_table_selection_highlight()
-        self._refresh_table_selection_visual(source_rows)
-        n = len(source_rows)
-        self._report_table_selection_status(n, extra=extra_status, pump=True)
-        self._schedule_plot_sync_after_programmatic_selection()
-        sync_dock = getattr(self, "_sync_dock_complex_viewer", None)
-        if callable(sync_dock):
-            sync_dock()
-        return n
-
-    def _finish_oid_override_selection(
-        self,
-        source_rows: list[int],
-        oids: frozenset[int],
-        *,
-        clear_oid_override: bool,
-        extra_status: str = "",
-    ) -> int:
-        if clear_oid_override:
-            self._selected_oids_override = None
-        sm = self.table.selectionModel()
-        self._in_programmatic_table_selection = True
-        try:
-            if sm is not None:
-                sm.clearSelection()
-            self._selected_oids_override = oids
-        finally:
-            self._in_programmatic_table_selection = False
-        anchor = [source_rows[0]] if source_rows else None
-        self._sync_table_selection_highlight()
-        self._refresh_table_selection_visual(anchor)
-        n = len(oids)
-        self._report_table_selection_status(n, extra=extra_status, pump=True)
-        self._schedule_plot_sync_after_programmatic_selection()
-        return n
-
-    def _start_chunked_oid_selection(
-        self,
-        source_rows: list[int],
-        *,
-        clear_oid_override: bool,
-        extra_status: str = "",
-    ) -> int:
-        """Logical selection for large row sets (tools use OIDs; table is not fully highlighted)."""
-        if clear_oid_override:
-            self._selected_oids_override = None
-        total = len(source_rows)
-        if total <= 0:
-            self._report_table_selection_status(0)
-            return 0
-        self._cancel_chunked_table_selection()
-        self._table_selection_job_gen = int(getattr(self, "_table_selection_job_gen", 0)) + 1
-        gen = self._table_selection_job_gen
-        self._table_selection_ctx = {
-            "gen": gen,
-            "phase": "oids",
-            "source_rows": source_rows,
-            "clear_oid_override": clear_oid_override,
-            "extra_status": extra_status,
-            "idx": 0,
-            "oids": set(),
-            "chunk": max(2000, load_config().table_selection_chunk_rows),
-        }
-        self._set_selection_status(f"Selecting… (0/{total:,} rows)", pump=True)
-        QTimer.singleShot(0, self._table_selection_chunk_step)
-        return total
-
-    def _start_chunked_qt_selection(
-        self,
-        source_rows: list[int],
-        view_rows: list[int],
-        *,
-        clear_oid_override: bool,
-        extra_status: str = "",
-    ) -> int:
-        """Apply Qt selection in chunks so the UI stays responsive."""
-        if clear_oid_override:
-            self._selected_oids_override = None
-        view_model = self.table.model()
-        if view_model is None:
-            return 0
-        last_col = max(0, view_model.columnCount() - 1)
-        ranges = merge_sorted_row_indices(view_rows)
-        total = len(source_rows)
-        self._cancel_chunked_table_selection()
-        self._table_selection_job_gen = int(getattr(self, "_table_selection_job_gen", 0)) + 1
-        gen = self._table_selection_job_gen
-        sm = self.table.selectionModel()
-        prev_mode = self.table.selectionMode()
-        prev_behavior = self.table.selectionBehavior()
-        self.table.setSelectionMode(QAbstractItemView.MultiSelection)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        if sm is not None:
-            sm.clearSelection()
-        self._table_selection_ctx = {
-            "gen": gen,
-            "phase": "qt",
-            "source_rows": source_rows,
-            "view_model": view_model,
-            "last_col": last_col,
-            "ranges": ranges,
-            "range_idx": 0,
-            "ranges_per_tick": 80,
-            "clear_oid_override": clear_oid_override,
-            "extra_status": extra_status,
-            "prev_mode": prev_mode,
-            "prev_behavior": prev_behavior,
-        }
-        self._set_selection_status(f"Selecting… (0/{total:,} rows)", pump=True)
-        QTimer.singleShot(0, self._table_selection_chunk_step)
-        return total
-
-    def _table_selection_chunk_step(self) -> None:
-        ctx = getattr(self, "_table_selection_ctx", None)
-        if not ctx or ctx.get("gen") != getattr(self, "_table_selection_job_gen", -1):
-            return
-        phase = ctx.get("phase")
-        if phase == "oids":
-            self._table_selection_chunk_step_oids(ctx)
-        elif phase == "qt":
-            self._table_selection_chunk_step_qt(ctx)
-
-    def _table_selection_chunk_step_oids(self, ctx: dict) -> None:
-        rows: list[int] = ctx["source_rows"]
-        total = len(rows)
-        idx = int(ctx["idx"])
-        chunk = int(ctx["chunk"])
-        end = min(idx + chunk, total)
-        oids: set[int] = ctx["oids"]
-        for j in range(idx, end):
-            try:
-                oids.add(int(self._table_model.row_oid(rows[j])))
-            except (IndexError, ValueError, TypeError):
-                continue
-        ctx["idx"] = end
-        self._table_model.set_highlighted_oids(frozenset(oids))
-        self._repaint_table_selection_viewport()
-        self._set_selection_status(f"Selecting… ({end:,}/{total:,} rows)")
-        if end < total:
-            QTimer.singleShot(0, self._table_selection_chunk_step)
-            return
-        self._table_selection_ctx = None
-        self._finish_oid_override_selection(
-            rows,
-            frozenset(oids),
-            clear_oid_override=bool(ctx.get("clear_oid_override", True)),
-            extra_status=str(ctx.get("extra_status") or ""),
-        )
-
-    def _table_selection_chunk_step_qt(self, ctx: dict) -> None:
-        sm = self.table.selectionModel()
-        view_model = ctx["view_model"]
-        last_col = int(ctx["last_col"])
-        ranges: list[tuple[int, int]] = ctx["ranges"]
-        ri = int(ctx["range_idx"])
-        per_tick = int(ctx["ranges_per_tick"])
-        source_rows: list[int] = ctx["source_rows"]
-        total = len(source_rows)
-        end_ri = min(ri + per_tick, len(ranges))
-        selection = QItemSelection()
-        for k in range(ri, end_ri):
-            lo, hi = ranges[k]
-            top = view_model.index(lo, 0)
-            bottom = view_model.index(hi, last_col)
-            if top.isValid() and bottom.isValid():
-                selection.select(top, bottom)
-        self._in_programmatic_table_selection = True
-        try:
-            if sm is not None and not selection.isEmpty():
-                flags = QItemSelectionModel.Select | QItemSelectionModel.Rows
-                if ri == 0:
-                    flags |= QItemSelectionModel.Clear
-                sm.select(selection, flags)
-        finally:
-            self._in_programmatic_table_selection = False
-        done_rows = sum(hi - lo + 1 for lo, hi in ranges[:end_ri])
-        ctx["range_idx"] = end_ri
-        self._set_selection_status(f"Selecting… ({min(done_rows, total):,}/{total:,} rows)")
-        if end_ri < len(ranges):
-            QTimer.singleShot(0, self._table_selection_chunk_step)
-            return
-        self.table.setSelectionMode(ctx["prev_mode"])
-        self.table.setSelectionBehavior(ctx["prev_behavior"])
-        self._table_selection_ctx = None
-        self._sync_table_selection_highlight()
-        self._refresh_table_selection_visual(source_rows)
-        self._report_table_selection_status(
-            len(source_rows),
-            extra=str(ctx.get("extra_status") or ""),
-            pump=True,
-        )
-        self._schedule_plot_sync_after_programmatic_selection()
-
     def _apply_table_row_selection(
         self,
         rows: list[int],
         *,
-        clear_oid_override: bool = True,
         extra_status: str = "",
+        origin: object = None,
+        reveal: bool = True,
     ) -> int:
+        """Store the entry selection; the table paints it from the store (no Qt mirror)."""
         n_rows = self._table_model.rowCount()
-        if n_rows <= 0:
-            if clear_oid_override:
-                self._selected_oids_override = None
-            self._report_table_selection_status(0, extra=extra_status)
-            return 0
         uniq = sorted({int(r) for r in rows if 0 <= int(r) < n_rows})
         if not uniq:
-            if clear_oid_override:
-                self.clear_table_selection()
-            else:
-                n_override = len(self._selected_oids_override or ())
-                self._report_table_selection_status(n_override, extra=extra_status)
+            self.clear_table_selection(origin=origin)
             return 0
-        cfg = load_config()
-        oid_min = cfg.table_selection_oid_override_min
-        chunk_thresh = cfg.table_selection_chunk_rows
-        if len(uniq) >= oid_min:
-            extra = str(extra_status or "")
-            if len(uniq) < n_rows:
-                hint = "(tools use full selection; hidden rows included via logical selection)"
-                extra = f"{extra} {hint}".strip() if extra else hint
-            self._start_chunked_oid_selection(
-                uniq, clear_oid_override=clear_oid_override, extra_status=extra
-            )
-            return len(uniq)
-        view_rows = self._source_rows_to_view_rows(uniq)
-        if not view_rows:
-            if not clear_oid_override and self._selected_oids_override:
-                n_override = len(self._selected_oids_override)
-                self._report_table_selection_status(n_override, extra=extra_status)
-                return n_override
-            self._report_table_selection_status(0, extra=extra_status)
-            return 0
-        if len(uniq) >= chunk_thresh:
-            self._start_chunked_qt_selection(
-                uniq,
-                view_rows,
-                clear_oid_override=clear_oid_override,
-                extra_status=extra_status,
-            )
-            return len(uniq)
-        return self._apply_qt_view_row_selection(
-            uniq,
-            view_rows,
-            clear_oid_override=clear_oid_override,
-            extra_status=extra_status,
-        )
+        oids = self._oids_for_source_rows(uniq)
+        self._clear_qt_cell_selection()
+        self.selection_store.set(oids, origin=origin)
+        extra = str(extra_status or "")
+        visible = self._visible_oids_set()
+        if visible is not None and not oids <= visible:
+            hint = "(includes rows hidden by filters)"
+            extra = f"{extra} {hint}".strip() if extra else hint
+        if reveal:
+            first_shown = next((r for r in uniq if self._is_source_row_visible(r)), None)
+            self._refresh_table_selection_visual(None if first_shown is None else [first_shown])
+        n = len(oids)
+        self._report_table_selection_status(n, extra=extra, pump=True)
+        return n
 
     def _select_all_visible_rows(self) -> None:
         """Select every row currently visible in the table (respects active filters)."""
         self._maybe_status_before_large_select()
         vis = self._visible_source_row_indices()
         if vis is None:
-            n_rows = self._table_model.rowCount()
-            cfg = load_config()
-            if n_rows >= cfg.table_selection_oid_override_min:
-                self._start_chunked_oid_selection(list(range(n_rows)))
-                return
-            self.select_table_rows(list(range(n_rows)))
-            return
+            vis = list(range(self._table_model.rowCount()))
         self.select_table_rows(vis)
 
     def _select_all_rows(self) -> None:
         """Select every visible table row (same as Select All on a column header)."""
         self._select_all_visible_rows()
 
-    def _cancel_pending_plot_table_select(self) -> None:
-        timer = getattr(self, "_plot_table_select_timer", None)
-        if timer is not None:
-            timer.stop()
-        self._plot_table_select_pending = None
+    def _clear_entry_selection(self, *, origin: object = None) -> None:
+        self._clear_qt_cell_selection()
+        self.selection_store.clear(origin=origin)
 
-    def clear_table_selection(self) -> None:
-        """Clear Qt, logical, and highlight selection, and sync open plots."""
-        self._cancel_pending_plot_table_select()
-        self._cancel_chunked_table_selection()
-        self._selected_oids_override = None
-        sm = self.table.selectionModel()
-        self._in_programmatic_table_selection = True
-        try:
-            if sm is not None:
-                sm.clearSelection()
-        finally:
-            self._in_programmatic_table_selection = False
-        self._sync_table_selection_highlight()
+    def clear_table_selection(self, *, origin: object = None) -> None:
+        """Clear the entry selection and any selected cells (store, highlights, plots)."""
+        self._clear_entry_selection(origin=origin)
         self._report_table_selection_status(0)
-        self._schedule_plot_sync_after_programmatic_selection()
-        sync_dock = getattr(self, "_sync_dock_complex_viewer", None)
-        if callable(sync_dock):
-            sync_dock()
 
     def invert_table_selection(self) -> None:
         """Select every table row that is not currently selected (full table, including filtered-out rows)."""
@@ -718,7 +460,7 @@ class TableSelectionMixin:
         if not inverted:
             self.clear_table_selection()
             return
-        if len(inverted) >= load_config().table_selection_oid_override_min:
+        if len(inverted) >= load_config().selection_status_min_rows:
             self._maybe_status_before_large_select()
         self.select_table_rows(inverted, extra_status="Inverted.")
 
@@ -826,51 +568,44 @@ class TableSelectionMixin:
         self.select_table_rows(to_sel)
 
     def _selected_logical_rows(self) -> list[int]:
-        """Distinct source-model row indices from the current selection (any column)."""
-        override = getattr(self, "_selected_oids_override", None)
-        if override:
-            return logical_rows_for_oids(
-                override,
-                logical_row_for_oid=self._table_model.logical_row_for_oid,
-            )
-        sm = self.table.selectionModel()
-        if sm is None:
-            return []
-        view_model = self.table.model()
-        proxy = getattr(self, "_filter_proxy_model", None)
-        use_proxy = proxy is not None and view_model is proxy
-        # selectedRows() is O(rows); selectedIndexes() is O(rows × columns) and freezes wide tables.
-        view_rows = sorted({ix.row() for ix in sm.selectedRows() if ix.isValid() and ix.row() >= 0})
-        if not use_proxy:
-            return view_rows
-        source_rows: list[int] = []
-        for vr in view_rows:
-            sidx = proxy.mapToSource(view_model.index(vr, 0))
-            if sidx.isValid():
-                source_rows.append(int(sidx.row()))
-        return sorted(set(source_rows))
+        """Sorted source-model rows of the selected entries (includes filtered-out rows)."""
+        return logical_rows_for_oids(
+            self.selection_store.oids,
+            logical_row_for_oid=self._table_model.logical_row_for_oid,
+        )
 
     def _selected_row_count_fast(self) -> int:
-        """Row count for scope labels — avoids materializing every logical row when possible."""
-        override = getattr(self, "_selected_oids_override", None)
-        if override is not None:
-            return len(override)
-        sm = self.table.selectionModel()
-        if sm is None:
-            return 0
-        return len(sm.selectedRows())
+        """Number of selected entries (no row scan)."""
+        return self.selection_store.count()
 
     def _selected_oids_set(self) -> set[int]:
-        from ..plot_table_sync import selected_oids_for_plot
+        return set(self.selection_store.oids)
 
-        return selected_oids_for_plot(self)
+    def _selected_shown_logical_rows(self) -> list[int]:
+        """Sorted source rows of selected entries that table filters currently show."""
+        rows = self._selected_logical_rows()
+        visible = self._visible_oids_set()
+        if visible is None:
+            return rows
+        row_oid = self._table_model.row_oid
+        return [r for r in rows if int(row_oid(r)) in visible]
+
+    def _selected_entry_source_cells(self) -> list[tuple[int, int]]:
+        """``(source_row, source_col)`` for every shown data cell of the shown selected entries.
+
+        Entry selection is not in Qt's selection model, so cell-based actions (copy, paste
+        origin) add these to Qt's selected cells to treat selected rows as whole rows.
+        """
+        rows = self._selected_shown_logical_rows()
+        if not rows:
+            return []
+        cols = [
+            c for c in range(1, self._table_model.columnCount()) if not self.table.isColumnHidden(c)
+        ]
+        return [(r, c) for r in rows for c in cols]
 
     def _selected_oids_for_delete(self) -> frozenset[int]:
-        """OIDs to delete without scanning the full table for logical row indices."""
-        override = getattr(self, "_selected_oids_override", None)
-        if override:
-            return frozenset(int(x) for x in override)
-        return frozenset(self._selected_oids_set())
+        return self.selection_store.oids
 
     def _oids_for_row_indices(self, rows: list[int]) -> frozenset[int]:
         return oids_from_id_hidden_cells(
@@ -879,18 +614,7 @@ class TableSelectionMixin:
         )
 
     def _clear_table_selection_after_delete(self) -> None:
-        self._cancel_pending_plot_table_select()
-        self._cancel_chunked_table_selection()
-        self._selected_oids_override = None
-        sm = self.table.selectionModel()
-        self._in_programmatic_table_selection = True
-        try:
-            if sm is not None:
-                sm.clearSelection()
-        finally:
-            self._in_programmatic_table_selection = False
-        self._sync_table_selection_highlight()
-        self._schedule_plot_sync_after_programmatic_selection()
+        self._clear_entry_selection()
 
     def _refresh_table_after_bulk_delete(self) -> None:
         self.calculate_global_bounds()

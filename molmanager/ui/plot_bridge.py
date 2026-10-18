@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING
 
 from PyQt5.QtCore import QObject, pyqtSlot
 
+from .layout_perf import perf_span
+
 if TYPE_CHECKING:
     from .plot import PlotWidget
 
@@ -35,11 +37,13 @@ class PlotBridge(QObject):
 
     @pyqtSlot(int, bool)
     def pointClicked(self, point_index: int, additive: bool = False) -> None:  # noqa: N802
-        self._plot_widget._on_plot_point_clicked(int(point_index), additive=bool(additive))
+        with perf_span("selection.plot_event"):
+            self._plot_widget._on_plot_point_clicked(int(point_index), additive=bool(additive))
 
     @pyqtSlot(str, bool)
     def pointsSelected(self, points_json: str, additive: bool = False) -> None:  # noqa: N802
-        self._plot_widget._on_plot_points_selected(points_json, additive=bool(additive))
+        with perf_span("selection.plot_event"):
+            self._plot_widget._on_plot_points_selected(points_json, additive=bool(additive))
 
     @pyqtSlot(str, bool)
     def histogramPointsSelected(self, indices_json: str, additive: bool = False) -> None:  # noqa: N802

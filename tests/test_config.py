@@ -73,6 +73,27 @@ def test_chemmanager_env_alias_migrates_with_warning(monkeypatch, caplog):
     assert any("CHEMMANAGER_" in r.message for r in caplog.records)
 
 
+def test_renamed_selection_env_vars_still_apply_with_warning(monkeypatch, caplog):
+    import logging
+
+    # delenv records the unset state, so the values the migration writes are removed afterwards.
+    monkeypatch.delenv("MOLMANAGER_SELECTION_STATUS_MIN_ROWS", raising=False)
+    monkeypatch.delenv("MOLMANAGER_TOOL_TABLE_CHUNK_ROWS", raising=False)
+    monkeypatch.setenv("MOLMANAGER_TABLE_SELECTION_OID_OVERRIDE_MIN", "4000")
+    monkeypatch.setenv("MOLMANAGER_TABLE_SELECTION_CHUNK_ROWS", "750")
+    with caplog.at_level(logging.WARNING, logger="molmanager.platform_support.config"):
+        cfg = load_config()
+    assert cfg.selection_status_min_rows == 4000
+    assert cfg.tool_table_chunk_rows == 750
+    assert any("MOLMANAGER_TOOL_TABLE_CHUNK_ROWS" in r.message for r in caplog.records)
+
+
+def test_new_selection_env_names_win_over_old_ones(monkeypatch):
+    monkeypatch.setenv("MOLMANAGER_TOOL_TABLE_CHUNK_ROWS", "900")
+    monkeypatch.setenv("MOLMANAGER_TABLE_SELECTION_CHUNK_ROWS", "750")
+    assert load_config().tool_table_chunk_rows == 900
+
+
 def test_perf_and_sqlite_page_size_env(monkeypatch):
     monkeypatch.setenv("MOLMANAGER_PERF_METRICS", "true")
     monkeypatch.setenv("MOLMANAGER_PERF_LOG_EVERY", "5")

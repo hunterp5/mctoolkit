@@ -281,7 +281,7 @@ Tool mixins that remain on the window (fragments, MMP/SALI, dock, predict) are t
 - **Helpers:** `services/numeric_bounds.py` (filter slider min/max scans);
   `column_color_compute.py` (gradient / categorical RGB).
 - **Filtered view:** `FilterProxyModel` hides rows by OID set (`set_visible_oids`), not per-row `setRowHidden`.
-- **Selection:** Qt selection + `_selected_oids_override` for large selections (tools/plots use `_selected_oids_set()`); logic lives in `TableSession` (`TableSelectionMixin` body).
+- **Selection:** `SelectionStore` (`window.selection_store`, OID-keyed) is the single source of truth; every writer goes through `select_table_rows` / `select_table_oids` / `clear_table_selection` and every reader asks the store. Qt's selection model holds only cell and column selection; entry selection is never mirrored into it. `TableRowSelectionController` (`ui/table_row_selection.py`, installed on `CompoundTableView`) turns row-header clicks (plain / Ctrl / Shift), Ctrl+A, and selection-clearing cell input into store operations. Row cells and row-header highlights paint from the store; copy / paste origin add the selected entries' shown cells to Qt's selected cells. Logic lives in `TableSession` (`TableSelectionMixin` body).
 - **SQLite mirror:** `SqliteTableStore` powers text/numeric filter pushdown and column search at 100k+ rows. Rebuilt in chunks on the GUI thread, then `SqliteRebuildWorker` builds the DB file.
 
 ## Background work
@@ -313,8 +313,8 @@ Progress: `WorkerSignals.tool_progress` + `ToolProgressState` polling → bottom
 - **Result browsers:** `ui/browsers/` (SOM, selection, MMP, SALI, metabolites) with shims at `ui/*_browser.py`
 - **Filters:** `FilterPanelMixin` is a file-split of the window filter panel (cards/apply/substructure/bounds) under `ui/filters/`. True mixins are card chrome only (`card_chrome.py`); `cards.py` is the barrel.
 - **Conformer writeback:** `ui/main_window/conformer_writeback.py` (table append / packed ensemble / superpose mol lookup); `ConformersToolsMixin` stays the UI adapter
-- **Table → plot:** debounced `_schedule_sync_active_plots_from_table_selection`
-- **Plot → table:** `apply_table_selection_for_source_rows`
+- **Table → plot:** `selection_store.changed` drives `_schedule_sync_active_plots_from_table_selection`, a leading-edge throttle (one fan-out per ~33 ms frame); the plot shell mutes its bridge only while it applies programmatic selections, so there are no echoes
+- **Plot → table:** `apply_table_selection_for_source_rows` applies immediately with `origin=<plot>` and `reveal=False` (no table scroll/focus steal); subscribers skip changes they originated
 - **Filters / edits:** `_schedule_active_plots_replot` after filter apply; `dataChanged` on model for open plots
 - **Substructure (large tables):** one or more SMARTS cards run via `SubstructureFilterWorker` off the GUI; sync/chunked apply consume override OID sets
 - **UI workflow benchmark:** `scripts/benchmark_ui_workflows.py` times CSV load, `.cms` restore, filters, plot collect/replot, search, export

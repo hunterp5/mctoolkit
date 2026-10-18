@@ -40,7 +40,6 @@ class ToolScopeHost(TableSelection, Protocol):
     def window(self) -> QWidget: ...
     def _selected_row_count_fast(self) -> int: ...
     def _selected_logical_rows(self) -> list: ...
-    def _schedule_sync_active_plots_from_table_selection(self) -> None: ...
 
 
 class ToolDialogScope:
@@ -61,7 +60,11 @@ class ToolDialogScope:
         self._attach_tool_scope_sync(dialog, on_finished_signal=dialog.finished)
 
     def _attach_tool_scope_sync(self, target, *, on_finished_signal) -> None:
-        """Wire table selection changes to a dialog/plot ``only_selected_cb`` until teardown."""
+        """Track a dialog/plot ``only_selected_cb`` until teardown.
+
+        Labels are refreshed by the selection fan-out
+        (:meth:`_refresh_attached_tool_scope_labels`), once per selection change.
+        """
         if getattr(target, "only_selected_cb", None) is None:
             return
         prior = getattr(target, "_scope_sync_disconnect", None)
@@ -70,24 +73,8 @@ class ToolDialogScope:
         if target not in self._scope_sync_targets:
             self._scope_sync_targets.append(target)
         self._sync_dialog_only_selected_scope(target)
-        sm = self._app.table.selectionModel()
-        if sm is None:
-            return
-
-        def on_sel_changed(*_args):
-            # Scope labels refresh once in the coalesced plot fan-out (avoids N× row scans).
-            self._app._schedule_sync_active_plots_from_table_selection()
-
-        sm.selectionChanged.connect(on_sel_changed)
 
         def teardown(*_args):
-            try:
-                from PyQt5 import sip
-
-                if sm is not None and not sip.isdeleted(sm):
-                    sm.selectionChanged.disconnect(on_sel_changed)
-            except (TypeError, RuntimeError):
-                pass
             try:
                 self._scope_sync_targets.remove(target)
             except ValueError:

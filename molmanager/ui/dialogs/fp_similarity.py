@@ -260,7 +260,7 @@ def apply_fp_similarity_column(app, *, compare_oids: set[int], column_name: str,
     n_scored = len(success)
     n_na = len(compare_oids) - n_scored
     cfg = load_config()
-    chunked = n_rows >= max(500, int(cfg.table_selection_chunk_rows))
+    chunked = n_rows >= max(500, int(cfg.tool_table_chunk_rows))
 
     def write_chunk(start: int, end: int, is_last: bool) -> None:
         model.fill_column_from_oid_map(

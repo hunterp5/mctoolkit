@@ -48,6 +48,23 @@ class FilterProxyModel(QAbstractProxyModel):
             return None
         return list(self._source_rows or [])
 
+    def source_rows_for_row_spans(self, spans: list[tuple[int, int]]) -> list[int]:
+        """Source rows for inclusive proxy-row spans, without per-row ``mapToSource`` calls.
+
+        Ascending when *spans* are sorted and disjoint (the proxy keeps source order).
+        """
+        n = self.rowCount()
+        out: list[int] = []
+        for lo, hi in spans:
+            lo, hi = max(0, int(lo)), min(n - 1, int(hi))
+            if hi < lo:
+                continue
+            if self._source_rows is None:
+                out.extend(range(lo, hi + 1))
+            else:
+                out.extend(self._source_rows[lo : hi + 1])
+        return out
+
     def setSourceModel(self, source) -> None:  # noqa: N802
         old = self.sourceModel()
         if old is not None and self._source_connected:

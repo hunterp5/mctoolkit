@@ -14,11 +14,9 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Helpers for building Qt item selections from row indices (merged contiguous ranges)."""
+"""Row-index helpers for table selection."""
 
 from __future__ import annotations
-
-from PyQt5.QtCore import QItemSelection
 
 
 def merge_sorted_row_indices(rows: list[int]) -> list[tuple[int, int]]:
@@ -36,16 +34,3 @@ def merge_sorted_row_indices(rows: list[int]) -> list[tuple[int, int]]:
             lo = hi = r
     spans.append((lo, hi))
     return spans
-
-
-def item_selection_for_view_rows(
-    view_model, view_rows: list[int], *, last_col: int
-) -> QItemSelection:
-    """Build a ``QItemSelection`` from proxy/view row indices using contiguous ranges."""
-    selection = QItemSelection()
-    for lo, hi in merge_sorted_row_indices(view_rows):
-        top = view_model.index(lo, 0)
-        bottom = view_model.index(hi, last_col)
-        if top.isValid() and bottom.isValid():
-            selection.select(top, bottom)
-    return selection

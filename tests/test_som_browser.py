@@ -337,16 +337,20 @@ def test_som_browser_jump_to_oid(qapp) -> None:  # noqa: ARG001
     w.close()
 
 
-def test_som_browser_only_selected_filters(qapp) -> None:  # noqa: ARG001
-    class _FakeApp:
-        def _selected_oids_set(self):
-            return {2}
+class _StoreApp:
+    def __init__(self, selected: set[int]) -> None:
+        from molmanager.ui.selection_store import SelectionStore
 
+        self.selection_store = SelectionStore()
+        self.selection_store.set(selected)
+
+
+def test_som_browser_only_selected_filters(qapp) -> None:  # noqa: ARG001
     recs = [
         SomBrowseRecord(oid=1, smiles="CCO", atoms=(SomAtomHit(0, 0.9, True),)),
         SomBrowseRecord(oid=2, smiles="c1ccccc1", atoms=(SomAtomHit(0, 0.2, False),)),
     ]
-    w = SomBrowserWidget(_FakeApp())
+    w = SomBrowserWidget(_StoreApp({2}))
     w.set_records(recs)
     assert w._cb_only_selected.text() == "Browse Only Selected"
     assert w._cb_only_selected.parent() is w._nav_bar
@@ -366,6 +370,23 @@ def test_som_browser_only_selected_filters(qapp) -> None:  # noqa: ARG001
     assert [r.oid for r in w._records] == [2]
     w._cb_only_selected.setChecked(False)
     assert [r.oid for r in w._records] == [1, 2]
+    w.close()
+
+
+def test_som_browser_rescopes_on_store_change(qapp) -> None:  # noqa: ARG001
+    """Large / plot-made selections reach the browser via the store, not Qt selection."""
+    app = _StoreApp({2})
+    w = SomBrowserWidget(app)
+    w.set_records(
+        [
+            SomBrowseRecord(oid=1, smiles="CCO", atoms=(SomAtomHit(0, 0.9, True),)),
+            SomBrowseRecord(oid=2, smiles="c1ccccc1", atoms=(SomAtomHit(0, 0.2, False),)),
+        ]
+    )
+    w._cb_only_selected.setChecked(True)
+    app.selection_store.set({1})
+    w._selection_timer.timeout.emit()
+    assert [r.oid for r in w._records] == [1]
     w.close()
 
 

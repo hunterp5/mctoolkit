@@ -844,10 +844,7 @@ class UndoAddBlankRowCommand(QUndoCommand):
         last = self._new_oids[-1]
         row = app._table_model.logical_row_for_oid(last)
         if row >= 0:
-            try:
-                app.table.selectRow(row)
-            except Exception:
-                pass
+            app.select_table_rows([row])
         mark = getattr(app, "_mark_session_dirty", None)
         if callable(mark):
             mark()

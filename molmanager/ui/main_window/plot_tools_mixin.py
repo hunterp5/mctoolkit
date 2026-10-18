@@ -20,7 +20,12 @@ from __future__ import annotations
 
 import logging
 
+from ..layout_perf import perf_span
+
 logger = logging.getLogger(__name__)
+
+# Minimum spacing between selection pushes to open plots (about one display frame).
+_PLOT_SELECTION_FRAME_MS = 33
 
 
 class PlotToolsMixin:
@@ -189,32 +194,50 @@ class PlotToolsMixin:
                     pass
 
     def _sync_active_plots_from_table_selection(self) -> None:
+        with perf_span("selection.fanout"):
+            self._sync_active_plots_from_table_selection_now()
+
+    def _sync_active_plots_from_table_selection_now(self) -> None:
         from ..plot_table_sync import selected_oids_for_plot
 
-        self._refresh_attached_tool_scope_labels()
-        selected = selected_oids_for_plot(self)
-        # Share one OID set across every open plot for this fan-out tick.
-        self._cached_plot_selected_oids = frozenset(selected)
-        try:
-            for view in self._iter_active_plot_selection_views():
-                try:
-                    sync = getattr(view, "sync_from_table_selection", None)
-                    if not callable(sync):
-                        continue
+        with perf_span("selection.fanout_scope_labels"):
+            self._refresh_attached_tool_scope_labels()
+        with perf_span("selection.fanout_collect_oids"):
+            selected = selected_oids_for_plot(self)
+        for view in self._iter_active_plot_selection_views():
+            try:
+                sync = getattr(view, "sync_from_table_selection", None)
+                if not callable(sync):
+                    continue
+                with perf_span("selection.plot_sync"):
                     try:
                         sync(selected_oids=selected)
                     except TypeError:
                         sync()
-                except RuntimeError:
-                    pass
-        finally:
-            self._cached_plot_selected_oids = None
+            except RuntimeError:
+                pass
 
     def _schedule_sync_active_plots_from_table_selection(self) -> None:
-        timer = getattr(self, "_plot_table_sync_timer", None)
-        if timer is None:
+        """Push the selection to open plots now, then at most once per frame while it changes.
+
+        Leading-edge throttle: the first change paints immediately and a burst (table drag,
+        chunked select) yields live updates every ``_PLOT_SELECTION_FRAME_MS`` plus one final
+        sync, instead of a trailing debounce that only paints after the burst stops.
+        """
+        timer = self._plot_table_sync_timer
+        if timer.isActive():
+            self._plot_table_sync_pending = True
             return
-        timer.start(40)
+        self._plot_table_sync_pending = False
+        self._sync_active_plots_from_table_selection()
+        timer.start(_PLOT_SELECTION_FRAME_MS)
+
+    def _on_plot_selection_throttle_elapsed(self) -> None:
+        if not self._plot_table_sync_pending:
+            return
+        self._plot_table_sync_pending = False
+        self._sync_active_plots_from_table_selection()
+        self._plot_table_sync_timer.start(_PLOT_SELECTION_FRAME_MS)
 
     def _iter_active_plot_hosts(self) -> list:
         """Docked / floating plot panels that can rebuild from the current table."""

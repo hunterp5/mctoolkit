@@ -554,7 +554,7 @@ class PlotRenderMixin:
         row = self.parent_app.logical_row_for_oid(oid)
         if row < 0:
             return
-        apply_table_selection_for_source_rows(self.parent_app, [row])
+        apply_table_selection_for_source_rows(self.parent_app, [row], origin=self)
         self.parent_app.status_label.setText(f"Radar Plot: selected row {row + 1:,} (OID {oid}).")
 
     def _clear_heatmap_state(self) -> None:
@@ -644,7 +644,6 @@ class PlotRenderMixin:
         )
         if not oids:
             return
-        self._arm_ignore_plot_clear()
         self._select_rows_for_oids(oids)
         self.parent_app.status_label.setText(
             f"Heatmap: selected {len(oids):,} row(s) in the clicked cell."
@@ -663,7 +662,6 @@ class PlotRenderMixin:
             return
         if additive:
             oids = sorted({int(x) for x in oids} | selected_oids_for_plot(self.parent_app))
-        self._arm_ignore_plot_clear()
         self._select_rows_for_oids(oids)
         self.parent_app.status_label.setText(
             f"Histogram: selected {len(oids):,} row(s) in the clicked bar."
@@ -673,7 +671,6 @@ class PlotRenderMixin:
         oids = oids_in_histogram_bin(self._hist_vals, self._hist_oids, self._hist_edges, bin_index)
         if not oids:
             return
-        self._arm_ignore_plot_clear()
         self._select_rows_for_oids(oids)
         self.parent_app.status_label.setText(
             f"Histogram: selected {len(oids):,} row(s) in bin {bin_index + 1}."

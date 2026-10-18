@@ -144,13 +144,13 @@ class ColumnWriteMixin:
     def _calc_writeback_async_min_rows(self) -> int:
         from ...platform_support.config import load_config
 
-        return max(500, int(load_config().table_selection_chunk_rows))
+        return max(500, int(load_config().tool_table_chunk_rows))
 
     def _calc_writeback_chunk_rows(self) -> int:
         from ...platform_support.config import load_config
 
         cfg = load_config()
-        return max(250, min(int(cfg.ingest_gui_chunk_size), int(cfg.table_selection_chunk_rows)))
+        return max(250, min(int(cfg.ingest_gui_chunk_size), int(cfg.tool_table_chunk_rows)))
 
     def _apply_calc_bulk_rows(
         self, calc_h: list[str], bulk_rows: list[tuple[int, dict[str, str]]]

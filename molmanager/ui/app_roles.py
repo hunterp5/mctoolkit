@@ -34,6 +34,8 @@ from typing import Any, Protocol
 from PyQt5.QtCore import QThreadPool, QTimer
 from PyQt5.QtWidgets import QTableView, QUndoStack
 
+from .selection_store import SelectionStore
+
 
 class ProgressChrome(Protocol):
     """The status line and the queued-tool progress state behind it."""
@@ -59,7 +61,7 @@ class TableSelection(Protocol):
     """The view and the caches that answer "what is selected" without a row scan."""
 
     table: QTableView
-    _selected_oids_override: frozenset[int] | None
+    selection_store: SelectionStore
     _visible_source_rows_cache: Any
 
     def _selected_oids_set(self) -> set[int]: ...

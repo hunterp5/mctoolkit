@@ -391,15 +391,6 @@ class DockToolsMixin:
                     out.append(mol)
         return out
 
-    def _sync_dock_complex_viewer(self) -> None:
-        """Keep a live pose browser in sync after table selection changes."""
-        browser = self._live_pose_browser()
-        if browser is None:
-            return
-        sync = getattr(browser, "_sync_select_button", None)
-        if callable(sync):
-            sync()
-
     def _live_protein_viewer(self):
         """Return the open Protein Viewer on this window."""
         from ..qt_widget_utils import qobject_is_deleted

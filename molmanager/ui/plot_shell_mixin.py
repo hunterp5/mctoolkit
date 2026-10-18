@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import json
-import time
 import webbrowser
 
 from PyQt5.QtCore import QTimer, QUrl
@@ -115,7 +114,6 @@ class PlotShellMixin:
         if not self._web_ready or not self._pending_payload_json:
             return
         run_javascript_apply_figure(self.web.page(), self._pending_payload_json)
-        self._arm_ignore_plot_clear()
         QTimer.singleShot(300, self.sync_from_table_selection)
 
     def sync_from_table_selection(
@@ -137,7 +135,6 @@ class PlotShellMixin:
         if new_idxs == self._selected_point_indices and self._last_pushed_selection_key is not None:
             return
         self._selected_point_indices = new_idxs
-        self._arm_ignore_plot_clear()
         self._sync_plot_selection_visual()
 
     def _sync_plot_selection_visual(self) -> None:
@@ -154,16 +151,12 @@ class PlotShellMixin:
 
     def _clear_plot_table_selection(self, *, update_plot: bool = True) -> None:
         self._selected_point_indices = set()
-        self._ignore_plot_clear_until = 0.0
-        clear_table_selection_from_plot(self.parent_app)
+        clear_table_selection_from_plot(self.parent_app, origin=self)
         if update_plot:
             self._sync_plot_selection_visual()
         else:
             self._last_pushed_selection_key = None
             self._sync_hover_persist_visual()
-
-    def _arm_ignore_plot_clear(self, ms: int = 500) -> None:
-        self._ignore_plot_clear_until = time.monotonic() + (ms / 1000.0)
 
     def _render_empty_plot(self, title: str) -> None:
         self._stats_panel.set_lines(["No statistics for the current plot."])
@@ -233,20 +226,13 @@ class PlotShellMixin:
         source_rows = source_rows_for_point_indices(
             self.parent_app, self._plotted_oids, point_indices
         )
-        # Do not scroll the table — keeps docked-plot clicks from flashing scrollbars.
-        apply_table_selection_for_source_rows(
-            self.parent_app,
-            source_rows,
-            scroll=False,
-            debounce=len(source_rows) > 1,
-        )
+        self._select_rows_for_source_rows(source_rows)
 
     def _select_rows_for_source_rows(self, source_rows: list[int]) -> None:
+        # Do not scroll or focus the table: keeps plot clicks from jumping the table and
+        # keeps keyboard focus (Shift+select) in the plot.
         apply_table_selection_for_source_rows(
-            self.parent_app,
-            source_rows,
-            scroll=False,
-            debounce=len(source_rows) > 1,
+            self.parent_app, source_rows, scroll=False, origin=self
         )
 
     def _on_plot_point_clicked(self, point_index: int, *, additive: bool = False) -> None:
@@ -257,7 +243,6 @@ class PlotShellMixin:
             self._selected_point_indices.add(idx)
         else:
             self._selected_point_indices = {idx}
-        self._arm_ignore_plot_clear()
         self._select_rows_for_point_indices(sorted(self._selected_point_indices))
         self._sync_plot_selection_visual()
         n = len(self._selected_point_indices)
@@ -278,8 +263,6 @@ class PlotShellMixin:
         if not idxs:
             if additive:
                 return
-            if time.monotonic() < self._ignore_plot_clear_until:
-                return
             self._clear_plot_table_selection()
             self.parent_app.status_label.setText("Plot: selection cleared.")
             return
@@ -290,7 +273,6 @@ class PlotShellMixin:
             self._selected_point_indices |= new_idxs
         else:
             self._selected_point_indices = new_idxs
-        self._arm_ignore_plot_clear()
         sel_sorted = sorted(self._selected_point_indices)
         self._select_rows_for_point_indices(sel_sorted)
         self.parent_app.status_label.setText(f"Plot: selected {len(sel_sorted):,} point(s).")

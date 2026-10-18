@@ -379,6 +379,12 @@ class CompoundTableModel(
         self._rebuild_oid_index()
         return self._oid_to_row.get(oid, -1)
 
+    def present_oids(self, oids: frozenset[int]) -> frozenset[int]:
+        """Subset of *oids* that still have a row (rebuilds the OID index once, not per miss)."""
+        self._rebuild_oid_index()
+        index = self._oid_to_row
+        return frozenset(oid for oid in oids if oid in index)
+
     def export_rows_for_sqlite(self, data_headers: list[str]) -> list[tuple[int, dict[str, str]]]:
         """Bulk export text columns for the SQLite mirror (avoids per-cell lookup)."""
         return self.export_rows_for_sqlite_slice(data_headers, 0, len(self._rows))

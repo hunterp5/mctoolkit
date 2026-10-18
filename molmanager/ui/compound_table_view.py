@@ -18,9 +18,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import suppress
+from typing import TYPE_CHECKING
 
-from PyQt5.QtCore import QRect, QSize, Qt, QTimer
+from PyQt5.QtCore import QEvent, QItemSelectionModel, QRect, QSize, Qt, QTimer
 from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPalette, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractButton,
@@ -41,8 +43,15 @@ from ..table.structure_depiction_layout import (
     structure_row_default_height,
 )
 
+if TYPE_CHECKING:
+    from .table_row_selection import TableRowSelectionController
+
 # Must match CompoundTableModel.STRUCTURE_COL
 _STRUCTURE_COL = 1
+_ROW_HEADER_HIGHLIGHT_ALPHA = 110
+_USER_SELECTION_EVENTS = frozenset(
+    {QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.MouseMove, QEvent.KeyPress}
+)
 
 # Palette roles so Fusion headers follow light/dark/custom GUI colors.
 # Any QHeaderView stylesheet without these roles freezes the section fill.
@@ -409,14 +418,46 @@ class CompoundTableHeaderView(QHeaderView):
         super().leaveEvent(event)
 
 
+class CompoundTableRowHeaderView(QHeaderView):
+    """Vertical header that highlights rows selected in the entry-selection store.
+
+    Entry selection is not held by Qt's selection model, so Qt's own section highlight
+    never fires for it; ``is_row_selected`` (view row -> bool) supplies the state instead.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Vertical, parent)
+        # QTableView only configures its default header; a replacement must opt in.
+        self.setSectionsClickable(True)
+        self.setHighlightSections(True)
+        self.is_row_selected: Callable[[int], bool] | None = None
+
+    def paintSection(self, painter, rect, logical_index) -> None:  # noqa: N802
+        super().paintSection(painter, rect, logical_index)
+        is_selected = self.is_row_selected
+        if is_selected is None or not is_selected(int(logical_index)):
+            return
+        fill = QColor(self.palette().color(QPalette.Highlight))
+        fill.setAlpha(_ROW_HEADER_HIGHLIGHT_ALPHA)
+        painter.save()
+        painter.fillRect(rect, fill)
+        painter.restore()
+
+
 class CompoundTableView(QTableView):
     """
     QTableView pre-wired for ``CompoundTableModel`` + structure delegate.
     Call ``set_compound_model`` after construction.
+
+    With a :class:`~molmanager.ui.table_row_selection.TableRowSelectionController`
+    installed (``set_row_selection_controller``), row-header clicks, select-all, and
+    selection-clearing cell input drive entry selection instead of Qt's selection model.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._row_selection: TableRowSelectionController | None = None
+        self.setVerticalHeader(CompoundTableRowHeaderView(self))
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableView.SelectItems)
         self.setSelectionMode(QTableView.ExtendedSelection)
@@ -437,6 +478,53 @@ class CompoundTableView(QTableView):
         self._compound_model = None
         self._structure_column_min_width = structure_column_minimum_width()
         hh.sectionResized.connect(self._on_horizontal_section_resized)
+
+    def set_row_selection_controller(self, controller: TableRowSelectionController) -> None:
+        """Route row-header, select-all, and cell-clear input to *controller*."""
+        self._row_selection = controller
+        vh = self.verticalHeader()
+        # QTableView wires row-header press/drag to _q_selectRow (Qt row selection).
+        with suppress(TypeError):
+            vh.sectionPressed.disconnect()
+        with suppress(TypeError):
+            vh.sectionEntered.disconnect()
+        vh.sectionPressed.connect(self._on_row_header_pressed)
+        if isinstance(vh, CompoundTableRowHeaderView):
+            vh.is_row_selected = controller.is_view_row_selected
+
+    def row_selection_controller(self) -> TableRowSelectionController | None:
+        return self._row_selection
+
+    def _on_row_header_pressed(self, logical_row: int) -> None:
+        if self._row_selection is not None and logical_row >= 0:
+            self._row_selection.press_row(logical_row, QApplication.keyboardModifiers())
+
+    def selectAll(self) -> None:  # noqa: N802
+        if self._row_selection is None:
+            super().selectAll()
+            return
+        self._row_selection.select_all()
+
+    def selectionCommand(self, index, event=None):  # noqa: N802
+        """Keep entry selection in step with Qt's cell-selection decisions for user input.
+
+        A right-click inside a selected entry keeps everything (context menu on the
+        selection); any user input for which Qt clears its selection clears entries too.
+        """
+        controller = self._row_selection
+        if controller is None or event is None or event.type() not in _USER_SELECTION_EVENTS:
+            return super().selectionCommand(index, event)
+        if (
+            event.type() == QEvent.MouseButtonPress
+            and event.button() == Qt.RightButton
+            and index.isValid()
+            and controller.is_view_row_selected(index.row())
+        ):
+            return QItemSelectionModel.NoUpdate
+        flags = super().selectionCommand(index, event)
+        if flags & QItemSelectionModel.Clear:
+            controller.clear_for_cell_input()
+        return flags
 
     def apply_table_font(self, font: QFont) -> None:
         """Set the table font and grow or shrink header bars to match."""

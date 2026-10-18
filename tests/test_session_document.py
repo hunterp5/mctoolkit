@@ -1332,9 +1332,7 @@ def test_session_document_roundtrip_table_search(qapp):  # noqa: ARG001
     assert first_col == w2.headers.index("Note")
     second_col = w2._search_criterion_rows[1].col_combo.currentData()
     assert second_col == w2.headers.index("SMILES")
-    sm = w2.table.selectionModel()
-    rows_hit = {ix.row() for ix in sm.selectedIndexes()}
-    assert rows_hit == {0}
+    assert w2._selected_logical_rows() == [0]
 
 
 def test_session_roundtrip_restores_protein_viewer(qapp, tmp_path) -> None:  # noqa: ARG001
