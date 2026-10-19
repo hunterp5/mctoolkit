@@ -253,7 +253,8 @@ class ChemistryWorkspaceWindow(
         self.signals.explicit_hydrogens_removed.connect(
             self.on_remove_explicit_hydrogens_finished, _qc
         )
-        self.signals.calculated.connect(self.on_calc_finished, _qc)
+        self.signals.calculated.connect(self._on_calculated_results, _qc)
+        self.signals.common_core_failed.connect(self._on_common_core_failed, _qc)
         self.signals.conformers_finished.connect(self.on_conformers_finished, _qc)
         self.signals.superpose_finished.connect(self.on_superpose_finished, _qc)
         self.signals.superpose_structures_finished.connect(
@@ -440,7 +441,7 @@ class ChemistryWorkspaceWindow(
         self._init_status_memory_tracker(cfg)
 
     def render2d_batch_active(self) -> bool:
-        """True while Tools → Render 2D batch is running (sorting frozen, etc.)."""
+        """True while Chemistry → Render 2D batch is running (sorting frozen, etc.)."""
         return self._render2d_batch_active
 
     @pyqtSlot()
