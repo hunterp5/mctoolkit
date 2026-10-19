@@ -45,6 +45,7 @@ from ..table.text_file_ingest import (
     smi_line_to_cells,
     sniff_table_delimiter,
 )
+from ..table.open_messages import message_for_read_failure
 from ..table.table_file_formats import (
     RXN_EXTS,
     SMI_LINE_EXTS,
@@ -77,6 +78,15 @@ from ..platform_support.tool_progress import ToolProgressState, report_tool_prog
 from .signals import WorkerSignals, emit_partial_results_if_cancelled
 
 logger = logging.getLogger(__name__)
+
+_OPENABLE_TABLE_EXTS = STRUCTURE_MOL_EXTS | SMI_LINE_EXTS | TABULAR_EXTS | RXN_EXTS
+
+
+def _file_has_bytes(path: str) -> bool:
+    try:
+        return os.path.getsize(path) > 0
+    except OSError:
+        return False
 
 
 def _emit_structure_tool_progress(
@@ -285,11 +295,13 @@ class UniversalLoadWorker(QRunnable):
         batch_size=400,
         cancel_event: threading.Event | None = None,
         structure_choice_event: threading.Event | None = None,
+        ingest_generation: int = 0,
     ):
         super().__init__()
         self.path, self.signals, self.batch_size = path, signals, batch_size
         self.cancel_event = cancel_event
         self.structure_choice_event = structure_choice_event
+        self.ingest_generation = int(ingest_generation)
 
     def _cancelled(self) -> bool:
         return self.cancel_event is not None and self.cancel_event.is_set()
@@ -323,6 +335,8 @@ class UniversalLoadWorker(QRunnable):
         cfg = load_config()
         text_first = bool(cfg.ingest_csv_text_first)
         try:
+            if ext not in _OPENABLE_TABLE_EXTS:
+                raise ValueError(f"Unsupported file type: {ext or '(none)'}")
             headers = ["ID_HIDDEN", "Structure"]
             first_emit = True
             batch = []
@@ -379,11 +393,15 @@ class UniversalLoadWorker(QRunnable):
                         _flush(last=False)
 
             if ext in STRUCTURE_MOL_EXTS:
+                n_mol = 0
                 for mol in iter_structure_mols(self.path):
                     if self._cancelled():
                         break
+                    n_mol += 1
                     if not _add_mol(mol):
                         break
+                if n_mol == 0 and not self._cancelled() and _file_has_bytes(str(self.path)):
+                    raise ValueError("No structures could be read.")
             elif ext in SMI_LINE_EXTS and text_first:
                 headers.append("SMILES")
                 if self._wait_for_structure_source_choice(headers):
@@ -443,14 +461,15 @@ class UniversalLoadWorker(QRunnable):
                         _flush(last=False)
 
             _flush(last=True)
-        except Exception:
-            logger.exception("UniversalLoadWorker failed")
+        except Exception as exc:
+            logger.exception("UniversalLoadWorker failed: %s", self.path)
             try:
-                self.signals.mols_loaded.emit([], ["ID_HIDDEN", "Structure"], True, True)
-            except Exception:
-                logger.warning(
-                    "UniversalLoadWorker: failed to emit empty completion signal", exc_info=True
+                self.signals.file_load_failed.emit(
+                    int(self.ingest_generation),
+                    message_for_read_failure(str(self.path), exc),
                 )
+            except Exception:
+                logger.warning("UniversalLoadWorker: failed to emit load failure", exc_info=True)
 
 
 class RenderWorker(QRunnable):
