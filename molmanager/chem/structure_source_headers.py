@@ -74,6 +74,8 @@ def header_looks_like_structure_text(name: str) -> bool:
         return True
     if n.startswith("largest fragment"):
         return True
+    if _is_murcko_structure_header(n):
+        return True
     if is_duplicated_structure_header(name):
         return True
     return False
@@ -96,8 +98,18 @@ def is_tool_generated_structure_header(name: str) -> bool:
         return True
     if n.startswith("largest fragment"):
         return True
+    if _is_murcko_structure_header(n):
+        return True
     if is_duplicated_structure_header(name):
         return True
+    return False
+
+
+def _is_murcko_structure_header(normalized: str) -> bool:
+    """Murcko scaffold, framework, and ring-system columns, including `` (1)`` copies."""
+    for base in ("murcko scaffold", "murcko framework", "murcko ring systems"):
+        if normalized == base or normalized.startswith(base + " "):
+            return True
     return False
 
 
