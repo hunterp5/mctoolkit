@@ -1265,13 +1265,173 @@ class GninaDockDialog(QDialog):
     _run_smina = _run_gnina
     _prepare_smina_ligands = _prepare_gnina_ligands
 
+    def gnina_session_state(self) -> dict:
+        """Paths and options to restore this Gnina dialog in a later session."""
+        return {
+            "exe": (self.edit_exe.text() or "").strip(),
+            "receptor": (self.edit_receptor.text() or "").strip(),
+            "ligand_source": str(self.combo_ligand_source.currentData() or "file"),
+            "ligand": (self.edit_ligand.text() or "").strip(),
+            "confs_column": (self.combo_confs.currentText() or "").strip(),
+            "output": (self.edit_out.text() or "").strip(),
+            "save_sdf": bool(self.save_sdf_cb.isChecked()),
+            "pharmacophore": (self.edit_pharmacophore.text() or "").strip(),
+            "pharma_slack": float(self.spin_pharma_slack.value()),
+            "autobox": bool(self.autobox_cb.isChecked()),
+            "autobox_ligand": (self.edit_autobox_ligand.text() or "").strip(),
+            "autobox_add": float(self.spin_autobox_add.value()),
+            "center_x": float(self.spin_cx.value()),
+            "center_y": float(self.spin_cy.value()),
+            "center_z": float(self.spin_cz.value()),
+            "size_x": float(self.spin_sx.value()),
+            "size_y": float(self.spin_sy.value()),
+            "size_z": float(self.spin_sz.value()),
+            "flex_mode": str(self.combo_flex_mode.currentData() or "off"),
+            "flexdist_ligand": (self.edit_flexdist_ligand.text() or "").strip(),
+            "flexdist": float(self.spin_flexdist.value()),
+            "flexres": (self.edit_flexres.text() or "").strip(),
+            "flex_max": int(self.spin_flex_max.value()),
+            "full_flex": bool(self.chk_full_flex.isChecked()),
+            "exhaustiveness": int(self.spin_exhaust.value()),
+            "num_modes": int(self.spin_modes.value()),
+            "cpu": int(self.spin_cpu.value()),
+            "validate_crystal": bool(self.validate_crystal_cb.isChecked()),
+            "minimize_poses": bool(self.minimize_poses_cb.isChecked()),
+            "work_dir": (self.edit_wd.text() or "").strip(),
+            "extra": (self.edit_extra.text() or "").strip(),
+            "cnn_scoring": str(self.combo_cnn_scoring.currentData() or "rescore"),
+            "cnn_model": str(self.combo_cnn_model.currentData() or ""),
+            "pose_sort": str(self.combo_pose_sort.currentData() or "CNNscore"),
+            "emp_scoring": str(self.combo_emp_scoring.currentData() or "vina"),
+            "gpu": bool(self.gpu_cb.isChecked()),
+            "crystal_ligand": (self._crystal_ligand_path or "").strip(),
+            "prepare_receptor": (self._prepare_receptor_path or "").strip(),
+        }
+
+    def apply_gnina_session(self, state: dict) -> None:
+        """Refill the dialog from a session snapshot."""
+        if not isinstance(state, dict):
+            return
+
+        def _set_line(widget, key: str) -> None:
+            if key not in state:
+                return
+            widget.setText(str(state.get(key) or ""))
+
+        def _spin(widget, key: str, cast) -> None:
+            if key not in state:
+                return
+            try:
+                widget.setValue(cast(state[key]))
+            except (TypeError, ValueError):
+                return
+
+        def _combo(widget, key: str) -> None:
+            if key not in state:
+                return
+            idx = widget.findData(state.get(key))
+            if idx < 0:
+                idx = widget.findData(str(state.get(key) or ""))
+            if idx >= 0:
+                widget.setCurrentIndex(idx)
+
+        def _check(widget, key: str) -> None:
+            if isinstance(state.get(key), bool):
+                widget.setChecked(state[key])
+
+        exe = str(state.get("exe") or "").strip()
+        if exe:
+            self.edit_exe.setText(exe)
+        _set_line(self.edit_receptor, "receptor")
+        _combo(self.combo_ligand_source, "ligand_source")
+        _set_line(self.edit_ligand, "ligand")
+        confs = str(state.get("confs_column") or "").strip() if "confs_column" in state else ""
+        if confs:
+            idx = self.combo_confs.findText(confs)
+            if idx < 0:
+                self.combo_confs.addItem(confs)
+                idx = self.combo_confs.findText(confs)
+            if idx >= 0:
+                self.combo_confs.setCurrentIndex(idx)
+        if isinstance(state.get("save_sdf"), bool):
+            self.save_sdf_cb.blockSignals(True)
+            self.save_sdf_cb.setChecked(state["save_sdf"])
+            self.save_sdf_cb.blockSignals(False)
+        _set_line(self.edit_out, "output")
+        if not (self.edit_out.text() or "").strip():
+            self._sync_out_suffix(self.save_sdf_cb.isChecked())
+        _set_line(self.edit_pharmacophore, "pharmacophore")
+        _spin(self.spin_pharma_slack, "pharma_slack", float)
+        _check(self.autobox_cb, "autobox")
+        _set_line(self.edit_autobox_ligand, "autobox_ligand")
+        _spin(self.spin_autobox_add, "autobox_add", float)
+        _spin(self.spin_cx, "center_x", float)
+        _spin(self.spin_cy, "center_y", float)
+        _spin(self.spin_cz, "center_z", float)
+        _spin(self.spin_sx, "size_x", float)
+        _spin(self.spin_sy, "size_y", float)
+        _spin(self.spin_sz, "size_z", float)
+        _combo(self.combo_flex_mode, "flex_mode")
+        _set_line(self.edit_flexdist_ligand, "flexdist_ligand")
+        _spin(self.spin_flexdist, "flexdist", float)
+        _set_line(self.edit_flexres, "flexres")
+        _spin(self.spin_flex_max, "flex_max", int)
+        _check(self.chk_full_flex, "full_flex")
+        _spin(self.spin_exhaust, "exhaustiveness", int)
+        _spin(self.spin_modes, "num_modes", int)
+        _spin(self.spin_cpu, "cpu", int)
+        _check(self.validate_crystal_cb, "validate_crystal")
+        _check(self.minimize_poses_cb, "minimize_poses")
+        _set_line(self.edit_wd, "work_dir")
+        _set_line(self.edit_extra, "extra")
+        _combo(self.combo_cnn_scoring, "cnn_scoring")
+        _combo(self.combo_cnn_model, "cnn_model")
+        _combo(self.combo_pose_sort, "pose_sort")
+        _combo(self.combo_emp_scoring, "emp_scoring")
+        _check(self.gpu_cb, "gpu")
+        if "crystal_ligand" in state:
+            self._crystal_ligand_path = str(state.get("crystal_ligand") or "").strip()
+        if "prepare_receptor" in state:
+            self._prepare_receptor_path = str(state.get("prepare_receptor") or "").strip()
+
+    def _remember_gnina_session(self) -> None:
+        host = self._main_window
+        remember = getattr(host, "remember_gnina_dock_session", None)
+        if callable(remember):
+            remember(self.gnina_session_state())
+
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        self._remember_gnina_session()
         if self._worker.is_running():
             self._worker.stop()
         else:
             self._clear_batch()
         self._notify_activity()
         super().closeEvent(event)
+
+
+def gnina_session_worth_saving(state: object) -> bool:
+    """True when the snapshot has a docking setup worth keeping in the session file."""
+    if not isinstance(state, dict):
+        return False
+    for key in (
+        "receptor",
+        "ligand",
+        "output",
+        "pharmacophore",
+        "autobox_ligand",
+        "flexdist_ligand",
+        "flexres",
+        "work_dir",
+        "extra",
+        "crystal_ligand",
+        "prepare_receptor",
+    ):
+        if str(state.get(key) or "").strip():
+            return True
+    if str(state.get("ligand_source") or "") == "rows":
+        return True
+    return str(state.get("flex_mode") or "off") not in {"", "off"}
 
 
 SminaDockDialog = GninaDockDialog
