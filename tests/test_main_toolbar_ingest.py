@@ -50,14 +50,17 @@ def test_main_toolbar_disabled_while_ingest_loading(qapp):  # noqa: ARG001
     w.close()
 
 
-def test_help_is_menubar_dropdown_after_settings(qapp):  # noqa: ARG001
+def test_help_is_last_item_in_settings_menu(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     mb = w.menuBar()
     labels = [a.text().replace("&", "") for a in mb.actions() if a.text()]
-    assert labels[-1] == "Help"
-    assert labels[-2] == "Settings"
+    assert labels[-1] == "Settings"
+    settings = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Settings")
+    settings_labels = [a.text().replace("&", "") for a in settings.actions() if a.text()]
+    assert settings_labels[-1] == "Help"
     menu = w._help_menu
     assert menu is not None
+    assert menu.menuAction() in settings.actions()
     item_labels = [a.text().replace("&", "") for a in menu.actions()]
     assert item_labels == ["User Guide", "Citations"]
     assert w._act_user_guide in menu.actions()
