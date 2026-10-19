@@ -86,8 +86,6 @@ class TableMenuMixin:
         old_n = self.headers[col]
         menu = QMenu(self)
         menu.setToolTipsVisible(True)
-        sel_act = menu.addAction(f"Select column '{old_n}'")
-        sel_act.setObjectName("header_select_column")
         select_sub = menu.addMenu("Select")
         select_sub.setToolTipsVisible(True)
         select_all_act = select_sub.addAction("Select All")
@@ -189,9 +187,7 @@ class TableMenuMixin:
         if action is None:
             return
         name = action.objectName()
-        if name == "header_select_column":
-            self._select_column(col)
-        elif name == "header_sort_num_asc":
+        if name == "header_sort_num_asc":
             self._apply_table_sort(col, True, "numeric")
         elif name == "header_sort_num_desc":
             self._apply_table_sort(col, False, "numeric")
