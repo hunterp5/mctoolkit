@@ -14,7 +14,13 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Cluster table rows by molecular fingerprint (scikit-learn + RDKit Butina / Leader sphere exclusion)."""
+"""Cluster table rows by fingerprint, numeric columns, or both.
+
+Fingerprint-only clustering keeps Tanimoto methods (Butina, sphere exclusion,
+Jarvis–Patrick) and scikit-learn methods on the bit matrix. Numeric columns,
+alone or concatenated with a fingerprint, use K-Means, agglomerative clustering,
+and DBSCAN.
+"""
 
 from __future__ import annotations
 
@@ -56,6 +62,12 @@ logger = logging.getLogger(__name__)
 
 
 _SKLEARN_CLUSTER_METHODS = frozenset({"kmeans", "agglomerative", "dbscan"})
+TANIMOTO_CLUSTER_METHODS = frozenset({"butina", "sphere_exclusion", "jarvis_patrick"})
+_FP_NONE_LABELS = frozenset({"", "none"})
+
+# Euclidean DBSCAN radii for standardized descriptor space. Cosine radii below
+# stay tuned to fingerprint bit vectors.
+_DBSCAN_EUCLIDEAN_EPS = (0.6, 1.0, 1.5, 2.0, 2.8, 3.6)
 
 # Fingerprints for exploratory trials, installed once in the child process.
 _CHILD_FPS: list | None = None
@@ -102,6 +114,78 @@ def _as_sklearn_features(X: np.ndarray) -> np.ndarray:
 
 def _method_needs_dense_matrix(method: str) -> bool:
     return str(method) in _SKLEARN_CLUSTER_METHODS
+
+
+def fingerprint_requested(fp_choice: str | None) -> bool:
+    """False when the dialog chose numeric columns without a fingerprint."""
+    return (fp_choice or "").strip().lower() not in _FP_NONE_LABELS
+
+
+def _align_numeric_rows(
+    oids: Sequence[int],
+    fps: Sequence | None,
+    numeric_by_oid: dict[int, np.ndarray],
+) -> tuple[list[int], list | None, np.ndarray | None]:
+    """Keep rows that have a finite numeric vector, in ``oids`` order."""
+    kept_oids: list[int] = []
+    kept_fps: list = []
+    vectors: list[np.ndarray] = []
+    if fps is None:
+        pairs: Sequence[tuple[int, object | None]] = [(int(oid), None) for oid in oids]
+    else:
+        pairs = [(int(oid), fp) for oid, fp in zip(oids, fps)]
+    for oid, fp in pairs:
+        raw = numeric_by_oid.get(int(oid))
+        if raw is None:
+            continue
+        vector = np.asarray(raw, dtype=np.float64)
+        if vector.ndim != 1 or vector.size == 0 or not np.isfinite(vector).all():
+            continue
+        kept_oids.append(int(oid))
+        if fps is not None:
+            kept_fps.append(fp)
+        vectors.append(vector)
+    if not vectors:
+        return [], ([] if fps is not None else None), None
+    numeric = np.vstack(vectors)
+    return kept_oids, (kept_fps if fps is not None else None), numeric
+
+
+def _combine_feature_matrix(
+    fps: Sequence | None,
+    numeric: np.ndarray,
+    *,
+    standardize: bool,
+) -> np.ndarray:
+    """Euclidean feature matrix for scikit-learn methods.
+
+    Numeric columns are standardized when requested. When a fingerprint is
+    concatenated, the bit block is rescaled so its total variance matches the
+    numeric block. Otherwise the bits dominate the distance.
+    """
+    numeric_block = np.array(numeric, dtype=np.float64, copy=True)
+    n_numeric = int(numeric_block.shape[1])
+    if standardize and n_numeric > 0:
+        from ..descriptors.ml_feature_matrix import standardize_feature_matrix
+
+        numeric_block, _scaler = standardize_feature_matrix(
+            numeric_block, n_numeric, enabled=True
+        )
+    if not fps:
+        return numeric_block
+    bits = np.asarray(_dense_fingerprint_matrix(fps), dtype=np.float64)
+    num_var = float(numeric_block.var(axis=0).sum())
+    bit_var = float(bits.var(axis=0).sum())
+    if num_var > 0.0 and bit_var > 0.0:
+        bits *= np.sqrt(num_var / bit_var)
+    return np.hstack([numeric_block, bits])
+
+
+def _tanimoto_with_numeric_message() -> str:
+    return (
+        "Butina, sphere exclusion, and Jarvis-Patrick use fingerprint Tanimoto "
+        "distance. Clear the numeric columns, or choose K-Means, Agglomerative, or DBSCAN."
+    )
 
 
 def _butina_neighbor_lists(
@@ -391,7 +475,8 @@ def _fit_sklearn_labels(X: np.ndarray, method: str, params: dict) -> np.ndarray:
     eps = float(params.get("eps", 0.35))
     ms = int(params.get("min_samples", 5))
     ms = max(2, min(ms, n_samples))
-    model = DBSCAN(eps=eps, min_samples=ms, metric="cosine")
+    metric = str(params.get("metric") or "cosine")
+    model = DBSCAN(eps=eps, min_samples=ms, metric=metric)
     return model.fit_predict(_as_sklearn_features(X))
 
 
@@ -424,7 +509,7 @@ def _run_clustering(
             cancel_event=cancel_event,
         )
     if X is None:
-        raise ValueError(f"{method} clustering requires a dense fingerprint matrix.")
+        raise ValueError(f"{method} clustering requires a feature matrix.")
     return _fit_sklearn_labels(X, method, params)
 
 
@@ -492,10 +577,17 @@ def generate_explore_trials(
     n: int,
     max_runs: int,
     include: dict[str, bool],
+    *,
+    feature_space: str = "fingerprint",
 ) -> list[tuple[str, dict]]:
-    """Build a bounded list of (method, params) trials for exploratory mode."""
+    """Build a bounded list of (method, params) trials for exploratory mode.
+
+    ``feature_space`` is ``fingerprint`` (Tanimoto methods allowed, cosine DBSCAN),
+    or ``numeric`` / ``mixed`` (scikit-learn methods only, Euclidean DBSCAN).
+    """
     trials: list[tuple[str, dict]] = []
     cap_k = max(2, min(n - 1, 80))
+    fingerprint_space = feature_space == "fingerprint"
 
     if include.get("kmeans", True):
         for k in _spread_integers(2, min(cap_k, 40), 8):
@@ -507,20 +599,27 @@ def generate_explore_trials(
                 trials.append(("agglomerative", {"n_clusters": k, "linkage": linkage}))
 
     if include.get("dbscan", True):
-        for eps in (0.12, 0.18, 0.25, 0.32, 0.4, 0.5):
+        if fingerprint_space:
+            eps_values = (0.12, 0.18, 0.25, 0.32, 0.4, 0.5)
+        else:
+            eps_values = _DBSCAN_EUCLIDEAN_EPS
+        for eps in eps_values:
             for ms in (3, 5, 8):
-                trials.append(("dbscan", {"eps": float(eps), "min_samples": int(ms)}))
+                params: dict = {"eps": float(eps), "min_samples": int(ms)}
+                if not fingerprint_space:
+                    params["metric"] = "euclidean"
+                trials.append(("dbscan", params))
 
-    if include.get("butina", True):
+    if fingerprint_space and include.get("butina", True):
         for c in np.linspace(0.08, 0.45, num=8):
             trials.append(("butina", {"cutoff": float(c), "reordering": False}))
         trials.append(("butina", {"cutoff": 0.25, "reordering": True}))
 
-    if include.get("sphere_exclusion", True):
+    if fingerprint_space and include.get("sphere_exclusion", True):
         for c in np.linspace(0.15, 0.65, num=8):
             trials.append(("sphere_exclusion", {"cutoff": float(c)}))
 
-    if include.get("jarvis_patrick", True):
+    if fingerprint_space and include.get("jarvis_patrick", True):
         for j_nn, p_common in ((10, 4), (12, 5), (14, 6), (16, 8), (20, 10), (24, 12)):
             if p_common < j_nn < n:
                 trials.append(("jarvis_patrick", {"nn_count": j_nn, "common_neighbors": p_common}))
@@ -543,7 +642,11 @@ def _format_params(method: str, params: dict) -> str:
     if method == "agglomerative":
         return f"k={int(params['n_clusters'])}, {params.get('linkage', 'average')}"
     if method == "dbscan":
-        return f"eps={float(params['eps']):.3f}, min_samples={int(params['min_samples'])}"
+        metric = str(params.get("metric") or "")
+        suffix = f", {metric}" if metric and metric != "cosine" else ""
+        return (
+            f"eps={float(params['eps']):.3f}, min_samples={int(params['min_samples'])}{suffix}"
+        )
     if method == "butina":
         r = ", reorder" if params.get("reordering") else ""
         return f"cutoff={float(params.get('cutoff', 0.2)):.3f}{r}"
@@ -827,6 +930,31 @@ def _fit_labels_off_gil(
         shutdown_process_pool_executor(ex, kill_workers=should_terminate_process_pool(cancel_event))
 
 
+def _mp_fit_matrix(args: tuple) -> np.ndarray:
+    """Cluster a prepared feature matrix in a child process."""
+    method, params, matrix = args
+    labels = _run_clustering(method, params, X=matrix, fps=[], cancel_event=None)
+    if labels is None:
+        raise RuntimeError("Clustering produced no labels.")
+    return labels
+
+
+def _fit_matrix_off_gil(
+    method: str,
+    params: dict,
+    matrix: np.ndarray,
+    cancel_event: threading.Event | None,
+    *,
+    on_wait: Callable[[], None] | None = None,
+) -> np.ndarray:
+    ex = register_process_pool(ProcessPoolExecutor(max_workers=1, mp_context=_spawn_context()))
+    try:
+        fut = ex.submit(_mp_fit_matrix, (method, dict(params), matrix))
+        return _wait_future(fut, cancel_event, on_wait)
+    finally:
+        shutdown_process_pool_executor(ex, kill_workers=should_terminate_process_pool(cancel_event))
+
+
 def _assign_cluster_labels(
     method: str,
     params: dict,
@@ -834,9 +962,14 @@ def _assign_cluster_labels(
     *,
     cancel_event: threading.Event | None,
     on_wait: Callable[[], None] | None = None,
+    features: np.ndarray | None = None,
 ) -> np.ndarray | None:
     # A large partial set (fingerprint collection already cancelled) still has to run
     # off the GIL. Pass cancel_event=None in that case so the fit is not killed immediately.
+    if features is not None:
+        if _use_fit_process_pool(int(features.shape[0])):
+            return _fit_matrix_off_gil(method, params, features, cancel_event, on_wait=on_wait)
+        return _run_clustering(method, params, X=features, fps=fps, cancel_event=cancel_event)
     if _use_fit_process_pool(len(fps)):
         return _fit_labels_off_gil(method, params, fps, cancel_event, on_wait=on_wait)
     x = _dense_fingerprint_matrix(fps) if _method_needs_dense_matrix(method) else None
@@ -873,9 +1006,13 @@ def _explore_trials_inline(
     *,
     cancel_event: threading.Event | None,
     on_trial: Callable[[int, int], None] | None,
+    features: np.ndarray | None = None,
 ) -> tuple[list[dict], bool]:
     needs_x = any(method in _SKLEARN_CLUSTER_METHODS for method, _params in trials)
-    x = _dense_fingerprint_matrix(fps) if needs_x else None
+    if features is not None:
+        x = features
+    else:
+        x = _dense_fingerprint_matrix(fps) if needs_x else None
     n_trials = max(len(trials), 1)
     results: list[dict] = []
     for method, params in trials:
@@ -944,13 +1081,94 @@ def _explore_trials_off_gil(
         )
 
 
+def _mp_init_cluster_matrix(matrix: np.ndarray) -> None:
+    global _CHILD_FPS, _CHILD_X
+    _CHILD_FPS = []
+    _CHILD_X = matrix
+
+
+def _mp_explore_matrix_trial(args: tuple) -> dict:
+    """One exploratory trial against the prepared feature matrix."""
+    method, params = args
+    matrix = _CHILD_X
+    try:
+        labels = _run_clustering(method, params, X=matrix, fps=[], cancel_event=None)
+    except Exception as exc:
+        return _explore_record(method, params, notes=str(exc)[:120])
+    if labels is None:
+        return _explore_record(method, params, notes="Clustering produced no labels.")
+    return _explore_record(method, params, stats=_summarize_partition(labels, matrix))
+
+
+def _explore_matrix_off_gil(
+    matrix: np.ndarray,
+    trials: Sequence[tuple[str, dict]],
+    *,
+    cancel_event: threading.Event | None,
+    on_trial: Callable[[int, int], None] | None,
+) -> tuple[list[dict], bool]:
+    """Run exploratory trials on a prepared matrix in one child process."""
+    n_trials = max(len(trials), 1)
+    ex = register_process_pool(
+        ProcessPoolExecutor(
+            max_workers=1,
+            mp_context=_spawn_context(),
+            initializer=_mp_init_cluster_matrix,
+            initargs=(matrix,),
+        )
+    )
+    results: list[dict] = []
+    cancelled = False
+
+    def _pulse() -> None:
+        if on_trial is not None:
+            on_trial(len(results), n_trials)
+
+    try:
+        for method, params in trials:
+            if should_terminate_process_pool(cancel_event):
+                cancelled = True
+                break
+            fut = ex.submit(_mp_explore_matrix_trial, (method, dict(params)))
+            try:
+                results.append(_wait_future(fut, cancel_event, _pulse))
+            except _PoolCancelled:
+                cancelled = True
+                break
+            if on_trial is not None:
+                on_trial(len(results), n_trials)
+        return results, cancelled
+    finally:
+        shutdown_process_pool_executor(
+            ex,
+            kill_workers=cancelled or should_terminate_process_pool(cancel_event),
+        )
+
+
 def _run_explore_trials(
     fps: Sequence,
     trials: Sequence[tuple[str, dict]],
     *,
     cancel_event: threading.Event | None,
     on_trial: Callable[[int, int], None] | None,
+    features: np.ndarray | None = None,
 ) -> tuple[list[dict], bool]:
+    if features is not None:
+        n_rows = int(features.shape[0])
+        if _use_fit_process_pool(n_rows):
+            return _explore_matrix_off_gil(
+                features,
+                trials,
+                cancel_event=cancel_event,
+                on_trial=on_trial,
+            )
+        return _explore_trials_inline(
+            fps,
+            trials,
+            cancel_event=cancel_event,
+            on_trial=on_trial,
+            features=features,
+        )
     if _use_fit_process_pool(len(fps)):
         return _explore_trials_off_gil(
             fps,
@@ -966,17 +1184,40 @@ def _run_explore_trials(
     )
 
 
+def _feature_space_name(*, use_fp: bool, numeric: bool) -> str:
+    if numeric and use_fp:
+        return "mixed"
+    if numeric:
+        return "numeric"
+    return "fingerprint"
+
+
+def _not_enough_rows_message(*, use_fp: bool, numeric: bool, explore: bool) -> str:
+    verb = "explore" if explore else "cluster"
+    if numeric and use_fp:
+        need = "both a fingerprint and complete numeric values"
+    elif numeric:
+        need = "complete values in the selected columns"
+    else:
+        need = "valid fingerprints"
+    return f"Need at least two rows with {need} in this scope to {verb}."
+
+
 class ClusterWorker(QRunnable):
     """Cluster rows off the GUI GIL.
 
     Fingerprints and the fit run in child processes once the table is large enough
     (or the fingerprint type holds the GIL). The parent thread only waits, so Qt
     can keep processing events.
+
+    ``numeric_by_oid`` supplies descriptor rows keyed by table OID. Scikit-learn
+    methods cluster those columns, optionally concatenated with a fingerprint.
+    Tanimoto methods fail if it is set.
     """
 
     def __init__(
         self,
-        rows: list[tuple[int, Chem.Mol]],
+        rows: list[tuple[int, Chem.Mol | None]],
         fp_choice: str,
         method: str,
         params: dict,
@@ -984,6 +1225,8 @@ class ClusterWorker(QRunnable):
         signals,
         cancel_event: threading.Event | None = None,
         progress_state=None,
+        numeric_by_oid: dict[int, np.ndarray] | None = None,
+        standardize_numeric: bool = True,
     ):
         super().__init__()
         self.rows = rows
@@ -994,6 +1237,8 @@ class ClusterWorker(QRunnable):
         self.signals = signals
         self.cancel_event = cancel_event
         self.progress_state = progress_state
+        self.numeric_by_oid = numeric_by_oid
+        self.standardize_numeric = bool(standardize_numeric)
 
     def run(self) -> None:
         sk_methods = _SKLEARN_CLUSTER_METHODS
@@ -1024,20 +1269,41 @@ class ClusterWorker(QRunnable):
                 throttle=throttle,
             )
 
-        try:
-            oids, fps, cancelled = _collect_fingerprints(
-                self.rows,
-                self.fp_choice,
-                cancel_event=cancel_ev,
-                on_progress=_on_fp,
+        use_fp = fingerprint_requested(self.fp_choice)
+        numeric_by_oid = self.numeric_by_oid or None
+        if self.method in TANIMOTO_CLUSTER_METHODS and numeric_by_oid:
+            self.signals.cluster_failed.emit(_tanimoto_with_numeric_message())
+            return
+        if not use_fp and not numeric_by_oid:
+            self.signals.cluster_failed.emit(
+                "Select a fingerprint, one or more numeric columns, or both."
             )
-        except Exception as e:
-            logger.exception("Clustering fingerprint collection failed")
-            self.signals.cluster_failed.emit(str(e) or "Clustering failed.")
             return
 
-        if len(fps) < 2:
-            if cancelled and len(fps) == 1 and oids:
+        cancelled = False
+        fps: list | None
+        if use_fp:
+            try:
+                oids, fps, cancelled = _collect_fingerprints(
+                    self.rows,
+                    self.fp_choice,
+                    cancel_event=cancel_ev,
+                    on_progress=_on_fp,
+                )
+            except Exception as e:
+                logger.exception("Clustering fingerprint collection failed")
+                self.signals.cluster_failed.emit(str(e) or "Clustering failed.")
+                return
+        else:
+            oids = [int(oid) for oid, _mol in self.rows]
+            fps = None
+
+        numeric = None
+        if numeric_by_oid:
+            oids, fps, numeric = _align_numeric_rows(oids, fps, numeric_by_oid)
+
+        if len(oids) < 2:
+            if cancelled and len(oids) == 1:
                 # Keep completed work: one processed row still gets a deterministic cluster label.
                 res = [(oids[0], {self.column_name: "0"})]
                 emit_partial_results_if_cancelled(self.signals, "Cluster", 1, tot, True)
@@ -1048,15 +1314,32 @@ class ClusterWorker(QRunnable):
                 self.signals.cluster_failed.emit("Cancelled.")
                 return
             self.signals.cluster_failed.emit(
-                "Need at least two rows with valid fingerprints in this scope to cluster."
+                _not_enough_rows_message(
+                    use_fp=use_fp, numeric=numeric_by_oid is not None, explore=False
+                )
             )
             return
+
+        features = None
+        fit_params = dict(self.params)
+        if numeric is not None:
+            try:
+                features = _combine_feature_matrix(
+                    fps, numeric, standardize=self.standardize_numeric
+                )
+            except Exception as e:
+                logger.exception("Clustering feature matrix failed")
+                self.signals.cluster_failed.emit(str(e) or "Clustering failed.")
+                return
+            if self.method == "dbscan":
+                fit_params.setdefault("metric", "euclidean")
 
         try:
             labels = _assign_cluster_labels(
                 self.method,
-                self.params,
-                fps,
+                fit_params,
+                fps or [],
+                features=features,
                 cancel_event=None if cancelled else cancel_ev,
                 on_wait=lambda: report_tool_progress(
                     message="Clustering",
@@ -1106,13 +1389,15 @@ class ClusterExploreWorker(QRunnable):
 
     def __init__(
         self,
-        rows: list[tuple[int, Chem.Mol]],
+        rows: list[tuple[int, Chem.Mol | None]],
         fp_choice: str,
         max_runs: int,
         include: dict[str, bool],
         signals,
         cancel_event: threading.Event | None = None,
         progress_state=None,
+        numeric_by_oid: dict[int, np.ndarray] | None = None,
+        standardize_numeric: bool = True,
     ):
         super().__init__()
         self.rows = rows
@@ -1122,6 +1407,8 @@ class ClusterExploreWorker(QRunnable):
         self.signals = signals
         self.cancel_event = cancel_event
         self.progress_state = progress_state
+        self.numeric_by_oid = numeric_by_oid
+        self.standardize_numeric = bool(standardize_numeric)
 
     def _emit_explore_cancel(self, results: list, n_trials: int) -> None:
         from ..platform_support.tool_progress import report_tool_progress
@@ -1157,29 +1444,67 @@ class ClusterExploreWorker(QRunnable):
                 throttle=fp_throttle,
             )
 
-        try:
-            _oids, fps, cancelled = _collect_fingerprints(
-                self.rows,
-                self.fp_choice,
-                cancel_event=cancel_ev,
-                on_progress=_on_fp,
-            )
-        except Exception as e:
-            logger.exception("Cluster explore fingerprint collection failed")
-            self.signals.cluster_failed.emit(str(e) or "Clustering failed.")
-            return
-        if cancelled:
-            self.signals.cluster_failed.emit("Cancelled.")
-            return
-
-        if len(fps) < 2:
+        use_fp = fingerprint_requested(self.fp_choice)
+        numeric_by_oid = self.numeric_by_oid or None
+        if not use_fp and not numeric_by_oid:
             self.signals.cluster_failed.emit(
-                "Need at least two rows with valid fingerprints in this scope to explore."
+                "Select a fingerprint, one or more numeric columns, or both."
             )
             return
 
-        n = len(fps)
-        trials = generate_explore_trials(n, self.max_runs, self.include)
+        fps: list | None
+        if use_fp:
+            try:
+                oids, fps, cancelled = _collect_fingerprints(
+                    self.rows,
+                    self.fp_choice,
+                    cancel_event=cancel_ev,
+                    on_progress=_on_fp,
+                )
+            except Exception as e:
+                logger.exception("Cluster explore fingerprint collection failed")
+                self.signals.cluster_failed.emit(str(e) or "Clustering failed.")
+                return
+            if cancelled:
+                self.signals.cluster_failed.emit("Cancelled.")
+                return
+        else:
+            oids = [int(oid) for oid, _mol in self.rows]
+            fps = None
+
+        numeric = None
+        if numeric_by_oid:
+            oids, fps, numeric = _align_numeric_rows(oids, fps, numeric_by_oid)
+
+        if len(oids) < 2:
+            self.signals.cluster_failed.emit(
+                _not_enough_rows_message(
+                    use_fp=use_fp, numeric=numeric_by_oid is not None, explore=True
+                )
+            )
+            return
+
+        feature_space = _feature_space_name(use_fp=use_fp, numeric=numeric is not None)
+        n = len(oids)
+        trials = generate_explore_trials(
+            n, self.max_runs, self.include, feature_space=feature_space
+        )
+        if not trials:
+            self.signals.cluster_failed.emit(
+                "None of the selected methods apply to numeric columns. "
+                "Use K-Means, Agglomerative, or DBSCAN."
+            )
+            return
+        features = None
+        if numeric is not None:
+            try:
+                features = _combine_feature_matrix(
+                    fps, numeric, standardize=self.standardize_numeric
+                )
+            except Exception as e:
+                logger.exception("Cluster explore feature matrix failed")
+                self.signals.cluster_failed.emit(str(e) or "Clustering failed.")
+                return
         needs_sk = any(m in _SKLEARN_CLUSTER_METHODS for m, _params in trials)
         if needs_sk:
             try:
@@ -1208,10 +1533,11 @@ class ClusterExploreWorker(QRunnable):
 
         try:
             results, trial_cancelled = _run_explore_trials(
-                fps,
+                fps or [],
                 trials,
                 cancel_event=cancel_ev,
                 on_trial=_on_trial,
+                features=features,
             )
         except _PoolCancelled:
             self._emit_explore_cancel([], n_trials)

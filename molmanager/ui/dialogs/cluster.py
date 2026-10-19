@@ -14,12 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Fingerprint clustering dialog (Chemistry → Fingerprints → Cluster)."""
+"""Clustering dialog (Chemistry → Fingerprints → Cluster)."""
 
 from __future__ import annotations
 
 from contextlib import suppress
 
+import numpy as np
+import pandas as pd
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QCloseEvent
 from PyQt5.QtWidgets import (
@@ -33,6 +35,8 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -43,16 +47,24 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ...analysis.dimensionality_reduction import is_fingerprint_bitcount_column
 from ...chem.structure_payload import oid_mol_rows_from_payloads
 from ...workers import ClusterExploreWorker, ClusterWorker, SIMILARITY_FP_TYPE_LABELS
-from ...workers.cluster_worker import CLUSTER_METHOD_LABELS, CLUSTER_METHOD_SHORT_LABELS
+from ...workers.cluster_worker import (
+    CLUSTER_METHOD_LABELS,
+    CLUSTER_METHOD_SHORT_LABELS,
+    TANIMOTO_CLUSTER_METHODS,
+)
 from ..analysis_job_support import enqueue_process_queue_job, prepare_scoped_structure_payloads
 from ..qt_widget_utils import make_window_minimizable
+from ..table_dataframe import scoped_table_column_names, table_to_dataframe
 from .scope import selection_scope_checked
+
+_FP_NONE_LABEL = "None"
 
 
 class ClusterDialog(QDialog):
-    """Cluster compounds by fingerprint (multiple algorithms + optional exploratory sweep)."""
+    """Cluster compounds by fingerprint, numeric columns, or both."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -67,7 +79,7 @@ class ClusterDialog(QDialog):
     def _init_cluster_state(self, parent) -> None:
         self.setWindowTitle("Cluster")
         self.setMinimumWidth(520)
-        self.resize(560, 640)
+        self.resize(580, 760)
         n_sel = len(parent._selected_logical_rows()) if parent is not None else 0
         self._have_selection = n_sel > 0
         self._initial_selected_row_count = n_sel
@@ -84,6 +96,7 @@ class ClusterDialog(QDialog):
         src_row.addWidget(QLabel("Source:"))
         self.src_combo = QComboBox()
         self.src_combo.setMinimumWidth(180)
+        self.src_combo.setToolTip("Structure column used to build fingerprints.")
         src_row.addWidget(self.src_combo, 1)
         root.addLayout(src_row)
 
@@ -95,13 +108,51 @@ class ClusterDialog(QDialog):
             self.only_selected_cb.setEnabled(False)
         root.addWidget(self.only_selected_cb)
 
+        feat = QGroupBox("Features")
+        feat_lyt = QVBoxLayout(feat)
+        feat_lyt.setSpacing(4)
         fp_row = QHBoxLayout()
         fp_row.setSpacing(6)
         fp_row.addWidget(QLabel("Fingerprint:"))
         self.fp_combo = QComboBox()
+        self.fp_combo.addItem(_FP_NONE_LABEL)
         self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
+        if self.fp_combo.count() > 1:
+            self.fp_combo.setCurrentIndex(1)
+        self.fp_combo.setToolTip(
+            "None clusters numeric columns only. Otherwise concatenate this fingerprint, "
+            "or use it alone when no columns are checked."
+        )
         fp_row.addWidget(self.fp_combo, 1)
-        root.addLayout(fp_row)
+        feat_lyt.addLayout(fp_row)
+
+        self.standardize_cb = QCheckBox("Standardize numeric columns")
+        self.standardize_cb.setChecked(True)
+        self.standardize_cb.setToolTip(
+            "Zero mean and unit variance on the checked columns. Fingerprint bits stay 0/1, "
+            "then the bit block is rescaled so it contributes about as much total variance "
+            "as the numeric columns."
+        )
+        feat_lyt.addWidget(self.standardize_cb)
+
+        col_btns = QHBoxLayout()
+        col_btns.addWidget(QLabel("Numeric columns:"))
+        self._btn_cols_all = QPushButton("All")
+        self._btn_cols_none = QPushButton("None")
+        col_btns.addWidget(self._btn_cols_all)
+        col_btns.addWidget(self._btn_cols_none)
+        col_btns.addStretch()
+        feat_lyt.addLayout(col_btns)
+        self.column_list = QListWidget()
+        self.column_list.setMinimumHeight(88)
+        self.column_list.setMaximumHeight(140)
+        self.column_list.setSelectionMode(QAbstractItemView.NoSelection)
+        self.column_list.setToolTip(
+            "Checked columns are clustered with K-Means, Agglomerative, or DBSCAN. "
+            "Butina, sphere exclusion, and Jarvis-Patrick stay fingerprint-only."
+        )
+        feat_lyt.addWidget(self.column_list)
+        root.addWidget(feat)
 
         self.exploratory_cb = QCheckBox("Exploratory mode (sample many parameter sets)")
         self.exploratory_cb.setToolTip(
@@ -183,9 +234,7 @@ class ClusterDialog(QDialog):
         ag_lyt.addRow("Clusters (k):", self.agglom_k)
         self.linkage_combo = QComboBox()
         self.linkage_combo.addItems(["average", "complete", "single"])
-        self.linkage_combo.setToolTip(
-            "Linkage for hierarchical clustering (Euclidean on bit vectors)."
-        )
+        self.linkage_combo.setToolTip("Linkage for hierarchical clustering (Euclidean distance).")
         ag_lyt.addRow("Linkage:", self.linkage_combo)
         self._method_pages["agglomerative"] = self._opt_stack.addWidget(ag)
 
@@ -283,6 +332,11 @@ class ClusterDialog(QDialog):
     def _wire_cluster_ui(self) -> None:
         self.exploratory_cb.stateChanged.connect(self._on_exploratory_toggled)
         self.method_combo.currentIndexChanged.connect(self._on_method_changed)
+        self.fp_combo.currentIndexChanged.connect(self._sync_feature_controls)
+        self.column_list.itemChanged.connect(self._sync_feature_controls)
+        self.only_selected_cb.stateChanged.connect(self._on_scope_changed)
+        self._btn_cols_all.clicked.connect(self._check_all_columns)
+        self._btn_cols_none.clicked.connect(self._clear_columns)
         self.explore_table.itemDoubleClicked.connect(self._on_explore_item_double_clicked)
         self.run_btn.clicked.connect(self._on_run)
         self.apply_explore_btn.clicked.connect(self._on_apply_explore_trial)
@@ -389,15 +443,196 @@ class ClusterDialog(QDialog):
         if not rows:
             return
 
+        resolved = self._resolve_cluster_inputs()
+        if resolved is None:
+            return
+        rows, fp_choice, numeric_by_oid, standardize, rows_are_payloads = resolved
         col_name = self._unique_cluster_column()
-        fp_choice = self.fp_combo.currentText()
-        self._enqueue_cluster_worker(rows, fp_choice, method, dict(params), col_name)
+        self._enqueue_cluster_worker(
+            rows,
+            fp_choice,
+            method,
+            dict(params),
+            col_name,
+            numeric_by_oid=numeric_by_oid,
+            standardize_numeric=standardize,
+            rows_are_payloads=rows_are_payloads,
+        )
 
     def _refresh_structure_sources(self) -> None:
         self.src_combo.clear()
+        if self.parent_app is not None:
+            self.src_combo.addItems(self.parent_app.chemistry_tool_structure_sources())
+        self._reload_numeric_columns()
+
+    def _on_scope_changed(self, _state: int = 0) -> None:
+        self._reload_numeric_columns()
+
+    def _selected_feature_columns(self) -> list[str]:
+        cols: list[str] = []
+        for i in range(self.column_list.count()):
+            item = self.column_list.item(i)
+            if item is not None and item.checkState() == Qt.Checked:
+                cols.append(item.text())
+        return cols
+
+    def _use_fingerprints(self) -> bool:
+        return self.fp_combo.currentText() != _FP_NONE_LABEL
+
+    def _tanimoto_methods_allowed(self) -> bool:
+        return self._use_fingerprints() and not self._selected_feature_columns()
+
+    def _reload_numeric_columns(self) -> None:
+        checked = set(self._selected_feature_columns())
+        self.column_list.blockSignals(True)
+        self.column_list.clear()
+        try:
+            if self.parent_app is None:
+                return
+            only_sel = selection_scope_checked(self)
+            _all_cols, numeric_cols = scoped_table_column_names(
+                self.parent_app, visible_only=False, only_selected=only_sel
+            )
+            for col in numeric_cols:
+                item = QListWidgetItem(col)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked if col in checked else Qt.Unchecked)
+                self.column_list.addItem(item)
+        finally:
+            self.column_list.blockSignals(False)
+        self._sync_feature_controls()
+
+    def _set_column_checks(self, state: Qt.CheckState) -> None:
+        self.column_list.blockSignals(True)
+        try:
+            for i in range(self.column_list.count()):
+                item = self.column_list.item(i)
+                if item is not None:
+                    item.setCheckState(state)
+        finally:
+            self.column_list.blockSignals(False)
+        self._sync_feature_controls()
+
+    def _check_all_columns(self) -> None:
+        self._set_column_checks(Qt.Checked)
+
+    def _clear_columns(self) -> None:
+        self._set_column_checks(Qt.Unchecked)
+
+    def _sync_feature_controls(self, *_args) -> None:
+        """Enable Tanimoto methods only for fingerprint-only clustering."""
+        use_fp = self._use_fingerprints()
+        has_cols = bool(self._selected_feature_columns())
+        allow_tanimoto = use_fp and not has_cols
+        self.src_combo.setEnabled(use_fp)
+        self.standardize_cb.setEnabled(has_cols)
+        model = self.method_combo.model()
+        for i in range(self.method_combo.count()):
+            key = str(self.method_combo.itemData(i) or "")
+            item = model.item(i)
+            if item is not None:
+                item.setEnabled(allow_tanimoto or key not in TANIMOTO_CLUSTER_METHODS)
+        if not allow_tanimoto and str(self.method_combo.currentData() or "") in TANIMOTO_CLUSTER_METHODS:
+            self.method_combo.setCurrentIndex(0)
+        for box, key in (
+            (self._ex_butina, "butina"),
+            (self._ex_sphere, "sphere_exclusion"),
+            (self._ex_jp, "jarvis_patrick"),
+        ):
+            box.setEnabled(allow_tanimoto or key not in TANIMOTO_CLUSTER_METHODS)
+        metric = "cosine distance" if allow_tanimoto or not has_cols else "Euclidean distance"
+        if not use_fp:
+            metric = "Euclidean distance"
+        self.dbscan_eps.setToolTip(
+            f"Neighborhood radius ({metric}). Smaller values yield more clusters and more noise."
+        )
+
+    def _table_oids(self, source_rows: list[int]) -> list[int]:
+        app = self.parent_app
+        assert app is not None
+        oids: list[int] = []
+        for row in source_rows:
+            text = app._table_model.cell_text(row, 0)
+            oids.append(int(text) if text.isdigit() else int(row))
+        return oids
+
+    def _numeric_vectors(
+        self, columns: list[str], only_selected: bool
+    ) -> dict[int, np.ndarray] | None:
+        """Complete numeric rows keyed by OID. ``None`` means the user was already warned."""
+        app = self.parent_app
+        assert app is not None
+        df, source_rows = table_to_dataframe(app, visible_only=False, only_selected=only_selected)
+        missing = [col for col in columns if col not in df.columns]
+        if missing:
+            QMessageBox.warning(
+                self,
+                "Cluster",
+                "These columns are not in the current scope: " + ", ".join(missing),
+            )
+            return None
+        oids = self._table_oids(source_rows)
+        numeric = df[columns].apply(pd.to_numeric, errors="coerce")
+        out: dict[int, np.ndarray] = {}
+        for pos, oid in enumerate(oids):
+            row = numeric.iloc[pos]
+            if not bool(row.notna().all()):
+                continue
+            out[int(oid)] = row.to_numpy(dtype=np.float64, copy=True)
+        return out
+
+    def _resolve_cluster_inputs(self):
+        """Return worker inputs, or ``None`` after telling the user why the job cannot start."""
         if self.parent_app is None:
-            return
-        self.src_combo.addItems(self.parent_app.chemistry_tool_structure_sources())
+            return None
+        only_selected = selection_scope_checked(self)
+        use_fp = self._use_fingerprints()
+        columns = self._selected_feature_columns()
+        if not use_fp and not columns:
+            QMessageBox.warning(
+                self,
+                "Cluster",
+                "Select a fingerprint, one or more numeric columns, or both.",
+            )
+            return None
+        if (
+            columns
+            and len(columns) == 1
+            and is_fingerprint_bitcount_column(columns[0])
+            and not use_fp
+        ):
+            QMessageBox.warning(
+                self,
+                "Cluster",
+                f"The column “{columns[0]}” stores only the number of on-bits, not the full "
+                "fingerprint vector.\n\n"
+                "Choose a fingerprint type other than None, or select more numeric columns.",
+            )
+            return None
+        numeric_by_oid = None
+        if columns:
+            numeric_by_oid = self._numeric_vectors(columns, only_selected)
+            if numeric_by_oid is None:
+                return None
+            if len(numeric_by_oid) < 2:
+                QMessageBox.information(
+                    self,
+                    "Cluster",
+                    "Need at least two rows with complete values in the selected columns.",
+                )
+                return None
+        if use_fp:
+            rows = self._prepare_cluster_payloads(self.src_combo.currentText(), only_selected)
+            if not rows:
+                return None
+            fp_choice = self.fp_combo.currentText()
+            rows_are_payloads = True
+        else:
+            rows = [(oid, None) for oid in numeric_by_oid]
+            fp_choice = ""
+            rows_are_payloads = False
+        standardize = bool(columns) and self.standardize_cb.isChecked()
+        return rows, fp_choice, numeric_by_oid, standardize, rows_are_payloads
 
     def _prepare_cluster_payloads(self, src: str, only_selected: bool):
         need = "Need at least two rows with valid structures in this scope."
@@ -411,16 +646,33 @@ class ClusterDialog(QDialog):
             too_few_message=need,
         )
 
-    def _enqueue_cluster_worker(self, rows, fp_choice, method, params, col_name) -> None:
+    def _enqueue_cluster_worker(
+        self,
+        rows,
+        fp_choice,
+        method,
+        params,
+        col_name,
+        *,
+        numeric_by_oid=None,
+        standardize_numeric: bool = True,
+        rows_are_payloads: bool = True,
+    ) -> None:
         self.run_btn.setEnabled(False)
         self._disconnect_process_queue_thread_finished()
+
+        def _mol_rows(payloads):
+            if rows_are_payloads:
+                return oid_mol_rows_from_payloads(payloads)
+            return list(payloads)
+
         self._active_cluster_job_id = enqueue_process_queue_job(
             self.parent_app,
             "Clustering",
             len(rows),
-            lambda ev, ps, r=rows, fc=fp_choice, m=method, p=params, c=col_name, ws=self.parent_app.signals: (
+            lambda ev, ps, r=rows, fc=fp_choice, m=method, p=params, c=col_name, ws=self.parent_app.signals, nb=numeric_by_oid, st=standardize_numeric: (
                 ClusterWorker(
-                    oid_mol_rows_from_payloads(r),
+                    _mol_rows(r),
                     fc,
                     m,
                     p,
@@ -428,6 +680,8 @@ class ClusterDialog(QDialog):
                     ws,
                     cancel_event=ev,
                     progress_state=ps,
+                    numeric_by_oid=nb,
+                    standardize_numeric=st,
                 )
             ),
             queue_label=f"Cluster ({len(rows)} rows, {method})",
