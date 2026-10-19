@@ -26,7 +26,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable
 
-from rdkit import Chem
+import numpy as np
+from rdkit import Chem, DataStructs
 from rdkit.Chem import AllChem, rdMolDescriptors, rdmolops
 
 try:
@@ -328,6 +329,17 @@ def fingerprint_for_label(mol: Chem.Mol, label: str) -> Any | None:
     if spec is None:
         return None
     return _compute_fingerprint(mol, spec)
+
+
+def bitvect_to_uint8(fp: Any) -> np.ndarray:
+    """Return one fingerprint as 0/1 bytes.
+
+    ``ConvertToNumpyArray`` only writes a float64 buffer. Callers that stack many
+    rows keep this uint8 copy (8× smaller) and upcast when a numeric routine needs floats.
+    """
+    wide = np.zeros((int(fp.GetNumBits()),), dtype=np.float64)
+    DataStructs.ConvertToNumpyArray(fp, wide)
+    return wide.astype(np.uint8, copy=False)
 
 
 def fingerprint_bitvect_for_ui_choice(mol: Chem.Mol, fp_choice: str) -> Any | None:
