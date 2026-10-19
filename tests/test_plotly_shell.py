@@ -37,9 +37,12 @@ def test_interactive_plot_shell_includes_bridge_handlers():
     assert "radarTraceClicked" in html
     assert "molmanager_selection_traces" in html
     assert "Plotly.Plots.resize" in html
+    assert "orientColorbarTitlesDownward" in html
+    assert 'replace("rotate(-90", "rotate(90")' in html
     assert "molmanagerCreateResizeScheduler" in html
     assert "ResizeObserver" in html
-    assert "window.molmanagerHoldResize" in html
+    assert "figureMatchesContainer" in html
+    assert "Plotly.relayout(gd, {autosize: true})" in html
     assert "window.molmanagerPerfStats" in html
     assert "window.molmanagerSelectionPerfStats" in html
     assert "window.molmanagerResetSelectionPerfStats" in html
