@@ -34,12 +34,37 @@ from ...table.structure_depiction_layout import (
 from ...chem.reaction_file_io import looks_like_reaction_smarts, parse_reaction_smarts
 from ...chem.render2d_mp import REACTION_PAYLOAD_TAG
 from ...chem.structure_2d_depiction import ReactionDrawSpec
+from ...chem.structure_source_headers import (
+    is_common_core_structure_header,
+    is_murcko_structure_header,
+)
 from ...workers import (
     STRUCTURE_PAYLOAD_TAG,
     Render2DBatchHeldJob,
     Render2DBatchProcessWorker,
 )
 from ..strings import TOOL_RENDER_2D
+from .column_write_mixin import cell_looks_uncalculated
+
+# PNG bytes for cancel. Above this, redrawing costs less than retaining every image.
+_RENDER2D_UNDO_SNAPSHOT_MAX_ROWS = 5000
+
+
+def _draws_on_write(header: str) -> bool:
+    return is_murcko_structure_header(header) or is_common_core_structure_header(header)
+
+
+def _render_task_has_structure(task) -> bool:
+    """True when a render task carries SMILES rather than a blank or placeholder cell."""
+    payload = task[1] if len(task) > 1 else None
+    if not isinstance(payload, tuple) or len(payload) < 3:
+        return bool(payload)
+    raw = payload[2]
+    if isinstance(raw, (bytes, bytearray)):
+        text = raw.decode("utf-8", errors="replace")
+    else:
+        text = str(raw or "")
+    return bool(text.strip()) and not cell_looks_uncalculated(text)
 
 
 class Render2DMixin:
@@ -146,7 +171,7 @@ class Render2DMixin:
         if max_auto > 0 and n_rows > max_auto:
             self.status_label.setText(
                 f"Loaded {n_rows:,} rows — auto 2D render skipped (limit {max_auto:,}). "
-                "Use Tools → Render 2D for visible or selected rows."
+                "Use Chemistry → Render 2D for visible or selected rows."
             )
             return False
         self.status_label.setText(f"{TOOL_RENDER_2D}: collecting structures…")
@@ -246,7 +271,7 @@ class Render2DMixin:
         return bool(title) and "render 2d" not in title.lower()
 
     def cancel_render_2d_batch(self) -> bool:
-        """Stop a Tools → Render 2D batch: no further chunks, workers skip drawing if not started."""
+        """Stop a Chemistry → Render 2D batch: no further chunks, workers skip drawing if not started."""
         if not self._render2d_batch_active:
             return False
         ev = getattr(self, "_render2d_cancel_event", None)
@@ -254,6 +279,8 @@ class Render2DMixin:
             ev.set()
         self._render2d_queue = None
         self._render2d_accept_session = None
+        rendered_oids = list(getattr(self, "_render2d_batch_oids_ordered", []) or [])
+        self._close_render2d_stream_store()
         self._render2d_pending.clear()
         self._render2d_batch_oids_ordered.clear()
         self._render2d_eager_flush_queue = None
@@ -265,18 +292,20 @@ class Render2DMixin:
             self._table_model.clear_structure_png_store()
         snap = getattr(self, "_render2d_snapshot", None)
         target = getattr(self, "_render2d_pixmap_target", None)
-        if snap:
+        streamed_column = bool(getattr(self, "_render2d_streamed_column", False))
+        self._render2d_streamed_column = False
+        if streamed_column and not snap and target:
+            self._table_model.clear_column_pixmaps_for_oids(target, rendered_oids)
+        elif snap:
             column_pixmap_mode = getattr(self, "_render2d_column_pixmap_mode", True)
-            set_pixmap = (
-                self._table_model.set_column_pixmap
-                if column_pixmap_mode
-                else self._table_model.set_cell_pixmap
-            )
-            for oid, pm in snap.items():
-                if target:
-                    set_pixmap(oid, target, pm)
-                else:
-                    self._table_model.set_structure_pixmap(oid, pm)
+            items = [(int(oid), raw) for oid, raw in snap.items()]
+            if target and column_pixmap_mode:
+                self._table_model.set_column_png_bytes_batch(target, items)
+            elif target:
+                for oid, raw in items:
+                    self._table_model.set_cell_png_bytes(oid, target, raw)
+            else:
+                self._table_model.restore_structure_pngs(items)
         self._render2d_snapshot = None
         self._render2d_lazy_flush = False
         self._render2d_eager_flush_queue = None
@@ -334,6 +363,41 @@ class Render2DMixin:
         self._start_render_2d_batch(
             renders, row_by_oid, src, column_pixmap_mode=(src != "Structure")
         )
+
+    def _queue_murcko_column_renders(
+        self, headers: list[str], allowed_oids: set[int] | None
+    ) -> None:
+        """Draw generated structure columns after their text lands in the table.
+
+        Murcko scaffold, framework, and ring systems are drawn. Scaffold count stays a
+        number. The common-core SMARTS column is drawn the same way. Blank and ``N/A``
+        cells are skipped. Each column is its own queue job.
+        """
+        columns = [
+            header
+            for header in headers
+            if header in getattr(self, "headers", []) and _draws_on_write(header)
+        ]
+        if not columns:
+            return
+        queue = getattr(self, "process_queue", None)
+        if queue is None:
+            return
+        base_w, base_h = structure_depict_width(), structure_depict_height()
+        for header in columns:
+            renders, row_by_oid = self._build_render2d_tasks_in_table_order(
+                header, base_w, base_h, allowed_oids
+            )
+            renders = [task for task in renders if _render_task_has_structure(task)]
+            if not renders:
+                continue
+            kept = {int(task[0]) for task in renders}
+            rows = {oid: row for oid, row in row_by_oid.items() if oid in kept}
+            payload = (renders, rows, header, True)
+            queue.enqueue(
+                f"Render 2D: {header} ({len(renders)} rows)",
+                lambda ev, p=payload: Render2DBatchHeldJob(self, p, ev),
+            )
 
     def _start_render_2d_batch(
         self,
@@ -404,28 +468,27 @@ class Render2DMixin:
                 len(oids), structure_column=structure_column
             )
         self._render2d_lazy_flush = lazy_structure
-        skip_snapshot = after_ingest or lazy_structure
+        self._render2d_streamed_column = False
+        keep_snapshot = (not after_ingest) and len(oids) <= _RENDER2D_UNDO_SNAPSHOT_MAX_ROWS
         tgt = self._render2d_pixmap_target
         if tgt:
-            # Cancel restores this snapshot; above the lazy threshold decoding every image to
-            # keep a copy costs more than redrawing them.
-            if len(oids) <= cfg.structure_render_lazy_min_rows:
-                self._render2d_snapshot = self._table_model.snapshot_column_pixmaps(tgt, oids)
-            else:
-                self._render2d_snapshot = {}
+            # PNG bytes, not decoded QPixmaps. Large batches are cheaper to redraw than to keep.
+            self._render2d_snapshot = (
+                self._table_model.snapshot_column_pngs(tgt, oids) if keep_snapshot else {}
+            )
             self._table_model.clear_column_pixmaps_for_oids(tgt, oids)
         elif lazy_structure:
-            self._render2d_snapshot = {}
+            self._render2d_snapshot = (
+                self._table_model.snapshot_structure_pngs(oids) if keep_snapshot else {}
+            )
             self._table_model.clear_structure_png_store()
             self._table_model.clear_structure_pixmaps_for_oids(oids, emit=False)
         else:
-            if skip_snapshot:
-                self._render2d_snapshot = {}
-            elif len(oids) <= cfg.structure_render_lazy_min_rows:
-                self._render2d_snapshot = self._table_model.snapshot_structure_pixmaps(oids)
-            else:
-                self._render2d_snapshot = {}
+            self._render2d_snapshot = (
+                self._table_model.snapshot_structure_pngs(oids) if keep_snapshot else {}
+            )
             self._table_model.clear_structure_pixmaps_for_oids(oids, emit=False)
+        self._open_render2d_stream_store(len(oids) if lazy_structure else 0)
         if structure_column and not lazy_structure:
             self._table_model.notify_structure_column_changed()
         self._render2d_progress_last_emit = 0.0
