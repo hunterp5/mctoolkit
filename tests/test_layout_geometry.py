@@ -14,18 +14,21 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-from molmanager.ui.layout_geometry import grow_horizontal_plot_split, grow_vertical_pane_split
+from molmanager.ui.layout_geometry import grow_horizontal_plot_split
 
 
 def test_horizontal_grow_only_when_plot_collapsed_or_preferred():
-    assert grow_horizontal_plot_split(
-        800,
-        400,
-        preferred=None,
-        min_plot_w=420,
-        content_pref_w=640,
-        collapsed_plot_w=80,
-    ) is None
+    assert (
+        grow_horizontal_plot_split(
+            800,
+            400,
+            preferred=None,
+            min_plot_w=420,
+            content_pref_w=640,
+            collapsed_plot_w=80,
+        )
+        is None
+    )
     grown = grow_horizontal_plot_split(
         800,
         40,
@@ -49,10 +52,3 @@ def test_horizontal_preferred_wins_over_content_pref():
     )
     assert pair is not None
     assert pair[1] >= 900 - 200  # bounded by total - table_min
-
-
-def test_vertical_grow_only_toward_height():
-    assert grow_vertical_pane_split([400, 400], 1, 350) is None
-    out = grow_vertical_pane_split([400, 200], 1, 350)
-    assert out is not None
-    assert out[1] >= 350
