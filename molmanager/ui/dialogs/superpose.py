@@ -22,7 +22,6 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLineEdit,
@@ -38,7 +37,7 @@ from ...workers.superpose_types import (
     SUPERPOSE_TARGET_LABELS,
 )
 from ..qt_widget_utils import make_window_minimizable
-from .conformer_output import citation_footer_label, conformer_options_group
+from .conformer_output import add_centered_run_button, conformer_options_group
 from .scope import selection_scope_checked
 
 
@@ -236,13 +235,8 @@ class SuperposeDialog(QDialog):
             )
         )
 
-        self.hint_lbl = citation_footer_label("")
-        root.addWidget(self.hint_lbl)
-
-        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        box.accepted.connect(self.accept)
-        box.rejected.connect(self.reject)
-        root.addWidget(box)
+        self.run_btn = add_centered_run_button(root)
+        self.run_btn.clicked.connect(self.accept)
 
     def _wire_superpose_ui(self) -> None:
         self.target_combo.currentIndexChanged.connect(self._sync_mode)
@@ -262,16 +256,6 @@ class SuperposeDialog(QDialog):
         self.mcs_cb.setVisible(not is_conf)
         self.o3a_cb.setVisible(not is_conf and not is_2d)
         self.reflect_cb.setVisible(not is_2d)
-        if is_conf:
-            self.hint_lbl.setText(
-                "Each row’s confs ensemble is aligned onto its reference conformer "
-                "and written to a new superpose column."
-            )
-        else:
-            self.hint_lbl.setText(
-                "Reference is the first row in scope (table order). The overlay is stored "
-                "on that row’s superpose column and opened in the results window."
-            )
 
     def _set_form_row_visible(self, field, visible: bool) -> None:
         field.setVisible(visible)
