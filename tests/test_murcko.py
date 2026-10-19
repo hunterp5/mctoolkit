@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Bemis–Murcko scaffold columns and the Scaffolds descriptor tab."""
+"""Bemis–Murcko scaffold columns and the Substructure menu dialog."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from molmanager.chem.murcko import (
     murcko_ring_systems_smiles,
     murcko_scaffold_smiles,
 )
-from molmanager.ui.dialogs.properties import PropertyDialog
+from molmanager.ui.dialogs.substructure import BemisMurckoDialog
 from molmanager.workers.chemistry_descriptors import CalcDescriptorsRequest, CalcWorker
 from molmanager.workers.signals import WorkerSignals
 
@@ -109,14 +109,82 @@ def test_descriptor_worker_writes_scaffold_and_count(qapp) -> None:  # noqa: ARG
     assert out["headers"] == ["Murcko scaffold", "Scaffold count"]
 
 
-def test_scaffolds_tab_follows_structural_alerts(qapp) -> None:  # noqa: ARG001
-    dlg = PropertyDialog(["Structure"], selected_row_count=0)
-    labels = [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
-    assert labels[labels.index("Structural Alerts") + 1] == "Scaffolds"
-    assert dlg.get_selected() == ([], [])
-    dlg._scaffold_checks["Murcko scaffold"].setChecked(True)
-    dlg._scaffold_checks["Scaffold count"].setChecked(True)
+def test_bemis_murcko_dialog_defaults_to_every_column(qapp) -> None:  # noqa: ARG001
+    dlg = BemisMurckoDialog(["Structure"], selected_row_count=0)
+    disp, fns = dlg.get_selected()
+    assert disp == [
+        "Murcko scaffold",
+        "Murcko framework",
+        "Murcko ring systems",
+        "Scaffold count",
+    ]
+    assert fns == ["MURCKO_SCAFFOLD", "MURCKO_FRAMEWORK", "MURCKO_RINGS", "MURCKO_COUNT"]
+    dlg._checks["Murcko framework"][0].setChecked(False)
+    dlg._checks["Murcko ring systems"][0].setChecked(False)
     disp, fns = dlg.get_selected()
     assert disp == ["Murcko scaffold", "Scaffold count"]
     assert fns == ["MURCKO_SCAFFOLD", "MURCKO_COUNT"]
     dlg.close()
+
+
+def _window_with_one_row():
+    from molmanager.ui.main_window import ChemistryWorkspaceWindow
+
+    window = ChemistryWorkspaceWindow()
+    window.headers = ["ID_HIDDEN", "Structure"]
+    window._table_model.set_headers(list(window.headers))
+    window._table_model.append_row(1, {})
+    return window
+
+
+def test_murcko_columns_queue_render_2d(qapp) -> None:  # noqa: ARG001
+    window = _window_with_one_row()
+    queued: list[str] = []
+
+    def _record(title, _factory, **_kwargs):
+        queued.append(title)
+        return "test-job"
+
+    window.process_queue.enqueue = _record
+    try:
+        window._on_calculated_results(
+            [
+                (
+                    1,
+                    {
+                        "Murcko scaffold": "c1ccccc1",
+                        "Murcko framework": "C1CCCCC1",
+                        "Murcko ring systems": "c1ccccc1",
+                        "Scaffold count": "1",
+                    },
+                )
+            ],
+            [
+                "Murcko scaffold",
+                "Murcko framework",
+                "Murcko ring systems",
+                "Scaffold count",
+            ],
+        )
+        assert queued == [
+            "Render 2D: Murcko scaffold (1 rows)",
+            "Render 2D: Murcko framework (1 rows)",
+            "Render 2D: Murcko ring systems (1 rows)",
+        ]
+        assert window._table_model.value_for_header(0, "Scaffold count") == "1"
+    finally:
+        window.close()
+
+
+def test_blank_and_placeholder_murcko_cells_skip_render(qapp) -> None:  # noqa: ARG001
+    window = _window_with_one_row()
+    queued: list[str] = []
+    window.process_queue.enqueue = lambda title, _factory, **_kwargs: queued.append(title)
+    try:
+        window._on_calculated_results(
+            [(1, {"Murcko scaffold": "", "Murcko framework": "N/A"})],
+            ["Murcko scaffold", "Murcko framework"],
+        )
+        assert queued == []
+    finally:
+        window.close()
