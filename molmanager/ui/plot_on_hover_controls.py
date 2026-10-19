@@ -21,9 +21,9 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import QCheckBox, QComboBox, QGroupBox, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QCheckBox, QComboBox, QGroupBox, QHBoxLayout, QVBoxLayout, QWidget
 
-from .plot_hover import default_hover_column_preferences, hover_column_choices
+from .plot_hover import hover_column_choices
 
 
 class PlotOnHoverControls(QGroupBox):
@@ -37,14 +37,6 @@ class PlotOnHoverControls(QGroupBox):
         layout = QVBoxLayout(self)
         layout.setSpacing(4)
 
-        self.hover_structure_cb = QCheckBox("Show structure")
-        self.hover_structure_cb.setChecked(True)
-        self.hover_structure_cb.setToolTip(
-            "Show a small 2D depiction of the molecule next to the hover card."
-        )
-        self.hover_structure_cb.stateChanged.connect(self._emit_changed)
-        layout.addWidget(self.hover_structure_cb)
-
         self._hover_combos: list[QComboBox] = []
         for _ in range(3):
             cb = QComboBox()
@@ -53,13 +45,25 @@ class PlotOnHoverControls(QGroupBox):
             layout.addWidget(cb)
             self._hover_combos.append(cb)
 
+        option_row = QHBoxLayout()
+        option_row.setContentsMargins(0, 0, 0, 0)
+        option_row.setSpacing(12)
+        self.hover_structure_cb = QCheckBox("Show Structure")
+        self.hover_structure_cb.setChecked(True)
+        self.hover_structure_cb.setToolTip(
+            "Show a small 2D depiction of the molecule next to the hover card."
+        )
+        self.hover_structure_cb.stateChanged.connect(self._emit_changed)
+        option_row.addWidget(self.hover_structure_cb)
         self.hover_persist_cb = QCheckBox("Persistent on Select")
         self.hover_persist_cb.setChecked(False)
         self.hover_persist_cb.setToolTip(
             "Keep the hover card near selected point(s); multiple selections are shown together."
         )
         self.hover_persist_cb.stateChanged.connect(self._emit_persist_changed)
-        layout.addWidget(self.hover_persist_cb)
+        option_row.addWidget(self.hover_persist_cb)
+        option_row.addStretch(1)
+        layout.addLayout(option_row)
 
     def _emit_changed(self, *_args) -> None:
         self.changed.emit()
@@ -88,16 +92,6 @@ class PlotOnHoverControls(QGroupBox):
                     j = cb.findText(p)
                     if j >= 0:
                         cb.setCurrentIndex(j)
-            prefs = default_hover_column_preferences()
-            for i, cb in enumerate(combos):
-                if cb.currentData() is not None:
-                    continue
-                prefer = prefs[i] if i < len(prefs) else ()
-                for h in prefer:
-                    j = cb.findText(h)
-                    if j >= 0:
-                        cb.setCurrentIndex(j)
-                        break
         finally:
             for cb in combos:
                 cb.blockSignals(False)
