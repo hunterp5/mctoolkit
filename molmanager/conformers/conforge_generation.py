@@ -62,7 +62,7 @@ _FORCE_FIELD = "MMFF94"
 
 @dataclass(frozen=True)
 class ConforgeParams:
-    """Options for Tools → Conformations → Generate → CONFORGE."""
+    """Options for Chemistry → Conformations → Generate → CONFORGE."""
 
     num_confs: int = 100
     energy_window: float = 15.0
