@@ -164,7 +164,6 @@ def test_app_table_search_selects_matching_row(qapp):  # noqa: ARG001
     # Quoted literal matches "ethane" only (not "methane" via partial "eth").
     w._search_partial_cb.setChecked(False)
     w._search_query_edit.setText('"ethane"')
-    w._search_substructure_cb.setChecked(False)
     w._run_table_search()
     qapp.processEvents()
 
