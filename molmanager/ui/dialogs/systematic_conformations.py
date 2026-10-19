@@ -21,12 +21,10 @@ from __future__ import annotations
 from PyQt5.QtWidgets import (
     QCheckBox,
     QDialog,
-    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -41,6 +39,7 @@ from ..qt_widget_utils import make_window_minimizable
 from .conformer_output import (
     ConformerOutputOptions,
     ConformerOutputOptionsPanel,
+    add_centered_run_button,
     conformer_options_group,
 )
 from .scope import selection_scope_checked
@@ -58,13 +57,6 @@ class SystematicConformationsDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
-
-        hint = QLabel(
-            "Systematic torsion search with Open Babel Confab. Defaults to the Open Babel "
-            "install in this Python environment (`pip install openbabel`)."
-        )
-        hint.setWordWrap(True)
-        root.addWidget(hint)
 
         form = QFormLayout()
         form.setSpacing(6)
@@ -146,10 +138,8 @@ class SystematicConformationsDialog(QDialog):
         )
         root.addWidget(self.output_panel)
 
-        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        box.accepted.connect(self._try_accept)
-        box.rejected.connect(self.reject)
-        root.addWidget(box)
+        self.run_btn = add_centered_run_button(root)
+        self.run_btn.clicked.connect(self._try_accept)
         make_window_minimizable(self)
 
     def _browse_obabel(self) -> None:
