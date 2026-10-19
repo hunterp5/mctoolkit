@@ -55,9 +55,33 @@ def available_physical_bytes() -> int | None:
     return _available_linux()
 
 
+def application_memory_bytes() -> int | None:
+    """Resident memory of this process plus its children.
+
+    Render workers, Uni-pKa, and Qt WebEngine are separate processes. The status
+    bar sums them so a busy tool is visible, not only the GUI working set.
+    """
+    own = current_process_rss_bytes()
+    try:
+        import psutil
+    except ImportError:
+        return own
+    try:
+        proc = psutil.Process()
+        total = int(proc.memory_info().rss)
+        for child in proc.children(recursive=True):
+            try:
+                total += int(child.memory_info().rss)
+            except (psutil.Error, OSError):
+                continue
+        return total
+    except (psutil.Error, OSError):
+        return own
+
+
 def format_process_memory_status() -> str | None:
     """Short status-bar text, e.g. ``Mem: 1.2 GiB``, or None when RSS is unknown."""
-    rss = current_process_rss_bytes()
+    rss = application_memory_bytes()
     if rss is None:
         return None
     return f"Mem: {format_memory_bytes(rss)}"
