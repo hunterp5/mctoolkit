@@ -12,24 +12,23 @@ Open it from **Data → QSAR → Generate Model**. Use it when you have enough l
 
 ## Inputs / scope
 
-Labeled rows with an **Activity (Y)** column; features from selected columns and/or fingerprints. Scope: **Visible Rows Only** and/or **Selected Rows Only**.
+Labeled rows with an **Activity (Y)** column; features from checked numeric columns and an optional fingerprint. **Selected Rows Only** limits training and prediction to the current selection; otherwise every table row is used.
 
 ## Options
 
-- **Visible Rows Only** / **Selected Rows Only** / **Refresh columns**.
-- **Activity (Y)** - **Column**, **Task** (Auto / Regression / Classification).
-- **Features (X)** - column checklist, **All** / **None**, **Include 2D fingerprints**, **Fingerprint**, **Structure**.
+- **Activity (Y)** - **Column**, **Task** (Auto / Regression / Classification), **Selected Rows Only**.
+- **Features (X)** - numeric column checklist, **Fingerprint** (None, or a 2D fingerprint), **Structure** (used when a fingerprint is chosen).
 - **Algorithm** - e.g. Ridge, Lasso, MLR, PLS, KNN, SVR, Random forest, Gradient boosting (classification: Logistic, RF, GB, SVM).
 - **Train fraction**, **CV folds**, **Standardize numeric features**.
 - Algorithm **Parameters** (Alpha, Components, Neighbors, Kernel, C, Trees, ...).
-- **Prediction column**; **Train & evaluate**; **Add predictions to table**.
+- **Prediction column**; **Train/Evaluate**; **Add predictions to table**.
 
 ## Workflow
 
-1. Filter/select the modeling set and refresh columns.
-2. Choose activity column, task, features, and FP settings.
+1. Select the modeling set if you want **Selected Rows Only**.
+2. Choose activity column, task, feature columns, and an optional fingerprint.
 3. Pick algorithm, train fraction, CV, and parameters.
-4. Train & evaluate, then add predictions for triage/plots.
+4. Train/Evaluate, then add predictions for triage/plots.
 
 ## Use cases
 
