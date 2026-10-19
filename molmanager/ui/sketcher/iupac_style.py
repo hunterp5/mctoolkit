@@ -177,7 +177,7 @@ def condensed_heteroatom_label(element: str, implicit_h: int) -> str | None:
     Returns None when no condensed H should be shown (use bare element symbol).
     """
     el = str(element or "")
-    if not el or el in ("C", "H", "D", "T", "*"):
+    if not el or el in ("C", "H", "D", "T", "*", "R1", "R2"):
         return None
     n = int(implicit_h)
     if n <= 0:
