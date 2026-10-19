@@ -18,7 +18,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -41,6 +44,8 @@ from ..docking.redock_validation import (
 )
 from ..docking import gnina_job
 from ..docking.gnina_launch import gnina_exit_127_message, gnina_qprocess_spec, gnina_uses_wsl
+
+logger = logging.getLogger(__name__)
 
 
 def system_stamp(text: str) -> str:
@@ -85,6 +90,8 @@ class GninaDockWorker(QObject):
     def __init__(self, host) -> None:
         super().__init__(host)
         self._host = host
+        self._stop_requested = False
+        self._discard_finish = False
         self.proc = QProcess(self)
         self.proc.finished.connect(self.on_proc_finished)
         self.proc.readyReadStandardOutput.connect(self.append_stdout)
@@ -96,6 +103,8 @@ class GninaDockWorker(QObject):
         return self.proc.state() != QProcess.NotRunning
 
     def start_process(self, launch: list[str]) -> None:
+        self._stop_requested = False
+        self._discard_finish = False
         h = self._host
         h._dismiss_for_run()
         exe = h._resolved_exe or h._gnina_executable()
@@ -103,20 +112,92 @@ class GninaDockWorker(QObject):
 
     def stop(self) -> None:
         h = self._host
+        self._stop_requested = True
         h._batch_cancelled = True
-        try:
-            self.proc.terminate()
-        except Exception:
-            pass
-        QTimer.singleShot(2500, self.kill_if_running)
+        if not self.is_running():
+            self._finish_stopped()
+            return
         h.log.append(system_stamp("Stopping…"))
-
-    def kill_if_running(self) -> None:
-        if self.proc.state() != QProcess.NotRunning:
+        # Windows console and WSL launchers ignore WM_CLOSE, so terminate() never exits.
+        if sys.platform == "win32":
+            self._kill_process_tree()
+        else:
             try:
-                self.proc.kill()
+                self.proc.terminate()
             except Exception:
                 pass
+        QTimer.singleShot(2500, self.kill_if_running)
+
+    def kill_if_running(self) -> None:
+        if not self._stop_requested:
+            return
+        if self.is_running():
+            self._kill_process_tree()
+            QTimer.singleShot(1500, self._abandon_if_still_running)
+            return
+        self._finish_stopped()
+
+    def _abandon_if_still_running(self) -> None:
+        """Release the dock UI if Gnina still has not exited after a force kill."""
+        if not self._stop_requested:
+            return
+        if not self.is_running():
+            self._finish_stopped()
+            return
+        h = self._host
+        h.log.append(system_stamp("Gnina did not exit; the dock was stopped anyway."))
+        self._discard_finish = True
+        self._stop_requested = False
+        h._clear_batch()
+        h._set_running_ui(False)
+        h._notify_activity()
+
+    def _kill_process_tree(self) -> None:
+        """Force-stop Gnina, including a copy left running inside WSL."""
+        pid = 0
+        try:
+            pid = int(self.proc.processId() or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        if sys.platform == "win32" and pid > 0:
+            try:
+                subprocess.Popen(
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                logger.debug("taskkill gnina failed", exc_info=True)
+            if gnina_uses_wsl():
+                try:
+                    from ..platform_support.wsl_launcher import wsl_argv
+
+                    subprocess.Popen(
+                        wsl_argv(["bash", "-lc", "pkill -x gnina || true"]),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                except Exception:
+                    logger.debug("could not ask WSL to stop gnina", exc_info=True)
+        try:
+            if self.is_running():
+                self.proc.kill()
+        except Exception:
+            logger.debug("QProcess.kill failed", exc_info=True)
+
+    def _finish_stopped(self) -> None:
+        """Clear the running UI after Stop, including when Gnina has already exited."""
+        if not self._stop_requested:
+            return
+        self._stop_requested = False
+        h = self._host
+        if h._minimize_ins:
+            self.finish_minimize_keep_placement()
+        else:
+            h._clear_batch()
+        h._set_running_ui(False)
+        h._notify_activity()
+        h.log.append(system_stamp("Stopped."))
 
     def on_proc_started(self) -> None:
         h = self._host
@@ -388,7 +469,26 @@ class GninaDockWorker(QObject):
         h.log.append(system_stamp(f"Internal validation: top pose crystal RMSD = {top:.3f} Å."))
 
     def on_proc_finished(self, code: int, status: QProcess.ExitStatus) -> None:
+        try:
+            self._on_proc_finished(code, status)
+        except Exception:
+            logger.exception("Gnina finish handler failed")
+            h = self._host
+            h.log.append(system_stamp("Gnina finished, but the results could not be read."))
+            self._stop_requested = False
+            h._clear_batch()
+            h._set_running_ui(False)
+            h._notify_activity()
+
+    def _on_proc_finished(self, code: int, status: QProcess.ExitStatus) -> None:
         h = self._host
+        if self._discard_finish:
+            self._discard_finish = False
+            self._stop_requested = False
+            return
+        if self._stop_requested or h._batch_cancelled:
+            self._finish_stopped()
+            return
         if h._validation_phase:
             self.on_validation_finished(code, status)
             return
