@@ -23,6 +23,7 @@ from typing import Any
 from rdkit import Chem
 
 from .constants import DEFAULT_WILDCARD_ELEMENTS, ELEMENT_UPPER_MAP, WILDCARD_ELEMENT
+from .rgroups import rgroup_element, rgroup_label_from_element
 from .wildcards import (
     _is_wildcard_node,
     _normalize_wildcard_elements,
@@ -54,8 +55,8 @@ def _rdkit_atom_from_sketch_node(node: dict[str, Any], formal_charge: int = 0) -
     """
     Build an RDKit atom for SMILES/SMARTS export from a sketcher node.
 
-    Handles wildcards (element-list SMARTS + charge), deuterium/tritium isotopes, and
-    normal elements with formal charge.
+    Handles wildcards (element-list SMARTS + charge), R1/R2 attachment points,
+    deuterium/tritium isotopes, and normal elements with formal charge.
     """
     fc = int(formal_charge)
     if _is_wildcard_node(node):
@@ -73,6 +74,14 @@ def _rdkit_atom_from_sketch_node(node: dict[str, Any], formal_charge: int = 0) -
         return a
 
     el = str(node.get("element") or "C")
+    r_label = rgroup_label_from_element(el)
+    if r_label is not None:
+        atom = Chem.Atom(0)
+        atom.SetAtomMapNum(r_label)
+        atom.SetNoImplicit(True)
+        if fc:
+            atom.SetFormalCharge(fc)
+        return atom
     if el == "D":
         a = Chem.Atom(1)
         a.SetIsotope(2)
@@ -88,6 +97,12 @@ def _rdkit_atom_from_sketch_node(node: dict[str, Any], formal_charge: int = 0) -
 
 def _sketch_element_from_rdkit_atom(atom: Chem.Atom) -> str:
     """Map an RDKit atom back to a sketcher element symbol (D/T for hydrogen isotopes)."""
+    if atom.GetAtomicNum() == 0:
+        label = int(atom.GetAtomMapNum() or 0) or int(atom.GetIsotope() or 0)
+        mapped = rgroup_element(label) if label in (1, 2) else None
+        if mapped:
+            return mapped
+        return atom.GetSymbol() or "*"
     if atom.GetAtomicNum() == 1:
         iso = int(atom.GetIsotope())
         if iso == 2:
@@ -109,6 +124,9 @@ def _parse_atom_symbol_input(raw: str) -> tuple[str, list[str] | None] | None:
     low = s.lower()
     if s == "*" or low in ("wildcard", "wild"):
         return (WILDCARD_ELEMENT, None)
+    r_label = rgroup_label_from_element(s)
+    if r_label is not None:
+        return (rgroup_element(r_label), None)
     sym = _parse_periodic_element_symbol(s)
     if sym is None:
         return None
