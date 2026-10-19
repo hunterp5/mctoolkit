@@ -27,19 +27,15 @@ from typing import Any
 from PyQt5.QtCore import QObject, QRunnable, Qt, pyqtSignal
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import (
-    QButtonGroup,
     QCheckBox,
     QDialog,
-    QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QPushButton,
-    QRadioButton,
     QShortcut,
     QSpinBox,
     QTabWidget,
@@ -48,6 +44,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ..qt_widget_utils import apply_monospace_to_text_edit, make_window_minimizable
+from .query_form import DatabaseQueryBar
 from ..strings import COLUMN_TANIMOTO_SIMILARITY
 from ..threadpool_access import start_runnable_on_app_pool
 
@@ -556,169 +553,104 @@ class ChEMBLDialog(QDialog):
         self._targets_tsv = ""
 
         root = QVBoxLayout(self)
+        self._query_activities = False
+        self._query_targets = False
 
-        top = QHBoxLayout()
-        top.addWidget(QLabel("SMILES:"))
-        self.smiles = QLineEdit()
-        self.smiles.setPlaceholderText("Paste SMILES here, or use the Sketcher button…")
-        top.addWidget(self.smiles, 1)
-        self.btn_query = QPushButton("Query")
+        self.query_bar = DatabaseQueryBar(
+            self,
+            tanimoto_tooltip=(
+                "Minimum Tanimoto similarity for ChEMBL cartridge search. "
+                "The public API only accepts thresholds from 0.70 to 1.00 (70–100); "
+                "lower values are raised to 0.70."
+            ),
+            max_tooltip="Maximum number of similar molecules to process.",
+        )
+        self.smiles = self.query_bar.smiles
+        self.btn_query = self.query_bar.btn_query
+        self.chk_only_selected = self.query_bar.chk_only_selected
+        self.btn_sketch = self.query_bar.btn_sketch
+        self.spin_tc = self.query_bar.spin_tc
+        self.spin_max = self.query_bar.spin_max
         self.btn_query.setToolTip(
             "Run ChEMBL lookup for the SMILES above, or for selected rows if “Only Query Selected” is checked."
         )
         self.btn_query.clicked.connect(self._run_query)
-        top.addWidget(self.btn_query)
-        self.chk_only_selected = QCheckBox("Only Query Selected")
-        self.chk_only_selected.setToolTip(
-            "When checked, Query uses SMILES from selected rows in the main table (ignores the text box)."
-        )
-        top.addWidget(self.chk_only_selected)
-        self.btn_sketch = QPushButton("Sketcher…")
         self.btn_sketch.clicked.connect(self._use_sketcher)
-        top.addWidget(self.btn_sketch)
-        root.addLayout(top)
+        root.addWidget(self.query_bar)
 
-        mode_row = QHBoxLayout()
-        self.rb_chembl_identity = QRadioButton("Identity (SMILES lookup)")
-        self.rb_chembl_similarity = QRadioButton("Similarity (2D Tanimoto, ChEMBL)")
-        self.rb_chembl_identity.setChecked(True)
-        self._chembl_mode_group = QButtonGroup(self)
-        self._chembl_mode_group.addButton(self.rb_chembl_identity)
-        self._chembl_mode_group.addButton(self.rb_chembl_similarity)
-        mode_row.addWidget(self.rb_chembl_identity)
-        mode_row.addWidget(self.rb_chembl_similarity)
-        mode_row.addStretch()
-        root.addLayout(mode_row)
-
-        self.gb_sim = QGroupBox("Similarity parameters (ChEMBL)")
-        sim_form = QFormLayout(self.gb_sim)
-        self.spin_tc = QDoubleSpinBox()
-        self.spin_tc.setRange(0.30, 1.00)
-        self.spin_tc.setDecimals(2)
-        self.spin_tc.setSingleStep(0.05)
-        self.spin_tc.setValue(0.70)
-        self.spin_tc.setToolTip(
-            "Minimum Tanimoto similarity for ChEMBL cartridge search. "
-            "The public API only accepts thresholds from 0.70 to 1.00 (70–100); lower values are raised to 0.70."
-        )
-        sim_form.addRow("Min. Tanimoto:", self.spin_tc)
-        self.spin_max = QSpinBox()
-        self.spin_max.setRange(1, 500)
-        self.spin_max.setValue(25)
-        self.spin_max.setToolTip("Maximum number of similar molecules to process.")
-        sim_form.addRow("Max. structures:", self.spin_max)
-        self.gb_sim.setEnabled(False)
-        self.rb_chembl_similarity.toggled.connect(self.gb_sim.setEnabled)
-        root.addWidget(self.gb_sim)
-
-        opts = QHBoxLayout()
-        gb_fields = QGroupBox("Retrieve fields")
-        f_lyt = QVBoxLayout(gb_fields)
-        btn_all_row = QHBoxLayout()
-        self.btn_chembl_all_fields = QPushButton("Retrieve all fields")
-        self.btn_chembl_all_fields.setToolTip(
-            "Enable identity, structures, every molecule property, activities, targets, "
-            "and the pChEMBL-only filter (heavier API usage)."
-        )
-        self.btn_chembl_all_fields.clicked.connect(self._chembl_select_all_fields)
-        btn_all_row.addWidget(self.btn_chembl_all_fields)
-        btn_all_row.addStretch()
-        f_lyt.addLayout(btn_all_row)
-        top_fields = QHBoxLayout()
+        id_row = QHBoxLayout()
         self.chk_identity = QCheckBox("Identity")
         self.chk_identity.setChecked(True)
+        self.chk_identity.setToolTip(
+            "ChEMBL id, preferred name, molecule type, max phase, and first approval."
+        )
         self.chk_structures = QCheckBox("Structures")
         self.chk_structures.setChecked(True)
-        top_fields.addWidget(self.chk_identity)
-        top_fields.addWidget(self.chk_structures)
-        top_fields.addStretch()
-        f_lyt.addLayout(top_fields)
+        self.chk_structures.setToolTip("Canonical SMILES and InChIKey.")
+        id_row.addWidget(self.chk_identity)
+        id_row.addWidget(self.chk_structures)
+        id_row.addStretch(1)
+        root.addLayout(id_row)
 
-        # Individual ChEMBL molecule_properties checkboxes.
         self._prop_defs: list[tuple[str, str]] = [
-            ("full_mwt", "Molecular Weight (full_mwt)"),
-            ("mw_freebase", "MW Freebase (mw_freebase)"),
-            ("alogp", "AlogP (alogp)"),
-            ("psa", "PSA (psa)"),
-            ("hbd", "HBD (hbd)"),
-            ("hba", "HBA (hba)"),
-            ("rtb", "Rotatable Bonds (rtb)"),
-            ("aromatic_rings", "Aromatic Rings (aromatic_rings)"),
-            ("heavy_atoms", "Heavy Atoms (heavy_atoms)"),
-            ("ro5_violations", "Ro5 Violations (ro5_violations)"),
-            ("qed_weighted", "QED (qed_weighted)"),
+            ("full_mwt", "Molecular Weight"),
+            ("mw_freebase", "MW Freebase"),
+            ("alogp", "AlogP"),
+            ("psa", "PSA"),
+            ("hbd", "HBD"),
+            ("hba", "HBA"),
+            ("rtb", "Rotatable Bonds"),
+            ("aromatic_rings", "Aromatic Rings"),
+            ("heavy_atoms", "Heavy Atoms"),
+            ("ro5_violations", "Ro5 Violations"),
+            ("qed_weighted", "QED"),
         ]
-        gb_props = QGroupBox("Molecule properties")
-        props_v = QVBoxLayout(gb_props)
+        gb_props = QGroupBox("Properties")
+        props_grid = QGridLayout(gb_props)
         self.prop_checks: dict[str, QCheckBox] = {}
+        for i, (key, label) in enumerate(self._prop_defs):
+            cb = QCheckBox(label)
+            cb.setChecked(False)
+            self.prop_checks[key] = cb
+            props_grid.addWidget(cb, i // 2, i % 2)
+        root.addWidget(gb_props)
 
-        def add_prop_group(title: str, keys: list[str]) -> None:
-            gb = QGroupBox(title)
-            g = QGridLayout(gb)
-            items = [(k, dict(self._prop_defs).get(k, k)) for k in keys]
-            for i, (k, label) in enumerate(items):
-                cb = QCheckBox(label)
-                cb.setChecked(False)
-                self.prop_checks[k] = cb
-                g.addWidget(cb, i // 2, i % 2)
-            props_v.addWidget(gb)
-
-        # Categorized like PubChem for easier scanning.
-        add_prop_group("PhysChem", ["full_mwt", "mw_freebase", "alogp", "psa"])
-        add_prop_group("H-bonding", ["hbd", "hba"])
-        add_prop_group("Topology / rings", ["rtb", "heavy_atoms", "aromatic_rings"])
-        add_prop_group("Rules / scores", ["ro5_violations", "qed_weighted"])
-
-        f_lyt.addWidget(gb_props)
-        opts.addWidget(gb_fields, 2)
-
-        gb_assoc = QGroupBox("Associations")
-        aform = QFormLayout(gb_assoc)
-        self.chk_activities = QCheckBox("Activities (bioactivity)")
-        self.chk_activities.setChecked(False)
+        gb_bio = QGroupBox("Activities and targets")
+        bio_form = QFormLayout(gb_bio)
+        self.chk_bioactivity = QCheckBox("Include activities and targets")
+        self.chk_bioactivity.setToolTip(
+            "Also download bioactivities and the targets they come from. "
+            "Set a max of 0 to skip that half."
+        )
         self.spin_act = QSpinBox()
         self.spin_act.setRange(0, 2000)
         self.spin_act.setValue(50)
-        self.chk_targets = QCheckBox("Targets (from activities)")
-        self.chk_targets.setChecked(False)
         self.spin_targ = QSpinBox()
         self.spin_targ.setRange(0, 500)
         self.spin_targ.setValue(25)
         self.chk_only_pchembl = QCheckBox("Only activities with pChEMBL value")
-        self.chk_only_pchembl.setChecked(False)
-        aform.addRow(self.chk_activities)
-        aform.addRow("Max activities / molecule:", self.spin_act)
-        aform.addRow(self.chk_targets)
-        aform.addRow("Max targets / molecule:", self.spin_targ)
-        aform.addRow(self.chk_only_pchembl)
-        opts.addWidget(gb_assoc, 3)
-        root.addLayout(opts)
+        bio_form.addRow(self.chk_bioactivity)
+        bio_form.addRow("Max activities / molecule:", self.spin_act)
+        bio_form.addRow("Max targets / molecule:", self.spin_targ)
+        bio_form.addRow(self.chk_only_pchembl)
+        root.addWidget(gb_bio)
 
         self.status = QLabel("")
         self.status.setStyleSheet("color: palette(mid);")
         root.addWidget(self.status)
 
         self.tabs = QTabWidget()
-        self.tab_log = QTextEdit()
-        self.tab_log.setReadOnly(True)
-        apply_monospace_to_text_edit(self.tab_log)
-        self.tabs.addTab(self.tab_log, "Log")
-
-        self.tab_summary = QTextEdit()
-        self.tab_summary.setReadOnly(True)
-        apply_monospace_to_text_edit(self.tab_summary)
-        self.tabs.addTab(self.tab_summary, "Summary")
+        self.out = QTextEdit()
+        self.out.setReadOnly(True)
+        apply_monospace_to_text_edit(self.out)
+        self.tabs.addTab(self.out, "Results")
 
         self.tab_acts = QTextEdit()
         self.tab_acts.setReadOnly(True)
         apply_monospace_to_text_edit(self.tab_acts)
-        self.tabs.addTab(self.tab_acts, "Activities (TSV)")
-
         self.tab_targets = QTextEdit()
         self.tab_targets.setReadOnly(True)
         apply_monospace_to_text_edit(self.tab_targets)
-        self.tabs.addTab(self.tab_targets, "Targets (TSV)")
-
         root.addWidget(self.tabs, 1)
 
         bottom = QHBoxLayout()
@@ -739,22 +671,17 @@ class ChEMBLDialog(QDialog):
         self.btn_cancel.clicked.connect(self._cancel_query)
         bottom.addWidget(self.btn_cancel)
         bottom.addStretch()
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.reject)
-        bottom.addWidget(close_btn)
         root.addLayout(bottom)
 
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=self._run_query)
         make_window_minimizable(self)
 
-    def _chembl_select_all_fields(self) -> None:
-        self.chk_identity.setChecked(True)
-        self.chk_structures.setChecked(True)
-        for cb in self.prop_checks.values():
-            cb.setChecked(True)
-        self.chk_activities.setChecked(True)
-        self.chk_targets.setChecked(True)
-        self.chk_only_pchembl.setChecked(True)
+    def _set_optional_tab(self, widget: QTextEdit, title: str, show: bool) -> None:
+        index = self.tabs.indexOf(widget)
+        if show and index < 0:
+            self.tabs.addTab(widget, title)
+        elif not show and index >= 0:
+            self.tabs.removeTab(index)
 
     def _resolve_single_query_smiles(self) -> str | None:
         if self.chk_only_selected.isChecked():
@@ -828,13 +755,14 @@ class ChEMBLDialog(QDialog):
             "structures": self.chk_structures.isChecked(),
             "properties": bool(property_keys),
         }
-        get_acts = self.chk_activities.isChecked() and self.spin_act.value() > 0
-        get_targs = self.chk_targets.isChecked() and self.spin_targ.value() > 0
+        include_bio = self.chk_bioactivity.isChecked()
+        get_acts = include_bio and self.spin_act.value() > 0
+        get_targs = include_bio and self.spin_targ.value() > 0
 
         similarity: tuple[float, int] | None = None
         smiles_list: list[str]
 
-        if self.rb_chembl_similarity.isChecked():
+        if self.query_bar.similarity_selected():
             one = self._resolve_single_query_smiles()
             if not one:
                 return
@@ -866,20 +794,16 @@ class ChEMBLDialog(QDialog):
         self._last = []
         self._activities_tsv = ""
         self._targets_tsv = ""
+        self._query_activities = get_acts
+        self._query_targets = get_targs
         self.btn_add.setEnabled(False)
         self.btn_add_unique.setEnabled(False)
         self.btn_cancel.setEnabled(True)
-        self.btn_query.setEnabled(False)
-        self.chk_only_selected.setEnabled(False)
-        self.btn_sketch.setEnabled(False)
-        self.rb_chembl_identity.setEnabled(False)
-        self.rb_chembl_similarity.setEnabled(False)
-        self.gb_sim.setEnabled(False)
+        self.query_bar.set_busy(True)
         self.status.setText(
             f"Starting ChEMBL {'similarity' if similarity else 'identity'} query… (N={len(smiles_list)})"
         )
-        self.tab_log.setPlainText("")
-        self.tab_summary.setPlainText("")
+        self.out.setPlainText("")
         self.tab_acts.setPlainText("")
         self.tab_targets.setPlainText("")
 
@@ -918,24 +842,19 @@ class ChEMBLDialog(QDialog):
         self.btn_add.setEnabled(bool(self._last))
         self.btn_add_unique.setEnabled(bool(self._last))
         self.btn_cancel.setEnabled(False)
-        self.btn_query.setEnabled(True)
-        self.chk_only_selected.setEnabled(True)
-        self.btn_sketch.setEnabled(True)
-        self.rb_chembl_identity.setEnabled(True)
-        self.rb_chembl_similarity.setEnabled(True)
-        self.gb_sim.setEnabled(self.rb_chembl_similarity.isChecked())
+        self.query_bar.set_busy(False)
         self.status.setText(f"Done. Success: {len(self._last)}  Total: {len(logs)}")
-        self.tab_log.setPlainText("\n".join(str(x) for x in (logs or [])))
         self.tab_acts.setPlainText(self._activities_tsv)
         self.tab_targets.setPlainText(self._targets_tsv)
-
-        # Summary: concise per-molecule overview.
-        lines: list[str] = []
-        for r in self._last:
-            lines.append(
-                f"{r.smiles} | {r.chembl_id} | activities={len(r.activities)} | targets={len(r.targets)}"
-            )
-        self.tab_summary.setPlainText("\n".join(lines))
+        lines = [
+            f"{r.smiles} | {r.chembl_id} | activities={len(r.activities)} | targets={len(r.targets)}"
+            for r in self._last
+        ]
+        log = "\n".join(str(x) for x in (logs or []))
+        summary = "\n".join(lines)
+        self.out.setPlainText("\n\n".join(part for part in (summary, log) if part))
+        self._set_optional_tab(self.tab_acts, "Activities", self._query_activities)
+        self._set_optional_tab(self.tab_targets, "Targets", self._query_targets)
         self._worker = None
 
     def _add_unique_to_table(self) -> None:
