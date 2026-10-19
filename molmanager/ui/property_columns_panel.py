@@ -31,6 +31,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from .qt_widget_utils import apply_group_box_style
+
 PROPERTY_COLUMN_SLOT_COUNT = 3
 PROPERTY_COLUMN_SLOT_MAX = 10
 
@@ -66,10 +68,7 @@ class PropertyColumnsPanel(QWidget):
 
         self._prop_box = QGroupBox()
         self._prop_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        self._prop_box.setStyleSheet(
-            "QGroupBox { margin-top: 6px; background-color: palette(base); "
-            "border: 1px solid palette(mid); border-radius: 4px; }"
-        )
+        apply_group_box_style(self._prop_box)
         self._rows_host = QWidget(self._prop_box)
         self._rows_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         self._rows_ly = QVBoxLayout(self._rows_host)
