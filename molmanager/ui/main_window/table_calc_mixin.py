@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Calculator, random columns, split/join columns, fingerprint similarity, and diverse subset."""
+"""Calculator, potency units, random columns, split/join columns, fingerprint similarity, and diverse subset."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
 from ..strings import (
     TOOL_CALCULATOR,
     TOOL_JOIN_COLUMNS,
+    TOOL_POTENCY,
     TOOL_RANDOM_NUMBER,
     TOOL_SPLIT_COLUMN,
 )
@@ -169,6 +170,90 @@ class TableCalcMixin:
             "_calculator_dialog",
             _factory,
             on_reused_visible=lambda dlg: self._sync_dialog_only_selected_scope(dlg),
+        )
+
+    def open_potency_standardization(self):
+        if not self.headers:
+            return
+        numeric_columns = list(self.global_bounds.keys())
+        from ..dialogs import PotencyStandardizationDialog
+
+        def _factory():
+            dialog = PotencyStandardizationDialog(
+                numeric_columns, len(self._selected_logical_rows()), self
+            )
+            dialog.setModal(False)
+            dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+            dialog.apply_requested.connect(lambda dlg=dialog: self._run_potency_from_dialog(dlg))
+            self._prepare_tool_dialog(dialog)
+            return dialog
+
+        reuse_or_show_modeless_singleton(
+            self,
+            "_potency_dialog",
+            _factory,
+            on_reused_visible=lambda dlg: self._sync_dialog_only_selected_scope(dlg),
+        )
+
+    def _run_potency_from_dialog(self, dlg) -> None:
+        from ...chem.potency import output_headers, standardize_activity
+        from ..dialogs import PotencyStandardizationDialog
+
+        if not isinstance(dlg, PotencyStandardizationDialog):
+            return
+        request = dlg.pending_request
+        if request is None or request.column not in self.headers:
+            QMessageBox.warning(self, TOOL_POTENCY, "Choose an activity column from the table.")
+            return
+        only_selected = dlg.only_selected_rows()
+        allowed = self._selected_oids_set() if only_selected else None
+        if self._abort_if_only_selected_but_empty(only_selected, allowed, TOOL_POTENCY):
+            return
+        oids = self._all_oids_in_table_order()
+        if allowed is not None:
+            oids = [oid for oid in oids if oid in allowed]
+        if not oids:
+            QMessageBox.information(self, TOOL_POTENCY, "No rows to process for this scope.")
+            return
+        activity_col = self.headers.index(request.column)
+        headers = output_headers(
+            request.measure,
+            write_molar=request.write_molar,
+            write_p=request.write_p,
+            write_ki=request.write_ki,
+        )
+        substrate_fixed = _fixed_molar(request.substrate_constant, request.substrate_unit)
+        km_fixed = _fixed_molar(request.km_constant, request.km_unit)
+        rows: list[tuple[int, dict[str, str]]] = []
+        for oid in oids:
+            row = self.logical_row_for_oid(oid)
+            activity = "" if row < 0 else self._table_cell_text(row, activity_col)
+            substrate = substrate_fixed
+            km = km_fixed
+            if request.write_ki and request.substrate_column:
+                substrate = _column_molar(
+                    self, oid, request.substrate_column, request.substrate_unit, allow_zero=True
+                )
+            if request.write_ki and request.km_column:
+                km = _column_molar(self, oid, request.km_column, request.km_unit, allow_zero=False)
+            rows.append(
+                (
+                    int(oid),
+                    standardize_activity(
+                        activity,
+                        unit=request.unit,
+                        measure=request.measure,
+                        write_molar=request.write_molar,
+                        write_p=request.write_p,
+                        write_ki=request.write_ki,
+                        substrate_molar=substrate,
+                        km_molar=km,
+                    ),
+                )
+            )
+        written = self.on_calc_finished(rows, headers, progress_label=TOOL_POTENCY)
+        self.status_label.setText(
+            f"{TOOL_POTENCY}: wrote {len(written)} column(s) for {len(rows)} row(s)."
         )
 
     def _ensure_blank_table_headers(self) -> None:
@@ -566,3 +651,27 @@ class TableCalcMixin:
             self._consume_partial_results_notice()
             or f'{TOOL_CALCULATOR}: column "{self.new_c}" updated.'
         )
+
+
+def _fixed_molar(value: float | None, unit: str) -> float | None:
+    from ...chem.potency import to_molar
+
+    if value is None:
+        return None
+    return to_molar(value, unit)
+
+
+def _column_molar(app, oid: int, column: str, unit: str, *, allow_zero: bool) -> float | None:
+    from ...chem.potency import parse_concentration, to_molar
+
+    if column not in app.headers:
+        return None
+    row = app.logical_row_for_oid(oid)
+    if row < 0:
+        return None
+    value = parse_concentration(
+        app._table_cell_text(row, app.headers.index(column)), allow_zero=allow_zero
+    )
+    if value is None:
+        return None
+    return to_molar(value, unit)

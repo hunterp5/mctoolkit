@@ -200,7 +200,15 @@ def test_tools_menu_expands_calculator_random_and_notepad():
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(tools.items)]
     assert "Utilities" not in labels
     assert "Calculate Descriptors…" not in labels
-    assert labels[:6] == ["Query Database", "", "Random", "Calculator…", "Notepad", "Sketcher…"]
+    assert labels[:7] == [
+        "Query Database",
+        "",
+        "Random",
+        "Calculator…",
+        "Potency Standardization…",
+        "Notepad",
+        "Sketcher…",
+    ]
     assert labels[-1] == "Browser…"
     random = find_submenu(tools.items, "Random")
     assert menu_outline(random.items) == ["Number…", "Molecule…"]

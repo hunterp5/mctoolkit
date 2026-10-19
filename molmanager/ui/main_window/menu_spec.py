@@ -259,6 +259,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltip="Add a numeric column from a math expression using existing column names (e.g. sqrt, log10, exp).",
         ),
         action(
+            "Potency Standardization…",
+            "open_potency_standardization",
+            tooltip=(
+                "Convert an activity column to mol/L and pIC50 or pKi. "
+                "IC50 can also become Ki with Cheng–Prusoff when [S] and Km are known."
+            ),
+        ),
+        action(
             "&Notepad",
             "open_notepad",
             tooltip=(

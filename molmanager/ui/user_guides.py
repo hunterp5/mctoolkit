@@ -210,6 +210,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "New numeric column from a math expression.",
             ),
             _e(
+                "tools_potency",
+                "Potency Standardization",
+                "Potency Standardization",
+                "Convert activity units to molar, pIC50 or pKi, and optional Ki.",
+            ),
+            _e(
                 "tools_sketcher",
                 "Sketcher",
                 "Sketcher",

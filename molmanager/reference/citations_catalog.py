@@ -784,6 +784,24 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 notes="SALI = |Δactivity| / (1 − similarity). Implemented in MolManager using RDKit fingerprints.",
             ),
             _t(
+                "cheng_prusoff",
+                "Cheng–Prusoff",
+                "Tools → Potency Standardization (IC50 to Ki).",
+                (
+                    (
+                        "Yung-Chi, C.; Prusoff, W. H. Relationship between the Inhibition Constant "
+                        "(KI) and the Concentration of Inhibitor Which Causes 50 Per Cent Inhibition "
+                        "(I50) of an Enzymatic Reaction. Biochem. Pharmacol. 1973, 22, 3099–3108.",
+                        "https://doi.org/10.1016/0006-2952(73)90196-2",
+                    ),
+                ),
+                LIC_GPL3,
+                notes=(
+                    "Competitive form Ki = IC50 / (1 + [S]/Km). "
+                    "Molar conversion and pActivity are implemented in MolManager."
+                ),
+            ),
+            _t(
                 "free_wilson",
                 "Free-Wilson",
                 "Data → Free-Wilson (additive substituent contributions on a shared core).",
