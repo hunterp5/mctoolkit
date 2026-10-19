@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Fingerprint clustering dialog (Tools → Fingerprints → Cluster)."""
+"""Fingerprint clustering dialog (Chemistry → Fingerprints → Cluster)."""
 
 from __future__ import annotations
 
