@@ -446,17 +446,11 @@ class PlotPane(QFrame):
     def add_plot_widget(self, widget: QWidget) -> None:
         """Append ``widget`` and show it. If it is already here, just show it."""
         embed_in_plot_pane(widget)
-        if widget in self._pages:
-            self._stack.setCurrentWidget(widget)
-            self._presize_stack_pages()
-            self._refresh_pager()
-            self._sync_visible_footer()
-            return
-        self._pages.append(widget)
-        self._stack.addWidget(widget)
-        self._remember_page_web_views(widget)
-        self._stack.setCurrentWidget(widget)
-        self._presize_stack_pages()
+        if widget not in self._pages:
+            self._pages.append(widget)
+            self._stack.addWidget(widget)
+            self._remember_page_web_views(widget)
+        self._display_page(self._pages.index(widget))
         self._refresh_pager()
         self._sync_visible_footer()
 
@@ -466,7 +460,9 @@ class PlotPane(QFrame):
             return False
         if getattr(self, "_header_button_owner", None) is widget:
             if not discard:
-                restore_dock_header_buttons(widget)
+                # Stay hidden until the widget is off this stack. Showing the footer
+                # here shrinks the figure while it is still the visible page.
+                restore_dock_header_buttons(widget, docked=True)
             self._header_button_owner = None
         idx = self._pages.index(widget)
         self._pages.remove(widget)
@@ -479,7 +475,7 @@ class PlotPane(QFrame):
         if not discard:
             unembed_from_plot_pane(widget)
         if self._pages:
-            self._stack.setCurrentIndex(min(idx, len(self._pages) - 1))
+            self._display_page(min(idx, len(self._pages) - 1))
         self._refresh_pager()
         self._sync_visible_footer()
         return True
@@ -489,7 +485,7 @@ class PlotPane(QFrame):
         if n < 2:
             return
         self._ensure_stale_pages_presized()
-        self._stack.setCurrentIndex((self.page_index() - 1) % n)
+        self._display_page((self.page_index() - 1) % n)
         self.activated.emit(self)
 
     def show_next_page(self) -> None:
@@ -497,7 +493,7 @@ class PlotPane(QFrame):
         if n < 2:
             return
         self._ensure_stale_pages_presized()
-        self._stack.setCurrentIndex((self.page_index() + 1) % n)
+        self._display_page((self.page_index() + 1) % n)
         self.activated.emit(self)
 
     def move_current_page_earlier(self) -> None:
@@ -532,7 +528,7 @@ class PlotPane(QFrame):
         if not self._pages:
             return
         self._ensure_stale_pages_presized()
-        self._stack.setCurrentIndex(max(0, min(int(index), len(self._pages) - 1)))
+        self._display_page(index)
 
     def _on_stack_current_changed(self, _index: int) -> None:
         self._ensure_stale_pages_presized()
@@ -567,17 +563,26 @@ class PlotPane(QFrame):
         return sw, sh
 
     def _apply_page_geometry(self, page: QWidget, sw: int, sh: int) -> None:
+        """Size a stack page to the pane, then let its layout place the figure.
+
+        The web view sits inside the plot layout (body margins, and the footer when
+        that bar is up). Pinning the view to the stack rectangle makes it a few
+        pixels too big; the layout then corrects it and Plotly lays the figure out
+        again. Activating the page layout assigns the content rect directly.
+        """
         try:
             if page.width() != sw or page.height() != sh:
                 page.resize(sw, sh)
+            layout = page.layout()
         except RuntimeError:
             return
-        for view in self._page_web_views.get(id(page), ()):
-            try:
-                if view.width() != sw or view.height() != sh:
-                    view.resize(sw, sh)
-            except RuntimeError:
-                continue
+        if layout is None:
+            return
+        try:
+            layout.invalidate()
+            layout.activate()
+        except RuntimeError:
+            return
 
     def _schedule_stale_presize(self) -> None:
         if self._stale_pages:
@@ -629,27 +634,29 @@ class PlotPane(QFrame):
             except RuntimeError:
                 continue
 
-    def _sync_visible_footer(self) -> None:
-        current = self.plot_widget()
-        owner = getattr(self, "_header_button_owner", None)
-        if owner is not None and owner is not current:
-            restore_dock_header_buttons(owner)
-            self._header_button_owner = None
-        if current is None:
+    def _install_page_chrome(self, page: QWidget | None) -> None:
+        """Adopt ``page`` header buttons before that page is shown.
+
+        Doing this after ``setCurrentIndex`` paints the footer, then hides it, and
+        the figure grows by that band. Background pages keep the footer hidden so
+        the next visit does not resize the figure either.
+        """
+        if page is None:
             return
-        # Same page still owns the header: skip restore/adopt so content geometry
-        # does not jitter (Plotly would look like it recalculated).
-        if owner is current:
-            sync = getattr(current, "_sync_footer_chrome", None)
+        owner = getattr(self, "_header_button_owner", None)
+        if owner is not None and owner is not page:
+            restore_dock_header_buttons(owner, docked=owner in self._pages)
+            self._header_button_owner = None
+            owner = None
+        if owner is page:
+            sync = getattr(page, "_sync_footer_chrome", None)
             if callable(sync):
                 try:
                     sync()
                 except RuntimeError:
                     pass
             return
-        # ParentChange footer sync is suspended during dock/undock reparent, so this
-        # remains the single visibility + adopt pass for the visible page.
-        sync = getattr(current, "_sync_footer_chrome", None)
+        sync = getattr(page, "_sync_footer_chrome", None)
         if callable(sync):
             try:
                 sync()
@@ -657,12 +664,31 @@ class PlotPane(QFrame):
                 pass
         adopt_dock_header_buttons(
             self._chrome_ly,
-            current,
+            page,
             leading_opts_layout=self._leading_opts_ly,
             send_window_layout=self._send_ly,
             trailing_close_layout=self._trailing_close_ly,
         )
-        self._header_button_owner = current
+        self._header_button_owner = page
+
+    def _sync_visible_footer(self) -> None:
+        self._install_page_chrome(self.plot_widget())
+
+    def _display_page(self, index: int) -> None:
+        """Show ``index`` with its chrome and figure box already final."""
+        n = len(self._pages)
+        if n == 0:
+            return
+        index = max(0, min(int(index), n - 1))
+        page = self._pages[index]
+        self._stack.setUpdatesEnabled(False)
+        try:
+            self._install_page_chrome(page)
+            self._presize_stack_pages()
+            if self.page_index() != index:
+                self._stack.setCurrentIndex(index)
+        finally:
+            self._stack.setUpdatesEnabled(True)
 
     def _refresh_pager(self) -> None:
         n = len(self._pages)
