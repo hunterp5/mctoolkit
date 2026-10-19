@@ -37,13 +37,13 @@ from ...platform_support.config import load_config
 from ...workers import SubstructureFilterWorker
 from ..search_panel import SearchCriterionRow
 from ..search_query import (
+    classify_search_query,
     combine_search_row_sets,
     evaluate_search_expression,
     parse_search_expression,
     parse_search_term_groups,
     parse_substructure_term,
     sqlite_where_for_expression,
-    validate_search_text_query,
 )
 
 
@@ -90,12 +90,6 @@ class TableSearchMixin:
         if not getattr(self, "_search_criterion_rows", None):
             return None
         return self._search_criterion_rows[0].case_cb
-
-    @property
-    def _search_substructure_cb(self) -> QCheckBox | None:
-        if not getattr(self, "_search_criterion_rows", None):
-            return None
-        return self._search_criterion_rows[0].substructure_cb
 
     def _init_table_search_panel(self, panel: QFrame) -> None:
         outer = QVBoxLayout(panel)
@@ -158,7 +152,7 @@ class TableSearchMixin:
             row.query_edit.clear()
             row.partial_cb.setChecked(True)
             row.case_cb.setChecked(False)
-            row.substructure_cb.setChecked(False)
+            row.glue_combo.setCurrentIndex(0)
         panel = getattr(self, "_search_panel", None)
         if panel is not None:
             panel.setVisible(False)
@@ -167,7 +161,7 @@ class TableSearchMixin:
         QTimer.singleShot(0, self._sync_filter_panel_scroll_content)
 
     def _sync_search_row_chrome(self) -> None:
-        """Keep Add on the first row, glue on later rows, and − visible on every row."""
+        """Keep Add on the first row, NOT/AND/OR on every row, and − visible on every row."""
         rows = getattr(self, "_search_criterion_rows", None) or []
         n = len(rows)
         for i, row in enumerate(rows):
@@ -177,13 +171,13 @@ class TableSearchMixin:
             else:
                 row.remove_btn.setToolTip("Remove this search row.")
             row.add_btn.setVisible(i == 0)
-            row.glue_combo.setVisible(i > 0)
+            row.glue_combo.setVisible(True)
 
     def _add_search_criterion_row(self) -> SearchCriterionRow:
         is_first = not self._search_criterion_rows
         row = SearchCriterionRow(
             self._search_rows_host,
-            show_glue=not is_first,
+            show_glue=True,
             show_add=is_first,
             on_add=self._add_search_criterion_row,
         )
@@ -263,8 +257,9 @@ class TableSearchMixin:
             if self._search_criterion_rows:
                 self._search_criterion_rows[0].query_edit.setFocus(Qt.ShortcutFocusReason)
             self.status_label.setText(
-                "Search: use Add for more columns; AND/OR between rows. "
-                "Within a row: & AND, | or comma OR. Press Enter to run. "
+                "Search: quote column text, or leave SMILES/SMARTS unquoted. "
+                "NOT on the first row excludes matches. Add for more rows (AND/OR/NOT). "
+                "Within a row: & AND, | or comma OR. Press Enter. "
                 "− deletes a row; deleting the last row closes Search."
             )
         QTimer.singleShot(0, self._sync_filter_panel_scroll_content)
@@ -336,17 +331,21 @@ class TableSearchMixin:
 
     def _collect_search_criteria(self) -> list[_SearchCriterionSpec] | None:
         specs: list[_SearchCriterionSpec] = []
-        for i, row in enumerate(self._search_criterion_rows):
+        for row in self._search_criterion_rows:
             needle = (row.query_edit.text() or "").strip()
-            if not row.substructure_cb.isChecked():
-                err = validate_search_text_query(needle, partial=row.partial_cb.isChecked())
-                if err:
-                    self.status_label.setText(err)
-                    return None
+            kind = classify_search_query(
+                needle,
+                partial=row.partial_cb.isChecked(),
+                parses_pattern=lambda text: self._search_query_pattern_mol(text) is not None,
+            )
+            if kind not in {"text", "substructure"}:
+                self.status_label.setText(kind)
+                return None
             term_groups = parse_search_term_groups(needle)
             if not term_groups:
                 continue
-            if row.substructure_cb.isChecked():
+            substructure = kind == "substructure"
+            if substructure:
                 term_groups = self._coalesce_smarts_term_groups(needle, term_groups)
             col = self._resolve_search_column(row.col_combo)
             if col is None:
@@ -355,16 +354,15 @@ class TableSearchMixin:
             if col is None:
                 self.status_label.setText("Search: no columns loaded.")
                 return None
-            glue = None if i == 0 else row.glue()
             specs.append(
                 _SearchCriterionSpec(
                     col=col,
                     query=needle,
                     term_groups=term_groups,
-                    glue=glue,
+                    glue=row.glue(),
                     partial=row.partial_cb.isChecked(),
                     case_sensitive=row.case_cb.isChecked(),
-                    substructure=row.substructure_cb.isChecked(),
+                    substructure=substructure,
                 )
             )
         return specs
@@ -491,7 +489,8 @@ class TableSearchMixin:
     def _combine_search_row_sets(
         self, specs: list[_SearchCriterionSpec], row_sets: list[set[int]]
     ) -> set[int]:
-        return combine_search_row_sets([spec.glue for spec in specs], row_sets)
+        universe = set(range(self._table_model.rowCount()))
+        return combine_search_row_sets([spec.glue for spec in specs], row_sets, universe=universe)
 
     def _select_table_rows(self, rows: list[int]) -> bool:
         """Select *rows* in the table view; return False if nothing selected."""
@@ -545,8 +544,8 @@ class TableSearchMixin:
         self.table.setFocus(Qt.ShortcutFocusReason)
 
         n_crit = len(specs)
-        glue_bits = [s.glue for s in specs[1:] if s.glue]
-        if n_crit > 1:
+        glue_bits = [s.glue for i, s in enumerate(specs) if s.glue and (i > 0 or s.glue == "not")]
+        if n_crit > 1 or (specs and specs[0].glue == "not"):
             glue_note = f", {n_crit} criteria ({'/'.join(g.upper() for g in glue_bits)})"
         else:
             glue_note = ""
@@ -690,15 +689,13 @@ class TableSearchMixin:
             header = ""
             if isinstance(col, int) and 0 <= col < len(self.headers):
                 header = str(self.headers[col])
-            glue = None if i == 0 else row.glue()
             criteria.append(
                 {
                     "column": header,
                     "query": query,
-                    "glue": glue,
+                    "glue": row.glue(),
                     "partial": bool(row.partial_cb.isChecked()),
                     "case_sensitive": bool(row.case_cb.isChecked()),
-                    "substructure": bool(row.substructure_cb.isChecked()),
                 }
             )
         if not visible and not has_query:
@@ -715,7 +712,7 @@ class TableSearchMixin:
             row.query_edit.clear()
             row.partial_cb.setChecked(True)
             row.case_cb.setChecked(False)
-            row.substructure_cb.setChecked(False)
+            row.glue_combo.setCurrentIndex(0)
         self._sync_search_row_chrome()
         panel = getattr(self, "_search_panel", None)
         if panel is not None:
@@ -744,9 +741,8 @@ class TableSearchMixin:
             row.query_edit.setText(str(spec.get("query") or ""))
             row.partial_cb.setChecked(bool(spec.get("partial", True)))
             row.case_cb.setChecked(bool(spec.get("case_sensitive", False)))
-            row.substructure_cb.setChecked(bool(spec.get("substructure", False)))
             glue = spec.get("glue")
-            if i > 0 and glue in ("and", "or", "not"):
+            if glue in ("and", "or", "not"):
                 idx = row.glue_combo.findData(glue)
                 if idx >= 0:
                     row.glue_combo.setCurrentIndex(idx)
