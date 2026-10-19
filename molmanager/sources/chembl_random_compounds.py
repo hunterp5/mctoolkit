@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Fetch random ChEMBL compounds for Tools → Utilities → Random → Molecule."""
+"""Fetch random ChEMBL compounds for Tools → Random → Molecule."""
 
 from __future__ import annotations
 
