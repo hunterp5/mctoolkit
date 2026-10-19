@@ -129,9 +129,7 @@ class ClusterDialog(QDialog):
         self.standardize_cb = QCheckBox("Standardize numeric columns")
         self.standardize_cb.setChecked(True)
         self.standardize_cb.setToolTip(
-            "Zero mean and unit variance on the checked columns. Fingerprint bits stay 0/1, "
-            "then the bit block is rescaled so it contributes about as much total variance "
-            "as the numeric columns."
+            "Zero mean and unit variance on the checked columns. Fingerprint bits are not standardized."
         )
         feat_lyt.addWidget(self.standardize_cb)
 
@@ -149,6 +147,7 @@ class ClusterDialog(QDialog):
         self.column_list.setSelectionMode(QAbstractItemView.NoSelection)
         self.column_list.setToolTip(
             "Checked columns are clustered with K-Means, Agglomerative, or DBSCAN. "
+            "With a fingerprint, the bit block is rescaled so the columns still affect the distance. "
             "Butina, sphere exclusion, and Jarvis-Patrick stay fingerprint-only."
         )
         feat_lyt.addWidget(self.column_list)
@@ -241,7 +240,7 @@ class ClusterDialog(QDialog):
         db = QWidget()
         db_lyt = QFormLayout(db)
         self.dbscan_eps = QDoubleSpinBox()
-        self.dbscan_eps.setRange(0.05, 2.0)
+        self.dbscan_eps.setRange(0.05, 10.0)
         self.dbscan_eps.setDecimals(3)
         self.dbscan_eps.setSingleStep(0.05)
         self.dbscan_eps.setValue(0.35)
@@ -481,17 +480,16 @@ class ClusterDialog(QDialog):
         self.column_list.blockSignals(True)
         self.column_list.clear()
         try:
-            if self.parent_app is None:
-                return
-            only_sel = selection_scope_checked(self)
-            _all_cols, numeric_cols = scoped_table_column_names(
-                self.parent_app, visible_only=False, only_selected=only_sel
-            )
-            for col in numeric_cols:
-                item = QListWidgetItem(col)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Checked if col in checked else Qt.Unchecked)
-                self.column_list.addItem(item)
+            if self.parent_app is not None:
+                only_sel = selection_scope_checked(self)
+                _all_cols, numeric_cols = scoped_table_column_names(
+                    self.parent_app, visible_only=False, only_selected=only_sel
+                )
+                for col in numeric_cols:
+                    item = QListWidgetItem(col)
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    item.setCheckState(Qt.Checked if col in checked else Qt.Unchecked)
+                    self.column_list.addItem(item)
         finally:
             self.column_list.blockSignals(False)
         self._sync_feature_controls()
@@ -535,7 +533,12 @@ class ClusterDialog(QDialog):
             (self._ex_jp, "jarvis_patrick"),
         ):
             box.setEnabled(allow_tanimoto or key not in TANIMOTO_CLUSTER_METHODS)
-        metric = "cosine distance" if use_fp and not has_cols else "Euclidean distance"
+        euclidean = not (use_fp and not has_cols)
+        if euclidean and abs(float(self.dbscan_eps.value()) - 0.35) < 1e-9:
+            self.dbscan_eps.setValue(1.5)
+        elif not euclidean and abs(float(self.dbscan_eps.value()) - 1.5) < 1e-9:
+            self.dbscan_eps.setValue(0.35)
+        metric = "Euclidean distance" if euclidean else "cosine distance"
         self.dbscan_eps.setToolTip(
             f"Neighborhood radius ({metric}). Smaller values yield more clusters and more noise."
         )

@@ -436,7 +436,10 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "Cluster…",
                 "open_cluster_dialog",
                 hotkey="data.cluster",
-                tooltip="Cluster compounds by fingerprint (K-Means, Butina, sphere exclusion, etc.).",
+                tooltip=(
+                    "Cluster compounds by fingerprint, numeric columns, or both "
+                    "(K-Means, Butina, sphere exclusion, etc.)."
+                ),
             ),
             tooltips_visible=True,
         ),

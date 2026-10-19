@@ -289,7 +289,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_cluster",
                 "Cluster",
                 "Cluster",
-                "Cluster molecules by fingerprint similarity.",
+                "Cluster rows by fingerprint, numeric columns, or both.",
             ),
         ),
     ),
