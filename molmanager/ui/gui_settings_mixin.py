@@ -202,6 +202,12 @@ class GuiSettingsMixin:
         settings_menu.addAction(self._act_status_bar)
         settings_menu.addSeparator()
         settings_menu.addAction(QAction("&WSL…", self, triggered=self.open_wsl_settings_dialog))
+        settings_menu.addSeparator()
+        from .main_window.menu_builder import _install_into_menu
+        from .main_window.menu_spec import HELP_MENU
+
+        help_menu = settings_menu.addMenu(HELP_MENU.title)
+        _install_into_menu(self, help_menu, HELP_MENU)
         self._apply_status_bar_visible(self._act_status_bar.isChecked(), persist=False)
 
     def _on_status_bar_toggled(self, checked: bool) -> None:
