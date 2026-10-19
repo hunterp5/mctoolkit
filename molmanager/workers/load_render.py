@@ -26,7 +26,13 @@ from .process_pool_utils import (
     should_terminate_process_pool,
     shutdown_process_pool_executor,
 )
-from .render2d_pool import ensure_render2d_process_pool, render2d_process_worker_count
+from .render2d_pool import (
+    ensure_render2d_process_pool,
+    note_render2d_pool_busy,
+    note_render2d_pool_idle,
+    release_render2d_process_pool,
+    render2d_process_worker_count,
+)
 
 from PyQt5.QtCore import QRunnable
 from rdkit import Chem
@@ -148,7 +154,7 @@ def render2d_process_worker_count() -> int:
 
 class Render2DBatchHeldJob(QRunnable):
     """
-    Process-queue adapter for Tools → Render 2D.
+    Process-queue adapter for Chemistry → Render 2D.
 
     Prepares the batch on the GUI thread, runs subprocess rendering, then blocks until the
     UI has flushed results (``_render2d_batch_done_event``).
@@ -189,7 +195,7 @@ class Render2DBatchHeldJob(QRunnable):
 
 
 class Render2DBatchProcessWorker(QRunnable):
-    """Tools → Render 2D: draw structures in subprocesses so the GUI process stays responsive."""
+    """Chemistry → Render 2D: draw structures in subprocesses so the GUI process stays responsive."""
 
     def __init__(
         self,
@@ -249,6 +255,7 @@ class Render2DBatchProcessWorker(QRunnable):
         ex = ensure_render2d_process_pool(max_workers=proc_workers)
         if ex is None:
             return
+        note_render2d_pool_busy()
 
         def _fill() -> None:
             while len(pending) < max_inflight:
@@ -279,12 +286,12 @@ class Render2DBatchProcessWorker(QRunnable):
                         self.signals.rendered_batch.emit(rows, self.batch_session)
                 _fill()
         finally:
-            # Shared pool stays warm across session opens. Cancel / app exit kills workers via
-            # the dedicated release helper so the module-level handle cannot go stale.
+            # The pool stays up briefly so the next Render 2D does not pay spawn again, then
+            # the idle timer releases it. Cancel / app exit kills workers immediately.
             if should_terminate_process_pool(ev):
-                from .render2d_pool import release_render2d_process_pool
-
                 release_render2d_process_pool(kill_workers=True)
+            else:
+                note_render2d_pool_idle()
 
 
 class UniversalLoadWorker(QRunnable):
