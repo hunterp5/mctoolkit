@@ -12,6 +12,8 @@ Use when PDB/PDBQT receptor prep is done and you want local Gnina runs without l
 
 Protein Viewer **Tools → Prepare → Fast Prepare…** and **Tools → Prepare → Dock File…** fill the receptor PDBQT and numeric search box (crystal-ligand AABB + padding). The docking **Ligand** field is left empty so you can choose compounds to dock. The crystal ligand extracted by those tools is kept for **internal validation** (on by default).
 
+**Protein → Dock Ligand → Gnina…** and Protein Viewer **Tools → Dock Ligand…** open this dialog. **File → Session → Save Session** stores the paths and options (receptor, ligand, output, box, pharmacophore, flexible residues, CNN settings, and the crystal ligand used for validation). Opening the dialog in that session fills them back in. A running job is not saved.
+
 ## Inputs / scope
 
 Requires a **Gnina** command, receptor PDB or PDBQT, ligands, and an output path. Ligands come from a **file** or from **selected table rows** plus a **conformations** column. Box defined by center and size, or **Autobox**.
