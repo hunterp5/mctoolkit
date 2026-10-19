@@ -41,7 +41,11 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 from ...platform_support.session_log import record_ui_log
-from ..dockable_plot import hide_plot_options_dialog
+from ..dockable_plot import (
+    hide_plot_options_dialog,
+    make_plot_options_dialog,
+    show_plot_options_dialog,
+)
 from ...analysis.dimensionality_reduction import (
     EMBEDDING_PCA_DIM,
     EMBEDDING_PCA_DIM_MAX,
@@ -97,12 +101,10 @@ class DimensionReductionPanel(DockableResultPlotPanel):
             window_title=window_title,
             floating_dialog_cls=DimensionReductionDialog,
             parent=None,
-            opts_title=f"{window_title} — Plot Options",
+            opts_title=window_title,
             opts_min_width=640,
             opts_min_height=480,
-            opts_tooltip=(
-                "Configure target dimensions, features, method parameters, color, and On Hover options."
-            ),
+            opts_tooltip="Configure titles, Color by, Size by, and On Hover.",
             pair_encoding=False,
             defer_initial_reload=True,
         )
@@ -133,102 +135,16 @@ class DimensionReductionPanel(DockableResultPlotPanel):
             self._root.addWidget(self._plot_placeholder, 1)
 
         extras = self._extra_opts_layout
-        features_opts_row = QHBoxLayout()
-        features_opts_row.setSpacing(8)
+        extras.addWidget(self._build_features_group())
+        extras.addWidget(self._build_scope_group(n_sel))
 
-        src_grp = QGroupBox("Features")
-        src_ly = QVBoxLayout(src_grp)
-        self.column_list = QListWidget()
-        self.column_list.setMinimumWidth(220)
-        self.column_list.setMaximumHeight(140)
-        src_ly.addWidget(self.column_list)
+        method_box = QGroupBox("Method")
+        method_layout = QVBoxLayout(method_box)
+        method_layout.setSpacing(6)
+        self._build_method_options(method_layout)
+        extras.addWidget(method_box)
+        extras.addWidget(self._build_preprocess_group())
 
-        fp_row = QHBoxLayout()
-        fp_row.addWidget(QLabel("Fingerprint:"))
-        self.fp_combo = QComboBox()
-        self.fp_combo.addItem(_FP_NONE_LABEL)
-        self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
-        self.fp_combo.setToolTip(
-            "None: numeric columns only. Otherwise concatenate a 2D fingerprint bit vector."
-        )
-        fp_row.addWidget(self.fp_combo, 1)
-        src_ly.addLayout(fp_row)
-        struct_row = QHBoxLayout()
-        struct_row.addWidget(QLabel("Structure from:"))
-        self.struct_src_combo = QComboBox()
-        struct_row.addWidget(self.struct_src_combo, 1)
-        src_ly.addLayout(struct_row)
-        features_opts_row.addWidget(src_grp, 1)
-
-        method_opts = QGroupBox("Options")
-        self._opts_form = QFormLayout(method_opts)
-        features_opts_row.addWidget(method_opts, 1)
-        extras.addLayout(features_opts_row)
-
-        self.target_dimensions = QComboBox()
-        self.target_dimensions.addItem("2D", 2)
-        self.target_dimensions.addItem("3D", 3)
-        self.target_dimensions.setToolTip(
-            "Embed into two or three dimensions. 3D draws a rotatable scatter. "
-            "Run again after changing this."
-        )
-        self._opts_form.addRow("Target Dimensions:", self.target_dimensions)
-
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
-        else:
-            self.only_selected_cb.setEnabled(False)
-        self._opts_form.addRow(self.only_selected_cb)
-
-        self._build_method_options(self._opts_form)
-        self.standardize_cb = QCheckBox("Standardize features (zero mean, unit variance)")
-        self.standardize_cb.setChecked(True)
-        self._opts_form.addRow(self.standardize_cb)
-        self._pca_preprocess_cb: QCheckBox | None = None
-        self._pca_dim_spin: QSpinBox | None = None
-        self._pca_var_spin: QDoubleSpinBox | None = None
-        self._pca_whiten_cb: QCheckBox | None = None
-        if self._method != "pca":
-            self._pca_preprocess_cb = QCheckBox("PCA-compress before embedding")
-            self._pca_preprocess_cb.setChecked(True)
-            self._pca_preprocess_cb.setToolTip(
-                "Project wide inputs (typical fingerprints) to principal components "
-                "before t-SNE / UMAP / SOM. On by default: faster, and local neighborhoods "
-                "are usually preserved. Turn off to embed the raw features."
-            )
-            self._opts_form.addRow(self._pca_preprocess_cb)
-
-            self._pca_dim_spin = QSpinBox()
-            self._pca_dim_spin.setRange(2, EMBEDDING_PCA_DIM_MAX)
-            self._pca_dim_spin.setValue(EMBEDDING_PCA_DIM)
-            self._pca_dim_spin.setToolTip(
-                "Maximum principal components to keep. Compression runs when the matrix "
-                "is wider than this, or when a variance target is set."
-            )
-            self._opts_form.addRow("PCA components:", self._pca_dim_spin)
-
-            self._pca_var_spin = QDoubleSpinBox()
-            self._pca_var_spin.setRange(0.0, 99.0)
-            self._pca_var_spin.setDecimals(0)
-            self._pca_var_spin.setSuffix(" %")
-            self._pca_var_spin.setSpecialValueText("off")
-            self._pca_var_spin.setValue(0)
-            self._pca_var_spin.setToolTip(
-                "Keep the fewest PCs that reach this explained variance, up to PCA components. "
-                "Off uses the component count only."
-            )
-            self._opts_form.addRow("PCA min. variance:", self._pca_var_spin)
-
-            self._pca_whiten_cb = QCheckBox("Whiten PCA components")
-            self._pca_whiten_cb.setChecked(False)
-            self._pca_whiten_cb.setToolTip(
-                "Scale each kept component to unit variance (sklearn whiten)."
-            )
-            self._opts_form.addRow(self._pca_whiten_cb)
-
-        trail = self._trailing_opts_layout
         run_row = QHBoxLayout()
         run_row.setContentsMargins(0, 10, 0, 6)
         run_row.addStretch()
@@ -237,7 +153,8 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         self.run_btn.setStyleSheet("QPushButton { padding: 8px 28px; }")
         run_row.addWidget(self.run_btn)
         run_row.addStretch()
-        trail.addLayout(run_row)
+        extras.addLayout(run_row)
+        self._install_appearance_dialog()
 
     def _wire_dimred_ui(self, parent: ChemistryWorkspaceWindow | None) -> None:
         self.fp_combo.currentIndexChanged.connect(self._on_fp_selection_changed)
@@ -254,13 +171,16 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         self._signals.failed.connect(self._on_failed, Qt.QueuedConnection)
 
     def _ui_parent(self) -> QWidget:
-        """Parent for alerts: Plot Options if open, else the visible plot window."""
-        opts = getattr(self, "_opts_dialog", None)
-        try:
-            if opts is not None and opts.isVisible():
-                return opts
-        except RuntimeError:
-            pass
+        """Parent for alerts: the open setup or plot-settings dialog, else the plot window."""
+        for opts in (
+            getattr(self, "_appearance_dialog", None),
+            getattr(self, "_opts_dialog", None),
+        ):
+            try:
+                if opts is not None and opts.isVisible():
+                    return opts
+            except RuntimeError:
+                continue
         win = self.window()
         try:
             if win is not None and win.isVisible():
@@ -280,7 +200,7 @@ class DimensionReductionPanel(DockableResultPlotPanel):
 
     def reveal_plot_window(self) -> None:
         """Show the floating plot host once an embedding is ready."""
-        hide_plot_options_dialog(self._opts_dialog)
+        self._hide_dimred_dialogs()
         if self._is_docked_in_main_window():
             return
         win = self.window()
@@ -294,18 +214,18 @@ class DimensionReductionPanel(DockableResultPlotPanel):
             return
 
     def present_initial_ui(self) -> None:
-        """Open Plot Options until a figure exists; then show the plot window."""
+        """Open embedding setup until a figure exists; then show the plot window."""
         if self._last_result is not None or self._is_docked_in_main_window():
             self.reveal_plot_window()
             return
-        self._open_plot_options()
+        self._open_setup_dialog()
 
     def _calculating_status_text(self) -> str:
         return f"{self._window_title}: calculating…"
 
     def _close_options_for_run(self) -> None:
-        """Hide Plot Options so progress is the main-window status line."""
-        hide_plot_options_dialog(self._opts_dialog)
+        """Hide setup and plot settings so progress is the main-window status line."""
+        self._hide_dimred_dialogs()
         if self._plot_window_is_visible() or self.parent_app is None:
             return
         try:
@@ -362,7 +282,169 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         }
         return labels.get(self._method, "Run")
 
-    def _build_method_options(self, form: QFormLayout) -> None:
+    def _build_features_group(self) -> QGroupBox:
+        """Numeric columns, optional fingerprint, and the structure column that feeds it."""
+        src_grp = QGroupBox("Features")
+        src_ly = QVBoxLayout(src_grp)
+        self.column_list = QListWidget()
+        self.column_list.setMinimumWidth(220)
+        self.column_list.setMinimumHeight(100)
+        self.column_list.setMaximumHeight(180)
+        src_ly.addWidget(self.column_list)
+
+        fp_row = QHBoxLayout()
+        fp_row.addWidget(QLabel("Fingerprint:"))
+        self.fp_combo = QComboBox()
+        self.fp_combo.addItem(_FP_NONE_LABEL)
+        self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
+        self.fp_combo.setToolTip(
+            "None: numeric columns only. Otherwise concatenate a 2D fingerprint bit vector."
+        )
+        fp_row.addWidget(self.fp_combo, 1)
+        src_ly.addLayout(fp_row)
+        struct_row = QHBoxLayout()
+        struct_row.addWidget(QLabel("Structure from:"))
+        self.struct_src_combo = QComboBox()
+        struct_row.addWidget(self.struct_src_combo, 1)
+        src_ly.addLayout(struct_row)
+        return src_grp
+
+    def _build_scope_group(self, n_selected: int) -> QGroupBox:
+        """Row scope and the number of embedding axes. Both apply on the next Run."""
+        scope = QGroupBox("Scope")
+        form = QFormLayout(scope)
+        self.target_dimensions = QComboBox()
+        self.target_dimensions.addItem("2D", 2)
+        self.target_dimensions.addItem("3D", 3)
+        self.target_dimensions.setToolTip(
+            "Embed into two or three dimensions. 3D draws a rotatable scatter. "
+            "Run again after changing this."
+        )
+        form.addRow("Target Dimensions:", self.target_dimensions)
+
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(
+                f"{self._only_selected_scope_prefix} ({n_selected} row(s))"
+            )
+        else:
+            self.only_selected_cb.setEnabled(False)
+        form.addRow(self.only_selected_cb)
+        return scope
+
+    def _build_preprocess_group(self) -> QGroupBox:
+        """Standardize, and for non-PCA methods an optional PCA compression step."""
+        box = QGroupBox("Preprocess")
+        layout = QVBoxLayout(box)
+        self.standardize_cb = QCheckBox("Standardize features (zero mean, unit variance)")
+        self.standardize_cb.setChecked(True)
+        layout.addWidget(self.standardize_cb)
+
+        self._pca_preprocess_cb: QCheckBox | None = None
+        self._pca_dim_spin: QSpinBox | None = None
+        self._pca_var_spin: QDoubleSpinBox | None = None
+        self._pca_whiten_cb: QCheckBox | None = None
+        self._pca_detail_host: QWidget | None = None
+        if self._method == "pca":
+            return box
+
+        self._pca_preprocess_cb = QCheckBox("PCA-compress before embedding")
+        self._pca_preprocess_cb.setChecked(True)
+        self._pca_preprocess_cb.setToolTip(
+            "Project wide inputs (typical fingerprints) to principal components "
+            "before t-SNE / UMAP / SOM. On by default: faster, and local neighborhoods "
+            "are usually preserved. Turn off to embed the raw features."
+        )
+        layout.addWidget(self._pca_preprocess_cb)
+
+        self._pca_dim_spin = QSpinBox()
+        self._pca_dim_spin.setRange(2, EMBEDDING_PCA_DIM_MAX)
+        self._pca_dim_spin.setValue(EMBEDDING_PCA_DIM)
+        self._pca_dim_spin.setToolTip(
+            "Maximum principal components to keep. Compression runs when the matrix "
+            "is wider than this, or when a variance target is set."
+        )
+        self._pca_var_spin = QDoubleSpinBox()
+        self._pca_var_spin.setRange(0.0, 99.0)
+        self._pca_var_spin.setDecimals(0)
+        self._pca_var_spin.setSuffix(" %")
+        self._pca_var_spin.setSpecialValueText("off")
+        self._pca_var_spin.setValue(0)
+        self._pca_var_spin.setToolTip(
+            "Keep the fewest PCs that reach this explained variance, up to PCA components. "
+            "Off uses the component count only."
+        )
+        self._pca_whiten_cb = QCheckBox("Whiten PCA components")
+        self._pca_whiten_cb.setChecked(False)
+        self._pca_whiten_cb.setToolTip(
+            "Scale each kept component to unit variance (sklearn whiten)."
+        )
+
+        detail = QWidget(box)
+        detail_form = QFormLayout(detail)
+        detail_form.setContentsMargins(0, 0, 0, 0)
+        detail_form.addRow("PCA components:", self._pca_dim_spin)
+        detail_form.addRow("PCA min. variance:", self._pca_var_spin)
+        detail_form.addRow(self._pca_whiten_cb)
+        self._pca_detail_host = detail
+        layout.addWidget(detail)
+        return box
+
+    def _install_appearance_dialog(self) -> None:
+        """Move titles, color, size, and hover into the plot-settings dialog.
+
+        The setup dialog keeps features, method, and Run. Plot settings redraws the
+        current figure and does not show those controls.
+        """
+        opts = self._opts_panel.layout()
+        opts.removeWidget(self._titles)
+        opts.removeWidget(self._hover_controls)
+
+        row_layouts = []
+        index = 0
+        while index < opts.count():
+            item = opts.itemAt(index)
+            layout = item.layout() if item is not None else None
+            if layout is None:
+                index += 1
+                continue
+            opts.takeAt(index)
+            row_layouts.append(layout)
+
+        panel = QWidget()
+        body = QVBoxLayout(panel)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(6)
+        body.addWidget(self._titles)
+        for row in row_layouts:
+            row.setParent(None)
+            host = QWidget(panel)
+            host.setLayout(row)
+            body.addWidget(host)
+        body.addWidget(self._hover_controls)
+        body.addStretch(1)
+        self._appearance_dialog = make_plot_options_dialog(
+            self,
+            panel,
+            title=f"{self._window_title} — Plot Options",
+            min_width=640,
+            min_height=280,
+        )
+
+    def _hide_dimred_dialogs(self) -> None:
+        hide_plot_options_dialog(getattr(self, "_opts_dialog", None))
+        hide_plot_options_dialog(getattr(self, "_appearance_dialog", None))
+
+    def _open_setup_dialog(self) -> None:
+        """Features, scope, method, and Run."""
+        show_plot_options_dialog(self._opts_dialog)
+
+    def _open_plot_options(self) -> None:
+        """Titles, color, size, and hover for the current embedding."""
+        show_plot_options_dialog(self._appearance_dialog)
+
+    def _build_method_options(self, layout: QVBoxLayout) -> None:
         raise NotImplementedError
 
     def _method_params(self) -> dict:
@@ -390,6 +472,8 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         for widget in (self._pca_dim_spin, self._pca_var_spin, self._pca_whiten_cb):
             if widget is not None:
                 widget.setEnabled(on)
+        if self._pca_detail_host is not None:
+            self._pca_detail_host.setVisible(on)
 
     def _target_n_components(self) -> int:
         return normalize_target_dimensions(self.target_dimensions.currentData())
@@ -808,7 +892,7 @@ class DimensionReductionPanel(DockableResultPlotPanel):
             else:
                 self.parent_app.status_label.setText(f"{self._window_title}: ready.")
         if not self._plot_window_is_visible():
-            self._open_plot_options()
+            self._open_setup_dialog()
 
     def _clear_dimred_background_job(self) -> None:
         job_id = getattr(self, "_bg_job_id", None)
@@ -867,7 +951,7 @@ class DimensionReductionPanel(DockableResultPlotPanel):
                 else:
                     self.parent_app.status_label.setText(msg)
             if not self._plot_window_is_visible():
-                self._open_plot_options()
+                self._open_setup_dialog()
             return
         self._log_dimred_failure(message)
         if self.parent_app is not None:
@@ -878,5 +962,5 @@ class DimensionReductionPanel(DockableResultPlotPanel):
             else:
                 self.parent_app.status_label.setText(msg)
         if not self._plot_window_is_visible():
-            self._open_plot_options()
+            self._open_setup_dialog()
         QMessageBox.warning(self._ui_parent(), self._window_title, message or "Computation failed.")
