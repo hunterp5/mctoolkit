@@ -19,8 +19,10 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QMessageBox
 
 from ..analysis_job_support import (
+    activity_value_for_table_oid,
     ensure_activity_analysis_ready,
     finish_analysis_pairs,
     report_analysis_failure,
@@ -51,8 +53,42 @@ class SaliMixin:
         )
         show_activity_tool_dialog(self, d, on_accepted=self._on_sali_dialog_accepted)
 
+    def _snapshot_off_target(self, column: str) -> dict[int, float] | None:
+        """Read numeric off-target values on the GUI thread before the worker starts."""
+        if column not in self.headers:
+            QMessageBox.information(
+                self,
+                TOOL_SALI_MAP,
+                f"Off-target column “{column}” is not in the table.",
+            )
+            return None
+        col = self.headers.index(column)
+        values: dict[int, float] = {}
+        for oid in self._table_model.all_oids_in_order():
+            off = activity_value_for_table_oid(
+                self,
+                int(oid),
+                activity_column=column,
+                activity_col_index=col,
+            )
+            if off is not None:
+                values[int(oid)] = float(off)
+        return values
+
     def _on_sali_dialog_accepted(self, d) -> None:
         p = d.params()
+        off_by_oid = None
+        if p.off_target_column:
+            if p.off_target_column == p.activity_column:
+                QMessageBox.information(
+                    self,
+                    TOOL_SALI_MAP,
+                    "Choose a different off-target column.",
+                )
+                return
+            off_by_oid = self._snapshot_off_target(p.off_target_column)
+            if off_by_oid is None:
+                return
 
         def _make_worker(rec, *, cancel_event, signals, progress_state):
             return SaliAnalysisWorker(
@@ -63,6 +99,8 @@ class SaliMixin:
                 min_similarity=p.min_similarity,
                 min_activity_difference=p.min_activity_difference,
                 max_pairs=p.max_pairs,
+                off_by_oid=off_by_oid,
+                off_target_column=p.off_target_column,
                 signals=signals,
                 cancel_event=cancel_event,
                 progress_state=progress_state,
@@ -77,12 +115,24 @@ class SaliMixin:
             make_worker=_make_worker,
         )
 
-    def on_sali_finished(self, points, activity_column: str, fp_choice: str, metric: str) -> None:
+    def on_sali_finished(
+        self,
+        points,
+        activity_column: str,
+        fp_choice: str,
+        metric: str,
+        off_target_column: str = "",
+    ) -> None:
+        empty = (
+            "No pairs met the current similarity / selectivity-difference filters."
+            if off_target_column
+            else "No pairs met the current similarity / activity-difference filters."
+        )
         points = finish_analysis_pairs(
             self,
             TOOL_SALI_MAP,
             points,
-            empty_message="No pairs met the current similarity / activity-difference filters.",
+            empty_message=empty,
         )
         if points is None:
             return
@@ -91,8 +141,10 @@ class SaliMixin:
             activity_column=activity_column,
             fp_choice=fp_choice,
             metric=metric,
+            off_target_column=off_target_column,
         )
-        self.status_label.setText(f"SALI: {len(points)} pair(s).")
+        label = "SALI selectivity" if off_target_column else "SALI"
+        self.status_label.setText(f"{label}: {len(points)} pair(s).")
 
     def on_sali_failed(self, message: str) -> None:
         report_analysis_failure(self, TOOL_SALI_MAP, message, fallback="SALI analysis failed.")
@@ -104,6 +156,7 @@ class SaliMixin:
         activity_column: str,
         fp_choice: str = "",
         metric: str = "Tanimoto",
+        off_target_column: str = "",
     ) -> None:
         from ..sali_map import SaliMapDialog
 
@@ -114,6 +167,7 @@ class SaliMixin:
                 activity_column=activity_column,
                 fp_choice=fp_choice,
                 metric=metric,
+                off_target_column=off_target_column,
             )
             dlg.setModal(False)
             dlg.setWindowModality(Qt.NonModal)
@@ -125,6 +179,7 @@ class SaliMixin:
                 activity_column=activity_column,
                 fp_choice=fp_choice,
                 metric=metric,
+                off_target_column=off_target_column,
             )
 
         reuse_or_show_modeless_singleton(
@@ -142,6 +197,7 @@ class SaliMixin:
         fp_choice: str = "",
         metric: str = "Tanimoto",
         start_index: int = 0,
+        off_target_column: str = "",
     ) -> None:
         from ..sali_browser import SaliBrowserDialog
 
@@ -153,6 +209,7 @@ class SaliMixin:
                 fp_choice=fp_choice,
                 metric=metric,
                 start_index=start_index,
+                off_target_column=off_target_column,
             )
             dlg.setModal(False)
             dlg.setWindowModality(Qt.NonModal)
@@ -165,6 +222,7 @@ class SaliMixin:
                 fp_choice=fp_choice,
                 metric=metric,
                 start_index=start_index,
+                off_target_column=off_target_column,
             )
 
         reuse_or_show_modeless_singleton(
