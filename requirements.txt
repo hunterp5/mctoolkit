@@ -34,6 +34,8 @@ orjson>=3.9
 openbabel>=3.2.0
 scikit-learn>=1.3
 umap-learn>=0.5.5
+# Process-tree memory for the status bar and the worker budget.
+psutil>=5.9
 
 # --- PyTorch (CPU 2.5.1; pKa and permeability tools) ---
 torch==2.5.1
