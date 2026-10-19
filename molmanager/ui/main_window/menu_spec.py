@@ -214,13 +214,68 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
     submenu(
         "&Tools",
         action(
+            "Calculator…",
+            "open_calculator",
+            hotkey="tools.calculator",
+            attr="_act_custom_calc",
+            tooltip="Add a numeric column from a math expression using existing column names (e.g. sqrt, log10, exp).",
+        ),
+        submenu(
+            "&Random",
+            action(
+                "Number…",
+                "open_random_number_dialog",
+                tooltip=(
+                    "Fill a column with random numbers (uniform, integer, or normal) "
+                    "for all or selected rows."
+                ),
+            ),
+            action(
+                "Molecule…",
+                "open_random_molecule_dialog",
+                tooltip=(
+                    "Fetch random small molecules from ChEMBL, PubChem, or ZINC and add them "
+                    "to the table."
+                ),
+            ),
+            tooltips_visible=True,
+        ),
+        action(
+            "&Notepad",
+            "open_notepad",
+            tooltip=(
+                "Open a floating notepad for session notes. Dock it like a plot or browser. "
+                "Size, color, and style stay independent of Settings → Font."
+            ),
+        ),
+        SEPARATOR,
+        submenu(
+            "Query &Database",
+            action("PubChem…", "open_pubchem"),
+            action("ChEMBL…", "open_chembl"),
+            action("Patents…", "open_patent_query"),
+            SEPARATOR,
+            action("SQL…", "open_external_db"),
+            tooltips_visible=True,
+        ),
+        SEPARATOR,
+        action(
+            "&Sketcher…",
+            "open_sketcher",
+            hotkey="tools.sketcher",
+            tooltip="Open the structure sketcher to draw or edit molecules.",
+        ),
+        tooltips_visible=True,
+    ),
+    submenu(
+        "&Chemistry",
+        action(
             "Calculate Descriptors…",
             "open_calc",
             hotkey="tools.calculate_descriptors",
             tooltip=(
-                "Compute RDKit molecular descriptors, structural-alert catalogs, and "
-                "Bemis–Murcko scaffolds, and append them as columns "
-                "(selected or visible rows)."
+                "Compute RDKit molecular descriptors and structural-alert catalogs, "
+                "and append them as columns (selected or visible rows)."
             ),
         ),
         SEPARATOR,
@@ -364,6 +419,30 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltips_visible=True,
         ),
         submenu(
+            "&Substructure",
+            submenu(
+                "Bemis–Murcko",
+                action(
+                    "Calculate…",
+                    "open_bemis_murcko",
+                    tooltip=(
+                        "Write the Bemis–Murcko scaffold, framework, ring systems, "
+                        "and how many rows share each scaffold."
+                    ),
+                ),
+                tooltips_visible=True,
+            ),
+            action(
+                "Common Core…",
+                "open_common_core",
+                tooltip=(
+                    "Find a maximum common substructure over the rows, "
+                    "and mark the structures that do not contain it."
+                ),
+            ),
+            tooltips_visible=True,
+        ),
+        submenu(
             "&Predict",
             action(
                 "pKa…",
@@ -462,62 +541,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 ),
             ),
             tooltips_visible=True,
-        ),
-        SEPARATOR,
-        submenu(
-            "&Utilities",
-            action(
-                "Calculator…",
-                "open_calculator",
-                hotkey="tools.calculator",
-                attr="_act_custom_calc",
-                tooltip="Add a numeric column from a math expression using existing column names (e.g. sqrt, log10, exp).",
-            ),
-            submenu(
-                "&Random",
-                action(
-                    "Number…",
-                    "open_random_number_dialog",
-                    tooltip=(
-                        "Fill a column with random numbers (uniform, integer, or normal) "
-                        "for all or selected rows."
-                    ),
-                ),
-                action(
-                    "Molecule…",
-                    "open_random_molecule_dialog",
-                    tooltip=(
-                        "Fetch random small molecules from ChEMBL, PubChem, or ZINC and add them "
-                        "to the table."
-                    ),
-                ),
-                tooltips_visible=True,
-            ),
-            action(
-                "&Notepad",
-                "open_notepad",
-                tooltip=(
-                    "Open a floating notepad for session notes. Dock it like a plot or browser. "
-                    "Size, color, and style stay independent of Settings → Font."
-                ),
-            ),
-            tooltips_visible=True,
-        ),
-        submenu(
-            "Query &Database",
-            action("PubChem…", "open_pubchem"),
-            action("ChEMBL…", "open_chembl"),
-            action("Patents…", "open_patent_query"),
-            SEPARATOR,
-            action("SQL…", "open_external_db"),
-            tooltips_visible=True,
-        ),
-        SEPARATOR,
-        action(
-            "&Sketcher…",
-            "open_sketcher",
-            hotkey="tools.sketcher",
-            tooltip="Open the structure sketcher to draw or edit molecules.",
         ),
         tooltips_visible=True,
     ),
