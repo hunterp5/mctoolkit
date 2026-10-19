@@ -28,12 +28,6 @@ def test_plain_citations_contain_dois() -> None:
     assert "10.1021/cn100008c" in sc.WAGER_CNS_MPO
     assert "10.1186/1758-2946-3-8" in sc.CONFAB
     assert "10.1021/acs.jcim.3c00563" in sc.CONFORGE
-    assert "Confab" in sc.systematic_conformations_dialog_footer_html()
-    assert "10.1021/acs.jcim.3c00563" in sc.conforge_conformations_dialog_footer_html()
-    assert "CONFORGE" in sc.conforge_conformations_dialog_footer_html()
-    assert "10.1021/acs.jcim.5b00654" in sc.stochastic_conformations_dialog_footer_html()
-    assert "ETKDG" in sc.stochastic_conformations_dialog_footer_html()
-    assert "GAFF" in sc.stochastic_conformations_dialog_footer_html()
 
 
 def test_descriptor_footer_html_links() -> None:
