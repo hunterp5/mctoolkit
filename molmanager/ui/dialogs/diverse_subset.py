@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Tools → Fingerprints → Diverse Subset."""
+"""Chemistry → Fingerprints → Diverse Subset."""
 
 from __future__ import annotations
 
