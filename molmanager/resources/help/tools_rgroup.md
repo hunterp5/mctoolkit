@@ -8,7 +8,7 @@ Tabulate substituents around a shared core for SAR tables and series analysis.
 
 ## When to use
 
-Use **Tools → Reaction → R-Group Decomposition** on a congeneric series when you can express the core and attachment pattern.
+Use **Chemistry → Reaction → R-Group Decomposition** on a congeneric series when you can express the core and attachment pattern.
 
 ## Inputs / scope
 
