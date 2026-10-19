@@ -21,7 +21,16 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import QCheckBox, QComboBox, QGroupBox, QHBoxLayout, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QGroupBox,
+    QHBoxLayout,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .plot_hover import hover_column_choices
 
@@ -63,6 +72,11 @@ class PlotOnHoverControls(QGroupBox):
         self.hover_persist_cb.stateChanged.connect(self._emit_persist_changed)
         option_row.addWidget(self.hover_persist_cb)
         option_row.addStretch(1)
+        self.apply_all_btn = QPushButton("Apply to All Plots")
+        self.apply_all_btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.apply_all_btn.setToolTip("Apply these On Hover settings to every open plot.")
+        self.apply_all_btn.clicked.connect(self._apply_to_all_plots)
+        option_row.addWidget(self.apply_all_btn)
         layout.addLayout(option_row)
 
     def _emit_changed(self, *_args) -> None:
@@ -138,6 +152,38 @@ class PlotOnHoverControls(QGroupBox):
                 idx = cb.findText(text)
                 if idx >= 0:
                     cb.setCurrentIndex(idx)
+
+    def _workspace_app(self) -> Any:
+        """Walk parents to the workspace that tracks open plots."""
+        widget: QWidget | None = self
+        seen: set[int] = set()
+        while widget is not None and id(widget) not in seen:
+            seen.add(id(widget))
+            app = getattr(widget, "parent_app", None)
+            if app is not None and callable(getattr(app, "_iter_active_plot_hosts", None)):
+                return app
+            widget = widget.parent()
+        return None
+
+    def _apply_to_all_plots(self) -> None:
+        """Copy this On Hover setup onto every open plot."""
+        app = self._workspace_app()
+        if app is None:
+            return
+        state = self.collect_state()
+        try:
+            hosts = list(app._iter_active_plot_hosts() or [])
+        except RuntimeError:
+            return
+        for host in hosts:
+            controls = getattr(host, "_hover_controls", None)
+            if controls is None or controls is self:
+                continue
+            try:
+                controls.apply_state(state)
+                controls.apply_to_plot_view(getattr(host, "_plot_view", None))
+            except RuntimeError:
+                continue
 
     def apply_to_plot_view(self, plot_view: Any) -> None:
         """Push current options into a :class:`PlotlyInteractiveView` (or compatible)."""
