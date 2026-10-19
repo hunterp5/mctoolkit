@@ -22,6 +22,8 @@ import pytest
 
 from molmanager.platform_support.qt_webengine_flags import (
     configure_qtwebengine_quiet_logs,
+    filter_chromium_stderr_bytes,
+    install_chromium_stderr_filter,
     webengine_views_supported,
 )
 from molmanager.ui.mol_viewer_3d import _js_console_is_benign
@@ -31,6 +33,7 @@ def test_configure_qtwebengine_quiet_logs_sets_log_level(monkeypatch):
     monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
     flags = configure_qtwebengine_quiet_logs()
     assert "--log-level=3" in flags
+    assert "--disable-logging" in flags
     assert flags == configure_qtwebengine_quiet_logs()
 
 
@@ -38,7 +41,90 @@ def test_configure_qtwebengine_quiet_logs_keeps_user_log_level(monkeypatch):
     monkeypatch.setenv("QTWEBENGINE_CHROMIUM_FLAGS", "--enable-gpu --log-level=0")
     flags = configure_qtwebengine_quiet_logs()
     assert "--log-level=0" in flags
+    assert "--disable-logging" not in flags
     assert flags.count("--log-level=") == 1
+
+
+def test_stderr_filter_drops_shared_image_gpu_noise():
+    noise = (
+        b"[35652:13152:1019/002531.244:ERROR:gles2_cmd_decoder.cc(18988)] "
+        b"[.RendererMainThread-000001776ED40530]GL ERROR :GL_INVALID_OPERATION : "
+        b"DoEndSharedImageAccessCHROMIUM: bound texture is not a shared image\n"
+    )
+    real = b"[1:2:0101/000000.000:ERROR:net.cc(10)] connection reset\n"
+    kept, pending = filter_chromium_stderr_bytes(b"", noise[:40])
+    assert kept == b""
+    assert pending
+    kept, pending = filter_chromium_stderr_bytes(pending, noise[40:] + real)
+    assert kept == real
+    assert pending == b""
+    kept, pending = filter_chromium_stderr_bytes(b"", real)
+    assert kept == real
+
+
+def test_stderr_filter_is_not_installed_under_pytest():
+    assert install_chromium_stderr_filter() is False
+
+
+def test_installed_stderr_filter_drops_gpu_noise():
+    """The live redirect drops the renderer line and keeps everything else."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import molmanager
+
+    root = Path(molmanager.__file__).resolve().parents[1]
+    script = r"""
+import os
+import sys
+
+from molmanager.platform_support import qt_webengine_flags
+
+assert qt_webengine_flags.install_chromium_stderr_filter()
+noise = (
+    b"[35652:13152:1019/002531.244:ERROR:gles2_cmd_decoder.cc(18988)] "
+    b"GL ERROR :GL_INVALID_OPERATION : DoEndSharedImageAccessCHROMIUM: "
+    b"bound texture is not a shared image\n"
+)
+os.write(2, noise)
+os.write(2, b"kept-line\n")
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.WriteFile.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_char_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.c_void_p,
+    ]
+    kernel32.WriteFile.restype = wintypes.BOOL
+    handle = kernel32.GetStdHandle(wintypes.DWORD(0xFFFFFFF4))
+    written = wintypes.DWORD()
+    kernel32.WriteFile(handle, noise, len(noise), ctypes.byref(written), None)
+    kernel32.WriteFile(handle, b"kept-win32\n", len(b"kept-win32\n"), ctypes.byref(written), None)
+os.close(2)
+thread = qt_webengine_flags._STDERR_FILTER_THREAD
+assert thread is not None
+thread.join(timeout=2)
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=root,
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
+    err = proc.stderr
+    assert b"kept-line" in err
+    assert b"DoEndSharedImageAccessCHROMIUM" not in err
+    assert b"gles2_cmd_decoder" not in err
+    if sys.platform == "win32":
+        assert b"kept-win32" in err
 
 
 def test_schedule_qtwebengine_prewarm_skips_pytest():
