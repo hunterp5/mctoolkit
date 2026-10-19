@@ -729,17 +729,79 @@ def is_sdf_path(path: str | Path) -> bool:
     return Path(path).suffix.lower() in SDF_POSE_SUFFIXES
 
 
+_VALENCE_ATOM_RE = re.compile(r"atom #\s*(\d+)")
+
+
+def _rdkit_log_blocker():
+    """Silence RDKit C++ logs until the returned object is deleted."""
+    try:
+        from rdkit.rdBase import BlockLogs
+
+        return BlockLogs()
+    except Exception:
+        return None
+
+
+def _drop_excess_explicit_hydrogen(mol: Chem.Mol, atom_idx: int) -> Chem.Mol | None:
+    """Remove one explicit hydrogen bonded to *atom_idx*, or None if there is none."""
+    if atom_idx < 0 or atom_idx >= int(mol.GetNumAtoms()):
+        return None
+    hydrogens = [
+        nbr.GetIdx()
+        for nbr in mol.GetAtomWithIdx(atom_idx).GetNeighbors()
+        if int(nbr.GetAtomicNum()) == 1
+    ]
+    if not hydrogens:
+        return None
+    edited = Chem.RWMol(mol)
+    edited.RemoveAtom(hydrogens[-1])
+    return edited.GetMol()
+
+
+def _sanitize_dock_pose(mol: Chem.Mol) -> Chem.Mol:
+    """Sanitize a pose, dropping explicit H that exceed the permitted valence.
+
+    Gnina writes polar hydrogens with OpenBabel. Sulfonamide nitrogen is
+    sometimes given two hydrogens, which RDKit rejects; force-field scoring
+    then raises and aborts the dock.
+    """
+    current = Chem.Mol(mol)
+    blocker = _rdkit_log_blocker()
+    try:
+        for _ in range(16):
+            try:
+                Chem.SanitizeMol(current)
+                return current
+            except ValueError as exc:
+                match = _VALENCE_ATOM_RE.search(str(exc))
+                if match is None:
+                    break
+                nxt = _drop_excess_explicit_hydrogen(current, int(match.group(1)))
+                if nxt is None:
+                    break
+                current = nxt
+    finally:
+        del blocker
+    return Chem.Mol(mol)
+
+
 def load_sdf_mols(path: str | Path) -> list[Chem.Mol]:
-    """Load molecules from an SDF, keeping explicit hydrogens."""
+    """Load molecules from an SDF, keeping explicit hydrogens.
+
+    Poses that fail sanitization only because of an extra explicit hydrogen are
+    repaired. Records that still cannot be sanitized are returned unsanitized.
+    """
     from rdkit.Chem import SDMolSupplier
 
     src = Path(path)
     if not src.is_file():
         return []
-    mols = [m for m in SDMolSupplier(str(src), removeHs=False) if m is not None]
-    if mols:
-        return mols
-    return [m for m in SDMolSupplier(str(src), removeHs=False, sanitize=False) if m is not None]
+    blocker = _rdkit_log_blocker()
+    try:
+        raw = [m for m in SDMolSupplier(str(src), removeHs=False, sanitize=False) if m is not None]
+    finally:
+        del blocker
+    return [_sanitize_dock_pose(mol) for mol in raw]
 
 
 def _pdbqt_atom_records(block: str) -> list[tuple[int, float, float, float]]:
