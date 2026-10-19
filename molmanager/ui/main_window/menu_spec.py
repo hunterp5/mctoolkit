@@ -182,34 +182,31 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
         action("&Copy", "edit_copy", hotkey="edit.copy"),
         action("&Paste", "edit_paste", hotkey="edit.paste"),
         SEPARATOR,
-        submenu(
-            "&Selection",
-            action(
-                "Invert Selection",
-                "invert_table_selection",
-                hotkey="edit.invert_selection",
-                tooltip=(
-                    "Select all rows that are not currently selected "
-                    "(entire table, including rows hidden by filters)."
-                ),
+        action(
+            "Invert Selection",
+            "invert_table_selection",
+            hotkey="edit.invert_selection",
+            tooltip=(
+                "Select all rows that are not currently selected "
+                "(entire table, including rows hidden by filters)."
             ),
-            action(
-                "Clear Selection",
-                "clear_table_selection",
-                hotkey="edit.clear_selection",
-                tooltip="Clear the current cell/row selection (Ctrl+Shift+D).",
-            ),
-            action(
-                "Delete &Selection",
-                "edit_delete_selection",
-                hotkey="edit.delete_selection",
-                tooltip=(
-                    "Delete selected rows, selected columns, or cell values, depending on the "
-                    "selection. When both rows and columns are selected, you choose which to delete."
-                ),
-            ),
-            tooltips_visible=True,
         ),
+        action(
+            "Clear Selection",
+            "clear_table_selection",
+            hotkey="edit.clear_selection",
+            tooltip="Clear the current cell/row selection (Ctrl+Shift+D).",
+        ),
+        action(
+            "Delete &Selection",
+            "edit_delete_selection",
+            hotkey="edit.delete_selection",
+            tooltip=(
+                "Delete selected rows, selected columns, or cell values, depending on the "
+                "selection. When both rows and columns are selected, you choose which to delete."
+            ),
+        ),
+        tooltips_visible=True,
     ),
     submenu(
         "&Tools",
