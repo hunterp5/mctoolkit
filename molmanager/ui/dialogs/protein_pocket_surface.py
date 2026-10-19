@@ -53,6 +53,8 @@ POCKET_SURFACE_COLORS = (
     ("purple", "Purple"),
     ("blue", "Blue"),
     ("element", "Element (CPK)"),
+    ("hydrophobicity", "Hydrophobicity"),
+    ("charge", "Charge"),
     ("custom", "Custom…"),
 )
 
@@ -65,7 +67,20 @@ DEFAULT_POCKET_SURFACE_SETTINGS = {
     "colorScheme": "solid",
 }
 
-_NAMED_COLORS = {key for key, _label in POCKET_SURFACE_COLORS if key not in {"element", "custom"}}
+_PROPERTY_COLOR_SCHEMES = frozenset({"element", "hydrophobicity", "charge"})
+_NAMED_COLORS = {
+    key for key, _label in POCKET_SURFACE_COLORS if key not in _PROPERTY_COLOR_SCHEMES | {"custom"}
+}
+_SCHEME_SWATCHES = {
+    "hydrophobicity": (
+        "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+        "stop:0 #2c7bb6, stop:0.5 #f7f7f7, stop:1 #d95f0e);"
+    ),
+    "charge": (
+        "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+        "stop:0 #d7191c, stop:0.5 #f7f7f7, stop:1 #2c7bb6);"
+    ),
+}
 
 
 def normalize_pocket_surface_settings(raw: dict | None) -> dict:
@@ -74,8 +89,8 @@ def normalize_pocket_surface_settings(raw: dict | None) -> dict:
     out = dict(DEFAULT_POCKET_SURFACE_SETTINGS)
     color = str(src.get("color") or out["color"]).strip() or out["color"]
     scheme = str(src.get("colorScheme") or "").strip() or "solid"
-    if scheme == "element" or color == "element":
-        out["colorScheme"] = "element"
+    if scheme in _PROPERTY_COLOR_SCHEMES or color in _PROPERTY_COLOR_SCHEMES:
+        out["colorScheme"] = scheme if scheme in _PROPERTY_COLOR_SCHEMES else color
         out["color"] = "lightgray"
     elif color.startswith("#") and len(color) >= 4:
         out["colorScheme"] = "solid"
@@ -109,6 +124,7 @@ class ProteinPocketSurfaceDialog(QDialog):
 
     settings_changed = pyqtSignal(dict)
     show_toggled = pyqtSignal(bool)
+    generate_requested = pyqtSignal()
 
     def __init__(self, viewer, parent=None) -> None:
         super().__init__(parent or viewer)
@@ -143,7 +159,11 @@ class ProteinPocketSurfaceDialog(QDialog):
         self.combo_color = QComboBox()
         for key, label in POCKET_SURFACE_COLORS:
             self.combo_color.addItem(label, key)
-        self.combo_color.setToolTip("Solid color, element CPK, or a custom color.")
+        self.combo_color.setToolTip(
+            "Solid color, element CPK, Kyte–Doolittle hydrophobicity "
+            "(blue hydrophilic, orange hydrophobic), amino-acid partial charge "
+            "(red negative, blue positive), or a custom color."
+        )
         self.btn_color = QPushButton()
         self.btn_color.setFixedWidth(36)
         self.btn_color.setToolTip("Choose a custom surface color.")
@@ -180,9 +200,11 @@ class ProteinPocketSurfaceDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self.btn_close = QPushButton("Close")
-        self.btn_close.clicked.connect(self.close)
-        btn_row.addWidget(self.btn_close)
+        self.btn_ok = QPushButton("OK")
+        self.btn_ok.setDefault(True)
+        self.btn_ok.setToolTip("Draw the pocket surface with these options.")
+        self.btn_ok.clicked.connect(self._on_ok_clicked)
+        btn_row.addWidget(self.btn_ok)
         root.addLayout(btn_row)
 
         self.chk_show.toggled.connect(self._on_show_toggled)
@@ -199,9 +221,9 @@ class ProteinPocketSurfaceDialog(QDialog):
     def settings(self) -> dict:
         """Current type, color, opacity, and wireframe options."""
         color_key = self.combo_color.currentData() or "lightgray"
-        if color_key == "element":
+        if color_key in _PROPERTY_COLOR_SCHEMES:
             color = "lightgray"
-            scheme = "element"
+            scheme = str(color_key)
         elif color_key == "custom":
             color = self._custom_color
             scheme = "solid"
@@ -226,8 +248,8 @@ class ProteinPocketSurfaceDialog(QDialog):
             if type_idx >= 0:
                 self.combo_type.setCurrentIndex(type_idx)
             color = settings["color"]
-            if settings["colorScheme"] == "element":
-                idx = self.combo_color.findData("element")
+            if settings["colorScheme"] in _PROPERTY_COLOR_SCHEMES:
+                idx = self.combo_color.findData(settings["colorScheme"])
             elif str(color).startswith("#"):
                 self._custom_color = str(color)
                 idx = self.combo_color.findData("custom")
@@ -257,12 +279,16 @@ class ProteinPocketSurfaceDialog(QDialog):
         return self.chk_show.isChecked()
 
     def _sync_enabled(self) -> None:
-        element = self.combo_color.currentData() == "element"
-        self.btn_color.setEnabled(not element)
+        property_scheme = self.combo_color.currentData() in _PROPERTY_COLOR_SCHEMES
+        self.btn_color.setEnabled(not property_scheme)
         self.spin_linewidth.setEnabled(self.chk_wireframe.isChecked())
 
     def _refresh_color_button(self) -> None:
         key = self.combo_color.currentData() or "lightgray"
+        swatch = _SCHEME_SWATCHES.get(str(key))
+        if swatch:
+            self.btn_color.setStyleSheet(swatch)
+            return
         if key == "element":
             fill = "#888888"
         elif key == "custom":
@@ -271,6 +297,10 @@ class ProteinPocketSurfaceDialog(QDialog):
             named = QColor(str(key))
             fill = named.name() if named.isValid() else "#d3d3d3"
         self.btn_color.setStyleSheet(f"background-color: {fill};")
+
+    def _on_ok_clicked(self) -> None:
+        """Ask the viewer to build the pocket surface from the current options."""
+        self.generate_requested.emit()
 
     def _on_show_toggled(self, checked: bool) -> None:
         if self._updating:
