@@ -19,8 +19,8 @@
 from __future__ import annotations
 
 import pytest
-from PyQt5.QtCore import QEvent
-from PyQt5.QtGui import QColor, QFont, QTextCharFormat, QTextCursor, QTextListFormat
+from PyQt5.QtCore import QEvent, Qt
+from PyQt5.QtGui import QColor, QFont, QPalette, QTextCharFormat, QTextCursor, QTextListFormat
 from PyQt5.QtWidgets import QLabel
 from rdkit import Chem
 
@@ -31,6 +31,7 @@ from molmanager.ui.session_notepad import (
     DEFAULT_NOTE_PT,
     NotepadDialog,
 )
+from molmanager.ui.theme import palette_for_theme
 
 
 @pytest.fixture(autouse=True)
@@ -105,6 +106,25 @@ def test_utilities_menu_opens_floating_notepad(qapp):  # noqa: ARG001
     assert not dialog.isHidden()
     assert panel.text() == "check the amide series"
     window.close()
+
+
+def test_new_notepad_types_black_text(qapp):
+    previous = QPalette(qapp.palette())
+    qapp.setPalette(palette_for_theme("dark"))
+    window = ChemistryWorkspaceWindow()
+    try:
+        window.open_notepad()
+        panel = window.session_notepad.panel
+        caret = panel._edit.currentCharFormat()
+        assert caret.foreground().style() != Qt.NoBrush
+        assert caret.foreground().color().name() == "#000000"
+        panel._edit.insertPlainText("new note")
+        typed = _document_format(panel)
+        assert typed.foreground().style() != Qt.NoBrush
+        assert typed.foreground().color().name() == "#000000"
+    finally:
+        window.close()
+        qapp.setPalette(previous)
 
 
 def test_notepad_format_glyphs_apply_to_selection(qapp):  # noqa: ARG001
