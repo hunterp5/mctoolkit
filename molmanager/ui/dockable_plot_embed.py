@@ -198,8 +198,13 @@ def _iter_named_buttons(widget: QWidget | None, names: tuple[str, ...]) -> list[
     return buttons
 
 
-def restore_dock_header_buttons(widget: QWidget | None) -> None:
-    """Put pane-adopted buttons back on the plot/viewer footer."""
+def restore_dock_header_buttons(widget: QWidget | None, *, docked: bool = False) -> None:
+    """Put pane-adopted buttons back on the plot/viewer footer.
+
+    ``docked=True`` leaves the footer hidden. Page changes use that so a plot that
+    stays in the stack does not give the footer band back to the figure and then
+    take it away again on the next visit.
+    """
     if widget is None:
         return
     homes = getattr(widget, _DOCK_HEADER_HOME_ATTR, None)
@@ -217,7 +222,7 @@ def restore_dock_header_buttons(widget: QWidget | None) -> None:
             layout.insertWidget(idx, btn)
         except RuntimeError:
             continue
-    sync_docked_footer_bar(widget, docked=False)
+    sync_docked_footer_bar(widget, docked=docked)
 
 
 def _adopt_buttons_into_layout(
