@@ -159,7 +159,11 @@ class StructureRenderStore:
         return path.read_bytes()
 
     def import_sqlite_bytes(self, raw: bytes) -> int:
-        """Replace store contents from a sidecar PNG SQLite blob. Returns imported OID count."""
+        """Replace store contents from a sidecar PNG SQLite blob. Returns imported OID count.
+
+        The snapshot is copied with SQLite's backup API so the PNG bytes are not also held as a
+        Python list.
+        """
         if not raw:
             return 0
         import sqlite3
@@ -172,13 +176,14 @@ class StructureRenderStore:
             tmp_path.write_bytes(bytes(raw))
             src = sqlite3.connect(str(tmp_path), check_same_thread=False)
             try:
-                rows = list(src.execute("SELECT oid, blob FROM pngs"))
+                self._conn.commit()
+                src.backup(self._conn)
             finally:
                 src.close()
-            self.clear()
-            items = [(int(oid), bytes(blob)) for oid, blob in rows if blob]
-            self.ingest_batch(items)
-            return len(items)
+            self._lru.clear()
+            self._seq = self._next_seq()
+            self._count = self._count_rows()
+            return self._count
         finally:
             try:
                 tmp_path.unlink(missing_ok=True)
