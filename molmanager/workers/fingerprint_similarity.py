@@ -154,7 +154,9 @@ class FPSimilarityWorker(QRunnable):
                     (oid, mol.ToBinary(), self.fp_choice, metric, qfp_bytes)
                     for oid, mol in self.targets
                 ]
-                proc_workers = min(max(2, (os.cpu_count() or 4) - 1), 8)
+                from ..platform_support.worker_budget import rdkit_process_workers
+
+                proc_workers = rdkit_process_workers()
                 done_count = 1
                 last_pulse = 0.0
                 ex = register_process_pool(ProcessPoolExecutor(max_workers=proc_workers))
