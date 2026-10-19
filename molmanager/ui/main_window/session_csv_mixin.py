@@ -22,9 +22,9 @@ import logging
 import sys
 
 from PyQt5.QtCore import QTimer, Qt
-from PyQt5.QtWidgets import QMessageBox
 
 from ...storage import load_mols_from_parse_result
+from ...table.open_messages import damaged_session_message, preflight_open_path
 from ..strings import LOADING_DETAIL_SESSION
 from ..threadpool_access import start_runnable_on_app_pool
 from ...workers.session_rows_parse import (
@@ -48,6 +48,12 @@ class SessionCsvMixin:
         File I/O and SMILES parsing run off the GUI thread; table appends stay
         chunked on the GUI thread (same pattern as ``.cms`` restore).
         """
+        problem = preflight_open_path(path)
+        if problem:
+            logger.warning("Open session CSV: %s", problem)
+            self._warn_could_not_open("Open Session", problem)
+            return
+        self._note_open_attempt("Open Session")
         self._session_mutation_paused = True
         self._pending_session_clean_on_ready = True
         self.clear_all()
@@ -97,11 +103,9 @@ class SessionCsvMixin:
             self.table.setUpdatesEnabled(True)
         except Exception:
             pass
-        self._set_ingest_loading(False)
-        self._session_mutation_paused = False
-        self._pending_session_clean_on_ready = False
-        self._set_workspace_stack_index(1)
-        QMessageBox.warning(self, "Open Session", message or "Session CSV parse failed.")
+        path = str(getattr(self, "_session_source_path", None) or "")
+        self._finish_failed_open()
+        self._warn_could_not_open("Open Session", message or damaged_session_message(path))
 
     def _on_csv_session_parsed(self, result: object, generation: int) -> None:
         if generation != getattr(self, "_session_load_generation", 0):
