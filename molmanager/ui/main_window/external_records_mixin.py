@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""External DB / PubChem / ChEMBL / patent query row ingest."""
+"""External DB / PubChem / ChEMBL / vendor / patent query row ingest."""
 
 from __future__ import annotations
 
@@ -64,6 +64,15 @@ class ExternalRecordsMixin:
             self,
             "_patent_query_dialog",
             lambda: PatentQueryDialog(self),
+        )
+
+    def open_vendor_query(self):
+        from ..external import VendorQueryDialog
+
+        reuse_or_show_modeless_singleton(
+            self,
+            "_vendor_query_dialog",
+            lambda: VendorQueryDialog(self),
         )
 
     def add_row_from_external_record(self, smiles: str, fields: dict[str, str]) -> None:
