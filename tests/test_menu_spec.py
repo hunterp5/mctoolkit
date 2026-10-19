@@ -53,7 +53,6 @@ def test_top_level_menu_order():
         "Chemistry",
         "Protein",
         "Data",
-        "Lists",
         "Settings",
     ]
 
@@ -124,7 +123,7 @@ def test_substructure_menu_sits_between_fingerprints_and_predict():
     assert labels.index("Substructure") + 1 == labels.index("Predict")
     sub = find_submenu(tools.items, "Substructure")
     assert menu_outline(sub.items) == [
-        {"Bemis–Murcko": ["Calculate…"]},
+        "Bemis–Murcko…",
         "Common Core…",
     ]
 
@@ -148,14 +147,16 @@ def test_reaction_menu_outline():
     ]
 
 
-def test_lists_menu_sits_between_data_and_settings():
+def test_lists_menu_sits_in_data_table():
     labels = []
     for item in MAIN_WINDOW_MENUS:
         outline = menu_outline((item,))[0]
         labels.append(next(iter(outline)) if isinstance(outline, dict) else outline)
-    assert labels[labels.index("Data") + 1] == "Lists"
-    assert labels[labels.index("Lists") + 1] == "Settings"
-    lists = find_submenu(MAIN_WINDOW_MENUS, "Lists")
+    assert "Lists" not in labels
+    assert labels[labels.index("Data") + 1] == "Settings"
+    data = find_submenu(MAIN_WINDOW_MENUS, "Data")
+    table = find_submenu(data.items, "Table")
+    lists = find_submenu(table.items, "Lists")
     assert lists.attr == "_lists_menu"
     assert lists.about_to_show == "_rebuild_lists_menu"
     assert menu_outline(lists.items) == [
@@ -190,6 +191,7 @@ def test_data_table_operations_submenu():
             ]
         },
         "Statistics…",
+        {"Lists": ["Add Selected to List…", "", "Manage Lists…"]},
     ]
 
 
@@ -198,7 +200,8 @@ def test_tools_menu_expands_calculator_random_and_notepad():
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(tools.items)]
     assert "Utilities" not in labels
     assert "Calculate Descriptors…" not in labels
-    assert labels[:3] == ["Calculator…", "Random", "Notepad"]
+    assert labels[:6] == ["Query Database", "", "Random", "Calculator…", "Notepad", "Sketcher…"]
+    assert labels[-1] == "Browser…"
     random = find_submenu(tools.items, "Random")
     assert menu_outline(random.items) == ["Number…", "Molecule…"]
 
@@ -207,13 +210,17 @@ def test_query_database_menu_outline():
     tools = find_submenu(MAIN_WINDOW_MENUS, "Tools")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(tools.items)]
     assert "External" not in labels
-    assert "Query Database" in labels
-    assert labels.index("Query Database") == labels.index("Notepad") + 2
-    assert labels[-1] == "Sketcher…"
+    assert labels[0] == "Query Database"
+    assert labels[1] == ""
+    assert "Browser…" not in [
+        x if isinstance(x, str) else next(iter(x))
+        for x in menu_outline(find_submenu(MAIN_WINDOW_MENUS, "Data").items)
+    ]
     query = find_submenu(tools.items, "Query Database")
     assert menu_outline(query.items) == [
         "PubChem…",
         "ChEMBL…",
+        "Vendors…",
         "Patents…",
         "",
         "SQL…",
