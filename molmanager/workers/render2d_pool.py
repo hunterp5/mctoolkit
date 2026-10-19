@@ -38,19 +38,93 @@ _LOCK = threading.Lock()
 _POOL: ProcessPoolExecutor | None = None
 _POOL_WORKERS = 0
 _WARMING = False
+_BUSY = 0
+_IDLE_GEN = 0
+_IDLE_TIMER: threading.Timer | None = None
+# Each child holds about 30 MB after RDKit import. Drop the pool once drawing has stopped.
+_IDLE_SECONDS = 60.0
+_CHILD_BYTES = 32 * 1024 * 1024
+
+
+def _cancel_idle_timer_unlocked() -> None:
+    global _IDLE_TIMER
+    timer = _IDLE_TIMER
+    _IDLE_TIMER = None
+    if timer is not None:
+        timer.cancel()
+
+
+def _arm_idle_timer_unlocked(gen: int) -> None:
+    global _IDLE_TIMER
+    _cancel_idle_timer_unlocked()
+    timer = threading.Timer(_IDLE_SECONDS, _idle_release, args=(gen,))
+    timer.daemon = True
+    _IDLE_TIMER = timer
+    timer.start()
+
+
+def _idle_release(gen: int) -> None:
+    global _POOL, _POOL_WORKERS
+    with _LOCK:
+        if gen != _IDLE_GEN or _BUSY > 0 or _POOL is None:
+            return
+        ex = _POOL
+        _POOL = None
+        _POOL_WORKERS = 0
+    with suppress(ValueError, RuntimeError):
+        unregister_process_pool(ex)
+    shutdown_process_pool_executor(ex, kill_workers=False)
 
 
 def render2d_process_worker_count() -> int:
     """Child-process count for batch 2D rendering.
 
     PNG encoding is ~70% of each render and runs entirely in the children, so this scales past the
-    physical core count on SMT machines.
+    physical core count on SMT machines. The pool is also capped so idle children stay near 2% of
+    available RAM (about 32 MB private each).
     """
     cfg = load_config()
     configured = cfg.render2d_process_workers
     if configured:
         return max(1, int(configured))
-    return max(2, min(12, (os.cpu_count() or 4) - 1))
+    cpu_cap = max(2, min(12, (os.cpu_count() or 4) - 1))
+    from ..platform_support.memory_usage import available_physical_bytes
+
+    avail = available_physical_bytes()
+    if not avail:
+        return cpu_cap
+    ram_cap = max(2, int(avail * 0.02) // _CHILD_BYTES)
+    return max(2, min(cpu_cap, ram_cap))
+
+
+def note_render2d_pool_busy() -> None:
+    """A render is using the pool; do not shut it down for being idle."""
+    global _BUSY, _IDLE_GEN
+    with _LOCK:
+        _BUSY += 1
+        _IDLE_GEN += 1
+        _cancel_idle_timer_unlocked()
+
+
+def note_render2d_pool_idle() -> None:
+    """One render finished. Shut the pool down if nothing else is using it."""
+    global _BUSY, _IDLE_GEN
+    with _LOCK:
+        _BUSY = max(0, _BUSY - 1)
+        if _BUSY > 0 or _POOL is None:
+            return
+        _IDLE_GEN += 1
+        _arm_idle_timer_unlocked(_IDLE_GEN)
+
+
+def schedule_render2d_pool_idle() -> None:
+    """Arm the idle timer without changing the in-use count (session-open warm-up)."""
+    global _IDLE_GEN
+    with _LOCK:
+        if _BUSY > 0 or _POOL is None:
+            return
+        _IDLE_GEN += 1
+        _arm_idle_timer_unlocked(_IDLE_GEN)
 
 
 def ensure_render2d_process_pool(
@@ -96,12 +170,16 @@ def warm_render2d_process_pool() -> None:
     finally:
         with _LOCK:
             _WARMING = False
+    schedule_render2d_pool_idle()
 
 
 def release_render2d_process_pool(*, kill_workers: bool = False) -> None:
     """Shut down the shared render pool (app exit or cancel-all)."""
-    global _POOL, _POOL_WORKERS
+    global _POOL, _POOL_WORKERS, _BUSY, _IDLE_GEN
     with _LOCK:
+        _IDLE_GEN += 1
+        _BUSY = 0
+        _cancel_idle_timer_unlocked()
         ex = _POOL
         _POOL = None
         _POOL_WORKERS = 0
