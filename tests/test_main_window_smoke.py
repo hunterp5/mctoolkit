@@ -1247,7 +1247,7 @@ def test_pka_prediction_writes_pi_only_when_requested(qapp):  # noqa: ARG001
 def test_tools_menu_nests_superpose_under_conformations(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     mb = w.menuBar()
-    tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Tools")
+    tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Chemistry")
     labels = [a.text().replace("&", "") for a in tools.actions()]
     assert "Generate Conformations" not in labels
     assert "Conformations" in labels
@@ -1267,7 +1267,7 @@ def test_tools_menu_nests_superpose_under_conformations(qapp):  # noqa: ARG001
 def test_prepare_structures_nests_explicit_hydrogens(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     mb = w.menuBar()
-    tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Tools")
+    tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Chemistry")
     prepare = next(
         a.menu() for a in tools.actions() if a.text().replace("&", "") == "Prepare Structures"
     )
@@ -1294,7 +1294,7 @@ def test_prepare_structures_nests_explicit_hydrogens(qapp):  # noqa: ARG001
 def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     mb = w.menuBar()
-    tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Tools")
+    tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Chemistry")
     labels = [a.text().replace("&", "") for a in tools.actions()]
     assert "R-Group Decomposition" not in labels
     assert "Reaction Based Enumeration…" not in labels
@@ -1353,9 +1353,13 @@ def test_data_menu_nests_medchem_with_dimensionality_reduction(qapp):  # noqa: A
     w = ChemistryWorkspaceWindow()
     mb = w.menuBar()
     tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Tools")
+    chemistry = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Chemistry")
     tools_labels = [a.text().replace("&", "") for a in tools.actions()]
+    chemistry_labels = [a.text().replace("&", "") for a in chemistry.actions()]
     assert "Dimensionality Reduction" not in tools_labels
     assert "MedChem" not in tools_labels
+    assert "Dimensionality Reduction" not in chemistry_labels
+    assert "MedChem" not in chemistry_labels
     data = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Data")
     data_labels = [a.text().replace("&", "") for a in data.actions()]
     assert "MedChem Plots" in data_labels
