@@ -23,6 +23,29 @@ from molmanager.plotting.plot_marker_color import (
 )
 
 
+def test_colorbar_title_runs_along_the_bar():
+    from molmanager.plotting.plot_marker_color import (
+        COLORBAR_TITLE_MAX_CHARS,
+        colorbar_for_label,
+    )
+
+    short = colorbar_for_label("Molecular Weight")
+    assert short["title"] == {"text": "Molecular Weight", "side": "right"}
+    assert short["thickness"] == 14
+
+    long_name = "Very long calculated descriptor name for the color scale"
+    titled = colorbar_for_label(long_name)
+    text = titled["title"]["text"]
+    assert titled["title"]["side"] == "right"
+    assert len(text) == COLORBAR_TITLE_MAX_CHARS
+    assert text.endswith("…")
+    assert text[:-1] == long_name[: COLORBAR_TITLE_MAX_CHARS - 1].rstrip()
+
+    marker = scatter_marker_from_column_values([1.0, 2.0, 3.0], color_label=long_name)
+    assert marker["colorbar"]["title"]["text"] == text
+    assert marker["colorbar"]["title"]["side"] == "right"
+
+
 def test_numeric_strings_use_colorscale_not_hex():
     m = scatter_marker_from_column_values(
         ["457.6814032", "539.62482", "384.2372"],
