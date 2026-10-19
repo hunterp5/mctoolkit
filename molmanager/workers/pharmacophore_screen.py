@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
@@ -147,7 +146,9 @@ class PharmacophoreScreenWorker(QRunnable):
                     )
                     for oid, mol in self.targets
                 ]
-                proc_workers = min(max(2, (os.cpu_count() or 4) - 1), 8)
+                from ..platform_support.worker_budget import rdkit_process_workers
+
+                proc_workers = rdkit_process_workers()
                 done_count = 0
                 last_pulse = 0.0
                 ex = register_process_pool(ProcessPoolExecutor(max_workers=proc_workers))
