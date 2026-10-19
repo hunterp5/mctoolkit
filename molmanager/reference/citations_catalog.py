@@ -169,7 +169,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "conforge",
                 "CONFORGE (CDPKit)",
-                "Knowledge-based conformer ensembles (Tools → Conformations → Generate → CONFORGE).",
+                "Knowledge-based conformer ensembles (Chemistry → Conformations → Generate → CONFORGE).",
                 (
                     (
                         "Seidel, T.; Permann, C.; Wieder, O.; Kohlbacher, S. M.; Langer, T. "
@@ -411,7 +411,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 "murcko",
                 "Bemis–Murcko scaffolds",
                 "Murcko scaffold, framework, ring systems, and scaffold count "
-                "(Calculate Descriptors → Scaffolds).",
+                "(Chemistry → Substructure → Bemis–Murcko).",
                 (
                     (
                         "Bemis, G. W.; Murcko, M. A. The Properties of Known Drugs. 1. Molecular "
@@ -421,6 +421,21 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 ),
                 LIC_BSD3,
                 notes="Computed with rdkit.Chem.Scaffolds.MurckoScaffold.",
+            ),
+            _t(
+                "common_core",
+                "Common core",
+                "Maximum common substructure over the chosen rows "
+                "(Chemistry → Substructure → Common Core).",
+                (
+                    (
+                        "Dalke, A.; Hastings, J. FMCS: a novel algorithm for the multiple MCS problem. "
+                        "J. Cheminform. 2013, 5 (Suppl 1), O6.",
+                        "https://doi.org/10.1186/1758-2946-5-S1-O6",
+                    ),
+                ),
+                LIC_BSD3,
+                notes="Computed with rdkit.Chem.rdFMCS.FindMCS.",
             ),
             _t(
                 "ab_mps",
@@ -456,7 +471,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 "rdkit_pharma3d",
                 "RDKit 3D pharmacophore features",
                 "Protein Viewer → Tools → Pharmacophore (From ligand), Gnina pose filtering, "
-                "and Tools → Conformations → Screen Pharmacophore.",
+                "and Chemistry → Conformations → Screen Pharmacophore.",
                 (
                     (
                         "Landrum, G. RDKit: Open-source cheminformatics. Zenodo.",
@@ -799,7 +814,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "pubchem",
                 "PubChem / PubChemPy",
-                "Tools → Query Database → PubChem; Tools → Utilities → Random → Molecule; Calculate Descriptors → Name (Common Name, Synonyms).",
+                "Tools → Query Database → PubChem; Tools → Random → Molecule; Calculate Descriptors → Name (Common Name, Synonyms).",
                 (
                     (
                         "Kim, S.; et al. PubChem 2023 update. Nucleic Acids Res. 2023, 51, D1373–D1380.",
@@ -813,7 +828,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "chembl",
                 "ChEMBL",
-                "Tools → Query Database → ChEMBL (`chembl_webresource_client`); Tools → Utilities → Random → Molecule.",
+                "Tools → Query Database → ChEMBL (`chembl_webresource_client`); Tools → Random → Molecule.",
                 (
                     (
                         "Zdrazil, B.; et al. The ChEMBL Database in 2023. Nucleic Acids Res. 2024, 52, D1180–D1192.",
@@ -827,7 +842,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "zinc",
                 "ZINC",
-                "Tools → Utilities → Random → Molecule (ZINC source).",
+                "Tools → Random → Molecule (ZINC source).",
                 (
                     (
                         "Tingle, B. I.; Tang, K. G.; Castanon, M.; et al. ZINC-22—A Free Multi-Billion-Scale "
