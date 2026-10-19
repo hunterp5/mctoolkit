@@ -32,21 +32,31 @@ from rdkit.Chem import Crippen, Descriptors
 
 from ..chem.molecule_conversion import parse_molecule_from_cell_text
 
-DEFAULT_MEDCHEM_PLOT_MAX_POINTS = 5000
+# Optional cap from ``MOLMANAGER_MEDCHEM_PLOT_MAX_POINTS``. Unset draws every compound.
+_MEDCHEM_PLOT_CAP_MIN = 500
+_MEDCHEM_PLOT_CAP_MAX = 2_000_000
 
 
 class MedChemSpaceCancelled(Exception):
     """Raised when a medchem-space build is cancelled cooperatively."""
 
 
-def medchem_plot_max_points() -> int:
-    """Maximum scatter points sent to Plotly (full table still used for region select)."""
+def medchem_plot_max_points() -> int | None:
+    """Plotly point cap, or ``None`` to draw every compound.
+
+    Region counts and region-select always use the full set. Set
+    ``MOLMANAGER_MEDCHEM_PLOT_MAX_POINTS`` to subsample the scatter only.
+    """
     raw = (os.environ.get("MOLMANAGER_MEDCHEM_PLOT_MAX_POINTS") or "").strip()
+    if not raw:
+        return None
     try:
-        v = int(raw or str(DEFAULT_MEDCHEM_PLOT_MAX_POINTS))
+        value = int(raw)
     except ValueError:
-        v = DEFAULT_MEDCHEM_PLOT_MAX_POINTS
-    return max(500, min(v, 50_000))
+        return None
+    if value <= 0:
+        return None
+    return max(_MEDCHEM_PLOT_CAP_MIN, min(value, _MEDCHEM_PLOT_CAP_MAX))
 
 
 def snapshot_scope_row_indices(
@@ -447,7 +457,7 @@ class MedChemTableColumnPlan:
 
 @dataclass(frozen=True)
 class MedChemSpaceBuildResult:
-    """Full-scope dataset plus a subsampled set for interactive plotting."""
+    """Full-scope dataset plus the points sent to the interactive plot."""
 
     full: MedChemSpaceDataset
     plot: MedChemSpaceDataset
@@ -588,10 +598,15 @@ def subsample_dataset(
     *,
     random_state: int = 42,
 ) -> MedChemSpaceDataset:
-    """Return a random subset for Plotly display; keeps region counts on the full set."""
-    cap = int(max_points or medchem_plot_max_points())
+    """Return the full dataset, or a random subset when a point cap is set.
+
+    ``max_points`` ``None`` uses :func:`medchem_plot_max_points`, which is also
+    ``None`` unless ``MOLMANAGER_MEDCHEM_PLOT_MAX_POINTS`` is set. Region counts
+    stay on the full set either way.
+    """
+    cap = medchem_plot_max_points() if max_points is None else int(max_points)
     n = len(dataset.points)
-    if n <= cap:
+    if cap is None or n <= cap:
         return dataset
     rng = np.random.default_rng(int(random_state))
     idx = np.sort(rng.choice(n, size=cap, replace=False))
