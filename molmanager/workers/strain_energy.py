@@ -106,18 +106,24 @@ def _single_point_conformer_energies(
             mp = None
         if mp is not None:
             for cid in cids:
-                ff = AllChem.MMFFGetMoleculeForceField(m, mp, confId=int(cid))
-                if ff is None:
+                try:
+                    ff = AllChem.MMFFGetMoleculeForceField(m, mp, confId=int(cid))
+                    if ff is None:
+                        return None
+                    energies.append(float(ff.CalcEnergy()))
+                except Exception:
                     return None
-                energies.append(float(ff.CalcEnergy()))
             return energies, ff_choice
         if not allow_uff_fallback:
             return None
     for cid in cids:
-        ff = AllChem.UFFGetMoleculeForceField(m, confId=int(cid))
-        if ff is None:
+        try:
+            ff = AllChem.UFFGetMoleculeForceField(m, confId=int(cid))
+            if ff is None:
+                return None
+            energies.append(float(ff.CalcEnergy()))
+        except Exception:
             return None
-        energies.append(float(ff.CalcEnergy()))
     return energies, "UFF"
 
 
