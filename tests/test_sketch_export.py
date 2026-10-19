@@ -347,3 +347,34 @@ def test_to_smiles_selected_ignores_unselected_bond_endpoints(qapp) -> None:  # 
     w.selected_nodes = []
     w.selected_bond_indices = {0, 1, 2}
     assert w.to_smiles_selected() == ""
+
+
+def test_rgroup_click_exports_numbered_dummy(qapp):  # noqa: ARG001
+    from molmanager.chem.rgroup_enumeration import prepare_core
+
+    w = SketchWidget()
+    nid = w.next_id
+    w.next_id += 1
+    w.nodes.append({"id": nid, "pos": QPoint(0, 0), "element": "C"})
+    w.place_rgroup_on(nid, "R1")
+    smi = w.to_smiles()
+    assert smi
+    assert "[*:1]" in smi
+    _core, labels = prepare_core(smi)
+    assert labels == (1,)
+    r_nodes = [n for n in w.nodes if n.get("element") == "R1"]
+    assert len(r_nodes) == 1
+    w.place_rgroup_on(r_nodes[0]["id"], "R2")
+    assert r_nodes[0]["element"] == "R2"
+    assert "[*:2]" in (w.to_smiles() or "")
+
+
+def test_rgroup_smiles_reloads_as_r_labels(qapp):  # noqa: ARG001
+    w = SketchWidget()
+    mol = Chem.MolFromSmiles("[*:1]c1ccc([*:2])cc1")
+    assert mol is not None
+    assert w.load_from_rdkit_mol(mol)
+    labels = sorted(n["element"] for n in w.nodes if str(n.get("element", "")).startswith("R"))
+    assert labels == ["R1", "R2"]
+    exported = w.to_smiles() or ""
+    assert "[*:1]" in exported and "[*:2]" in exported
