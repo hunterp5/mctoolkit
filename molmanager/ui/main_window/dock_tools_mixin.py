@@ -523,13 +523,34 @@ class DockToolsMixin:
             render(oid, live, skip_mol_props=True)
         return oid
 
-    def open_gnina_dock(self):
+    def _new_gnina_dock_dialog(self):
+        """Build a Gnina dialog and refill it from the saved session setup."""
         from ..dialogs.gnina_dock import GninaDockDialog
 
+        dlg = GninaDockDialog(self)
+        state = getattr(self, "_gnina_dock_session", None)
+        if isinstance(state, dict):
+            dlg.apply_gnina_session(state)
+        return dlg
+
+    def remember_gnina_dock_session(self, state: dict | None) -> None:
+        """Keep the Gnina setup for the next session save and the next dialog open."""
+        from ..dialogs.gnina_dock import gnina_session_worth_saving
+
+        cleaned = state if gnina_session_worth_saving(state) else None
+        if cleaned == getattr(self, "_gnina_dock_session", None):
+            return
+        self._gnina_dock_session = cleaned
+        mark = getattr(self, "_mark_session_dirty", None)
+        if callable(mark):
+            mark()
+
+    def open_gnina_dock(self):
+        """Open the Gnina docking dialog."""
         dlg = reuse_or_show_modeless_singleton(
             self,
             "_smina_dock_dialog",
-            lambda: GninaDockDialog(self),
+            self._new_gnina_dock_dialog,
         )
         dlg.setAttribute(Qt.WA_DeleteOnClose, True)
         self._prepare_tool_dialog(dlg)
