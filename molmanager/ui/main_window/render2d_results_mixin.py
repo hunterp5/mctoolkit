@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import time
 
-from PyQt5.QtCore import QEventLoop, QTimer
+from PyQt5.QtCore import QEventLoop, Qt, QTimer
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QApplication
 
@@ -52,6 +52,11 @@ class Render2DResultsMixin:
         thread from being the bottleneck when tens of thousands of rows are drawn.
         """
         if not rows or not self._render2d_batch_session_accepted(batch_session):
+            return
+        # getattr: unit tests invoke this on a stand-in that only buffers ``_render2d_pending``.
+        writer = getattr(self, "_render2d_write_png_rows", None)
+        if callable(writer) and writer(rows):
+            self._advance_render2d_batch_progress(len(rows))
             return
         pending = self._render2d_pending
         for oid, img, success, w, h in rows:
@@ -99,7 +104,9 @@ class Render2DResultsMixin:
         pix_target = getattr(self, "_render2d_pixmap_target", None)
         batch = getattr(self, "_render2d_batch_active", False)
         if success and row != -1:
-            if batch:
+            if batch and self._render2d_write_png_rows([(oid, img, True, w, h)]):
+                pass
+            elif batch:
                 self._render2d_pending[oid] = (bytes(img), True, int(w), int(h))
             else:
                 pm = pixmap_from_structure_render_png(img, w, h)
@@ -151,6 +158,59 @@ class Render2DResultsMixin:
                 )
         except Exception:
             pass
+
+    def _close_render2d_stream_store(self) -> None:
+        """Drop a PNG store that was filled during a render and never attached to the table."""
+        store = getattr(self, "_render2d_stream_store", None)
+        self._render2d_stream_store = None
+        closer = getattr(store, "close", None)
+        if callable(closer):
+            closer()
+
+    def _open_render2d_stream_store(self, n_rows: int) -> None:
+        """Create the structure PNG store up front so results can be written as they arrive."""
+        self._close_render2d_stream_store()
+        if int(n_rows) <= 0:
+            return
+        cfg = load_config()
+        cap = int(cfg.structure_render_png_max_entries)
+        if cap > 0:
+            cap = max(cap, int(n_rows))
+        self._render2d_flush_max_width = 0
+        self._render2d_stream_store = StructureRenderStore(
+            max_decoded_pixmaps=cfg.structure_render_pixmap_lru,
+            max_png_entries=cap,
+        )
+
+    def _render2d_write_png_rows(self, rows) -> bool:
+        """Write one result batch to disk. False when the caller should keep the bytes in memory."""
+        store = getattr(self, "_render2d_stream_store", None)
+        pix_target = getattr(self, "_render2d_pixmap_target", None)
+        if store is None and not pix_target:
+            return False
+        items: list[tuple[int, bytes]] = []
+        max_w = int(getattr(self, "_render2d_flush_max_width", 0) or 0)
+        for oid, img, success, w, _h in rows:
+            oid_i = int(oid)
+            if not success or not img or self._resolve_structure_row_for_oid(oid_i) == -1:
+                continue
+            items.append((oid_i, bytes(img)))
+            max_w = max(max_w, int(w))
+        self._render2d_flush_max_width = max_w
+        if not items:
+            return True
+        if store is not None:
+            store.ingest_batch(items)
+            return True
+        column_mode = getattr(self, "_render2d_column_pixmap_mode", True)
+        if column_mode:
+            self._table_model.register_pixmap_column(pix_target)
+            self._table_model.set_column_png_bytes_batch(pix_target, items, emit=False)
+        else:
+            for oid_i, raw in items:
+                self._table_model.set_cell_png_bytes(oid_i, pix_target, raw, emit=False)
+        self._render2d_streamed_column = True
+        return True
 
     def _render2d_use_lazy_structure_flush(self, count: int, *, structure_column: bool) -> bool:
         if not structure_column:
@@ -248,32 +308,38 @@ class Render2DResultsMixin:
             if pix_target and column_pixmap_mode:
                 self._table_model.register_pixmap_column(pix_target)
             if lazy_structure:
-                cfg = load_config()
-                # Never cap below this completed batch size — otherwise Fast Prepare /
-                # Tools → Render 2D silently drop earlier drawings (old default was 20k).
-                cap = int(cfg.structure_render_png_max_entries)
-                png_items: list[tuple[int, bytes]] = []
-                for oid in ordered:
-                    rec = pending.get(oid)
-                    if not rec:
-                        continue
-                    img_b, ok, _rw, _rh = rec
-                    if ok and img_b:
-                        png_items.append((int(oid), bytes(img_b)))
-                if cap > 0:
-                    cap = max(cap, len(png_items))
-                store = StructureRenderStore(
-                    max_decoded_pixmaps=cfg.structure_render_pixmap_lru,
-                    max_png_entries=cap,
-                )
-                if png_items:
-                    store.ingest_batch(png_items)
-                self._render2d_flush_max_width = max(
-                    (int(rec[2]) for rec in pending.values() if rec and rec[1]),
-                    default=0,
-                )
+                store = getattr(self, "_render2d_stream_store", None)
+                self._render2d_stream_store = None
+                if store is None:
+                    cfg = load_config()
+                    cap = int(cfg.structure_render_png_max_entries)
+                    png_items: list[tuple[int, bytes]] = []
+                    for oid in ordered:
+                        rec = pending.get(oid)
+                        if not rec:
+                            continue
+                        img_b, ok, _rw, _rh = rec
+                        if ok and img_b:
+                            png_items.append((int(oid), bytes(img_b)))
+                    if cap > 0:
+                        cap = max(cap, len(png_items))
+                    store = StructureRenderStore(
+                        max_decoded_pixmaps=cfg.structure_render_pixmap_lru,
+                        max_png_entries=cap,
+                    )
+                    if png_items:
+                        store.ingest_batch(png_items)
+                    self._render2d_flush_max_width = max(
+                        (int(rec[2]) for rec in pending.values() if rec and rec[1]),
+                        default=0,
+                    )
                 self._table_model.set_structure_png_store(store)
                 self._ensure_structure_lazy_scroll_hook()
+                self._render2d_eager_flush_queue = []
+                self._render2d_eager_flush_idx = 0
+                self._render2d_eager_uniform_height = False
+            elif getattr(self, "_render2d_streamed_column", False) and pix_target:
+                # Bytes were written as they arrived; do not rebuild an eager pixmap queue.
                 self._render2d_eager_flush_queue = []
                 self._render2d_eager_flush_idx = 0
                 self._render2d_eager_uniform_height = False
@@ -336,7 +402,10 @@ class Render2DResultsMixin:
                 pass
         if lazy_structure:
             self._refresh_visible_structure_cells()
+        if getattr(self, "_render2d_streamed_column", False) and pix_target:
+            self._notify_streamed_pixmap_column(pix_target)
 
+        self._render2d_streamed_column = False
         self._render2d_pending = {}
         self._render2d_batch_oids_ordered = []
         self._render2d_snapshot = None
@@ -344,6 +413,22 @@ class Render2DResultsMixin:
         self._render2d_eager_flush_queue = None
         self._render2d_eager_flush_idx = 0
         self._render2d_eager_uniform_height = False
+
+    def _notify_streamed_pixmap_column(self, header_name: str) -> None:
+        """One repaint after PNG bytes were written during the render, without decoding them."""
+        model = self._table_model
+        try:
+            col = model._headers.index(header_name)
+        except ValueError:
+            return
+        n = model.rowCount()
+        if col < 0 or n <= 0:
+            return
+        model.dataChanged.emit(
+            model.index(0, col),
+            model.index(n - 1, col),
+            [Qt.DecorationRole, Qt.SizeHintRole, Qt.DisplayRole, Qt.ToolTipRole],
+        )
 
     def _decode_render2d_flush_slice(
         self, slice_items: list[tuple[int, tuple | None]]
