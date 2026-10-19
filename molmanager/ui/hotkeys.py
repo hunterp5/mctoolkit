@@ -66,6 +66,7 @@ HOTKEY_SPECS: tuple[HotkeySpec, ...] = (
     HotkeySpec("data.cluster", "Cluster…", "Data", ()),
     HotkeySpec("data.add_row", "Add Row…", "Data", ()),
     HotkeySpec("data.add_column", "Add Column…", "Data", ()),
+    HotkeySpec("data.add_to_list", "Add to List", "Data", ("Ctrl+L",)),
     HotkeySpec("data.analyze_table", "Statistics…", "Data", ()),
     HotkeySpec("data.split_column", "Split Column…", "Data", ()),
     HotkeySpec("data.join_columns", "Join Columns…", "Data", ()),
