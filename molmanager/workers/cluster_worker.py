@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
-import os
 import threading
 from collections.abc import Callable, Sequence
 from concurrent.futures import (
@@ -694,8 +693,9 @@ def _spawn_context() -> multiprocessing.context.BaseContext:
 
 
 def _process_workers(n_tasks: int) -> int:
-    cpu = max(2, (os.cpu_count() or 4) - 1)
-    return max(1, min(cpu, 8, int(n_tasks)))
+    from ..platform_support.worker_budget import rdkit_process_workers
+
+    return rdkit_process_workers(int(n_tasks))
 
 
 def _wait_future(
