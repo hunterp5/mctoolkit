@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from molmanager.ui.search_query import (
     SearchCondition,
+    classify_search_query,
     combine_search_row_sets,
     evaluate_search_condition,
     evaluate_search_conditions,
@@ -108,8 +109,42 @@ def test_and_or_combination_legacy_flat():
     )
 
 
+def _pattern_parses(text: str) -> bool:
+    return text in {"c1ccccc1", "CCO", "[F,Cl]"}
+
+
+def test_unquoted_pattern_is_substructure():
+    assert (
+        classify_search_query("c1ccccc1", partial=True, parses_pattern=_pattern_parses)
+        == "substructure"
+    )
+    assert (
+        classify_search_query("NOT c1ccccc1", partial=True, parses_pattern=_pattern_parses)
+        == "substructure"
+    )
+    assert (
+        classify_search_query("c1ccccc1 | [F,Cl]", partial=True, parses_pattern=_pattern_parses)
+        == "substructure"
+    )
+
+
+def test_quoted_pattern_stays_text():
+    assert (
+        classify_search_query('"c1ccccc1"', partial=True, parses_pattern=_pattern_parses) == "text"
+    )
+    assert classify_search_query(">10", partial=True, parses_pattern=_pattern_parses) == "text"
+
+
+def test_unquoted_words_are_neither_text_nor_substructure():
+    message = classify_search_query("ethane", partial=True, parses_pattern=_pattern_parses)
+    assert message not in {"text", "substructure"}
+    assert "quote" in message.lower()
+
+
 def test_combine_search_row_sets_not():
     assert combine_search_row_sets([None, "not"], [{0, 1, 2}, {1}]) == {0, 2}
+    assert combine_search_row_sets(["not"], [{1}], universe={0, 1, 2}) == {0, 2}
+    assert combine_search_row_sets(["not", "and"], [{1}, {0, 2}], universe={0, 1, 2}) == {0, 2}
     assert combine_search_row_sets([None, "or", "not"], [{0, 1}, {2}, {1, 2}]) == {0}
     assert combine_search_row_sets([None, "and", "not"], [{0, 1, 2}, {0, 1}, {1}]) == {0}
     assert combine_search_row_sets([None, "and"], [{0, 1}, {1}]) == {1}
