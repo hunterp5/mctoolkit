@@ -37,8 +37,22 @@ def test_hover_column_choices_skips_id_and_structure():
 
 def test_resolve_default_hover_columns():
     cols = resolve_default_hover_columns(["ID_HIDDEN", "Structure", "SMILES", "Name", "MW", "LogP"])
-    assert cols == ["SMILES", "Name", "MW"]
+    assert cols == []
     assert resolve_default_hover_columns([]) == []
+
+
+def test_hover_controls_default_to_structure_only(qapp):  # noqa: ARG001
+    from molmanager.ui.plot_on_hover_controls import PlotOnHoverControls
+
+    controls = PlotOnHoverControls()
+    controls.reload_columns(["ID_HIDDEN", "Structure", "SMILES", "Name", "MW"])
+    assert controls.show_structure() is True
+    assert controls.selected_columns() == []
+    assert all(combo.currentText() == "—" for combo in controls._hover_combos)
+
+    controls._hover_combos[0].setCurrentText("SMILES")
+    controls.reload_columns(["ID_HIDDEN", "Structure", "SMILES", "Name", "MW", "LogP"])
+    assert controls.selected_columns() == ["SMILES"]
 
 
 def test_hover_lines_and_structure_png(qapp):  # noqa: ARG001
