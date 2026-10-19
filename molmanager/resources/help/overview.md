@@ -18,7 +18,7 @@ Works on the current session table (structures plus property columns). Most tool
 
 - **File** - open/import data, sessions, export, selection browser.
 - **Edit** - undo/redo, clipboard, and selection commands.
-- **Tools** - calculator, random numbers and molecules, notepad, **Query Database** (SQL, PubChem, ChEMBL, patents), and the sketcher.
+- **Tools** - calculator, random numbers and molecules, notepad, **Query Database** (SQL, PubChem, ChEMBL, vendors, patents), and the sketcher.
 - **Chemistry** - calculate descriptors, prepare structures, conformations, fingerprints, substructure (Bemis–Murcko scaffolds and common core), reactions, and predictors (pKa, permeability, SOM).
 - **Protein** - 3D structure viewer for PDB, mmCIF, and related crystallographic files, plus **Sequence** for MAFFT multiple-sequence alignment.
 - **Data** - statistics, plotter, MedChem plots, dimensionality reduction, QSAR, MPO, filters, and table search.
