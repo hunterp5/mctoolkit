@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Modeless SALI map: fingerprint similarity vs |Δactivity|."""
+"""Modeless SALI map: fingerprint similarity vs |Δactivity| or |Δselectivity|."""
 
 from __future__ import annotations
 
@@ -58,6 +58,7 @@ class SaliMapPanel(DockableResultPlotPanel):
         activity_column: str = "",
         fp_choice: str = "",
         metric: str = "Tanimoto",
+        off_target_column: str = "",
         parent=None,
     ):
         super().__init__(
@@ -72,6 +73,7 @@ class SaliMapPanel(DockableResultPlotPanel):
         self._activity_column = activity_column or ""
         self._fp_choice = fp_choice or ""
         self._metric = metric or "Tanimoto"
+        self._off_target_column = off_target_column or ""
         self._current_index: int | None = None
 
         self._plot_view: PlotlyInteractiveView | None = None
@@ -102,6 +104,7 @@ class SaliMapPanel(DockableResultPlotPanel):
             activity_column=activity_column,
             fp_choice=self._fp_choice,
             metric=self._metric,
+            off_target_column=self._off_target_column,
         )
 
     def set_points(
@@ -111,6 +114,7 @@ class SaliMapPanel(DockableResultPlotPanel):
         activity_column: str | None = None,
         fp_choice: str | None = None,
         metric: str | None = None,
+        off_target_column: str | None = None,
     ) -> None:
         self._points = list(points or [])
         if activity_column is not None:
@@ -119,6 +123,8 @@ class SaliMapPanel(DockableResultPlotPanel):
             self._fp_choice = fp_choice
         if metric is not None:
             self._metric = metric
+        if off_target_column is not None:
+            self._off_target_column = off_target_column
         self._current_index = None
         self._btn_browse.setEnabled(False)
         self._reload_color_columns()
@@ -129,6 +135,7 @@ class SaliMapPanel(DockableResultPlotPanel):
             "kind": self.SESSION_KIND,
             **self._collect_encoding_chrome_state(),
             "activity_column": self._activity_column,
+            "off_target_column": self._off_target_column,
             "fp_choice": self._fp_choice,
             "metric": self._metric,
             "points": [asdict(p) for p in self._points],
@@ -149,6 +156,7 @@ class SaliMapPanel(DockableResultPlotPanel):
             activity_column=str(state.get("activity_column") or ""),
             fp_choice=str(state.get("fp_choice") or ""),
             metric=str(state.get("metric") or "Tanimoto"),
+            off_target_column=str(state.get("off_target_column") or ""),
         )
 
     @classmethod
@@ -178,6 +186,7 @@ class SaliMapPanel(DockableResultPlotPanel):
             points,
             activity_column=self._activity_column,
             similarity_label=sim_label,
+            selectivity=bool(self._off_target_column),
             **enc,
         )
         oids = [p.oid_a for p in points]
@@ -222,6 +231,7 @@ class SaliMapPanel(DockableResultPlotPanel):
                 fp_choice=self._fp_choice,
                 metric=self._metric,
                 start_index=start_index,
+                off_target_column=self._off_target_column,
             )
         except Exception:
             pass
@@ -252,6 +262,7 @@ class SaliMapDialog(QDialog):
         activity_column: str = "",
         fp_choice: str = "",
         metric: str = "Tanimoto",
+        off_target_column: str = "",
         panel: SaliMapPanel | None = None,
     ):
         super().__init__(parent)
@@ -267,6 +278,7 @@ class SaliMapDialog(QDialog):
                 activity_column=activity_column,
                 fp_choice=fp_choice,
                 metric=metric,
+                off_target_column=off_target_column,
             )
 
         self.setWindowTitle("SALI")
