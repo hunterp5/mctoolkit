@@ -496,6 +496,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
             ),
             _e("ext_pubchem", "PubChem", "PubChem", "Lookup and similarity search in PubChem."),
             _e("ext_chembl", "ChEMBL", "ChEMBL", "Molecules and bioactivity from ChEMBL."),
+            _e(
+                "ext_vendors",
+                "Vendors",
+                "Vendors",
+                "Chemical vendors, product IDs, and product links.",
+            ),
             _e("ext_patents", "Patents", "Patents", "SureChEMBL patent chemistry similarity."),
         ),
     ),
