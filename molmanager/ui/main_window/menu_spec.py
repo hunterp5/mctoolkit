@@ -213,13 +213,24 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
     ),
     submenu(
         "&Tools",
-        action(
-            "Calculator…",
-            "open_calculator",
-            hotkey="tools.calculator",
-            attr="_act_custom_calc",
-            tooltip="Add a numeric column from a math expression using existing column names (e.g. sqrt, log10, exp).",
+        submenu(
+            "Query &Database",
+            action("PubChem…", "open_pubchem"),
+            action("ChEMBL…", "open_chembl"),
+            action(
+                "Vendors…",
+                "open_vendor_query",
+                tooltip=(
+                    "Look up chemical vendors, product IDs, and product pages for the query "
+                    "structures. Structures with no vendor are omitted."
+                ),
+            ),
+            action("Patents…", "open_patent_query"),
+            SEPARATOR,
+            action("SQL…", "open_external_db"),
+            tooltips_visible=True,
         ),
+        SEPARATOR,
         submenu(
             "&Random",
             action(
@@ -241,6 +252,13 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltips_visible=True,
         ),
         action(
+            "Calculator…",
+            "open_calculator",
+            hotkey="tools.calculator",
+            attr="_act_custom_calc",
+            tooltip="Add a numeric column from a math expression using existing column names (e.g. sqrt, log10, exp).",
+        ),
+        action(
             "&Notepad",
             "open_notepad",
             tooltip=(
@@ -248,22 +266,18 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "Size, color, and style stay independent of Settings → Font."
             ),
         ),
-        SEPARATOR,
-        submenu(
-            "Query &Database",
-            action("PubChem…", "open_pubchem"),
-            action("ChEMBL…", "open_chembl"),
-            action("Patents…", "open_patent_query"),
-            SEPARATOR,
-            action("SQL…", "open_external_db"),
-            tooltips_visible=True,
-        ),
-        SEPARATOR,
         action(
             "&Sketcher…",
             "open_sketcher",
             hotkey="tools.sketcher",
             tooltip="Open the structure sketcher to draw or edit molecules.",
+        ),
+        action(
+            "&Browser…",
+            "open_selection_browser",
+            hotkey="file.browser",
+            tooltip="Open the selection browser to review and act on selected rows. "
+            "Right-click a structure for Browser; settings pick RDKit 2D, 3Dmol 2D, or 3Dmol 3D.",
         ),
         tooltips_visible=True,
     ),
@@ -420,17 +434,13 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
         ),
         submenu(
             "&Substructure",
-            submenu(
-                "Bemis–Murcko",
-                action(
-                    "Calculate…",
-                    "open_bemis_murcko",
-                    tooltip=(
-                        "Write the Bemis–Murcko scaffold, framework, ring systems, "
-                        "and how many rows share each scaffold."
-                    ),
+            action(
+                "Bemis–Murcko…",
+                "open_bemis_murcko",
+                tooltip=(
+                    "Write the Bemis–Murcko scaffold, framework, ring systems, "
+                    "and how many rows share each scaffold."
                 ),
-                tooltips_visible=True,
             ),
             action(
                 "Common Core…",
@@ -630,6 +640,25 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 tooltips_visible=True,
             ),
             action("Statistics…", "open_data_analysis", hotkey="data.analyze_table"),
+            submenu(
+                "&Lists",
+                action(
+                    "Add Selected to List…",
+                    "add_selected_to_list",
+                    tooltip="Save the selected rows as a named list. An existing name adds to that list.",
+                    attr="_act_add_selected_to_list",
+                ),
+                MenuItem(kind=KIND_SEPARATOR, attr="_act_lists_footer_separator"),
+                action(
+                    "Manage Lists…",
+                    "manage_row_lists",
+                    tooltip="Delete named row lists.",
+                    attr="_act_manage_lists",
+                ),
+                attr="_lists_menu",
+                about_to_show="_rebuild_lists_menu",
+                tooltips_visible=True,
+            ),
         ),
         SEPARATOR,
         action(
@@ -692,14 +721,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltip="Open the plotter or show the docked plot panel.",
         ),
         SEPARATOR,
-        action(
-            "&Browser…",
-            "open_selection_browser",
-            hotkey="file.browser",
-            tooltip="Open the selection browser to review and act on selected rows. "
-            "Right-click a structure for Browser; settings pick RDKit 2D, 3Dmol 2D, or 3Dmol 3D.",
-        ),
-        SEPARATOR,
         submenu(
             "&Filter",
             action(
@@ -758,25 +779,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             hotkey="tools.search",
             tooltip="Open or hide the in-table search panel (Ctrl+F). Queries stay until deleted with −.",
         ),
-        tooltips_visible=True,
-    ),
-    submenu(
-        "&Lists",
-        action(
-            "Add Selected to List…",
-            "add_selected_to_list",
-            tooltip="Save the selected rows as a named list. An existing name adds to that list.",
-            attr="_act_add_selected_to_list",
-        ),
-        MenuItem(kind=KIND_SEPARATOR, attr="_act_lists_footer_separator"),
-        action(
-            "Manage Lists…",
-            "manage_row_lists",
-            tooltip="Delete named row lists.",
-            attr="_act_manage_lists",
-        ),
-        attr="_lists_menu",
-        about_to_show="_rebuild_lists_menu",
         tooltips_visible=True,
     ),
     SETTINGS,
