@@ -27,6 +27,7 @@ from molmanager.ui.dialogs.dimensionality_reduction import (
     TSNEPlotPanel,
     UMAPPlotPanel,
 )
+from molmanager.ui.plot_markers_controls import PlotMarkersControls
 
 
 def test_present_initial_ui_opens_options_not_plot(qapp):
@@ -310,7 +311,7 @@ def test_plot_options_split_embedding_and_appearance(qapp):
         assert panel._appearance_dialog.isAncestorOf(panel._hover_controls)
         assert panel._appearance_dialog.isAncestorOf(panel.size_combo)
         markers = panel._markers_group
-        assert isinstance(markers, QGroupBox)
+        assert isinstance(markers, PlotMarkersControls)
         assert markers.title() == "Markers"
         assert markers.isAncestorOf(panel.color_combo)
         assert markers.isAncestorOf(panel.size_combo)
