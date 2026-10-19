@@ -108,6 +108,7 @@ from .mmp_worker import MmpAnalysisWorker
 from .sali_worker import SaliAnalysisWorker
 from .reaction_enumeration import ReactionEnumerationWorker
 from .rgroup_decomposition import RGroupDecompositionWorker
+from .rgroup_enumeration import RGroupEnumerationWorker
 from .free_wilson_worker import FreeWilsonWorker
 from .signals import (
     BulkSimilaritySignals,
@@ -174,6 +175,7 @@ __all__ = [
     "RenderWorker",
     "STRUCTURE_PAYLOAD_TAG",
     "RGroupDecompositionWorker",
+    "RGroupEnumerationWorker",
     "FreeWilsonWorker",
     "SessionSaveSignals",
     "SessionSaveWorker",
