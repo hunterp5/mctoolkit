@@ -153,7 +153,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_calc_descriptors",
                 "Calculate Descriptors",
                 "Calculate Descriptors",
-                "RDKit descriptors, structural alerts, Murcko scaffolds, and 3D shape when confs exist.",
+                "RDKit descriptors, structural alerts, and 3D shape when confs exist.",
             ),
             _e(
                 "tools_fast_prepare",
@@ -171,13 +171,13 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_add_explicit_h",
                 "Explicit Hydrogens — Add",
                 "Add Explicit Hydrogens",
-                "Tools → Prepare Structures → Explicit Hydrogens → Add.",
+                "Chemistry → Prepare Structures → Explicit Hydrogens → Add.",
             ),
             _e(
                 "tools_remove_explicit_h",
                 "Explicit Hydrogens — Remove",
                 "Remove Explicit Hydrogens",
-                "Tools → Prepare Structures → Explicit Hydrogens → Remove.",
+                "Chemistry → Prepare Structures → Explicit Hydrogens → Remove.",
             ),
             _e(
                 "tools_render_2d",
@@ -189,19 +189,19 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_protonate",
                 "Protonate",
                 "Protonate",
-                "Dominant protomer at a chosen pH (Tools → Prepare Structures → Protonate).",
+                "Dominant protomer at a chosen pH (Chemistry → Prepare Structures → Protonate).",
             ),
             _e(
                 "tools_generate_protomers",
                 "Generate Protomers",
                 "Generate Protomers",
-                "Enumerate protomers/tautomers (Tools → Prepare Structures → Protonate).",
+                "Enumerate protomers/tautomers (Chemistry → Prepare Structures → Protonate).",
             ),
             _e(
                 "tools_neutralize",
                 "Neutralize",
                 "Neutralize",
-                "Zero net formal charge (Tools → Prepare Structures → Protonate → Neutralize).",
+                "Zero net formal charge (Chemistry → Prepare Structures → Protonate → Neutralize).",
             ),
             _e(
                 "tools_calculator",
@@ -219,25 +219,25 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_gen_conformations",
                 "Generate Conformations",
                 "Generate Conformations",
-                "Build 3D conformer ensembles (Tools → Conformations → Generate → Stochastic).",
+                "Build 3D conformer ensembles (Chemistry → Conformations → Generate → Stochastic).",
             ),
             _e(
                 "tools_gen_conformations_systematic",
                 "Systematic Conformations",
                 "Systematic Conformations",
-                "Build 3D ensembles (Tools → Conformations → Generate → Systematic).",
+                "Build 3D ensembles (Chemistry → Conformations → Generate → Systematic).",
             ),
             _e(
                 "tools_gen_conformations_conforge",
                 "CONFORGE Conformations",
                 "CONFORGE Conformations",
-                "Build 3D ensembles (Tools → Conformations → Generate → CONFORGE).",
+                "Build 3D ensembles (Chemistry → Conformations → Generate → CONFORGE).",
             ),
             _e(
                 "tools_superpose",
                 "Superpose",
                 "Superpose",
-                "Align conformers or structures (Tools → Conformations → Superpose).",
+                "Align conformers or structures (Chemistry → Conformations → Superpose).",
             ),
             _e(
                 "tools_pharmacophore_screen",
@@ -248,7 +248,24 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "5 — Fingerprints",
+        "5 — Substructure",
+        (
+            _e(
+                "tools_bemis_murcko",
+                "Bemis–Murcko",
+                "Bemis–Murcko",
+                "Scaffold, framework, ring systems, and scaffold count.",
+            ),
+            _e(
+                "tools_common_core",
+                "Common Core",
+                "Common Core",
+                "Maximum common substructure over the chosen rows.",
+            ),
+        ),
+    ),
+    GuideSection(
+        "6 — Fingerprints",
         (
             _e(
                 "tools_fp_similarity",
@@ -271,7 +288,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "6 — Dock Ligand",
+        "7 — Dock Ligand",
         (
             _e(
                 "tools_prepare_pdb",
@@ -294,7 +311,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "7 — Protein",
+        "8 — Protein",
         (
             _e(
                 "protein_viewer",
@@ -317,7 +334,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "8 — Design and modeling",
+        "9 — Design and modeling",
         (
             _e(
                 "tools_rgroup",
@@ -378,7 +395,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "9 — Random",
+        "10 — Random",
         (
             _e(
                 "tools_random_number",
@@ -395,7 +412,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "10 — Charts and analysis",
+        "11 — Charts and analysis",
         (
             _e(
                 "data_analyze_table",
@@ -472,7 +489,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "11 — Query Database",
+        "12 — Query Database",
         (
             _e(
                 "ext_sql", "SQL Database", "SQL Database", "Load query results from a SQL database."
