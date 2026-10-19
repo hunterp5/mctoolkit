@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""QSAR tool window (Data menu)."""
+"""QSAR and AutoQSAR tool windows (Data menu)."""
 
 from __future__ import annotations
 
@@ -43,6 +43,30 @@ class QsarMixin:
         reuse_or_show_modeless_singleton(
             self,
             "_qsar_dialog",
+            _factory,
+            on_reused_visible=lambda dlg: self._sync_dialog_only_selected_scope(dlg),
+        )
+
+    def open_auto_qsar_dialog(self) -> None:
+        if not self.headers or self._table_model.rowCount() == 0:
+            QMessageBox.information(
+                self,
+                "AutoQSAR",
+                "Open a file or add rows with activity data first.",
+            )
+            return
+        from ..dialogs.auto_qsar import AutoQSARDialog
+        from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
+
+        def _factory():
+            dialog = AutoQSARDialog(self)
+            self._prepare_tool_dialog(dialog)
+            dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+            return dialog
+
+        reuse_or_show_modeless_singleton(
+            self,
+            "_auto_qsar_dialog",
             _factory,
             on_reused_visible=lambda dlg: self._sync_dialog_only_selected_scope(dlg),
         )
