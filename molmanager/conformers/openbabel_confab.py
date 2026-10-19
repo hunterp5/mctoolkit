@@ -52,7 +52,7 @@ _FORCE_FIELD = "MMFF94"
 
 @dataclass(frozen=True)
 class SystematicConfParams:
-    """Options for Open Babel Confab (Tools → Conformations → Generate → Systematic)."""
+    """Options for Open Babel Confab (Chemistry → Conformations → Generate → Systematic)."""
 
     num_confs: int = 100
     rmsd_cutoff: float = 0.5
