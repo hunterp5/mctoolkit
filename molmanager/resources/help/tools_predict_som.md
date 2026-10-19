@@ -29,7 +29,7 @@ Rows with valid molecules in the chosen structure **Source**, or a single **SMIL
 1. Choose table rows or paste SMILES.
 2. Pick the metabolism subset and threshold.
 3. Run **Predict** and wait on **Processes**.
-4. Review maps in the **Predict SOM Browser** (large structure preview, color scale beside the map, **←** / **→**). Click an atom row to emphasize that atom. Click an atom-table column header to sort numerically or alphabetically. **Browse Only Selected** limits the browser to the current table selection. Reopen it from **Tools → Predict → SOM → Viewer** when SOM columns are already in the table. Right-click a **SOM Map** cell for **Browse** (open this row in the browser) or **Export** (save the map image). SOM sites are labeled with atom number and probability. Maps use a yellow–red probability scale. **Phase 1 and 2** also writes **SOM Sites Phase 1**, **SOM Sites Phase 2**, and **SOM Phase**.
+4. Review maps in the **Predict SOM Browser** (large structure preview, color scale beside the map, **←** / **→**). Click an atom row to emphasize that atom. Click an atom-table column header to sort numerically or alphabetically. **Browse Only Selected** limits the browser to the current table selection. Reopen it from **Chemistry → Predict → SOM → Viewer** when SOM columns are already in the table. Right-click a **SOM Map** cell for **Browse** (open this row in the browser) or **Export** (save the map image). SOM sites are labeled with atom number and probability. Maps use a yellow–red probability scale. **Phase 1 and 2** also writes **SOM Sites Phase 1**, **SOM Sites Phase 2**, and **SOM Phase**.
 
 ## Use cases
 
