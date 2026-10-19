@@ -20,14 +20,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QCheckBox,
     QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -57,14 +55,18 @@ def conformer_options_group(*checkboxes: QWidget) -> QGroupBox:
     return gb
 
 
-def citation_footer_label(html: str, parent: QWidget | None = None) -> QLabel:
-    """Rich-text Method / citation line used under conformation dialogs."""
-    ref_lbl = QLabel(html, parent)
-    ref_lbl.setWordWrap(True)
-    ref_lbl.setTextFormat(Qt.RichText)
-    ref_lbl.setOpenExternalLinks(True)
-    ref_lbl.setStyleSheet("color: palette(mid); font-size: 11px;")
-    return ref_lbl
+def add_centered_run_button(parent_layout) -> QPushButton:
+    """Centered padded Run button, matching dimensionality reduction and clustering."""
+    row = QHBoxLayout()
+    row.setContentsMargins(0, 10, 0, 6)
+    row.addStretch()
+    button = QPushButton("Run")
+    button.setMinimumWidth(160)
+    button.setStyleSheet("QPushButton { padding: 8px 28px; }")
+    row.addWidget(button)
+    row.addStretch()
+    parent_layout.addLayout(row)
+    return button
 
 
 class ConformerOutputOptionsPanel(QWidget):
