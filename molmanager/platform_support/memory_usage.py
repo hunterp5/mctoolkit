@@ -46,6 +46,15 @@ def current_process_rss_bytes() -> int | None:
     return _rss_linux()
 
 
+def available_physical_bytes() -> int | None:
+    """Bytes of physical RAM the OS can still hand out, or None when unknown."""
+    if sys.platform == "win32":
+        return _available_windows()
+    if sys.platform == "darwin":
+        return _available_macos()
+    return _available_linux()
+
+
 def format_process_memory_status() -> str | None:
     """Short status-bar text, e.g. ``Mem: 1.2 GiB``, or None when RSS is unknown."""
     rss = current_process_rss_bytes()
@@ -89,6 +98,49 @@ def _rss_windows() -> int | None:
     if not get_process_memory_info(process, ctypes.byref(counters), counters.cb):
         return None
     return int(counters.WorkingSetSize)
+
+
+def _available_windows() -> int | None:
+    import ctypes
+
+    class MEMORYSTATUSEX(ctypes.Structure):
+        _fields_ = [
+            ("dwLength", ctypes.c_ulong),
+            ("dwMemoryLoad", ctypes.c_ulong),
+            ("ullTotalPhys", ctypes.c_ulonglong),
+            ("ullAvailPhys", ctypes.c_ulonglong),
+            ("ullTotalPageFile", ctypes.c_ulonglong),
+            ("ullAvailPageFile", ctypes.c_ulonglong),
+            ("ullTotalVirtual", ctypes.c_ulonglong),
+            ("ullAvailVirtual", ctypes.c_ulonglong),
+            ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+        ]
+
+    status = MEMORYSTATUSEX()
+    status.dwLength = ctypes.sizeof(status)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        return None
+    avail = int(status.ullAvailPhys)
+    return avail if avail > 0 else None
+
+
+def _available_linux() -> int | None:
+    try:
+        with open("/proc/meminfo", encoding="ascii", errors="replace") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return int(parts[1]) * 1024
+    except OSError:
+        return None
+    return None
+
+
+def _available_macos() -> int | None:
+    # Host statistics need a Mach VM call that is easy to get wrong. Callers fall back
+    # to a CPU cap when this is unknown.
+    return None
 
 
 def _rss_linux() -> int | None:
