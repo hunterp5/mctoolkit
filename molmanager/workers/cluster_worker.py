@@ -34,7 +34,6 @@ import numpy as np
 from PyQt5.QtCore import QRunnable
 from rdkit import Chem
 from rdkit import DataStructs
-from rdkit.ML.Cluster import Butina
 from rdkit.SimDivFilters.rdSimDivPickers import LeaderPicker
 
 from ..chem.fingerprint_cache import get as cache_get
@@ -82,39 +81,104 @@ CLUSTER_METHOD_SHORT_LABELS: dict[str, str] = {
 
 
 def _bitvect_to_numpy(fp) -> np.ndarray:
-    n = int(fp.GetNumBits())
-    arr = np.zeros((n,), dtype=np.float64)
-    DataStructs.ConvertToNumpyArray(fp, arr)
-    return arr
+    """0/1 bytes. sklearn call sites upcast; the retained matrix stays uint8."""
+    from ..chem.rdkit_fingerprints import bitvect_to_uint8
+
+    return bitvect_to_uint8(fp)
 
 
 def _dense_fingerprint_matrix(fps: Sequence) -> np.ndarray:
+    if not fps:
+        return np.zeros((0, 0), dtype=np.uint8)
     return np.vstack([_bitvect_to_numpy(fp) for fp in fps])
+
+
+def _as_sklearn_features(X: np.ndarray) -> np.ndarray:
+    """Float64 view for sklearn. No copy when the matrix is already float64."""
+    if X.dtype == np.float64:
+        return X
+    return np.asarray(X, dtype=np.float64)
 
 
 def _method_needs_dense_matrix(method: str) -> bool:
     return str(method) in _SKLEARN_CLUSTER_METHODS
 
 
-def _condensed_tanimoto_distances(
-    fps: Sequence, cancel_event: threading.Event | None = None
-) -> list[float] | None:
-    """Lower-triangle condensed distances d = 1 - Tanimoto (same order as RDKit Butina)."""
+def _butina_neighbor_lists(
+    fps: Sequence,
+    dist_cutoff: float,
+    cancel_event: threading.Event | None = None,
+) -> list[list[int]] | None:
+    """Indexes within ``dist_cutoff`` (1 - Tanimoto), including self.
+
+    RDKit ``ClusterData`` turns a condensed distance list into an n×n float64 matrix
+    before it builds these same lists. Keeping only the neighbors avoids both.
+    """
     n = len(fps)
-    out: list[float] = []
-    for i in range(n):
+    cutoff = float(dist_cutoff)
+    # Diagonal distance is 0, so self is a neighbor only when the cutoff is non-negative.
+    neighbors: list[list[int]] = [([i] if cutoff >= 0.0 else []) for i in range(n)]
+    for i in range(1, n):
         if cancel_event is not None and cancel_event.is_set():
             return None
-        sims = DataStructs.BulkTanimotoSimilarity(fps[i], fps[: i + 1])
-        for j in range(i):
-            s = float(sims[j])
-            d = 1.0 - s
-            if d < 0.0:
-                d = 0.0
-            elif d > 1.0:
-                d = 1.0
-            out.append(d)
-    return out
+        sims = DataStructs.BulkTanimotoSimilarity(fps[i], fps[:i])
+        for j, sim in enumerate(sims):
+            dist = 1.0 - float(sim)
+            if dist < 0.0:
+                dist = 0.0
+            elif dist > 1.0:
+                dist = 1.0
+            if dist <= cutoff:
+                neighbors[i].append(j)
+                neighbors[j].append(i)
+    for group in neighbors:
+        group.sort()
+    return neighbors
+
+
+def _clusters_from_neighbor_lists(
+    neighbor_lists: list[list[int]],
+    *,
+    reordering: bool,
+) -> tuple[tuple[int, ...], ...]:
+    """Same selection order as ``rdkit.ML.Cluster.Butina.ClusterData``."""
+    n_pts = len(neighbor_lists)
+    sorted_indices = [(len(group), idx) for idx, group in enumerate(neighbor_lists)]
+    sorted_indices.sort(reverse=True)
+    clusters: list[tuple[int, ...]] = []
+    seen = np.zeros(n_pts, dtype=bool)
+    while sorted_indices and sorted_indices[0][0] > 1:
+        _, idx = sorted_indices.pop(0)
+        if seen[idx]:
+            continue
+        cluster = [idx]
+        seen[idx] = True
+        for neighbor in neighbor_lists[idx]:
+            if not seen[neighbor]:
+                cluster.append(neighbor)
+                seen[neighbor] = True
+        clusters.append(tuple(cluster))
+        if not reordering:
+            continue
+        affected = {
+            neighbor
+            for point in cluster
+            for neighbor in neighbor_lists[point]
+            if not seen[neighbor]
+        }
+        for ii, element in enumerate(sorted_indices):
+            affected_point = element[1]
+            if affected_point in affected:
+                new_neighbors = [nbr for nbr in neighbor_lists[affected_point] if not seen[nbr]]
+                neighbor_lists[affected_point] = new_neighbors
+                sorted_indices[ii] = (len(new_neighbors), affected_point)
+        sorted_indices.sort(reverse=True)
+    while sorted_indices:
+        _, idx = sorted_indices.pop(0)
+        if seen[idx]:
+            continue
+        clusters.append((idx,))
+    return tuple(clusters)
 
 
 def _labels_from_butina_clusters(clusters: tuple[tuple[int, ...], ...], n: int) -> np.ndarray:
@@ -138,16 +202,10 @@ def cluster_butina(
         return None
     if cancel_event is not None and cancel_event.is_set():
         return None
-    dists = _condensed_tanimoto_distances(fps, cancel_event=cancel_event)
-    if dists is None:
+    neighbors = _butina_neighbor_lists(fps, dist_cutoff, cancel_event=cancel_event)
+    if neighbors is None:
         return None
-    clusters = Butina.ClusterData(
-        dists,
-        nPts=n,
-        distThresh=float(dist_cutoff),
-        isDistData=True,
-        reordering=bool(reordering),
-    )
+    clusters = _clusters_from_neighbor_lists(neighbors, reordering=bool(reordering))
     return _labels_from_butina_clusters(clusters, n)
 
 
@@ -323,18 +381,18 @@ def _fit_sklearn_labels(X: np.ndarray, method: str, params: dict) -> np.ndarray:
         k = int(params.get("n_clusters", 5))
         k = max(2, min(k, n_samples))
         model = KMeans(n_clusters=k, random_state=42, n_init=10)
-        return model.fit_predict(X)
+        return model.fit_predict(_as_sklearn_features(X))
     if method == "agglomerative":
         k = int(params.get("n_clusters", 5))
         k = max(2, min(k, n_samples))
         linkage = str(params.get("linkage", "average"))
         model = AgglomerativeClustering(n_clusters=k, linkage=linkage)
-        return model.fit_predict(X)
+        return model.fit_predict(_as_sklearn_features(X))
     eps = float(params.get("eps", 0.35))
     ms = int(params.get("min_samples", 5))
     ms = max(2, min(ms, n_samples))
     model = DBSCAN(eps=eps, min_samples=ms, metric="cosine")
-    return model.fit_predict(X)
+    return model.fit_predict(_as_sklearn_features(X))
 
 
 def _run_clustering(
@@ -393,13 +451,14 @@ def _summarize_partition(labels: np.ndarray, X: np.ndarray | None) -> dict[str, 
         try:
             from sklearn.metrics import silhouette_score
 
+            features = _as_sklearn_features(X)
             if noise_ct:
                 if n_eff >= 3:
                     xm = non_noise_mask
                     lab_sub = labels[xm]
-                    sil = float(silhouette_score(X[xm], lab_sub, metric="euclidean"))
+                    sil = float(silhouette_score(features[xm], lab_sub, metric="euclidean"))
             else:
-                sil = float(silhouette_score(X, labels, metric="euclidean"))
+                sil = float(silhouette_score(features, labels, metric="euclidean"))
         except Exception:
             sil = None
 
