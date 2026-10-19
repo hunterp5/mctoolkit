@@ -797,8 +797,8 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 ),
                 LIC_GPL3,
                 notes=(
-                    "Competitive form Ki = IC50 / (1 + [S]/Km). "
-                    "Molar conversion and pActivity are implemented in MolManager."
+                    "Competitive form Ki = IC50 / (1 + Σ [concentration]/Km or Kd). "
+                    "Unit conversion and pActivity are implemented in MolManager."
                 ),
             ),
             _t(
