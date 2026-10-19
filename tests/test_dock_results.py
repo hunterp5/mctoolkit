@@ -70,9 +70,13 @@ def test_dock_menu_includes_smina(qapp):  # noqa: ARG001
     viewer_act = next(a for a in dock_actions if a.text().replace("&", "") == "Pose Browser")
     assert viewer_act.isEnabled() is False
     tools = next(a.menu() for a in w.menuBar().actions() if a.text().replace("&", "") == "Tools")
+    chemistry = next(
+        a.menu() for a in w.menuBar().actions() if a.text().replace("&", "") == "Chemistry"
+    )
     assert not any(a.text().replace("&", "") == "Dock" for a in tools.actions())
+    assert not any(a.text().replace("&", "") == "Dock" for a in chemistry.actions())
     predict = None
-    for act in tools.actions():
+    for act in chemistry.actions():
         menu = act.menu()
         if menu is not None and act.text().replace("&", "") == "Predict":
             predict = menu
