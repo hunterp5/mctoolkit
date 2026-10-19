@@ -22,12 +22,10 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -45,12 +43,11 @@ from ...conformers.conforge_generation import (
     normalize_conforge_mode,
     normalize_conforge_preset,
 )
-from ...reference.method_citations import conforge_conformations_dialog_footer_html
 from ..qt_widget_utils import make_window_minimizable
 from .conformer_output import (
     ConformerOutputOptions,
     ConformerOutputOptionsPanel,
-    citation_footer_label,
+    add_centered_run_button,
     conformer_options_group,
 )
 from .scope import selection_scope_checked
@@ -82,15 +79,6 @@ class ConforgeConformationsDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
-
-        hint = QLabel(
-            "CONFORGE (CDPKit) builds knowledge-based ensembles from connectivity. "
-            "On Windows, install CDPKit (MSVC) from GitHub Releases and Browse to "
-            r"confgen.exe (usually C:\Program Files\CDPKit\Bin\confgen.exe). "
-            "Linux/macOS: `pip install cdpkit` when a wheel exists for your Python."
-        )
-        hint.setWordWrap(True)
-        root.addWidget(hint)
 
         form = QFormLayout()
         form.setSpacing(6)
@@ -203,12 +191,9 @@ class ConforgeConformationsDialog(QDialog):
             )
         )
         root.addWidget(self.output_panel)
-        root.addWidget(citation_footer_label(conforge_conformations_dialog_footer_html(), self))
 
-        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        box.accepted.connect(self._try_accept)
-        box.rejected.connect(self.reject)
-        root.addWidget(box)
+        self.run_btn = add_centered_run_button(root)
+        self.run_btn.clicked.connect(self._try_accept)
         make_window_minimizable(self)
 
     def _browse_confgen(self) -> None:
