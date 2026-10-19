@@ -297,45 +297,6 @@ def permeability_dialog_footer_html() -> str:
     )
 
 
-def stochastic_conformations_dialog_footer_html() -> str:
-    """Rich text for Chemistry → Conformations → Generate → Stochastic…."""
-    return (
-        "<small><b>Method</b>: RDKit <b>ETKDG</b> (experimental-torsion-knowledge distance geometry) — "
-        '<a href="https://doi.org/10.1021/acs.jcim.5b00654">Riniker &amp; Landrum, J. Chem. Inf. Model. 2015</a>. '
-        "Stochastic embedding, then MMFF/UFF or GAFF/GAFF2 (AmberTools + OpenMM) "
-        "vacuum minimization and energy/RMS pruning. "
-        "Energies in the results window are vacuum molecular-mechanics totals (kcal/mol), "
-        "not protein-bound or quantum-chemical values. GAFF/GAFF2 need AmberTools "
-        "(WSL on Windows) and OpenMM.</small>"
-    )
-
-
-def systematic_conformations_dialog_footer_html() -> str:
-    """Rich text for Chemistry → Conformations → Generate → Systematic…."""
-    return (
-        "<small><b>Method</b>: Open Babel <b>Confab</b> — "
-        '<a href="https://doi.org/10.1186/1758-2946-3-8">O\'Boyle et al., J. Cheminform. 2011</a>. '
-        "Systematic torsion driving with RMSD and energy cutoffs (not RDKit ETKDG). "
-        "Requires Open Babel (<code>obabel</code> or the Python bindings). "
-        "Confab needs a 3D starting geometry; MolManager embeds with ETKDG when the ligand is 2D. "
-        "Energies in the results window are vacuum MMFF/UFF totals, not protein-bound ΔG.</small>"
-    )
-
-
-def conforge_conformations_dialog_footer_html() -> str:
-    """Rich text for Chemistry → Conformations → Generate → CONFORGE…."""
-    return (
-        "<small><b>Method</b>: <b>CONFORGE</b> (CDPKit) — "
-        '<a href="https://doi.org/10.1021/acs.jcim.3c00563">Seidel et al., J. Chem. Inf. Model. 2023</a>. '
-        "Knowledge-based fragment/torsion sampling for typical drug-like molecules; "
-        "stochastic DG for large macrocycles. On Windows, install CDPKit and point at "
-        "<code>confgen.exe</code> (PyPI has no Python 3.11 wheel). On Linux/macOS, "
-        "<code>pip install cdpkit</code> when a wheel exists. Energies in the results window "
-        "are vacuum MMFF totals, "
-        "not protein-bound ΔG.</small>"
-    )
-
-
 def protomer_dialog_footer_html() -> str:
     """Rich text appended under the protomer generator hint."""
     return (
