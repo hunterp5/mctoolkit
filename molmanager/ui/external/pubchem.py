@@ -23,21 +23,15 @@ from dataclasses import dataclass
 from PyQt5.QtCore import QObject, QRunnable, Qt, pyqtSignal
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import (
-    QButtonGroup,
     QCheckBox,
     QDialog,
-    QDoubleSpinBox,
-    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QPushButton,
-    QRadioButton,
     QShortcut,
-    QSpinBox,
     QTextEdit,
     QVBoxLayout,
 )
@@ -45,6 +39,7 @@ from PyQt5.QtWidgets import (
 from ...sources.pubchem_names import names_from_title_and_synonyms
 from ...chem.molecule_conversion import morgan_tanimoto_to_query
 from ..qt_widget_utils import apply_monospace_to_text_edit, make_window_minimizable
+from .query_form import DatabaseQueryBar
 from ..strings import COLUMN_TANIMOTO_SIMILARITY
 from ..threadpool_access import start_runnable_on_app_pool
 
@@ -233,6 +228,8 @@ _PUBCHEM_FIELD_DEFS: list[tuple[str, str, str, str]] = [
     ("Complexity", "Complexity", "complexity", "Counts / topology"),
 ]
 
+_DEFAULT_PUBCHEM_FIELDS = frozenset({"CID", FIELD_COMMON_NAME, "IsomericSMILES"})
+
 
 def _compound_title(comp) -> str:
     """PubChem preferred name (Title) for a PubChemPy ``Compound``."""
@@ -311,76 +308,27 @@ class PubChemDialog(QDialog):
 
         root = QVBoxLayout(self)
 
-        mode_row = QHBoxLayout()
-        self.rb_pub_identity = QRadioButton("Identity (SMILES lookup)")
-        self.rb_pub_similarity = QRadioButton("Similarity (2D Tanimoto, PubChem)")
-        self.rb_pub_identity.setChecked(True)
-        self._pub_mode_group = QButtonGroup(self)
-        self._pub_mode_group.addButton(self.rb_pub_identity)
-        self._pub_mode_group.addButton(self.rb_pub_similarity)
-        mode_row.addWidget(self.rb_pub_identity)
-        mode_row.addWidget(self.rb_pub_similarity)
-        mode_row.addStretch()
-        root.addLayout(mode_row)
-
-        self.gb_sim = QGroupBox("Similarity parameters (PubChem)")
-        sim_form = QFormLayout(self.gb_sim)
-        self.spin_tc = QDoubleSpinBox()
-        self.spin_tc.setRange(0.30, 1.00)
-        self.spin_tc.setDecimals(2)
-        self.spin_tc.setSingleStep(0.05)
-        self.spin_tc.setValue(0.70)
-        self.spin_tc.setToolTip(
-            "Minimum Tanimoto similarity for PubChem PUG-REST 2D fingerprint search "
-            "(Threshold 1–100 on the PubChem scale; see PubChem documentation)."
+        self.query_bar = DatabaseQueryBar(
+            self,
+            tanimoto_tooltip=(
+                "Minimum Tanimoto similarity for PubChem PUG-REST 2D fingerprint search "
+                "(Threshold 1–100 on the PubChem scale; see PubChem documentation)."
+            ),
+            max_tooltip="Maximum number of compounds returned (PubChem MaxRecords).",
         )
-        sim_form.addRow("Min. Tanimoto:", self.spin_tc)
-        self.spin_max = QSpinBox()
-        self.spin_max.setRange(1, 500)
-        self.spin_max.setValue(25)
-        self.spin_max.setToolTip("Maximum number of compounds returned (PubChem MaxRecords).")
-        sim_form.addRow("Max. structures:", self.spin_max)
-        self.gb_sim.setEnabled(False)
-        self.rb_pub_similarity.toggled.connect(self.gb_sim.setEnabled)
-        root.addWidget(self.gb_sim)
-
-        row = QHBoxLayout()
-        row.addWidget(QLabel("SMILES:"))
-        self.smiles = QLineEdit()
-        self.smiles.setPlaceholderText("Paste SMILES here, or use the Sketcher button…")
-        row.addWidget(self.smiles, 1)
-        self.btn_query = QPushButton("Query")
+        self.smiles = self.query_bar.smiles
+        self.btn_query = self.query_bar.btn_query
+        self.chk_only_selected = self.query_bar.chk_only_selected
+        self.btn_sketch = self.query_bar.btn_sketch
+        self.spin_tc = self.query_bar.spin_tc
+        self.spin_max = self.query_bar.spin_max
         self.btn_query.setToolTip(
             "Run PubChem lookup for the SMILES above, or for selected rows if “Only Query Selected” is checked."
         )
         self.btn_query.clicked.connect(self._run_query)
-        row.addWidget(self.btn_query)
-        self.chk_only_selected = QCheckBox("Only Query Selected")
-        self.chk_only_selected.setToolTip(
-            "When checked, Query uses SMILES from selected rows in the main table (ignores the text box)."
-        )
-        row.addWidget(self.chk_only_selected)
-        self.btn_sketch = QPushButton("Sketcher…")
         self.btn_sketch.clicked.connect(self._use_sketcher)
-        row.addWidget(self.btn_sketch)
-        root.addLayout(row)
+        root.addWidget(self.query_bar)
 
-        self.status = QLabel("")
-        self.status.setStyleSheet("color: palette(mid);")
-        root.addWidget(self.status)
-
-        gb_fields = QGroupBox("Retrieve fields")
-        fields_v = QVBoxLayout(gb_fields)
-        btn_all_fields = QHBoxLayout()
-        self.btn_pubchem_all_fields = QPushButton("Retrieve all fields")
-        self.btn_pubchem_all_fields.setToolTip(
-            "Select every field below (larger PubChemPy requests). By default, boxes start unchecked—"
-            "pick what you need or use this shortcut."
-        )
-        self.btn_pubchem_all_fields.clicked.connect(self._pubchem_select_all_fields)
-        btn_all_fields.addWidget(self.btn_pubchem_all_fields)
-        btn_all_fields.addStretch()
-        fields_v.addLayout(btn_all_fields)
         self.field_checks: dict[str, QCheckBox] = {}
         groups: dict[str, list[tuple[str, str, str, str]]] = {}
         for item in _PUBCHEM_FIELD_DEFS:
@@ -393,13 +341,15 @@ class PubChemDialog(QDialog):
             gb = QGroupBox(group_name)
             g = QGridLayout(gb)
             for i, (key, label, _attr, _grp) in enumerate(items):
-                cb = QCheckBox(label if label == key else f"{label} ({key})")
-                cb.setChecked(False)
+                cb = QCheckBox(label)
+                cb.setChecked(key in _DEFAULT_PUBCHEM_FIELDS)
                 self.field_checks[key] = cb
                 g.addWidget(cb, i // 2, i % 2)
-            fields_v.addWidget(gb)
+            root.addWidget(gb)
 
-        root.addWidget(gb_fields)
+        self.status = QLabel("")
+        self.status.setStyleSheet("color: palette(mid);")
+        root.addWidget(self.status)
 
         self.out = QTextEdit()
         self.out.setReadOnly(True)
@@ -424,9 +374,6 @@ class PubChemDialog(QDialog):
         self.btn_cancel.clicked.connect(self._cancel_query)
         bottom.addWidget(self.btn_cancel)
         bottom.addStretch()
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.reject)
-        bottom.addWidget(close_btn)
         root.addLayout(bottom)
 
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=self._run_query)
@@ -435,10 +382,6 @@ class PubChemDialog(QDialog):
             if auto_query:
                 self._run_query()
         make_window_minimizable(self)
-
-    def _pubchem_select_all_fields(self) -> None:
-        for cb in self.field_checks.values():
-            cb.setChecked(True)
 
     def set_smiles_list(self, smiles_list: list[str]) -> None:
         smiles_list = [s.strip() for s in (smiles_list or []) if s and s.strip()]
@@ -522,7 +465,7 @@ class PubChemDialog(QDialog):
         similarity: tuple[float, int] | None = None
         smiles_list: list[str]
 
-        if self.rb_pub_similarity.isChecked():
+        if self.query_bar.similarity_selected():
             one = self._resolve_single_query_smiles()
             if not one:
                 return
@@ -555,12 +498,7 @@ class PubChemDialog(QDialog):
         self.btn_add.setEnabled(False)
         self.btn_add_unique.setEnabled(False)
         self.btn_cancel.setEnabled(True)
-        self.btn_query.setEnabled(False)
-        self.chk_only_selected.setEnabled(False)
-        self.btn_sketch.setEnabled(False)
-        self.rb_pub_identity.setEnabled(False)
-        self.rb_pub_similarity.setEnabled(False)
-        self.gb_sim.setEnabled(False)
+        self.query_bar.set_busy(True)
         n = len(smiles_list)
         self.status.setText(
             f"Starting PubChem {'similarity' if similarity else 'identity'} query… (N={n})"
@@ -591,12 +529,7 @@ class PubChemDialog(QDialog):
         self.btn_add.setEnabled(bool(self._last))
         self.btn_add_unique.setEnabled(bool(self._last))
         self.btn_cancel.setEnabled(False)
-        self.btn_query.setEnabled(True)
-        self.chk_only_selected.setEnabled(True)
-        self.btn_sketch.setEnabled(True)
-        self.rb_pub_identity.setEnabled(True)
-        self.rb_pub_similarity.setEnabled(True)
-        self.gb_sim.setEnabled(self.rb_pub_similarity.isChecked())
+        self.query_bar.set_busy(False)
         self.status.setText(f"Done. Success: {len(self._last)}  Total: {len(logs)}")
         # Display a compact log by default (big batches stay readable).
         self.out.setPlainText("\n".join(str(x) for x in (logs or [])))
