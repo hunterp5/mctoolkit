@@ -61,6 +61,9 @@ def test_search_and_filter_hotkeys_are_data_category():
     by_id = {spec.action_id: spec for spec in HOTKEY_SPECS}
     assert by_id["tools.search"].category == "Data"
     assert by_id["tools.toggle_filter_panel"].category == "Data"
+    assert by_id["data.add_to_list"].label == "Add to List"
+    assert by_id["data.add_to_list"].category == "Data"
+    assert by_id["data.add_to_list"].defaults == ("Ctrl+L",)
 
 
 def test_find_duplicate_bindings():
