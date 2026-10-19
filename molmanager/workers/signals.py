@@ -42,6 +42,8 @@ class WorkerSignals(QObject):
     # mols_loaded: (batch, headers_or_empty, is_first_batch, is_last_batch)
     # batch entries are Chem.Mol (SDF/MOL) or dict[str,str] cell maps (text-first CSV/TSV).
     mols_loaded = pyqtSignal(list, list, bool, bool)
+    # file_load_failed: (ingest_generation, user_message). Not a successful empty load.
+    file_load_failed = pyqtSignal(int, str)
     # Emitted on the UI thread before bulk read when multiple structure columns exist; worker waits.
     structure_source_probe = pyqtSignal(list)
     # Last int: render_batch_session (0 = single / non-batch; non-zero must match app accept id)
