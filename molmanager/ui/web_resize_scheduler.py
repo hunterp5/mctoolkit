@@ -41,18 +41,16 @@ def resize_scheduler_binding_html(on_resize_js: str, *, target_id: str = "v") ->
 
     ``on_resize_js`` is a statement body; it may read ``info.settle`` and should guard
     against the viewer not existing yet (the observer can fire before page init).
-    Also defines ``window.molmanagerHoldResize`` for dock/undock transitions.
     """
     return f"""{web_resize_scheduler_script_tag()}
 <script>
 (function () {{
   var target = document.getElementById({json.dumps(target_id)}) || document.body;
-  var scheduler = window.molmanagerCreateResizeScheduler({{
+  window.molmanagerCreateResizeScheduler({{
     target: target,
     onResize: function (info) {{
       {on_resize_js}
     }}
   }});
-  window.molmanagerHoldResize = function (hold) {{ scheduler.hold(!!hold); }};
 }})();
 </script>"""
