@@ -262,8 +262,9 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             "Potency Standardization…",
             "open_potency_standardization",
             tooltip=(
-                "Convert an activity column to mol/L and pIC50 or pKi. "
-                "IC50 can also become Ki with Cheng–Prusoff when [S] and Km are known."
+                "Convert an activity column to nM or uM, with optional pActivity. "
+                "Mass/volume units use molecular weight. "
+                "IC50 can become Ki with Cheng–Prusoff when assay concentrations are known."
             ),
         ),
         action(
@@ -432,15 +433,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                     "(MaxMin on fingerprint Tanimoto distance)."
                 ),
             ),
-            action(
-                "Cluster…",
-                "open_cluster_dialog",
-                hotkey="data.cluster",
-                tooltip=(
-                    "Cluster compounds by fingerprint, numeric columns, or both "
-                    "(K-Means, Butina, sphere exclusion, etc.)."
-                ),
-            ),
             tooltips_visible=True,
         ),
         submenu(
@@ -559,6 +551,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                     "Run a named reaction (Suzuki, Buchwald, amide coupling, etc.) across two reactant "
                     "pools from structure files or pasted SMILES, then append products to the table "
                     "and/or an SDF file."
+                ),
+            ),
+            action(
+                "R-Group Enumeration…",
+                "open_rgroup_enumeration",
+                tooltip=(
+                    "Attach building-block lists to a core with numbered * points and append the "
+                    "products. The same property limits used for fragment recomposition can cap the set."
                 ),
             ),
             tooltips_visible=True,
@@ -683,6 +683,15 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltip=(
                 "Score rows with linear, Gaussian, or step desirability functions and combine "
                 "into an overall MPO score."
+            ),
+        ),
+        action(
+            "Cluster…",
+            "open_cluster_dialog",
+            hotkey="data.cluster",
+            tooltip=(
+                "Cluster compounds by fingerprint, numeric columns, or both "
+                "(K-Means, Butina, sphere exclusion, etc.)."
             ),
         ),
         SEPARATOR,
