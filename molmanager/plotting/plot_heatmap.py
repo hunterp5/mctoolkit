@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .plot_marker_color import resolve_plot_colorscale
+from .plot_marker_color import colorbar_for_label, resolve_plot_colorscale
 from .plotly_legend import finalize_plot_legend
 
 
@@ -147,7 +147,7 @@ def build_heatmap_figure(
                 z=z,
                 colorscale=resolve_plot_colorscale(colorscale),
                 showlegend=False,
-                colorbar={"title": "Count"},
+                colorbar=colorbar_for_label("Count"),
                 hovertemplate=(
                     f"{x_label}: %{{x}}<br>{y_label}: %{{y}}<br>Count: %{{z}}<extra></extra>"
                 ),
