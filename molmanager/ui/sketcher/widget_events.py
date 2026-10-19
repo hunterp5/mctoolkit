@@ -24,8 +24,9 @@ from typing import Any
 from PyQt5.QtCore import QPoint, QRect, Qt
 from PyQt5.QtWidgets import QAction, QMenu, QMessageBox, QWidget
 
-from .bonds import _bond_make, _bond_unpack
+from .bonds import BOND_STEREO_PLAIN, _bond_make, _bond_unpack
 from .constants import DEFAULT_WILDCARD_ELEMENTS, SKETCH_MEDIAN_BOND_PX, WILDCARD_ELEMENT
+from .rgroups import rgroup_label_from_element
 from .sketch_reactions import snap_arrow_end
 from .wildcards import _is_wildcard_node
 
@@ -725,6 +726,8 @@ class SketchWidgetEventsMixin:
                         ex = int(round(ex0))
                         ey = int(round(ey0))
                     pel = self.place_element if self.place_element is not None else "C"
+                    if rgroup_label_from_element(pel) is not None:
+                        order, pst = 1, BOND_STEREO_PLAIN
                     nid = self.next_id
                     self.next_id += 1
                     node: dict[str, Any] = {"id": nid, "pos": QPoint(ex, ey), "element": pel}
@@ -784,7 +787,9 @@ class SketchWidgetEventsMixin:
         if self._drag_candidate is not None:
             base_id = self._drag_candidate
             tgt = next((n for n in self.nodes if n["id"] == base_id), None)
-            if tgt is not None and self.place_element == "C":
+            if tgt is not None and rgroup_label_from_element(self.place_element) is not None:
+                self.place_rgroup_on(base_id, self.place_element)
+            elif tgt is not None and self.place_element == "C":
                 is_plain_carbon = (
                     tgt.get("element") == "C"
                     and not _is_wildcard_node(tgt)
