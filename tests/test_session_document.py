@@ -1376,3 +1376,46 @@ def test_session_roundtrip_restores_protein_viewer(qapp, tmp_path) -> None:  # n
     assert opened is dlg2
     w.close()
     w2.close()
+
+
+def test_session_roundtrip_restores_gnina_dock(qapp, tmp_path) -> None:  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    w.headers = ["ID_HIDDEN", "Structure", "SMILES"]
+    w._table_model.set_headers(list(w.headers))
+    dlg = w.open_gnina_dock()
+    dlg.edit_receptor.setText(str(tmp_path / "rec.pdbqt"))
+    dlg.edit_ligand.setText(str(tmp_path / "lig.sdf"))
+    dlg.edit_out.setText(str(tmp_path / "out.sdf"))
+    dlg.autobox_cb.setChecked(False)
+    dlg.spin_cx.setValue(1.25)
+    dlg.spin_sx.setValue(18.0)
+    dlg.combo_cnn_scoring.setCurrentIndex(dlg.combo_cnn_scoring.findData("none"))
+    dlg.edit_extra.setText("--seed 7")
+    dlg._crystal_ligand_path = str(tmp_path / "xtal.sdf")
+    dlg.close()
+
+    doc = w._build_session_document()
+    saved = doc.get("gnina_dock")
+    assert isinstance(saved, dict)
+    assert str(saved["receptor"]).endswith("rec.pdbqt")
+    assert saved["center_x"] == 1.25
+    assert str(saved["crystal_ligand"]).endswith("xtal.sdf")
+    assert saved["cnn_scoring"] == "none"
+    assert saved["extra"] == "--seed 7"
+
+    w2 = ChemistryWorkspaceWindow()
+    w2.headers = ["ID_HIDDEN", "Structure", "SMILES"]
+    w2._table_model.set_headers(list(w2.headers))
+    w2._apply_session_document(doc)
+    dlg2 = w2.open_gnina_dock()
+    assert str(dlg2.edit_receptor.text()).endswith("rec.pdbqt")
+    assert str(dlg2.edit_ligand.text()).endswith("lig.sdf")
+    assert str(dlg2.edit_out.text()).endswith("out.sdf")
+    assert dlg2.autobox_cb.isChecked() is False
+    assert dlg2.spin_cx.value() == pytest.approx(1.25)
+    assert dlg2.spin_sx.value() == pytest.approx(18.0)
+    assert dlg2.combo_cnn_scoring.currentData() == "none"
+    assert dlg2.edit_extra.text() == "--seed 7"
+    assert str(dlg2._crystal_ligand_path).endswith("xtal.sdf")
+    w.close()
+    w2.close()
