@@ -96,6 +96,28 @@ function molmanagerInitView() {
       }
       return out;
     }
+    function componentStyleSpec(comp) {
+      var color = comp.cartoonColor || comp.color || undefined;
+      var style = (comp && comp.style) || "stick";
+      if (style === "cartoon") {
+        return {cartoon: {color: color || "spectrum", hidden: false}};
+      }
+      if (style === "surface") {
+        var surfColor = color || "lightgray";
+        if (surfColor === "spectrum") surfColor = comp.color || "lightgray";
+        return {cartoon: {color: surfColor, hidden: false}};
+      }
+      if (style === "stick") return {stick: carbonSpec({radius: 0.15}, comp)};
+      if (style === "sphere") {
+        var scale = (comp.kind === "water") ? 0.35 : (comp.kind === "metal" ? 0.55 : 0.4);
+        return {sphere: carbonSpec({scale: scale}, comp)};
+      }
+      if (style === "line") return {line: carbonSpec({linewidth: 1.5}, comp)};
+      return {
+        stick: carbonSpec({radius: 0.18}, comp),
+        sphere: carbonSpec({scale: 0.26}, comp)
+      };
+    }
     function applyOneStyle(v, comp) {
       if (!comp) return;
       var sel = selOf(comp);
@@ -104,29 +126,15 @@ function molmanagerInitView() {
         v.setStyle(sel, {hidden: true});
         return;
       }
-      var color = comp.cartoonColor || comp.color || undefined;
       var style = comp.style || "stick";
-      if (style === "cartoon") {
-        v.setStyle(sel, {cartoon: {color: color || "spectrum", hidden: false}});
-      } else if (style === "surface") {
+      v.setStyle(sel, componentStyleSpec(comp));
+      if (style === "surface") {
+        var color = comp.cartoonColor || comp.color || undefined;
         var surfColor = color || "lightgray";
         if (surfColor === "spectrum") surfColor = comp.color || "lightgray";
-        v.setStyle(sel, {cartoon: {color: surfColor, hidden: false}});
         try {
           v.addSurface($3Dmol.SurfaceType.VDW, {opacity: 0.65, color: surfColor === "spectrum" ? "white" : surfColor}, sel);
         } catch (eSurf) {}
-      } else if (style === "stick") {
-        v.setStyle(sel, {stick: carbonSpec({radius: 0.15}, comp)});
-      } else if (style === "sphere") {
-        var scale = (comp.kind === "water") ? 0.35 : (comp.kind === "metal" ? 0.55 : 0.4);
-        v.setStyle(sel, {sphere: carbonSpec({scale: scale}, comp)});
-      } else if (style === "line") {
-        v.setStyle(sel, {line: carbonSpec({linewidth: 1.5}, comp)});
-      } else {
-        v.setStyle(sel, {
-          stick: carbonSpec({radius: 0.18}, comp),
-          sphere: carbonSpec({scale: 0.26}, comp)
-        });
       }
       if (comp.selected && comp.visible && !(window.molmanagerResidueHighlight || []).length) {
         try {
@@ -451,6 +459,169 @@ function molmanagerInitView() {
       applyDockPose(v);
       applyPharmacophore(v);
       bindPicking(v);
+      try {
+        window.molmanagerPrevHighlightSels = JSON.parse(
+          JSON.stringify(window.molmanagerResidueHighlight || [])
+        );
+      } catch (ePrev) {
+        window.molmanagerPrevHighlightSels = [];
+      }
+      rememberOrangeIds();
+    }
+    function rememberOrangeIds() {
+      var ids = [];
+      if (!(window.molmanagerResidueHighlight || []).length) {
+        var comps = window.molmanagerComponents || [];
+        for (var i = 0; i < comps.length; i++) {
+          var comp = comps[i];
+          if (comp && comp.selected && comp.visible && comp.id) ids.push(comp.id);
+        }
+      }
+      window.molmanagerOrangeIds = ids;
+    }
+    function componentForSelection(src) {
+      var comps = window.molmanagerComponents || [];
+      var cid = src && (src.component_id || "");
+      var i;
+      if (cid) {
+        for (i = 0; i < comps.length; i++) {
+          if (comps[i] && comps[i].id === cid) return comps[i];
+        }
+      }
+      var chain = (src && src.chain) || "";
+      var resi = src && src.resi != null && src.resi !== "" ? String(src.resi) : "";
+      var resn = src && src.resn ? String(src.resn).toUpperCase() : "";
+      for (i = 0; i < comps.length; i++) {
+        var c = comps[i];
+        if (!c || (c.chain || "") !== chain) continue;
+        if (c.kind === "polymer" || c.kind === "water") return c;
+        if (resn && String(c.resn || "").toUpperCase() !== resn) continue;
+        if (c.resi != null && String(c.resi) !== "" && resi && String(c.resi) !== resi) continue;
+        return c;
+      }
+      return null;
+    }
+    function ensureClickTarget(at) {
+      if (!at) return;
+      if (atomLooksHidden(at) || (isHydrogenAtom(at) && !atomHasAtomRepresentation(at))) {
+        at.clickable = false;
+        return;
+      }
+      at.clickable = true;
+      at.style = at.style || {};
+      if (at.style.sphere && at.style.sphere.opacity != null && at.style.sphere.opacity <= 0.05) {
+        at.style.sphere.hidden = true;
+      }
+      if (atomHasAtomRepresentation(at)) return;
+      at.style.clicksphere = {hidden: false, radius: 0.8};
+    }
+    function refreshAtomsAfterStyle(v, atoms) {
+      if (!v || !atoms || !atoms.length) return;
+      var mode = normalizeHydrogensMode(window.molmanagerHydrogens);
+      var visibleHeavies = indexVisibleHeavyResidues(atoms);
+      var heavyIndex = indexResidueHeavies(atoms);
+      var showSerials = {};
+      for (var i = 0; i < atoms.length; i++) {
+        var at = atoms[i];
+        if (!at) continue;
+        if (!isHydrogenAtom(at)) {
+          ensureClickTarget(at);
+          continue;
+        }
+        var keep = false;
+        if (mode !== "none" && visibleHeavies[residueResKey(at)]) {
+          keep = (mode === "all") || hydrogenParentIsPolar(at, heavyIndex);
+        }
+        if (keep) {
+          showPolarHydrogen(at);
+          var mid = String(atomModelId(at));
+          if (!showSerials[mid]) showSerials[mid] = [];
+          if (at.serial != null && at.serial !== "") showSerials[mid].push(at.serial);
+        } else {
+          hideAtom(at);
+        }
+      }
+      var showSpec = hydrogenShowSpec();
+      for (var key in showSerials) {
+        if (!Object.prototype.hasOwnProperty.call(showSerials, key)) continue;
+        var serials = showSerials[key];
+        if (!serials.length) continue;
+        var sel = {serial: serials};
+        if (key !== "") sel.model = parseInt(key, 10);
+        applyHydrogenSetStyle(v, sel, showSpec);
+      }
+    }
+    function restyleComponent(v, comp) {
+      if (!v || !comp) return;
+      applyOneStyle(v, comp);
+      var atoms = [];
+      try { atoms = v.selectedAtoms(selOf(comp)) || []; } catch (eAt) {}
+      refreshAtomsAfterStyle(v, atoms);
+    }
+    function restoreHighlightSels(v, sels) {
+      for (var i = 0; i < (sels || []).length; i++) {
+        var src = sels[i] || {};
+        var comp = componentForSelection(src);
+        var target = viewerSel(src);
+        var spec = comp ? componentStyleSpec(comp) : {stick: {radius: 0.15}};
+        if (comp && !comp.visible) spec = {hidden: true};
+        try { v.setStyle(target, spec); } catch (eSet) {}
+        var atoms = [];
+        try { atoms = v.selectedAtoms(target) || []; } catch (eSel) {}
+        refreshAtomsAfterStyle(v, atoms);
+      }
+    }
+    function syncSelectionStyles(v, selectedIds) {
+      if (!selectedIds) return;
+      var want = {};
+      for (var i = 0; i < selectedIds.length; i++) want[selectedIds[i]] = true;
+      var orange = window.molmanagerOrangeIds || [];
+      var orangeSet = {};
+      for (var o = 0; o < orange.length; o++) orangeSet[orange[o]] = true;
+      var comps = window.molmanagerComponents || [];
+      var highlighted = (window.molmanagerResidueHighlight || []).length > 0;
+      var nextOrange = [];
+      for (var c = 0; c < comps.length; c++) {
+        var comp = comps[c];
+        if (!comp) continue;
+        var now = !!want[comp.id];
+        var was = !!comp.selected;
+        if (was !== now) comp.selected = now;
+        var wasOrange = !!orangeSet[comp.id];
+        if (wasOrange && !now) {
+          restyleComponent(v, comp);
+          continue;
+        }
+        if (!highlighted && now && comp.visible && !wasOrange) {
+          restyleComponent(v, comp);
+          if (comp.id) nextOrange.push(comp.id);
+          continue;
+        }
+        if (wasOrange && now && comp.visible) nextOrange.push(comp.id);
+      }
+      window.molmanagerOrangeIds = nextOrange;
+    }
+    function applySelectionFast(v) {
+      v = v || window.molmanagerViewer;
+      if (!v) return;
+      var sels = window.molmanagerResidueHighlight || [];
+      var prev = window.molmanagerPrevHighlightSels || [];
+      try { v.removeAllLabels(); } catch (eLab) {}
+      restoreHighlightSels(v, prev);
+      applyResidueHighlight(v);
+      for (var i = 0; i < sels.length; i++) {
+        var src = sels[i] || {};
+        if ((src.serial != null && src.serial !== "") || src.atom) continue;
+        var atoms = [];
+        try { atoms = v.selectedAtoms(viewerSel(src)) || []; } catch (eRes) {}
+        refreshAtomsAfterStyle(v, atoms);
+      }
+      try {
+        window.molmanagerPrevHighlightSels = JSON.parse(JSON.stringify(sels));
+      } catch (eCopy) {
+        window.molmanagerPrevHighlightSels = [];
+      }
+      try { v.render(); } catch (eRend) {}
     }
     function atomModelId(at) {
       if (at && at.model && typeof at.model.id === "number") return at.model.id;
@@ -1265,14 +1436,31 @@ function molmanagerInitView() {
       applyAll(v);
       keepViewResize(v);
     };
-    window.molmanagerSetResidueHighlight = function (sels) {
+    window.molmanagerSetResidueHighlight = function (arg) {
+      var sels = arg;
+      var selectedIds = null;
+      if (arg && !Array.isArray(arg)) {
+        sels = arg.sels || [];
+        if (arg.selectedIds) selectedIds = arg.selectedIds;
+      }
       window.molmanagerResidueHighlight = sels || [];
-      applyAll(window.molmanagerViewer);
-      keepViewResize(window.molmanagerViewer);
+      var v = window.molmanagerViewer;
+      if (!v) return;
+      if (selectedIds) syncSelectionStyles(v, selectedIds);
+      applySelectionFast(v);
     };
     window.molmanagerSetPocket = function (pocket) {
+      var apply = true;
+      if (pocket && pocket._apply === false) {
+        apply = false;
+        var copy = {};
+        for (var k in pocket) {
+          if (Object.prototype.hasOwnProperty.call(pocket, k) && k !== "_apply") copy[k] = pocket[k];
+        }
+        pocket = copy;
+      }
       window.molmanagerPocket = pocket || null;
-      if (!window.molmanagerViewer) return;
+      if (!apply || !window.molmanagerViewer) return;
       applyAll(window.molmanagerViewer);
       keepViewResize(window.molmanagerViewer);
     };
@@ -1283,8 +1471,13 @@ function molmanagerInitView() {
       keepViewResize(window.molmanagerViewer);
     };
     window.molmanagerSetHydrogens = function (mode) {
+      var apply = true;
+      if (mode && typeof mode === "object") {
+        apply = mode.apply !== false;
+        mode = mode.mode;
+      }
       window.molmanagerHydrogens = normalizeHydrogensMode(mode);
-      if (!window.molmanagerViewer) return;
+      if (!apply || !window.molmanagerViewer) return;
       applyAll(window.molmanagerViewer);
       keepViewResize(window.molmanagerViewer);
     };
