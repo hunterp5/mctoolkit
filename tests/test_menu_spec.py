@@ -148,7 +148,7 @@ def test_reaction_menu_outline():
     ]
 
 
-def test_lists_menu_sits_in_data_table():
+def test_lists_menu_sits_under_data_below_table():
     labels = []
     for item in MAIN_WINDOW_MENUS:
         outline = menu_outline((item,))[0]
@@ -156,10 +156,15 @@ def test_lists_menu_sits_in_data_table():
     assert "Lists" not in labels
     assert labels[labels.index("Data") + 1] == "Settings"
     data = find_submenu(MAIN_WINDOW_MENUS, "Data")
+    data_labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]
+    assert data_labels.index("Lists") == data_labels.index("Table") + 1
     table = find_submenu(data.items, "Table")
-    lists = find_submenu(table.items, "Lists")
+    assert "Lists" not in [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(table.items)]
+    lists = find_submenu(data.items, "Lists")
     assert lists.attr == "_lists_menu"
     assert lists.about_to_show == "_rebuild_lists_menu"
+    add_to_list = next(item for item in lists.items if item.title == "Add Selected to List…")
+    assert add_to_list.hotkey == "data.add_to_list"
     assert menu_outline(lists.items) == [
         "Add Selected to List…",
         "",
@@ -178,6 +183,12 @@ def test_help_menu_sits_inside_settings():
     assert HELP_MENU.attr == "_help_menu"
 
 
+def test_sar_matrix_follows_free_wilson():
+    data = find_submenu(MAIN_WINDOW_MENUS, "Data")
+    labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]
+    assert labels.index("SAR Matrix…") == labels.index("Free-Wilson…") + 1
+
+
 def test_data_table_operations_submenu():
     data = find_submenu(MAIN_WINDOW_MENUS, "Data")
     table = find_submenu(data.items, "Table")
@@ -192,7 +203,6 @@ def test_data_table_operations_submenu():
             ]
         },
         "Statistics…",
-        {"Lists": ["Add Selected to List…", "", "Manage Lists…"]},
     ]
 
 
