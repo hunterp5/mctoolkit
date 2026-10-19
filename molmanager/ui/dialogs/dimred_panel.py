@@ -392,42 +392,22 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         return box
 
     def _install_appearance_dialog(self) -> None:
-        """Move titles, color, size, and hover into the plot-settings dialog.
+        """Move titles, markers, and hover into the plot-settings dialog.
 
         The setup dialog keeps features, method, and Run. Plot settings redraws the
         current figure and does not show those controls.
         """
         opts = self._opts_panel.layout()
         opts.removeWidget(self._titles)
+        opts.removeWidget(self._markers_group)
         opts.removeWidget(self._hover_controls)
-
-        row_layouts = []
-        index = 0
-        while index < opts.count():
-            item = opts.itemAt(index)
-            layout = item.layout() if item is not None else None
-            if layout is None:
-                index += 1
-                continue
-            opts.takeAt(index)
-            row_layouts.append(layout)
 
         panel = QWidget()
         body = QVBoxLayout(panel)
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(6)
         body.addWidget(self._titles)
-        markers = QGroupBox("Markers", panel)
-        markers_layout = QVBoxLayout(markers)
-        markers_layout.setContentsMargins(8, 6, 8, 6)
-        markers_layout.setSpacing(2)
-        for row in row_layouts:
-            row.setParent(None)
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(6)
-            markers_layout.addLayout(row)
-        self._markers_group = markers
-        body.addWidget(markers)
+        body.addWidget(self._markers_group)
         body.addWidget(self._hover_controls)
         body.addStretch(1)
         self._appearance_dialog = make_plot_options_dialog(
