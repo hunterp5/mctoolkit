@@ -37,12 +37,31 @@ def test_property_dialog_name_tab_includes_common_name_and_synonyms(qapp) -> Non
     dlg.close()
 
 
+def test_property_dialog_opens_wide_enough_for_every_tab(qapp) -> None:  # noqa: ARG001
+    dlg = PropertyDialog(["Structure"], selected_row_count=0)
+    try:
+        bar = dlg.tabs.tabBar()
+        margins = dlg.layout().contentsMargins()
+        needed = bar.sizeHint().width() + margins.left() + margins.right()
+        assert dlg.minimumWidth() >= needed
+        assert dlg.width() >= dlg.minimumWidth()
+        dlg.show()
+        qapp.processEvents()
+        last = bar.tabRect(bar.count() - 1)
+        assert last.right() <= bar.width()
+        assert last.left() >= 0
+    finally:
+        dlg.close()
+
+
 def test_property_dialog_checkboxes_match_catalog(qapp) -> None:  # noqa: ARG001
     dlg = PropertyDialog(["Structure"], selected_row_count=0)
     tabs = [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     catalog = iter_descriptor_tab_items()
-    assert tabs == [name for name, _items in catalog]
-    assert tabs == list(DESCRIPTOR_TAB_ORDER)
+    ordered = list(DESCRIPTOR_TAB_ORDER)
+    ordered.insert(ordered.index("Drug-likeness") + 1, "Structural Alerts")
+    ordered.insert(ordered.index("Structural Alerts") + 1, "Scaffolds")
+    assert tabs == ordered
     expected = {disp: key for _tab, items in catalog for disp, key in items}
     assert {disp: internal for disp, (_cb, internal) in dlg.cbs.items()} == expected
     dlg.close()
