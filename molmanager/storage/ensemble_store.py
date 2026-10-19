@@ -303,27 +303,31 @@ class EnsembleStore(MutableMapping[tuple[int, str], str]):
         try:
             if oids is None:
                 self._conn.backup(dest_conn)
+                dest_conn.close()
+                dest_conn = None
             else:
                 dest_conn.execute(
                     "CREATE TABLE IF NOT EXISTS ensembles ("
                     "oid INTEGER NOT NULL, col TEXT NOT NULL, kind TEXT NOT NULL, "
                     "blob BLOB NOT NULL, PRIMARY KEY (oid, col))"
                 )
-                want = {int(o) for o in oids}
-                rows = [
-                    (int(oid), str(col), str(kind), bytes(blob or b""))
-                    for oid, col, kind, blob in self._conn.execute(
-                        "SELECT oid, col, kind, blob FROM ensembles"
-                    )
-                    if int(oid) in want
-                ]
-                dest_conn.executemany(
-                    "INSERT OR REPLACE INTO ensembles (oid, col, kind, blob) VALUES (?, ?, ?, ?)",
-                    rows,
-                )
                 dest_conn.commit()
-            dest_conn.close()
-            dest_conn = None
+                dest_conn.close()
+                dest_conn = None
+                want = sorted({int(o) for o in oids})
+                if want:
+                    self._conn.execute("ATTACH DATABASE ? AS snapshot", (str(dest),))
+                    try:
+                        placeholders = ",".join("?" * len(want))
+                        self._conn.execute(
+                            "INSERT INTO snapshot.ensembles (oid, col, kind, blob) "
+                            "SELECT oid, col, kind, blob FROM ensembles "
+                            f"WHERE oid IN ({placeholders})",
+                            want,
+                        )
+                        self._conn.commit()
+                    finally:
+                        self._conn.execute("DETACH DATABASE snapshot")
             return dest.read_bytes()
         finally:
             if dest_conn is not None:
@@ -346,21 +350,30 @@ class EnsembleStore(MutableMapping[tuple[int, str], str]):
         handle.write(data)
         handle.close()
         src_path = Path(handle.name)
-        src = sqlite3.connect(str(src_path))
+        src: sqlite3.Connection | None = sqlite3.connect(str(src_path))
         try:
+            self._flush()
             if replace:
-                self.clear()
-            try:
-                rows = src.execute("SELECT oid, col, kind, blob FROM ensembles").fetchall()
-            except sqlite3.Error:
-                return
-            self._conn.executemany(
-                "INSERT OR REPLACE INTO ensembles (oid, col, kind, blob) VALUES (?, ?, ?, ?)",
-                [(int(r[0]), str(r[1]), str(r[2]), bytes(r[3] or b"")) for r in rows],
-            )
-            self._conn.commit()
+                src.backup(self._conn)
+            else:
+                # Close before ATTACH. Windows locks a file another connection still has open.
+                src.close()
+                src = None
+                self._conn.execute("ATTACH DATABASE ? AS incoming", (str(src_path),))
+                try:
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO ensembles (oid, col, kind, blob) "
+                        "SELECT oid, col, kind, blob FROM incoming.ensembles"
+                    )
+                    self._conn.commit()
+                finally:
+                    self._conn.execute("DETACH DATABASE incoming")
+            self._lru.clear()
+        except sqlite3.Error:
+            return
         finally:
-            src.close()
+            if src is not None:
+                src.close()
             try:
                 src_path.unlink(missing_ok=True)
             except OSError:
