@@ -24,14 +24,12 @@ from PyQt5.QtCore import QEvent
 from PyQt5.QtWidgets import (
     QComboBox,
     QHBoxLayout,
-    QLabel,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from ..plotting.plot_marker_color import (
-    PLOT_COLORSCALE_CHOICES,
     color_values_are_numeric,
     normalize_color_column,
     normalize_size_column,
@@ -52,9 +50,8 @@ from .dockable_plot import (
     show_plot_options_dialog,
     sync_footer_on_parent_change,
 )
-from .plot_color_range_controls import PlotColorRangeControls
+from .plot_markers_controls import PlotMarkersControls
 from .plot_on_hover_controls import PlotOnHoverControls
-from .plot_size_controls import PlotSizeRangeControls
 
 
 class DockableResultPlotPanel(QWidget):
@@ -97,57 +94,29 @@ class DockableResultPlotPanel(QWidget):
         self._titles.changed.connect(self._on_titles_changed)
         opts.addWidget(self._titles)
 
-        color_row = QHBoxLayout()
-        color_row.setSpacing(6)
-        self._color_by_label = QLabel("Color by:")
-        color_row.addWidget(self._color_by_label)
-        self.color_combo = QComboBox()
-        self.color_combo.setMinimumWidth(120)
         pair_note = (
             ". For pair points, numeric columns use the mean of both molecules."
             if self._pair_encoding
             else ""
         )
-        self.color_combo.setToolTip(
-            "Color markers by a table column. Leave as (none) for the plot’s default coloring"
-            + (f" ({self._default_color_hint})" if self._default_color_hint else "")
-            + pair_note
-        )
-        self.color_combo.currentIndexChanged.connect(self._on_color_column_changed)
-        color_row.addWidget(self.color_combo, 1)
-        self._spectrum_label = QLabel("Spectrum:")
-        color_row.addWidget(self._spectrum_label)
-        self.colorscale_combo = QComboBox()
-        self.colorscale_combo.setMinimumWidth(100)
-        self.colorscale_combo.addItems(PLOT_COLORSCALE_CHOICES)
-        self.colorscale_combo.setToolTip("Continuous colorscale for numeric Color by columns.")
-        self.colorscale_combo.currentIndexChanged.connect(self._on_color_column_changed)
-        color_row.addWidget(self.colorscale_combo)
-        self.color_range = PlotColorRangeControls()
-        self.color_range.connect_changed(self._on_color_column_changed)
-        color_row.addWidget(self.color_range)
-        opts.addLayout(color_row)
-
-        size_row = QHBoxLayout()
-        size_row.setSpacing(6)
-        self._size_by_label = QLabel("Size by:")
-        size_row.addWidget(self._size_by_label)
-        self.size_combo = QComboBox()
-        self.size_combo.setMinimumWidth(120)
         size_note = (
             " For pair points, numeric columns use the mean of both molecules."
             if self._pair_encoding
             else ""
         )
-        self.size_combo.setToolTip(
-            "Size markers by a table column (numeric or categorical)." + size_note
+        self._markers_group = PlotMarkersControls(
+            self._opts_panel,
+            color_tooltip=(
+                "Color markers by a table column. Leave as (none) for the plot’s default coloring"
+                + (f" ({self._default_color_hint})" if self._default_color_hint else "")
+                + pair_note
+            ),
+            size_tooltip="Size markers by a table column (numeric or categorical)." + size_note,
         )
-        self.size_combo.currentIndexChanged.connect(self._on_size_column_changed)
-        size_row.addWidget(self.size_combo, 1)
-        self.size_range = PlotSizeRangeControls()
-        self.size_range.connect_changed(self._on_size_column_changed)
-        size_row.addWidget(self.size_range)
-        opts.addLayout(size_row)
+        self._markers_group.color_changed.connect(self._on_color_column_changed)
+        self._markers_group.size_changed.connect(self._on_size_column_changed)
+        self._bind_marker_controls(self._markers_group)
+        opts.addWidget(self._markers_group)
 
         self._hover_controls = PlotOnHoverControls(self._opts_panel)
         self._hover_controls.changed.connect(self._on_hover_options_changed)
@@ -219,6 +188,17 @@ class DockableResultPlotPanel(QWidget):
             self._update_size_controls()
             self._sync_footer_chrome()
             self.setMinimumWidth(self.embedded_minimum_width())
+
+    def _bind_marker_controls(self, markers: PlotMarkersControls) -> None:
+        """Expose marker widgets on the panel so plot code can use one set of names."""
+        self._color_by_label = markers._color_by_label
+        self.color_combo = markers.color_combo
+        self._spectrum_label = markers._spectrum_label
+        self.colorscale_combo = markers.colorscale_combo
+        self.color_range = markers.color_range
+        self._size_by_label = markers._size_by_label
+        self.size_combo = markers.size_combo
+        self.size_range = markers.size_range
 
     def _finish_layout(self) -> None:
         """Call after subclass adds content widgets to ``self._root``."""
