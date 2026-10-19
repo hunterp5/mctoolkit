@@ -342,8 +342,7 @@ class CompoundTableBulkMixin:
         self.beginRemoveColumns(QModelIndex(), col, col)
         self._headers.pop(col)
         if col >= 2:
-            for row in self._rows:
-                row.values.pop(h, None)
+            self._rows.drop_column(h)
         self._mark_header_removed_for_bounds(h)
         self.endRemoveColumns()
 
@@ -361,9 +360,7 @@ class CompoundTableBulkMixin:
             self._pixmap_columns.add(new_name)
             self._extra_pixmaps.rename_header(old, new_name)
         if col >= 2:
-            for row in self._rows:
-                if old in row.values:
-                    row.values[new_name] = row.values.pop(old)
+            self._rows.rename_column(old, new_name)
         self.headerDataChanged.emit(Qt.Horizontal, col, col)
         c0 = self.index(0, col)
         c1 = self.index(max(len(self._rows) - 1, 0), col)

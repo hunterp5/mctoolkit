@@ -47,6 +47,7 @@ from ..table.structure_depiction_layout import (
 )
 from ..storage.structure_render_store import StructureRenderStore
 from ..chem.molecule_conversion import safe_float
+from .column_store import ColumnStore
 from .compound_table_bounds_mixin import CompoundTableBoundsMixin
 from .compound_table_bulk_mixin import CompoundTableBulkMixin
 from .compound_table_color_mixin import CompoundTableColorMixin
@@ -132,7 +133,7 @@ class CompoundTableModel(
     def __init__(self, headers: list[str], parent=None):
         super().__init__(parent)
         self._headers = list(headers)
-        self._rows: list[_Row] = []
+        self._rows = ColumnStore()
         self._pixmaps: dict[int, QPixmap] = {}
         self._structure_png_store: StructureRenderStore | None = None
         self._oid_to_row: dict[int, int] = {}
@@ -336,7 +337,7 @@ class CompoundTableModel(
             return 0
         n_before = len(self._rows)
         self.beginResetModel()
-        self._rows = [r for r in self._rows if int(r.oid) not in kill]
+        self._rows.delete_oids(kill)
         for oid in kill:
             self._drop_row_assets(oid)
         if self._highlighted_oids is not None:
@@ -353,11 +354,9 @@ class CompoundTableModel(
             return
         ordered = sorted(rows, key=lambda item: item[0])
         self.beginResetModel()
-        new_rows = list(self._rows)
         for k, (orig_row, oid, cells) in enumerate(ordered):
-            insert_at = max(0, min(int(orig_row) + k, len(new_rows)))
-            new_rows.insert(insert_at, _Row(oid=int(oid), values=dict(cells)))
-        self._rows = new_rows
+            insert_at = max(0, min(int(orig_row) + k, len(self._rows)))
+            self._rows.insert(insert_at, _Row(oid=int(oid), values=dict(cells)))
         self._rebuild_oid_index()
         if self._column_color_rules:
             for _orig_row, _oid, cells in ordered:
@@ -370,7 +369,7 @@ class CompoundTableModel(
         return self._rows[logical_row].oid
 
     def _rebuild_oid_index(self) -> None:
-        self._oid_to_row = {row.oid: i for i, row in enumerate(self._rows)}
+        self._oid_to_row = {int(oid): i for i, oid in enumerate(self._rows.oids[: self._rows.n])}
 
     def logical_row_for_oid(self, oid: int) -> int:
         r = self._oid_to_row.get(oid, -1)
@@ -402,7 +401,7 @@ class CompoundTableModel(
         out: list[tuple[int, dict[str, str]]] = []
         for r in range(lo, hi):
             row = self._rows[r]
-            cells = {h: str(row.values.get(h, "") or "") for h in data_headers}
+            cells = {h: self._rows.get_text(r, h) or "" for h in data_headers}
             out.append((int(row.oid), cells))
         return out
 
@@ -493,7 +492,7 @@ class CompoundTableModel(
         if row < 0 or row >= len(self._rows) or col < 0 or col >= len(self._headers):
             return None
         h = self._headers[col]
-        oid = self._rows[row].oid
+        oid = self._rows.oid_at(row)
 
         if col == 0:
             if role in (Qt.DisplayRole, Qt.EditRole):
@@ -534,7 +533,7 @@ class CompoundTableModel(
         if h in self._pixmap_columns:
             pix = self._extra_pixmaps.get((oid, h))
             has_pix = pix is not None and not pix.isNull()
-            backing = self._rows[row].values.get(h, "") or ""
+            backing = self._rows.get_text(row, h) or ""
             if role == Qt.DecorationRole:
                 return pix if has_pix else None
             if role == Qt.DisplayRole:
@@ -571,7 +570,7 @@ class CompoundTableModel(
             return None
 
         if role in (Qt.DisplayRole, Qt.EditRole):
-            return self._rows[row].values.get(h, "")
+            return self._rows.get_text(row, h)
         if role == Qt.TextAlignmentRole:
             return table_text_alignment_flags()
         return None
@@ -584,7 +583,7 @@ class CompoundTableModel(
             return False
         h = self._headers[col]
         text_s = str(value)
-        self._rows[row].values[h] = text_s
+        self._rows.set_text(row, h, text_s)
         self._refresh_color_cache_for_cell(self._rows[row], h, text_s)
         self.dataChanged.emit(index, index, [Qt.DisplayRole, Qt.EditRole, Qt.BackgroundRole])
         return True
@@ -665,9 +664,9 @@ class CompoundTableModel(
         if row < 0 or row >= len(self._rows) or col < 0 or col >= len(self._headers):
             return ""
         if col == 0:
-            return str(self._rows[row].oid)
+            return str(self._rows.oid_at(row))
         if col == self.STRUCTURE_COL:
-            oid = self._rows[row].oid
+            oid = self._rows.oid_at(row)
             pix = self._pixmaps.get(oid)
             if pix is not None and not pix.isNull():
                 return ""
@@ -675,29 +674,39 @@ class CompoundTableModel(
         h = self._headers[col]
         if h in self._pixmap_columns:
             return ""
-        return self._rows[row].values.get(h, "") or ""
+        return self._rows.get_text(row, h) or ""
 
     def analysis_column_texts(
         self, headers: list[str], rows: list[int] | None = None
-    ) -> dict[str, list[str]]:
-        """Stripped cell text per data column for *rows* (all rows when ``None``).
+    ) -> dict[str, list[str] | object]:
+        """Per-column values for *rows* (all rows when ``None``).
 
-        Same values as :meth:`cell_text` plus the pixmap-column backing fallback that analysis
-        tools rely on, but read straight off the row store. Whole-table DataFrame builds used to
-        cost one Python call per cell, which dominated session restore on wide tables.
+        Uniform numeric columns are float64 arrays (blank cells are NaN). Text columns are
+        stripped strings, including pixmap-column backing text. An empty *rows* list still
+        returns every column name so pickers can list headers without reading cells.
         """
-        try:
-            picked = self._rows if rows is None else [self._rows[r] for r in rows]
-        except IndexError:
-            picked = [self._rows[r] for r in (rows or []) if 0 <= r < len(self._rows)]
-        out: dict[str, list[str]] = {}
+        n = len(self._rows)
+        if rows is None:
+            indices: list[int] | None = None
+            width = n
+        else:
+            indices = [r for r in rows if 0 <= int(r) < n]
+            width = len(indices)
+        oids = self._rows.oids[:n]
+        out: dict[str, list[str] | object] = {}
         for col, name in enumerate(headers):
             if col >= len(self._headers) or col == self.STRUCTURE_COL or name == "Structure":
                 continue
             if col == 0:
-                out[name] = [str(row.oid) for row in picked]
+                if indices is None:
+                    out[name] = [str(int(oid)) for oid in oids]
+                else:
+                    out[name] = [str(int(oids[i])) for i in indices]
                 continue
-            out[name] = [(row.values.get(name, "") or "").strip() for row in picked]
+            if width == 0 and rows is not None:
+                out[name] = []
+                continue
+            out[name] = self._rows.analysis_values(name, indices)
         return out
 
     def value_for_header(self, row: int, header_name: str) -> str:
@@ -706,13 +715,13 @@ class CompoundTableModel(
             return ""
         if header_name in self._pixmap_columns:
             return ""
-        return self._rows[row].values.get(header_name, "") or ""
+        return self._rows.get_text(row, header_name) or ""
 
     def backing_value_for_row_header(self, row: int, header_name: str) -> str:
         """Stored cell text even when ``header_name`` is a pixmap-only column (hidden from ``cell_text``)."""
         if row < 0 or row >= len(self._rows):
             return ""
-        return (self._rows[row].values.get(header_name, "") or "").strip()
+        return (self._rows.get_text(row, header_name) or "").strip()
 
     def moveRow(
         self,
