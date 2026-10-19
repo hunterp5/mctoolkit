@@ -62,6 +62,7 @@ def __getattr__(name: str) -> Any:
 
 from .bulk_similarity import BulkSimilarityResult, BulkSimilarityWorker
 from .cluster_worker import ClusterExploreWorker, ClusterWorker
+from .common_core import CommonCoreWorker
 from .export_worker import ExportWorker
 from ..chem.rdkit_fingerprints import SIMILARITY_FP_TYPE_LABELS, fingerprint_bitvect_for_ui_choice
 from .diverse_subset_worker import (
@@ -131,6 +132,7 @@ __all__ = [
     "BulkSimilarityWorker",
     "ClusterExploreWorker",
     "ClusterWorker",
+    "CommonCoreWorker",
     "ConformerGenParams",
     "ConformerGenerationWorker",
     "SuperposeConformersWorker",
