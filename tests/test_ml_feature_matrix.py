@@ -53,6 +53,21 @@ def test_combined_numeric_and_fingerprint():
     assert built.X.shape[0] == n
     assert built.n_numeric_features == 2
     assert built.X.shape[1] > built.n_numeric_features
+    assert built.X.dtype == np.float32
+
+
+def test_fingerprint_only_matrix_is_uint8():
+    mol_rows = [(0, _mol("CCO")), (1, _mol("c1ccccc1"))]
+    built = build_combined_feature_matrix(
+        df=pd.DataFrame({"x": [1.0, 2.0]}),
+        oids=[0, 1],
+        feature_columns=[],
+        mol_rows=mol_rows,
+        fp_choice="MACCS (166)",
+        min_rows=2,
+    )
+    assert built.X.dtype == np.uint8
+    assert set(np.unique(built.X)).issubset({0, 1})
 
 
 def test_standardize_numeric_block_only():
