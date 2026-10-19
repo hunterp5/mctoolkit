@@ -205,12 +205,12 @@ class ProteinViewerDialog(
         edit_menu = menubar.addMenu("&Edit")
         self._act_undo = QAction("&Undo", self, triggered=self.undo_manager_delete)
         self._act_undo.setShortcut(QKeySequence.Undo)
-        self._act_undo.setToolTip("Undo the last atom, bond, or Manager chain edit.")
+        self._act_undo.setToolTip("Undo the last atom, bond, Manager chain, or rendering change.")
         self._act_undo.setEnabled(False)
         edit_menu.addAction(self._act_undo)
         self._act_redo = QAction("&Redo", self, triggered=self.redo_manager_delete)
         self._act_redo.setShortcut(QKeySequence.Redo)
-        self._act_redo.setToolTip("Redo the last atom, bond, or Manager chain edit.")
+        self._act_redo.setToolTip("Redo the last atom, bond, Manager chain, or rendering change.")
         self._act_redo.setEnabled(False)
         edit_menu.addAction(self._act_redo)
         edit_menu.addSeparator()
@@ -674,6 +674,7 @@ class ProteinViewerDialog(
         self.log.append(f"[{stamp}] {t}")
 
     def _reset_camera(self) -> None:
+        before = self._capture_render()
         styles_changed = self._restore_loaded_render_styles()
         self._clear_pocket_overlay()
         if styles_changed:
@@ -682,6 +683,7 @@ class ProteinViewerDialog(
             self._push_states()
         elif self._slots:
             self._sync_render_menus_from_rows()
+        self._commit_render(before)
         web = getattr(self.viewer, "_web", None)
         if web is None:
             return
@@ -874,8 +876,13 @@ class ProteinViewerDialog(
         splitter.setSizes([max(sizes[0] - extra, 400), 380])
 
     def _float_side_docks(self) -> None:
-        """Reparent Manager-docked panels into floating windows before this viewer closes."""
+        """Close a docked pose browser; float any other Manager panels before this viewer closes."""
+        from .browsers.pose_browser import PoseBrowserWidget
+
         for widget in list(self.side_docked_widgets()):
+            if isinstance(widget, PoseBrowserWidget):
+                self.close_side_dock_widget(widget)
+                continue
             app = getattr(widget, "parent_app", None)
             factory = getattr(widget, "create_floating_dialog", None)
             self.undock_side_widget(widget)
