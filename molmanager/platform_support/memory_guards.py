@@ -74,8 +74,9 @@ def check_cluster_workload(n_rows: int) -> MemoryGuardResult:
             f"(requested {rows:,}). Select fewer rows or raise "
             f"MOLMANAGER_MEMORY_GUARD_CLUSTER_MAX_ROWS." + _rss_hint(),
         )
-    # Pairwise float32 distances worst-case ~ n²/2 × 4 bytes (upper bound hint).
-    est = (rows * rows // 2) * 4 if rows > 1 else 0
+    # Upper bound only. Butina keeps neighbor indexes within the cutoff, not this
+    # dense float32 matrix (and not the n×n float64 matrix RDKit's ClusterData builds).
+    est = (rows * (rows - 1) // 2) * 4 if rows > 1 else 0
     return MemoryGuardResult(True, estimated_extra_bytes=est)
 
 
@@ -132,7 +133,7 @@ def check_fp_matrix_workload(n_rows: int, n_bits: int = 2048) -> MemoryGuardResu
             f"for this fingerprint size, or adjust MOLMANAGER_MEMORY_GUARD_FP_MATRIX_MAX_CELLS."
             + _rss_hint(),
         )
-    est = cells * 8  # float64 working matrix
+    est = cells * 8  # float64 once a tool upcasts; stored bits are uint8
     return MemoryGuardResult(True, estimated_extra_bytes=est)
 
 
