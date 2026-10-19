@@ -74,10 +74,16 @@ class DimensionReductionMixin:
             with suppress(RuntimeError, AttributeError):
                 getattr(dlg, "_panel", dlg)._reload_columns()
             self._sync_dialog_only_selected_scope(dlg)
+            panel = getattr(dlg, "_panel", None)
+            if panel is not None and getattr(panel, "_last_result", None) is not None:
+                opener = getattr(panel, "_open_setup_dialog", None)
+                if callable(opener):
+                    opener()
+                    return
         self._present_dimension_reduction_dialog(dlg)
 
     def _present_dimension_reduction_dialog(self, dlg) -> None:
-        """Show Plot Options until a figure exists; then raise the plot window."""
+        """Show embedding setup until a figure exists; then raise the plot window."""
         panel = getattr(dlg, "_panel", None)
         present = getattr(panel, "present_initial_ui", None)
         if callable(present):
