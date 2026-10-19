@@ -257,8 +257,7 @@ def build_fingerprint_matrix(
     fp_choice: str,
 ) -> tuple[np.ndarray, list[int]]:
     """Full bit-vector matrix from in-memory structures (same fingerprints as Cluster)."""
-    from rdkit import DataStructs
-
+    from ..chem.rdkit_fingerprints import bitvect_to_uint8
     from ..platform_support.memory_guards import check_fp_matrix_workload
     from ..workers.fingerprint_similarity import fingerprint_bitvect_for_ui_choice
     from ..chem.rdkit_fingerprints import fingerprint_bitvect_for_row
@@ -281,10 +280,8 @@ def build_fingerprint_matrix(
             fp = None
         if fp is None:
             continue
-        arr = np.zeros((int(fp.GetNumBits()),), dtype=np.float64)
-        DataStructs.ConvertToNumpyArray(fp, arr)
         oids.append(int(oid))
-        rows.append(arr)
+        rows.append(bitvect_to_uint8(fp))
     if len(rows) < 2:
         raise ValueError(
             "Need at least two rows with valid fingerprints in this scope. "
