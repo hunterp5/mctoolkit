@@ -287,24 +287,22 @@ def _mmff_threads_for_unipka() -> int:
 
 
 def pin_unipka_torch_threads() -> None:
-    """Pin intra-op threads to 1 inside pool children (avoid oversubscribe)."""
+    """Let the single scoring process use the spare cores.
+
+    Several Uni-pKa processes used to pin this to 1 so they would not oversubscribe.
+    Scoring is one process now, so intra-op threads take ``cpu - 1``.
+    """
     global _WORKER_THREADS_PINNED
     if _WORKER_THREADS_PINNED:
         return
     _WORKER_THREADS_PINNED = True
-    for var in (
-        "OMP_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
-    ):
-        os.environ.setdefault(var, "1")
+    n = max(1, (os.cpu_count() or 2) - 1)
     try:
         import torch
 
-        torch.set_num_threads(1)
+        torch.set_num_threads(n)
     except Exception:
-        logger.debug("could not pin torch thread count for Uni-pKa", exc_info=True)
+        logger.debug("could not set Uni-pKa torch thread count", exc_info=True)
 
 
 def pka_from_delta_g(g_base: float, g_acid: float) -> float:
@@ -642,23 +640,44 @@ def _unipka_windows_lmdb_guards():
         gc.collect()
 
 
-def score_microstate_free_energies(mols: list[Chem.Mol]) -> list[float]:
-    """Score β-scaled G for each mol via ``unipkainfer`` (fold loaded once per process)."""
-    pin_unipka_torch_threads()
-    from unipkainfer import UnipkaFreeEnergyConfig, predict_standard_free_energies
+def _preprocess_worker_count(n_mols: int) -> int:
+    """How many RDKit processes should build conformers for one scoring batch."""
+    if n_mols < 2 or os.environ.get("MOLMANAGER_UNIPKA_PREPROCESS_CHILD") == "1":
+        return 1
+    from ..platform_support.config import load_config
+    from ..platform_support.worker_budget import rdkit_process_workers
 
-    use_gpu = unipka_use_gpu()
-    _log_unipka_compute_device(use_gpu)
-    cfg = UnipkaFreeEnergyConfig(nthreads=_mmff_threads_for_unipka(), gpu=use_gpu)
-    with _unipka_windows_lmdb_guards():
-        results = predict_standard_free_energies(mols, config=cfg)
-    if len(results) != len(mols):
-        raise ValueError(f"Expected {len(mols)} free-energy rows, got {len(results)}.")
+    configured = load_config().pka_process_workers
+    if configured is not None and int(configured) <= 1:
+        return 1
+    workers = rdkit_process_workers(n_mols)
+    if configured is not None:
+        workers = min(workers, int(configured))
+    return workers
+
+
+def score_microstate_free_energies(mols: list[Chem.Mol]) -> list[float]:
+    """Score β-scaled G for each mol.
+
+    Conformers are built with RDKit. The network runs in one torch process,
+    which loads a weights-only checkpoint rather than the training file.
+    """
+    from .unipka_preprocess import records_for_mols
+    from .unipka_score_host import score_raw_free_energies
+
+    if not mols:
+        return []
+    records = records_for_mols(
+        mols,
+        nthreads=_mmff_threads_for_unipka(),
+        parallel_workers=_preprocess_worker_count(len(mols)),
+        on_record=note_preprocess_record,
+    )
+    raw = score_raw_free_energies(list(mols), records)
     calibrated: list[float] = []
-    for i, mol in enumerate(mols):
-        raw = float(results.loc[i, "standard_free_energy"])
+    for mol, energy in zip(mols, raw):
         charge = int(rdmolops.GetFormalCharge(mol))
-        calibrated.append(calibrate_unipka_free_energy(raw, charge))
+        calibrated.append(calibrate_unipka_free_energy(float(energy), charge))
     return calibrated
 
 
@@ -745,6 +764,18 @@ def ionization_progress_from_preprocess(
     return min(done, n - 1)
 
 
+_PREPROCESS_LISTENERS: list = []
+
+
+def note_preprocess_record() -> None:
+    """Tell progress listeners that one unique microstate conformer set is ready."""
+    for fn in list(_PREPROCESS_LISTENERS):
+        try:
+            fn()
+        except Exception:
+            logger.debug("Uni-pKa preprocess progress callback failed", exc_info=True)
+
+
 def _notify_ionization_progress(on_progress, done: int, total: int) -> None:
     if on_progress is None:
         return
@@ -756,33 +787,18 @@ def _notify_ionization_progress(on_progress, done: int, total: int) -> None:
 
 @contextmanager
 def _unipka_preprocess_progress(on_record: Callable[[], None] | None):
-    """Call *on_record* after each Uni-pKa MMFF/LMDB unique-SMILES write."""
+    """Call *on_record* after each unique microstate conformer set is built."""
     if on_record is None:
         yield
         return
-    try:
-        from unipkainfer.pka_predictor import free_energy as fe_mod
-    except Exception:
-        yield
-        return
-    orig = getattr(fe_mod, "_smiles_to_free_energy_record", None)
-    if orig is None:
-        yield
-        return
-
-    def wrapped(smi, cfg):
-        rec = orig(smi, cfg)
-        try:
-            on_record()
-        except Exception:
-            logger.debug("Uni-pKa preprocess progress callback failed", exc_info=True)
-        return rec
-
-    fe_mod._smiles_to_free_energy_record = wrapped
+    _PREPROCESS_LISTENERS.append(on_record)
     try:
         yield
     finally:
-        fe_mod._smiles_to_free_energy_record = orig
+        try:
+            _PREPROCESS_LISTENERS.remove(on_record)
+        except ValueError:
+            pass
 
 
 def _ensembles_from_flats(
