@@ -83,6 +83,17 @@
   <script>
     (function() {
       var gd = document.getElementById('plot');
+      // Plotly rotates a right-side colorbar title -90deg, so the name reads upward.
+      // Flip that to +90deg: same place beside the bar, first character at the top.
+      function orientColorbarTitlesDownward() {
+        if (!gd) return;
+        var nodes = gd.querySelectorAll(".colorbar text");
+        for (var i = 0; i < nodes.length; i++) {
+          var tr = nodes[i].getAttribute("transform") || "";
+          var flipped = tr.replace("rotate(-90", "rotate(90");
+          if (flipped !== tr) nodes[i].setAttribute("transform", flipped);
+        }
+      }
       var hoverLayer = document.getElementById('mol-hover-layer');
       var hoverSvg = document.getElementById('mol-hover-connectors');
       var bridge = null;
@@ -1265,6 +1276,13 @@
           }
           Plotly.react(gd, data, layout, config).then(function() {
             try {
+              if (!gd._mmColorbarTitleOrient) {
+                gd._mmColorbarTitleOrient = true;
+                gd.on("plotly_afterplot", orientColorbarTitlesDownward);
+              }
+              orientColorbarTitlesDownward();
+            } catch (_cbtitle) {}
+            try {
               installMiddleMousePan();
               installEmptySpaceClear();
             } catch (_mid) {}
@@ -1407,7 +1425,9 @@
             });
             applyInFlight = false;
             scheduleSelectionFlush();
-            try { postApplyOp = Plotly.Plots.resize(gd); } catch (_rz) {}
+            // react already sized the figure to the container; only redraw if the
+            // container moved while it was drawing.
+            postApplyOp = fitFigureToContainer();
             schedulePinnedHoverReposition();
           }).finally(function() {
             applyInFlight = false;
@@ -1418,28 +1438,46 @@
           console.error('molmanager Plotly embed failed:', e);
         }
       };
-      var lastResizeW = -1;
-      var lastResizeH = -1;
+      // True when the drawn figure already matches the container. Compared with
+      // Plotly's own layout, so a figure drawn while its page was hidden is not
+      // redrawn when the page is first shown.
+      function figureMatchesContainer() {
+        var full = gd && gd._fullLayout;
+        if (!full) return true;
+        if (gd.layout && gd.layout.width && gd.layout.height) return true;
+        var w = gd.clientWidth || 0;
+        var h = gd.clientHeight || 0;
+        if (w < 2 || h < 2) return true;
+        return Math.abs(w - full.width) < 1 && Math.abs(h - full.height) < 1;
+      }
+      // Plotly.Plots.resize waits 100 ms before it relayouts, so the old figure is
+      // painted at the new size first. Relayout directly for discrete changes.
+      function fitFigureToContainer() {
+        if (!gd || !gd.data || figureMatchesContainer()) return null;
+        try {
+          delete gd.layout.width;
+          delete gd.layout.height;
+          return Plotly.relayout(gd, {autosize: true});
+        } catch (_fit) {
+          return null;
+        }
+      }
       function resizePlot(info) {
         var settle = !!(info && info.settle);
+        var first = !!(info && info.first);
         var op = null;
         try {
-          if (!gd || !gd.data) return null;
-          var w = gd.clientWidth || 0;
-          var h = gd.clientHeight || 0;
-          // Skip no-op resizes (show/hide / reparent often report a resize
-          // without a meaningful geometry change and flash like a recalculation).
-          var unchanged = w > 1 && h > 1
-            && Math.abs(w - lastResizeW) < 1 && Math.abs(h - lastResizeH) < 1;
-          if (!unchanged) {
-            lastResizeW = w;
-            lastResizeH = h;
-            // Pinned cards would trail the figure mid-drag; re-place them on settle.
-            if (!settle && hoverLayer && hoverLayer.childElementCount > 1) {
-              hoverLayer.style.visibility = "hidden";
-            }
-            op = Plotly.Plots.resize(gd);
+          if (!gd || !gd.data || figureMatchesContainer()) {
+            if (settle) schedulePinnedHoverReposition(0);
+            return null;
           }
+          // Pinned cards would trail the figure mid-drag; re-place them on settle.
+          if (!settle && hoverLayer && hoverLayer.childElementCount > 1) {
+            hoverLayer.style.visibility = "hidden";
+          }
+          // Mid-drag frames keep Plotly's debounced resize so a splitter drag does
+          // not relayout a large figure every frame.
+          op = (first || settle) ? fitFigureToContainer() : Plotly.Plots.resize(gd);
         } catch (_r) {
           op = null;
         }
@@ -1450,11 +1488,6 @@
         target: gd,
         onResize: resizePlot
       });
-      // Hold resizes during dock/undock so the figure paints once at the final
-      // geometry; the scheduler releases a forgotten hold on its own.
-      window.molmanagerHoldResize = function(hold) {
-        resizeScheduler.hold(!!hold);
-      };
     })();
   </script>
 </body>
