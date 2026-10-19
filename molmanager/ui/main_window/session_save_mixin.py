@@ -32,6 +32,12 @@ from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
 from ...conformers.conformer_column_codec import serialize_confs_sidecar
 from ...ionization.microstate_cache import serialize_ionization_sidecar
 from ...services.filter_config import cfg_column
+from ...table.open_messages import (
+    damaged_session_message,
+    message_for_session_read_failure,
+    not_a_session_message,
+    preflight_open_path,
+)
 from ...table.session_codec import (
     compact_global_bounds,
     dumps_session_document,
@@ -296,7 +302,9 @@ class SessionSaveMixin:
     def _session_data_headers(self) -> list[str]:
         return [h for h in self.headers if h not in ("ID_HIDDEN", "Structure")]
 
-    def _snapshot_structure_payloads(self, oids: set[int] | None) -> dict[int, tuple[bytes | None, str]]:
+    def _snapshot_structure_payloads(
+        self, oids: set[int] | None
+    ) -> dict[int, tuple[bytes | None, str]]:
         """One MolStore scan of ``(blob, smiles)`` — no RDKit hydrate on the GUI thread."""
         payloads: dict[int, tuple[bytes | None, str]] = {}
         iter_fn = getattr(self.mols, "iter_structure_payloads", None)
@@ -681,9 +689,7 @@ class SessionSaveMixin:
         except Exception as e:
             logger.exception("Session save follow-up failed: %s", path)
             self._session_save_last_ok = False
-            QMessageBox.warning(
-                self, pending.get("dialog_title") or "Save Session", str(e)
-            )
+            QMessageBox.warning(self, pending.get("dialog_title") or "Save Session", str(e))
 
     def _on_session_save_failed(self, job_gen: int, message: str) -> None:
         jobs = getattr(self, "_session_save_pending", None) or {}
@@ -720,28 +726,31 @@ class SessionSaveMixin:
             self.apply_saved_session_from_file(path)
 
     def apply_saved_session_from_file(self, path: str) -> bool:
+        problem = preflight_open_path(path)
+        if problem:
+            logger.warning("Open session: %s", problem)
+            self._warn_could_not_open("Open Session", problem)
+            return False
         try:
             with open(path, "rb") as f:
                 raw = f.read()
             d = expand_session_document(loads_session_bytes(raw))
         except Exception as e:
             logger.exception("Open session: could not read %s", path)
-            QMessageBox.warning(self, "Open Session", f"Could not read file: {e}")
+            self._warn_could_not_open("Open Session", message_for_session_read_failure(path, e))
             return False
         if not self._session_format_ok(d.get("format")) or not self._session_version_ok(
             d.get("version")
         ):
-            QMessageBox.warning(
-                self,
-                "Open Session",
-                "Not a MolManager session file (expected .cms / version 1–2).",
-            )
+            self._warn_could_not_open("Open Session", not_a_session_message(path))
             return False
+        self._note_open_attempt("Open Session")
         self._session_source_path = path
         try:
             self._apply_session_document(d)
-        except Exception as e:
+        except Exception:
             logger.exception("Open session: apply failed for %s", path)
-            QMessageBox.warning(self, "Open Session", str(e))
+            self._finish_failed_open()
+            self._warn_could_not_open("Open Session", damaged_session_message(path))
             return False
         return True
