@@ -33,8 +33,9 @@ from ...conformers.conformer_column_codec import (
     make_sidecar_cell,
     mol_has_3d_coordinates,
 )
-from ...table.text_file_ingest import is_ingest_cell_batch
 from ...storage import ensure_confs_sidecar
+from ...table.open_messages import damaged_file_message
+from ...table.text_file_ingest import is_ingest_cell_batch
 from ..strings import LOADING_DETAIL_AFTER_FILE_READ, STATUS_READY_RENDER_2D, TOOL_RENDER_2D
 
 logger = logging.getLogger(__name__)
@@ -297,6 +298,81 @@ class IngestLoadMixin:
         if source_blob is not None and mol.GetNumConformers():
             source_blob = None
         batch.append((int(oid), mol, source_blob, str(cells.get("SMILES") or "")))
+
+    def _note_open_attempt(self, title: str) -> None:
+        """Remember workspace state so a failed open can restore the dirty flag."""
+        self._file_open_dialog_title = title
+        unsaved = getattr(self, "_session_has_unsaved_changes", None)
+        self._file_open_was_dirty = bool(unsaved()) if callable(unsaved) else False
+        has_content = getattr(self, "_session_has_workspace_content", None)
+        self._file_open_had_content = bool(has_content()) if callable(has_content) else False
+
+    def _abort_ingest_sqlite_bulk(self) -> None:
+        if not getattr(self, "_ingest_sqlite_bulk_active", False):
+            self._ingest_sqlite_paused_dirty = False
+            return
+        store = getattr(self, "_sqlite_store", None)
+        self._ingest_sqlite_bulk_active = False
+        self._ingest_sqlite_paused_dirty = False
+        self._ingest_sqlite_bulk_headers = None
+        if store is not None:
+            abort = getattr(store, "abort_bulk_load", None)
+            if callable(abort):
+                abort()
+        self._sqlite_store_dirty = True
+
+    def _finish_failed_open(self) -> None:
+        """Drop the loading page after a file or session read fails."""
+        self._pending_session_clean_on_ready = False
+        self._pending_batches = []
+        self._processing_batches = False
+        self._last_batch_received = False
+        self._ingest_append_mode = False
+        model = getattr(self, "_table_model", None)
+        if model is not None:
+            try:
+                if model.silent_appending:
+                    model.end_silent_appends()
+            except Exception:
+                logger.debug("end_silent_appends failed after open error", exc_info=True)
+        self._abort_ingest_sqlite_bulk()
+        table = getattr(self, "table", None)
+        if table is not None:
+            try:
+                table.setUpdatesEnabled(True)
+            except Exception:
+                pass
+        self._import_progress_active = False
+        clear = getattr(self, "_clear_tool_progress", None)
+        if callable(clear):
+            clear(status_message=None)
+        self._set_ingest_loading(False)
+        self._set_workspace_stack_index(1)
+        rows = int(model.rowCount()) if model is not None else 0
+        title = str(getattr(self, "_file_open_dialog_title", "") or "")
+        had = bool(getattr(self, "_file_open_had_content", False))
+        was_dirty = bool(getattr(self, "_file_open_was_dirty", False))
+        self._session_mutation_paused = False
+        if title in ("Open File", "Open Session"):
+            self._session_source_path = None
+        if rows > 0 or (title in ("Open File", "Open Session") and had):
+            self._session_dirty = True
+        elif not was_dirty:
+            self._session_dirty = False
+        status = getattr(self, "status_label", None)
+        if status is not None:
+            status.setText("Ready.")
+
+    def on_file_load_failed(self, generation: int, message: str) -> None:
+        """A replace/import read failed after the loading page was shown."""
+        if int(generation) != int(getattr(self, "_file_ingest_generation", 0)):
+            return
+        self._finish_failed_open()
+        title = str(getattr(self, "_file_open_dialog_title", "") or "Open File")
+        text = message or damaged_file_message("")
+        warn = getattr(self, "_warn_could_not_open", None)
+        if callable(warn):
+            warn(title, text)
 
     def on_file_loaded(self, mols_list, headers, is_first, is_last):
         # A Close Session bumps the generation so a load still in flight cannot refill the table.
