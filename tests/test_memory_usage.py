@@ -16,7 +16,10 @@
 
 from __future__ import annotations
 
+import sys
+
 from molmanager.platform_support.memory_usage import (
+    available_physical_bytes,
     current_process_rss_bytes,
     format_memory_bytes,
     format_process_memory_status,
@@ -40,3 +43,11 @@ def test_current_process_rss_bytes_positive() -> None:
 def test_format_process_memory_status() -> None:
     text = format_process_memory_status()
     assert text is None or text.startswith("Mem: ")
+
+
+def test_available_physical_bytes() -> None:
+    available = available_physical_bytes()
+    if sys.platform == "darwin":
+        assert available is None
+    else:
+        assert available is not None and available > 0
