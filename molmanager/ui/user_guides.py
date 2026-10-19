@@ -92,7 +92,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "settings",
                 "Settings",
                 "Settings",
-                "Theme, fonts, status bar, keyboard shortcuts, and WSL.",
+                "Theme, fonts, status bar, keyboard shortcuts, WSL, and Help.",
             ),
         ),
     ),
@@ -153,7 +153,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_calc_descriptors",
                 "Calculate Descriptors",
                 "Calculate Descriptors",
-                "RDKit descriptors, PubChem names, 3D shape/SASA when confs exist, and related property columns.",
+                "RDKit descriptors, structural alerts, Murcko scaffolds, and 3D shape when confs exist.",
             ),
             _e(
                 "tools_fast_prepare",
