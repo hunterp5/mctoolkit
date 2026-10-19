@@ -751,7 +751,7 @@ class ProteinViewerStyleMixin:
         self._activate_pocket(zoom=True)
 
     def open_pocket_surface_dialog(self) -> None:
-        """Open the Pocket Surface options window and show the overlay if possible."""
+        """Open Pocket Surface options. The surface is drawn only when OK is clicked."""
         from .dialogs.protein_pocket_surface import ProteinPocketSurfaceDialog
 
         dlg = self._pocket_surface_dialog
@@ -762,19 +762,33 @@ class ProteinViewerStyleMixin:
             dlg = ProteinPocketSurfaceDialog(self)
             dlg.settings_changed.connect(self._on_pocket_surface_settings)
             dlg.show_toggled.connect(self._on_pocket_surface_show)
+            dlg.generate_requested.connect(self._on_pocket_surface_generate)
             dlg.destroyed.connect(self._on_pocket_surface_dialog_destroyed)
             self._pocket_surface_dialog = dlg
         dlg.set_settings(self._pocket_surface_style())
-        showing = bool(
-            self._pocket_surface_payload is not None and self._pocket_surface_payload.get("active")
+        dlg.set_showing(
+            bool(
+                self._pocket_surface_payload is not None
+                and self._pocket_surface_payload.get("active")
+            )
         )
-        dlg.set_showing(showing)
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
-        if not showing:
-            dlg.set_showing(True)
-            self._on_pocket_surface_show(True)
+
+    def _on_pocket_surface_generate(self) -> None:
+        """Build the pocket surface from the dialog options and close on success."""
+        from .dialogs.protein_pocket_surface import normalize_pocket_surface_settings
+
+        dlg = self._pocket_surface_dialog
+        if dlg is not None and not qobject_is_deleted(dlg):
+            self._pocket_surface_settings = normalize_pocket_surface_settings(dlg.settings())
+        if self._activate_pocket_surface():
+            self._sync_pocket_surface_dialog()
+            if dlg is not None and not qobject_is_deleted(dlg):
+                dlg.accept()
+            return
+        self._sync_pocket_surface_dialog()
 
     def _on_pocket_surface_dialog_destroyed(self) -> None:
         self._pocket_surface_dialog = None
@@ -847,6 +861,10 @@ class ProteinViewerStyleMixin:
             "residueSels": residue_sels,
             **self._pocket_surface_style(),
         }
+        if surface.get("colorScheme") == "hydrophobicity":
+            from ..protein.surface_color import hydrophobicity_residue_colors
+
+            surface["residueColors"] = hydrophobicity_residue_colors()
         self._pocket_surface_payload = surface
         self.viewer.set_pocket_surface(surface)
         self._mark_viewer_unsaved()
