@@ -26,7 +26,11 @@ from PyQt5.QtCore import QRunnable
 from rdkit import Chem, DataStructs
 
 from ..chem.rdkit_fingerprints import fingerprint_bitvect_for_row, fingerprint_bitvect_for_ui_choice
-from ..analysis.sali_analysis import accumulate_sali_candidate, finalize_sali_points
+from ..analysis.sali_analysis import (
+    accumulate_sali_candidate,
+    as_sali_activity,
+    finalize_sali_points,
+)
 from ..platform_support.tool_progress import report_tool_progress
 from .fingerprint_similarity import SIMILARITY_METRIC_LABELS, pairwise_fingerprint_similarity
 from .signals import WorkerSignals
@@ -49,6 +53,7 @@ class SaliAnalysisWorker(QRunnable):
         max_pairs: int = 10000,
         off_by_oid: dict[int, float] | None = None,
         off_target_column: str = "",
+        treat_logarithmically: bool = False,
         signals: WorkerSignals,
         cancel_event: threading.Event | None = None,
         progress_state=None,
@@ -65,6 +70,7 @@ class SaliAnalysisWorker(QRunnable):
             None if off_by_oid is None else {int(k): float(v) for k, v in off_by_oid.items()}
         )
         self.off_target_column = off_target_column or ""
+        self.treat_logarithmically = bool(treat_logarithmically)
         self.signals = signals
         self.cancel_event = cancel_event
         self.progress_state = progress_state
@@ -94,9 +100,15 @@ class SaliAnalysisWorker(QRunnable):
             for i, (oid, mol, act) in enumerate(self.records):
                 if ev is not None and ev.is_set():
                     return
+                act_val = as_sali_activity(act, logarithmic=self.treat_logarithmically)
+                if act_val is None:
+                    continue
                 off_val = None
                 if off_map is not None:
-                    off_val = off_map.get(int(oid))
+                    raw_off = off_map.get(int(oid))
+                    if raw_off is None:
+                        continue
+                    off_val = as_sali_activity(raw_off, logarithmic=self.treat_logarithmically)
                     if off_val is None:
                         continue
                 try:
@@ -109,7 +121,7 @@ class SaliAnalysisWorker(QRunnable):
                     continue
                 oids.append(int(oid))
                 fps.append(fp)
-                activities.append(float(act))
+                activities.append(float(act_val))
                 offs.append(None if off_val is None else float(off_val))
                 report_tool_progress(
                     message=label,
@@ -121,15 +133,24 @@ class SaliAnalysisWorker(QRunnable):
                 )
 
             if len(fps) < 2:
-                if off_map is not None:
-                    self.signals.sali_failed.emit(
+                if self.treat_logarithmically and off_map is not None:
+                    message = (
+                        "Need at least two molecules with a structure, a fingerprint, "
+                        "and a positive value in both activity columns."
+                    )
+                elif self.treat_logarithmically:
+                    message = (
+                        "Need at least two molecules with a structure, a fingerprint, "
+                        "and a positive activity value."
+                    )
+                elif off_map is not None:
+                    message = (
                         "Need at least two molecules with a structure, a fingerprint, "
                         "and numeric values in both activity columns."
                     )
                 else:
-                    self.signals.sali_failed.emit(
-                        "Need at least two molecules with both a structure and a fingerprint."
-                    )
+                    message = "Need at least two molecules with both a structure and a fingerprint."
+                self.signals.sali_failed.emit(message)
                 return
 
             n = len(fps)
@@ -202,6 +223,7 @@ class SaliAnalysisWorker(QRunnable):
                 self.fp_choice,
                 self.metric,
                 self.off_target_column,
+                self.treat_logarithmically,
             )
         except Exception as exc:
             logger.exception("SALI analysis failed")

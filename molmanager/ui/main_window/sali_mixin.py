@@ -101,6 +101,7 @@ class SaliMixin:
                 max_pairs=p.max_pairs,
                 off_by_oid=off_by_oid,
                 off_target_column=p.off_target_column,
+                treat_logarithmically=p.treat_logarithmically,
                 signals=signals,
                 cancel_event=cancel_event,
                 progress_state=progress_state,
@@ -122,6 +123,7 @@ class SaliMixin:
         fp_choice: str,
         metric: str,
         off_target_column: str = "",
+        treat_logarithmically: bool = False,
     ) -> None:
         empty = (
             "No pairs met the current similarity / selectivity-difference filters."
@@ -142,6 +144,7 @@ class SaliMixin:
             fp_choice=fp_choice,
             metric=metric,
             off_target_column=off_target_column,
+            treat_logarithmically=treat_logarithmically,
         )
         label = "SALI selectivity" if off_target_column else "SALI"
         self.status_label.setText(f"{label}: {len(points)} pair(s).")
@@ -157,6 +160,7 @@ class SaliMixin:
         fp_choice: str = "",
         metric: str = "Tanimoto",
         off_target_column: str = "",
+        treat_logarithmically: bool = False,
     ) -> None:
         from ..sali_map import SaliMapDialog
 
@@ -168,6 +172,7 @@ class SaliMixin:
                 fp_choice=fp_choice,
                 metric=metric,
                 off_target_column=off_target_column,
+                treat_logarithmically=treat_logarithmically,
             )
             dlg.setModal(False)
             dlg.setWindowModality(Qt.NonModal)
@@ -180,6 +185,7 @@ class SaliMixin:
                 fp_choice=fp_choice,
                 metric=metric,
                 off_target_column=off_target_column,
+                treat_logarithmically=treat_logarithmically,
             )
 
         reuse_or_show_modeless_singleton(
@@ -198,6 +204,7 @@ class SaliMixin:
         metric: str = "Tanimoto",
         start_index: int = 0,
         off_target_column: str = "",
+        treat_logarithmically: bool = False,
     ) -> None:
         from ..sali_browser import SaliBrowserDialog
 
@@ -210,6 +217,7 @@ class SaliMixin:
                 metric=metric,
                 start_index=start_index,
                 off_target_column=off_target_column,
+                treat_logarithmically=treat_logarithmically,
             )
             dlg.setModal(False)
             dlg.setWindowModality(Qt.NonModal)
@@ -223,6 +231,7 @@ class SaliMixin:
                 metric=metric,
                 start_index=start_index,
                 off_target_column=off_target_column,
+                treat_logarithmically=treat_logarithmically,
             )
 
         reuse_or_show_modeless_singleton(

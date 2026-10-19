@@ -36,6 +36,14 @@ from .dockable_plot import resolve_plot_title_text
 from .plotly_html import finalize_plot_legend
 
 
+def _activity_delta_axis(activity_column: str, *, logarithmic: bool) -> str:
+    """Y-axis title for a single activity column."""
+    name = activity_column or "activity"
+    if logarithmic and not name.casefold().startswith("p"):
+        name = f"p{name}"
+    return f"|Δ{name}|"
+
+
 def build_sali_figure(
     points: Sequence[SaliPoint],
     *,
@@ -54,14 +62,13 @@ def build_sali_figure(
     xaxis_title: str = "",
     yaxis_title: str = "",
     selectivity: bool = False,
+    treat_logarithmically: bool = False,
 ) -> go.Figure:
     """Scatter of fingerprint similarity vs ``|Δactivity|``, colored by SALI by default."""
     if selectivity:
         default_y = "|Δselectivity|"
-    elif activity_column:
-        default_y = f"|Δ{activity_column}|"
     else:
-        default_y = "|Δactivity|"
+        default_y = _activity_delta_axis(activity_column, logarithmic=treat_logarithmically)
     xs = [float(p.similarity) for p in points]
     ys = [float(p.abs_delta) for p in points]
     custom = [[int(p.oid_a), int(p.oid_b), int(p.pair_index)] for p in points]

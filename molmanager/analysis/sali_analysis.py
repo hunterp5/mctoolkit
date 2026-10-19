@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import heapq
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -41,6 +42,29 @@ class SaliPoint:
     sali: float
     delta_on: float | None = None
     delta_off: float | None = None
+
+
+def as_sali_activity(value: float, *, logarithmic: bool) -> float | None:
+    """Activity on the scale SALI will difference.
+
+    When *logarithmic* is set, return ``−log10(value)`` for a positive finite
+    concentration. That matches pIC50 or pKi differences when every value in the
+    column shares one unit. Non-positive values cannot be converted.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    if not logarithmic:
+        return number
+    if number <= 0.0:
+        return None
+    converted = -math.log10(number)
+    if not math.isfinite(converted):
+        return None
+    return converted
 
 
 def sali_index(
@@ -175,6 +199,7 @@ def build_sali_points(
     min_activity_difference: float = 0.0,
     max_pairs: int = 0,
     off_by_oid: dict[int, float] | None = None,
+    treat_logarithmically: bool = False,
 ) -> list[SaliPoint]:
     """
     Build SALI plot points from activities and pairwise similarities.
@@ -185,9 +210,20 @@ def build_sali_points(
 
     When *off_by_oid* is set, activity is the on-target column and selectivity
     is on-target minus off-target. Pairs missing either value are dropped.
+    *treat_logarithmically* converts each positive value with ``−log10`` first.
     """
-    act_by_oid = {int(oid): float(act) for oid, act in records}
-    offs = None if off_by_oid is None else {int(k): float(v) for k, v in off_by_oid.items()}
+    act_by_oid: dict[int, float] = {}
+    for oid, act in records:
+        converted = as_sali_activity(act, logarithmic=treat_logarithmically)
+        if converted is not None:
+            act_by_oid[int(oid)] = converted
+    offs = None
+    if off_by_oid is not None:
+        offs = {}
+        for oid, off in off_by_oid.items():
+            converted = as_sali_activity(off, logarithmic=treat_logarithmically)
+            if converted is not None:
+                offs[int(oid)] = converted
     min_sim = max(0.0, float(min_similarity))
     min_dact = max(0.0, float(min_activity_difference))
     heap: list = []

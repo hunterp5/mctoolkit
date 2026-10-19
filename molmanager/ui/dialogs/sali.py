@@ -27,9 +27,12 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
     QLabel,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from ...workers import SIMILARITY_FP_TYPE_LABELS, SIMILARITY_METRIC_LABELS
@@ -41,10 +44,10 @@ from .scope import selection_scope_checked
 # Radius 3 / 2048 bits, so close analogs are less likely to share one fingerprint.
 _DEFAULT_SALI_FINGERPRINT = "Morgan (r=3, n=2048)"
 
-_PACTIVITY_TIP = (
-    "Use a higher-is-more-potent scale such as pIC50 or pKi. "
-    "Raw IC50 in nM lets large weak values dominate |Δ|. "
-    "Convert with Tools → Potency Standardization; SALI does not convert units."
+_LOG_TIP = (
+    "Treat each positive value as −log10 (pIC50 or pKi). "
+    "Pair differences match pActivity when the column shares one concentration unit. "
+    "Values ≤ 0 are skipped. In selectivity mode this applies to both columns."
 )
 
 
@@ -60,6 +63,7 @@ class SaliDialogParams:
     min_activity_difference: float
     max_pairs: int
     off_target_column: str = ""
+    treat_logarithmically: bool = False
 
 
 class SaliDialog(QDialog):
@@ -84,7 +88,8 @@ class SaliDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
+        activity = QGroupBox("Activity")
+        form = QFormLayout(activity)
         self._form = form
         self.src_combo = QComboBox()
         self.src_combo.addItems(structure_sources)
@@ -107,11 +112,17 @@ class SaliDialog(QDialog):
         else:
             self.activity_combo.addItem("(no numeric columns)")
             self.activity_combo.setEnabled(False)
-        self.activity_combo.setToolTip(
-            "Numeric activity used for Δactivity and SALI. " + _PACTIVITY_TIP
-        )
+        self.activity_combo.setToolTip("Numeric activity used for Δactivity and SALI.")
+        self.treat_log_cb = QCheckBox("Treat Logarithmically")
+        self.treat_log_cb.setToolTip(_LOG_TIP)
+        activity_row = QWidget()
+        activity_layout = QHBoxLayout(activity_row)
+        activity_layout.setContentsMargins(0, 0, 0, 0)
+        activity_layout.setSpacing(8)
+        activity_layout.addWidget(self.activity_combo, 1)
+        activity_layout.addWidget(self.treat_log_cb)
         self._activity_label = QLabel("Activity column:")
-        form.addRow(self._activity_label, self.activity_combo)
+        form.addRow(self._activity_label, activity_row)
 
         self.off_combo = QComboBox()
         self.off_combo.setMinimumWidth(220)
@@ -122,11 +133,25 @@ class SaliDialog(QDialog):
             self.off_combo.addItem("(no numeric columns)")
             self.off_combo.setEnabled(False)
         self.off_combo.setToolTip(
-            "Off-target activity. Selectivity = on-target − off-target. " + _PACTIVITY_TIP
+            "Off-target activity. Selectivity = on-target − off-target, "
+            "after Treat Logarithmically when that box is checked."
         )
         self._off_label = QLabel("Off-target:")
         form.addRow(self._off_label, self.off_combo)
 
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(
+                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
+            )
+        else:
+            self.only_selected_cb.setEnabled(False)
+        form.addRow("", self.only_selected_cb)
+        root.addWidget(activity)
+
+        similarity = QGroupBox("Similarity")
+        sim_form = QFormLayout(similarity)
         self.fp_combo = QComboBox()
         self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
         default_fp = self.fp_combo.findText(_DEFAULT_SALI_FINGERPRINT)
@@ -137,12 +162,12 @@ class SaliDialog(QDialog):
             "Morgan radius 3 with 2048 bits is the default so close analogs "
             "are less likely to share an identical fingerprint."
         )
-        form.addRow("Fingerprint:", self.fp_combo)
+        sim_form.addRow("Fingerprint:", self.fp_combo)
 
         self.metric_combo = QComboBox()
         self.metric_combo.addItems(SIMILARITY_METRIC_LABELS)
         self.metric_combo.setToolTip("Similarity metric (Tanimoto recommended for SALI).")
-        form.addRow("Similarity metric:", self.metric_combo)
+        sim_form.addRow("Similarity metric:", self.metric_combo)
 
         self.min_sim_sb = QDoubleSpinBox()
         self.min_sim_sb.setDecimals(3)
@@ -152,8 +177,11 @@ class SaliDialog(QDialog):
         self.min_sim_sb.setToolTip(
             "Keep only pairs at or above this fingerprint similarity (0 = all pairs)."
         )
-        form.addRow("Minimum similarity:", self.min_sim_sb)
+        sim_form.addRow("Minimum similarity:", self.min_sim_sb)
+        root.addWidget(similarity)
 
+        pairs = QGroupBox("Pairs")
+        pair_form = QFormLayout(pairs)
         self.min_dact_sb = QDoubleSpinBox()
         self.min_dact_sb.setDecimals(6)
         self.min_dact_sb.setRange(0.0, 1e12)
@@ -163,7 +191,7 @@ class SaliDialog(QDialog):
             "Keep only pairs whose absolute activity difference is at least this value."
         )
         self._min_diff_label = QLabel("Minimum activity difference:")
-        form.addRow(self._min_diff_label, self.min_dact_sb)
+        pair_form.addRow(self._min_diff_label, self.min_dact_sb)
 
         self.max_pairs_sb = QSpinBox()
         self.max_pairs_sb.setRange(100, 200000)
@@ -172,18 +200,8 @@ class SaliDialog(QDialog):
         self.max_pairs_sb.setToolTip(
             "Maximum pairs to plot (highest SALI kept when more pairs qualify)."
         )
-        form.addRow("Max pairs to plot:", self.max_pairs_sb)
-        root.addLayout(form)
-
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(
-                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
-            )
-        else:
-            self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
+        pair_form.addRow("Max pairs to plot:", self.max_pairs_sb)
+        root.addWidget(pairs)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)
@@ -241,15 +259,15 @@ class SaliDialog(QDialog):
             "Minimum |Δselectivity|:" if selective else "Minimum activity difference:"
         )
         if selective:
-            self.activity_combo.setToolTip("On-target activity. " + _PACTIVITY_TIP)
+            self.activity_combo.setToolTip(
+                "On-target activity. Treat Logarithmically applies to this column and the off-target."
+            )
             self.min_dact_sb.setToolTip(
                 "Keep only pairs whose absolute selectivity difference is at least this value."
             )
             self._ensure_distinct_off_target()
         else:
-            self.activity_combo.setToolTip(
-                "Numeric activity used for Δactivity and SALI. " + _PACTIVITY_TIP
-            )
+            self.activity_combo.setToolTip("Numeric activity used for Δactivity and SALI.")
             self.min_dact_sb.setToolTip(
                 "Keep only pairs whose absolute activity difference is at least this value."
             )
@@ -284,6 +302,7 @@ class SaliDialog(QDialog):
             min_activity_difference=float(self.min_dact_sb.value()),
             max_pairs=int(self.max_pairs_sb.value()),
             off_target_column=off,
+            treat_logarithmically=bool(self.treat_log_cb.isChecked()),
         )
 
 

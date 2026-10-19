@@ -59,6 +59,7 @@ class SaliMapPanel(DockableResultPlotPanel):
         fp_choice: str = "",
         metric: str = "Tanimoto",
         off_target_column: str = "",
+        treat_logarithmically: bool = False,
         parent=None,
     ):
         super().__init__(
@@ -74,6 +75,7 @@ class SaliMapPanel(DockableResultPlotPanel):
         self._fp_choice = fp_choice or ""
         self._metric = metric or "Tanimoto"
         self._off_target_column = off_target_column or ""
+        self._treat_logarithmically = bool(treat_logarithmically)
         self._current_index: int | None = None
 
         self._plot_view: PlotlyInteractiveView | None = None
@@ -105,6 +107,7 @@ class SaliMapPanel(DockableResultPlotPanel):
             fp_choice=self._fp_choice,
             metric=self._metric,
             off_target_column=self._off_target_column,
+            treat_logarithmically=self._treat_logarithmically,
         )
 
     def set_points(
@@ -115,6 +118,7 @@ class SaliMapPanel(DockableResultPlotPanel):
         fp_choice: str | None = None,
         metric: str | None = None,
         off_target_column: str | None = None,
+        treat_logarithmically: bool | None = None,
     ) -> None:
         self._points = list(points or [])
         if activity_column is not None:
@@ -125,6 +129,8 @@ class SaliMapPanel(DockableResultPlotPanel):
             self._metric = metric
         if off_target_column is not None:
             self._off_target_column = off_target_column
+        if treat_logarithmically is not None:
+            self._treat_logarithmically = bool(treat_logarithmically)
         self._current_index = None
         self._btn_browse.setEnabled(False)
         self._reload_color_columns()
@@ -136,6 +142,7 @@ class SaliMapPanel(DockableResultPlotPanel):
             **self._collect_encoding_chrome_state(),
             "activity_column": self._activity_column,
             "off_target_column": self._off_target_column,
+            "treat_logarithmically": self._treat_logarithmically,
             "fp_choice": self._fp_choice,
             "metric": self._metric,
             "points": [asdict(p) for p in self._points],
@@ -157,6 +164,7 @@ class SaliMapPanel(DockableResultPlotPanel):
             fp_choice=str(state.get("fp_choice") or ""),
             metric=str(state.get("metric") or "Tanimoto"),
             off_target_column=str(state.get("off_target_column") or ""),
+            treat_logarithmically=bool(state.get("treat_logarithmically")),
         )
 
     @classmethod
@@ -187,6 +195,7 @@ class SaliMapPanel(DockableResultPlotPanel):
             activity_column=self._activity_column,
             similarity_label=sim_label,
             selectivity=bool(self._off_target_column),
+            treat_logarithmically=self._treat_logarithmically,
             **enc,
         )
         oids = [p.oid_a for p in points]
@@ -232,6 +241,7 @@ class SaliMapPanel(DockableResultPlotPanel):
                 metric=self._metric,
                 start_index=start_index,
                 off_target_column=self._off_target_column,
+                treat_logarithmically=self._treat_logarithmically,
             )
         except Exception:
             pass
@@ -263,6 +273,7 @@ class SaliMapDialog(QDialog):
         fp_choice: str = "",
         metric: str = "Tanimoto",
         off_target_column: str = "",
+        treat_logarithmically: bool = False,
         panel: SaliMapPanel | None = None,
     ):
         super().__init__(parent)
@@ -279,6 +290,7 @@ class SaliMapDialog(QDialog):
                 fp_choice=fp_choice,
                 metric=metric,
                 off_target_column=off_target_column,
+                treat_logarithmically=treat_logarithmically,
             )
 
         self.setWindowTitle("SALI")

@@ -21,6 +21,8 @@ from molmanager.ui.sali_plot import build_sali_figure
 
 
 def test_sali_dialog_defaults_to_finer_morgan(qapp):  # noqa: ARG001
+    from PyQt5.QtWidgets import QGroupBox
+
     from molmanager.ui.dialogs.sali import SaliDialog
 
     dlg = SaliDialog(
@@ -30,6 +32,11 @@ def test_sali_dialog_defaults_to_finer_morgan(qapp):  # noqa: ARG001
     )
     assert dlg.fp_combo.currentText() == "Morgan (r=3, n=2048)"
     assert dlg.params().fp_choice == "Morgan (r=3, n=2048)"
+    assert [box.title() for box in dlg.findChildren(QGroupBox)] == [
+        "Activity",
+        "Similarity",
+        "Pairs",
+    ]
     dlg.deleteLater()
 
 
@@ -219,4 +226,47 @@ def test_sali_dialog_selectivity_params(qapp):  # noqa: ARG001
         selectivity=True,
     )
     assert fig.layout.yaxis.title.text == "|Δselectivity|"
+    assert dlg.treat_log_cb.text() == "Treat Logarithmically"
+    assert params.treat_logarithmically is False
+    dlg.treat_log_cb.setChecked(True)
+    assert dlg.params().treat_logarithmically is True
     dlg.deleteLater()
+
+
+def test_treat_logarithmically_uses_negative_log10():
+    points = build_sali_points(
+        [(1, 1e-8), (2, 1e-6)],
+        [(1, 2, 0.5)],
+        treat_logarithmically=True,
+    )
+    assert len(points) == 1
+    point = points[0]
+    assert abs(point.signed_delta - (6.0 - 8.0)) < 1e-9
+    assert abs(point.abs_delta - 2.0) < 1e-9
+    fig = build_sali_figure(points, activity_column="IC50", treat_logarithmically=True)
+    assert fig.layout.yaxis.title.text == "|ΔpIC50|"
+
+
+def test_treat_logarithmically_drops_non_positive():
+    points = build_sali_points(
+        [(1, 1e-8), (2, 0.0), (3, 1e-6)],
+        [(1, 2, 0.5), (1, 3, 0.5)],
+        treat_logarithmically=True,
+    )
+    assert [(p.oid_a, p.oid_b) for p in points] == [(1, 3)]
+
+
+def test_selectivity_logarithmic_differences_match_pactivity():
+    records = [(1, 10.0), (2, 1000.0)]
+    offs = {1: 100.0, 2: 100.0}
+    points = build_sali_points(
+        records,
+        [(1, 2, 0.5)],
+        off_by_oid=offs,
+        treat_logarithmically=True,
+    )
+    assert len(points) == 1
+    point = points[0]
+    # −log10(nM) differs from pIC50 by a constant that cancels in selectivity.
+    assert abs(point.signed_delta - (-2.0)) < 1e-9
+    assert abs(point.abs_delta - 2.0) < 1e-9

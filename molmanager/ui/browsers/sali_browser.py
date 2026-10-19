@@ -38,7 +38,7 @@ from PyQt5.QtWidgets import (
 from rdkit import Chem
 from rdkit.Chem.Draw import rdMolDraw2D
 
-from ...analysis.sali_analysis import SaliPoint
+from ...analysis.sali_analysis import SaliPoint, as_sali_activity
 from .chrome import (
     BrowserIndexSpinBox,
     configure_browser_mol_drawer,
@@ -67,12 +67,14 @@ class SaliBrowserDialog(PairBrowserDialog):
         metric: str = "Tanimoto",
         start_index: int = 0,
         off_target_column: str = "",
+        treat_logarithmically: bool = False,
     ):
         self._all_points = list(points)
         self._points = list(points)
         self._fp_choice = fp_choice or ""
         self._metric = metric or "Tanimoto"
         self._off_target_column = off_target_column or ""
+        self._treat_logarithmically = bool(treat_logarithmically)
         self._idx = max(0, int(start_index))
         if self._all_points and 0 <= self._idx < len(self._all_points):
             p0 = self._all_points[self._idx]
@@ -195,6 +197,7 @@ class SaliBrowserDialog(PairBrowserDialog):
         metric: str | None = None,
         start_index: int | None = None,
         off_target_column: str | None = None,
+        treat_logarithmically: bool | None = None,
     ) -> None:
         """Replace the pair list and refresh the view."""
         self._all_points = list(points or [])
@@ -206,6 +209,8 @@ class SaliBrowserDialog(PairBrowserDialog):
             self._metric = metric
         if off_target_column is not None:
             self._off_target_column = off_target_column
+        if treat_logarithmically is not None:
+            self._treat_logarithmically = bool(treat_logarithmically)
         prefer: tuple[int, int] | None = None
         if start_index is not None and self._all_points:
             si = max(0, min(int(start_index), len(self._all_points) - 1))
@@ -403,14 +408,33 @@ class SaliBrowserDialog(PairBrowserDialog):
         sign = "+" if value >= 0 else ""
         return f"{sign}{value:.4g}"
 
+    def _scaled_name(self, column: str) -> str:
+        name = column or "activity"
+        if self._treat_logarithmically and not name.casefold().startswith("p"):
+            return f"p{name}"
+        return name
+
+    def _format_activity(self, value: float | None) -> str:
+        if value is None:
+            return "—"
+        shown = value
+        if self._treat_logarithmically:
+            shown = as_sali_activity(value, logarithmic=True)
+            if shown is None:
+                return "—"
+        return f"{shown:.4g}"
+
     def _metrics_text(self, point: SaliPoint) -> str:
         similarity = f"Similarity = {point.similarity:.3f}"
         sali = f"SALI = {point.sali:.4g}"
         if point.delta_on is None or point.delta_off is None:
-            delta = f"Δ{self._activity_column} = {self._signed_text(point.signed_delta)}"
+            delta = (
+                f"Δ{self._scaled_name(self._activity_column)} = "
+                f"{self._signed_text(point.signed_delta)}"
+            )
             return f"{similarity}  ·  {delta}  ·  {sali}"
-        on_name = self._activity_column or "on-target"
-        off_name = self._off_target_column or "off-target"
+        on_name = self._scaled_name(self._activity_column or "on-target")
+        off_name = self._scaled_name(self._off_target_column or "off-target")
         return (
             f"{similarity}  ·  "
             f"Δ{on_name} = {self._signed_text(point.delta_on)}  ·  "
@@ -420,22 +444,25 @@ class SaliBrowserDialog(PairBrowserDialog):
         )
 
     def _activity_caption(self, oid: int, activity: float | None) -> str:
-        on_name = self._activity_column or "Activity"
+        on_name = self._scaled_name(self._activity_column or "Activity")
+        on_text = self._format_activity(activity)
         if not self._off_target_column:
-            if activity is None:
-                return f"{on_name}: —"
-            return f"{on_name}: {activity:.4g}"
+            return f"{on_name}: {on_text}"
         off = self._column_value_for_oid(oid, self._off_target_column)
+        off_text = self._format_activity(off)
         lines = [
-            f"{on_name}: —" if activity is None else f"{on_name}: {activity:.4g}",
-            f"{self._off_target_column}: —"
-            if off is None
-            else f"{self._off_target_column}: {off:.4g}",
+            f"{on_name}: {on_text}",
+            f"{self._scaled_name(self._off_target_column)}: {off_text}",
         ]
-        if activity is None or off is None:
+        on_scaled = activity
+        off_scaled = off
+        if self._treat_logarithmically:
+            on_scaled = None if activity is None else as_sali_activity(activity, logarithmic=True)
+            off_scaled = None if off is None else as_sali_activity(off, logarithmic=True)
+        if on_scaled is None or off_scaled is None:
             lines.append("Selectivity: —")
         else:
-            lines.append(f"Selectivity: {activity - off:.4g}")
+            lines.append(f"Selectivity: {on_scaled - off_scaled:.4g}")
         return "\n".join(lines)
 
     def _column_value_for_oid(self, oid: int, column: str) -> float | None:
