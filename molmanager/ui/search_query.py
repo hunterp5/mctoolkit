@@ -389,6 +389,40 @@ def flatten_search_term_groups(groups: list[list[str]]) -> list[str]:
     return out
 
 
+def classify_search_query(query: str, *, partial: bool, parses_pattern) -> str:
+    """Return ``text``, ``substructure``, or an error message.
+
+    Quoted column text, comparisons, and empty/blank stay text searches.
+    An unquoted query whose terms parse as SMILES or SMARTS is a substructure search.
+    """
+    q = (query or "").strip()
+    if not q or validate_search_text_query(q, partial=partial) is None:
+        return "text"
+    groups = parse_search_term_groups(q)
+    if groups and _groups_are_unquoted_substructure(groups, parses_pattern):
+        return "substructure"
+    return (
+        'Search: quote column text ("like this"). '
+        "Leave SMILES or SMARTS unquoted (c1ccccc1, [F,Cl]). "
+        f"Could not use {q!r} as either."
+    )
+
+
+def _groups_are_unquoted_substructure(groups: list[list[str]], parses_pattern) -> bool:
+    """True when every term is an unquoted pattern *parses_pattern* accepts."""
+    saw = False
+    for and_terms in groups:
+        for term in and_terms:
+            quoted, _inner = _unwrap_quoted_term(term)
+            if quoted:
+                return False
+            pattern, _negated = parse_substructure_term(term)
+            if not pattern or not parses_pattern(pattern):
+                return False
+            saw = True
+    return saw
+
+
 def validate_search_text_query(query: str, *, partial: bool) -> str | None:
     """
       Return an error message when a text-search term must be quoted, else ``None``.
@@ -638,16 +672,24 @@ def evaluate_search_conditions(
     return all(results) if match_and else any(results)
 
 
-def combine_search_row_sets(glues: list[str | None], row_sets: list[set[int]]) -> set[int]:
+def combine_search_row_sets(
+    glues: list[str | None],
+    row_sets: list[set[int]],
+    *,
+    universe: set[int] | None = None,
+) -> set[int]:
     """
     Combine per-criterion row sets left to right.
 
     ``and`` is intersection, ``or`` is union, and ``not`` removes rows that match
     that criterion from the result so far. The first set is the starting result.
+    ``not`` on the first criterion starts from *universe* minus that set.
     """
     if not row_sets:
         return set()
     result = set(row_sets[0])
+    if glues and glues[0] == "not":
+        result = set(universe or ()) - result
     for i in range(1, len(row_sets)):
         glue = glues[i] if i < len(glues) and glues[i] else "and"
         nxt = row_sets[i]
