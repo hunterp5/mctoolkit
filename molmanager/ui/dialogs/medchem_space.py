@@ -231,7 +231,11 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             "struct_src": self.struct_src_combo.currentText(),
             **self._collect_encoding_chrome_state(),
             "full_dataset": self._medchem_dataset_to_dict(self._full_dataset),
-            "plot_dataset": self._medchem_dataset_to_dict(self._plot_dataset),
+            "plot_dataset": (
+                None
+                if self._plot_dataset is None or self._plot_dataset is self._full_dataset
+                else self._medchem_dataset_to_dict(self._plot_dataset)
+            ),
             "summary": self.summary_text.toPlainText(),
         }
 
@@ -245,6 +249,8 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self._apply_encoding_chrome_state(state)
         self._full_dataset = self._medchem_dataset_from_dict(state.get("full_dataset"))
         self._plot_dataset = self._medchem_dataset_from_dict(state.get("plot_dataset"))
+        if self._plot_dataset is None:
+            self._plot_dataset = self._full_dataset
         summary = state.get("summary")
         if isinstance(summary, str):
             self.summary_text.setPlainText(summary)
