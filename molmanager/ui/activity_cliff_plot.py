@@ -29,6 +29,7 @@ from ..plotting.plot_marker_color import (
     DEFAULT_MARKER_SIZE_MAX_PX,
     DEFAULT_MARKER_SIZE_MIN_PX,
     attach_marker_size_legend,
+    colorbar_for_label,
     marker_sizes_from_column_values,
     scatter_marker_from_column_values,
 )
@@ -95,7 +96,7 @@ def build_activity_cliff_figure(
             opacity=0.85,
         )
         if color_label:
-            marker.setdefault("colorbar", {"title": color_label})
+            marker.setdefault("colorbar", colorbar_for_label(color_label))
             marker["showscale"] = True
     else:
         sizes = marker_sizes_from_column_values(
@@ -111,7 +112,7 @@ def build_activity_cliff_figure(
             "colorscale": "RdBu",
             "cmin": -cmax,
             "cmax": cmax,
-            "colorbar": {"title": f"Δ{activity_column}"},
+            "colorbar": colorbar_for_label(f"Δ{activity_column}"),
             "line": {"width": 0.5, "color": "#333"},
             "opacity": 0.85,
         }
