@@ -103,7 +103,7 @@ def cell_text_for_oid(app: Any, oid: int, header: str) -> str:
 
 def hover_lines_for_oid(app: Any, oid: int, columns: list[str]) -> list[str]:
     """``Header: value`` lines for the selected hover columns."""
-    lines: list[str] = [f"OID: {int(oid)}"]
+    lines: list[str] = []
     for h in columns:
         if not h:
             continue
@@ -180,7 +180,7 @@ def hover_card_payload(
     if z_label and z_value is not None:
         coord_bits.append(f"{z_label}={z_value}")
     if coord_bits:
-        lines.insert(1, ", ".join(coord_bits))
+        lines.insert(0, ", ".join(coord_bits))
     img = (
         structure_png_data_url_for_oid(app, oid, width=thumb_width, height=thumb_height)
         if show_structure
