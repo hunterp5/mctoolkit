@@ -198,6 +198,48 @@ class ExtraPixmapStore:
             if pm is not None:
                 yield key, pm
 
+    def png_bytes(self, oid: int, header_name: str) -> bytes | None:
+        """Stored PNG for one cell, without decoding a ``QPixmap``."""
+        return self._raw(int(oid), str(header_name))
+
+    def png_bytes_for_header(self, header_name: str) -> dict[int, bytes]:
+        """Every PNG in *header_name*. Does not decode images."""
+        header = str(header_name)
+        return {
+            int(oid): bytes(blob)
+            for oid, blob in self._conn.execute(
+                "SELECT oid, blob FROM images WHERE header = ?",
+                (header,),
+            )
+            if blob
+        }
+
+    def set_png_bytes(self, oid: int, header_name: str, raw: bytes | None) -> None:
+        self._store_png((int(oid), str(header_name)), bytes(raw) if raw else None)
+
+    def set_png_bytes_batch(self, header_name: str, items: list[tuple[int, bytes | None]]) -> None:
+        """Write or clear many PNG blobs in one header with a single commit."""
+        header = str(header_name)
+        writes: list[tuple[int, str, bytes]] = []
+        clears: list[tuple[int, str]] = []
+        for oid, raw in items:
+            key = (int(oid), header)
+            self._lru.pop(key, None)
+            if raw:
+                writes.append((key[0], header, bytes(raw)))
+            elif key in self._keys:
+                clears.append(key)
+        if writes:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO images (oid, header, blob) VALUES (?, ?, ?)", writes
+            )
+        if clears:
+            self._conn.executemany("DELETE FROM images WHERE oid = ? AND header = ?", clears)
+        if writes or clears:
+            self._conn.commit()
+        self._keys.update((oid, header) for oid, header, _raw in writes)
+        self._keys.difference_update(clears)
+
     def set_pixmap(self, oid: int, header_name: str, pixmap: QPixmap | None) -> None:
         key = (int(oid), str(header_name))
         self._store_png(key, pixmap_to_png_bytes(pixmap))
