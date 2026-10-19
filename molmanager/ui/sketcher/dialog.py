@@ -53,6 +53,7 @@ from ..mol_viewer_3d import Molecule3DEmbedView
 from ..qt_widget_utils import make_window_minimizable
 from .chem import _parse_periodic_element_symbol
 from .constants import WILDCARD_ELEMENT
+from .rgroups import is_rgroup_element, rgroup_element
 from .customize_elements import (
     CustomizeElementsDialog,
     element_groups_for_symbols,
@@ -535,7 +536,7 @@ class SketcherDialog(QDialog):
         toolbar_outer.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
         self._toolbar_outer = toolbar_outer
 
-        # --- Elements by informal PT family; Custom: * wildcard and ? any-element ---
+        # --- Elements by informal PT family; Custom: *, ?, R1, R2 ---
         self.element_buttons: list[QPushButton] = []
         self._element_btn_by_symbol: dict[str, QPushButton] = {}
         self._element_button_group = QButtonGroup(self)
@@ -549,6 +550,9 @@ class SketcherDialog(QDialog):
         self._any_element_symbol: str | None = None
         self.tb_wildcard = QPushButton("*")
         self.tb_any_element = QPushButton("?")
+        self.tb_r1 = QPushButton("R1")
+        self.tb_r2 = QPushButton("R2")
+        self._rgroup_buttons = {1: self.tb_r1, 2: self.tb_r2}
         toolbar_outer.addLayout(self._el_grid)
         initial_els = (
             list(self._element_symbols_override)
@@ -1088,7 +1092,11 @@ class SketcherDialog(QDialog):
             w = item.widget()
             if w is None:
                 continue
-            if w is self.tb_wildcard or w is self.tb_any_element:
+            if (
+                w is self.tb_wildcard
+                or w is self.tb_any_element
+                or w in self._rgroup_buttons.values()
+            ):
                 w.setParent(None)
                 continue
             if isinstance(w, QPushButton) and w.property("sketch_element"):
@@ -1098,7 +1106,7 @@ class SketcherDialog(QDialog):
         self._element_btn_by_symbol.clear()
 
     def _populate_element_toolbar(self, symbols: list[str]) -> None:
-        """Build left-panel element buttons for ``symbols`` (plus Custom * / ?)."""
+        """Build left-panel element buttons for ``symbols`` (plus Custom * / ? / R1 / R2)."""
         self._visible_element_symbols = list(symbols)
         self._clear_element_grid_widgets()
         el_ncols = self._el_ncols
@@ -1168,12 +1176,36 @@ class SketcherDialog(QDialog):
             pass
         self.tb_any_element.clicked.connect(self._on_any_element_tool_clicked)
 
+        r_font = QFont(btn_font)
+        r_font.setPointSize(7)
+        for label, button in self._rgroup_buttons.items():
+            button.setCheckable(True)
+            button.setFont(r_font)
+            button.setFixedSize(32, 26)
+            button.setStyleSheet("padding: 0px;")
+            button.setToolTip(
+                f"R{label}: click an atom to attach this point for R-group enumeration. "
+                f"Click empty canvas to place it alone. Exports as [*:{label}]."
+            )
+            try:
+                button.toggled.disconnect()
+            except TypeError:
+                pass
+            button.toggled.connect(lambda on, lab=label: self._on_rgroup_tool_toggled(lab, on))
+
         self._el_grid.addWidget(self.tb_wildcard, grid_row, 0)
         self._el_grid.addWidget(self.tb_any_element, grid_row, 1)
+        self._el_grid.addWidget(self.tb_r1, grid_row, 2)
+        self._el_grid.addWidget(self.tb_r2, grid_row, 3)
 
         # Drop place-tool if the selected element was removed from the panel.
         place = getattr(self.canvas, "place_element", None) if hasattr(self, "canvas") else None
-        if place and place not in self._element_btn_by_symbol and place != WILDCARD_ELEMENT:
+        if (
+            place
+            and place not in self._element_btn_by_symbol
+            and place != WILDCARD_ELEMENT
+            and not is_rgroup_element(place)
+        ):
             if getattr(self, "canvas", None) is not None:
                 self.canvas.place_element = None
 
@@ -1242,6 +1274,7 @@ class SketcherDialog(QDialog):
             self.tb_wildcard.setChecked(False)
             self.tb_wildcard.blockSignals(False)
         self._uncheck_any_element_button()
+        self._uncheck_rgroup_buttons()
         self.canvas.place_element = None
 
     def _select_template_from_menu(self, name: str) -> None:
@@ -1309,6 +1342,7 @@ class SketcherDialog(QDialog):
             self.tb_wildcard.setChecked(False)
             self.tb_wildcard.blockSignals(False)
         self._uncheck_any_element_button()
+        self._uncheck_rgroup_buttons()
         self._leave_special_modes_for_drawing()
         self.canvas.active_template = None
         self._uncheck_ring_buttons()
@@ -1326,11 +1360,44 @@ class SketcherDialog(QDialog):
                 b.setChecked(False)
                 b.blockSignals(False)
             self._uncheck_any_element_button()
+            self._uncheck_rgroup_buttons()
             self._leave_special_modes_for_drawing()
             self.canvas.active_template = None
             self._uncheck_ring_buttons()
             self.canvas.place_element = WILDCARD_ELEMENT
         elif self.canvas.place_element == WILDCARD_ELEMENT:
+            self._select_default_element_tool()
+
+    def _uncheck_rgroup_buttons(self) -> None:
+        for button in getattr(self, "_rgroup_buttons", {}).values():
+            button.blockSignals(True)
+            button.setChecked(False)
+            button.blockSignals(False)
+
+    def _on_rgroup_tool_toggled(self, label: int, on: bool) -> None:
+        element = rgroup_element(label)
+        if on:
+            for other, button in self._rgroup_buttons.items():
+                if other == label:
+                    continue
+                button.blockSignals(True)
+                button.setChecked(False)
+                button.blockSignals(False)
+            for button in self.element_buttons:
+                button.blockSignals(True)
+                button.setChecked(False)
+                button.blockSignals(False)
+            if getattr(self, "tb_wildcard", None) is not None:
+                self.tb_wildcard.blockSignals(True)
+                self.tb_wildcard.setChecked(False)
+                self.tb_wildcard.blockSignals(False)
+            self._uncheck_any_element_button()
+            self._leave_special_modes_for_drawing()
+            self.canvas.active_template = None
+            self._uncheck_ring_buttons()
+            self.canvas.place_element = element
+            return
+        if self.canvas.place_element == element:
             self._select_default_element_tool()
 
     def _on_any_element_tool_clicked(self, checked: bool) -> None:
@@ -1366,6 +1433,7 @@ class SketcherDialog(QDialog):
             self.tb_wildcard.blockSignals(True)
             self.tb_wildcard.setChecked(False)
             self.tb_wildcard.blockSignals(False)
+        self._uncheck_rgroup_buttons()
         self._leave_special_modes_for_drawing()
         self.canvas.active_template = None
         self._uncheck_ring_buttons()
@@ -1394,6 +1462,7 @@ class SketcherDialog(QDialog):
             self.tb_wildcard.setChecked(False)
             self.tb_wildcard.blockSignals(False)
         self._uncheck_any_element_button()
+        self._uncheck_rgroup_buttons()
         bc = self._element_btn_by_symbol.get("C")
         if bc is not None:
             bc.setChecked(True)
