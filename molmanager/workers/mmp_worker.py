@@ -156,7 +156,9 @@ class MmpAnalysisWorker(QRunnable):
                     )
                     for k in order
                 ]
-                proc_workers = min(max(2, (os.cpu_count() or 4) - 1), 8, n_unique)
+                from ..platform_support.worker_budget import rdkit_process_workers
+
+                proc_workers = rdkit_process_workers(n_unique)
                 ex = register_process_pool(ProcessPoolExecutor(max_workers=proc_workers))
                 try:
                     pending = {ex.submit(_mp_fragment_mol, t) for t in tasks}
