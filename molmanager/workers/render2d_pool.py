@@ -41,9 +41,8 @@ _WARMING = False
 _BUSY = 0
 _IDLE_GEN = 0
 _IDLE_TIMER: threading.Timer | None = None
-# Each child holds about 30 MB after RDKit import. Drop the pool once drawing has stopped.
+# Drop the pool once drawing has stopped. Sizing lives in worker_budget.
 _IDLE_SECONDS = 60.0
-_CHILD_BYTES = 32 * 1024 * 1024
 
 
 def _cancel_idle_timer_unlocked() -> None:
@@ -80,21 +79,19 @@ def render2d_process_worker_count() -> int:
     """Child-process count for batch 2D rendering.
 
     PNG encoding is ~70% of each render and runs entirely in the children, so this scales past the
-    physical core count on SMT machines. The pool is also capped so idle children stay near 2% of
-    available RAM (about 32 MB private each).
+    physical core count on SMT machines. The shared budget then limits that by free RAM
+    (about 32 MB private per child). ``MOLMANAGER_RENDER2D_PROCESS_WORKERS`` still wins.
     """
-    cfg = load_config()
-    configured = cfg.render2d_process_workers
-    if configured:
-        return max(1, int(configured))
-    cpu_cap = max(2, min(12, (os.cpu_count() or 4) - 1))
-    from ..platform_support.memory_usage import available_physical_bytes
+    from ..platform_support.worker_budget import RENDER2D_PROCESS_BYTES, plan_process_workers
 
-    avail = available_physical_bytes()
-    if not avail:
-        return cpu_cap
-    ram_cap = max(2, int(avail * 0.02) // _CHILD_BYTES)
-    return max(2, min(cpu_cap, ram_cap))
+    cfg = load_config()
+    cpu_cap = max(2, min(12, (os.cpu_count() or 4) - 1))
+    return plan_process_workers(
+        per_worker_bytes=RENDER2D_PROCESS_BYTES,
+        cpu_cap=cpu_cap,
+        configured=cfg.render2d_process_workers,
+        min_workers=2,
+    )
 
 
 def note_render2d_pool_busy() -> None:
