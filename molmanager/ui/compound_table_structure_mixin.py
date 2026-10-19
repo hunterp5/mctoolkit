@@ -21,6 +21,7 @@ from __future__ import annotations
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 
+from ..storage.extra_pixmap_store import pixmap_to_png_bytes
 from ..storage.structure_render_store import StructureRenderStore
 
 
@@ -189,6 +190,106 @@ class CompoundTableStructureMixin:
 
     def cell_pixmap_copy(self, oid: int, header_name: str) -> QPixmap | None:
         return self.column_pixmap_copy(oid, header_name)
+
+    def snapshot_structure_pngs(self, oids: list[int]) -> dict[int, bytes | None]:
+        """PNG bytes for undo/cancel. Does not decode the lazy store into ``QPixmap``s."""
+        out: dict[int, bytes | None] = {}
+        store = self._structure_png_store
+        for oid in oids:
+            oid_i = int(oid)
+            raw = store.png_bytes(oid_i) if store is not None else None
+            if not raw:
+                pix = self._pixmaps.get(oid_i)
+                raw = pixmap_to_png_bytes(pix) if pix is not None and not pix.isNull() else None
+            out[oid_i] = raw
+        return out
+
+    def snapshot_column_pngs(self, header_name: str, oids: list[int]) -> dict[int, bytes | None]:
+        """PNG bytes for one image column. Does not decode every row."""
+        out: dict[int, bytes | None] = {}
+        if header_name not in self._headers:
+            return out
+        for oid in oids:
+            out[int(oid)] = self._extra_pixmaps.png_bytes(int(oid), header_name)
+        return out
+
+    def column_png_bytes_by_oid(self, header_name: str) -> dict[int, bytes]:
+        """Every stored PNG in *header_name*, for an undo snapshot."""
+        return self._extra_pixmaps.png_bytes_for_header(str(header_name))
+
+    def set_column_png_bytes_batch(
+        self,
+        header_name: str,
+        items: list[tuple[int, bytes | None]],
+        *,
+        emit: bool = True,
+    ) -> None:
+        """Restore or replace image-column PNGs without decoding them first."""
+        if not items or header_name not in self._headers:
+            return
+        if header_name in ("ID_HIDDEN", "Structure"):
+            return
+        self._extra_pixmaps.set_png_bytes_batch(header_name, items)
+        if not emit:
+            return
+        rows_changed = [
+            r for r in (self.logical_row_for_oid(int(o)) for o, _raw in items) if r >= 0
+        ]
+        if not rows_changed:
+            return
+        c = self._headers.index(header_name)
+        self._emit_data_changed_row_spans(
+            rows_changed,
+            c,
+            c,
+            roles=[Qt.DecorationRole, Qt.SizeHintRole, Qt.DisplayRole, Qt.ToolTipRole],
+        )
+
+    def set_cell_png_bytes(
+        self, oid: int, header_name: str, raw: bytes | None, *, emit: bool = True
+    ) -> None:
+        """Store one extra-column PNG. *emit* is false while a batch render is still running."""
+        if header_name not in self._headers or header_name in ("ID_HIDDEN", "Structure"):
+            return
+        self._extra_pixmaps.set_png_bytes(int(oid), header_name, raw)
+        if not emit:
+            return
+        r = self.logical_row_for_oid(int(oid))
+        if r < 0:
+            return
+        try:
+            c = self._headers.index(header_name)
+        except ValueError:
+            return
+        idx = self.index(r, c)
+        self.dataChanged.emit(
+            idx, idx, [Qt.DecorationRole, Qt.SizeHintRole, Qt.DisplayRole, Qt.ToolTipRole]
+        )
+
+    def restore_structure_pngs(self, items: list[tuple[int, bytes | None]]) -> None:
+        """Put structure PNGs back after a cancelled render. Missing bytes clear that row."""
+        pngs = [(int(oid), bytes(raw)) for oid, raw in items if raw]
+        if pngs:
+            store = self._structure_png_store
+            if store is None:
+                from ..platform_support.config import load_config
+
+                cfg = load_config()
+                store = StructureRenderStore(
+                    max_decoded_pixmaps=cfg.structure_render_pixmap_lru,
+                    max_png_entries=cfg.structure_render_png_max_entries,
+                )
+                self._structure_png_store = store
+            store.expand_png_capacity(len(pngs))
+            store.ingest_batch(pngs)
+        for oid, raw in items:
+            if raw:
+                continue
+            self._pixmaps.pop(int(oid), None)
+            if self._structure_png_store is not None:
+                self._structure_png_store.remove_oid(int(oid))
+        if self._rows:
+            self.notify_structure_column_changed()
 
     def snapshot_structure_pixmaps(self, oids: list[int]) -> dict[int, QPixmap | None]:
         """Shallow copies of structure pixmaps for undo/cancel (caller owns QPixmap copies)."""
