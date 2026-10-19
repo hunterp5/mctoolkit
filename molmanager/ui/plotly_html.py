@@ -140,6 +140,13 @@ def write_self_contained_plotly_html(fig: go.Figure, path: Path) -> None:
         Plotly.newPlot(gd, payload.data || [], payload.layout || {{}}, {{
           displaylogo: false,
           responsive: true
+        }}).then(function() {{
+          var nodes = gd.querySelectorAll(".colorbar text");
+          for (var i = 0; i < nodes.length; i++) {{
+            var tr = nodes[i].getAttribute("transform") || "";
+            var flipped = tr.replace("rotate(-90", "rotate(90");
+            if (flipped !== tr) nodes[i].setAttribute("transform", flipped);
+          }}
         }});
       }} catch (e) {{
         console.error('Plotly render failed:', e);
