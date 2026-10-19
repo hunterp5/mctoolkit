@@ -1423,7 +1423,7 @@ class SketcherDialog(QDialog):
             app.headers.append(h)
 
     def _queue_reaction_structure_render(self, app, oid: int, smarts: str) -> None:
-        """Render the reaction scheme into Structure (same PNG path as Tools → Render 2D)."""
+        """Render the reaction scheme into Structure (same PNG path as Chemistry → Render 2D)."""
         spec = ReactionDrawSpec(smarts)
         rw, rh = reaction_depict_size()
         if hasattr(app, "start_render_worker"):
