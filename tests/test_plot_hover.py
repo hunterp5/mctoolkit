@@ -50,9 +50,8 @@ def test_hover_lines_and_structure_png(qapp):  # noqa: ARG001
     w.next_oid = 1
 
     lines = hover_lines_for_oid(w, 0, ["SMILES", "Name"])
-    assert lines[0] == "OID: 0"
-    assert "SMILES: CCO" in lines
-    assert "Name: ethanol" in lines
+    assert lines == ["SMILES: CCO", "Name: ethanol"]
+    assert not any(line.startswith("OID") for line in lines)
 
     url = structure_png_data_url_for_oid(w, 0)
     assert url.startswith("data:image/png;base64,")
