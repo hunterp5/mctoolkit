@@ -37,6 +37,26 @@ from ..plotting.plot_marker_color import (
 from ..ui.plotly_html import finalize_plot_legend
 from .dockable_plot import resolve_plot_title_text
 
+# Solid markers up to the old 5,000-point sample; larger clouds fade with sqrt(n).
+_MARKER_OPACITY = 0.88
+_OPACITY_REFERENCE_POINTS = 5_000
+_OPACITY_FLOOR = 0.08
+_UNSELECTED_OPACITY_RATIO = 0.35 / _MARKER_OPACITY
+
+
+def marker_opacity_for_point_count(n_points: int) -> float:
+    """Fade markers as the cloud grows so overlap shows density instead of a solid fill."""
+    count = max(0, int(n_points))
+    if count <= _OPACITY_REFERENCE_POINTS:
+        return _MARKER_OPACITY
+    scaled = _MARKER_OPACITY * (_OPACITY_REFERENCE_POINTS / count) ** 0.5
+    return max(_OPACITY_FLOOR, min(_MARKER_OPACITY, scaled))
+
+
+def _unselected_marker_opacity(rest_opacity: float) -> float:
+    """Dim the unselected cloud by the same ratio the solid markers used."""
+    return max(0.04, float(rest_opacity) * _UNSELECTED_OPACITY_RATIO)
+
 
 def _path_shape(
     polygon: list[tuple[float, float]],
@@ -68,6 +88,7 @@ def _scatter_marker(
     size_values: list[Any] | None = None,
     size_min_px: float | None = None,
     size_max_px: float | None = None,
+    n_points: int = 0,
 ) -> dict:
     from ..plotting.plot_marker_color import scatter_marker_from_column_values
 
@@ -78,7 +99,7 @@ def _scatter_marker(
         "color_max": color_max,
         "size_values": size_values,
         "point_size": DEFAULT_MARKER_SIZE_PX,
-        "opacity": 0.88,
+        "opacity": marker_opacity_for_point_count(n_points),
     }
     if size_min_px is not None:
         kwargs["size_min_px"] = size_min_px
@@ -93,6 +114,7 @@ def _compound_scatter(
     oids: list[int],
     marker: dict,
 ) -> go.Scatter:
+    rest = float(marker.get("opacity") or _MARKER_OPACITY)
     return go.Scatter(
         x=xs,
         y=ys,
@@ -102,7 +124,7 @@ def _compound_scatter(
         marker=marker,
         name="Compounds",
         showlegend=False,
-        unselected={"marker": {"opacity": 0.35}},
+        unselected={"marker": {"opacity": _unselected_marker_opacity(rest)}},
         selected={
             "marker": {"size": DEFAULT_SELECTED_MARKER_SIZE_PX, "color": "#d62828", "opacity": 1.0}
         },
@@ -136,6 +158,7 @@ def build_boiled_egg_figure(
         size_values=size_values,
         size_min_px=size_min_px,
         size_max_px=size_max_px,
+        n_points=len(pts),
     )
     fig = go.Figure(
         data=[
@@ -222,6 +245,7 @@ def build_golden_triangle_figure(
         size_values=size_values,
         size_min_px=size_min_px,
         size_max_px=size_max_px,
+        n_points=len(pts),
     )
     fig = go.Figure(
         data=[
