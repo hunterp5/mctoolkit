@@ -100,3 +100,123 @@ def test_build_sali_figure():
     fig = build_sali_figure(points, activity_column="pIC50")
     assert fig.data
     assert "molmanager_selection_traces" in (fig.layout.meta or {})
+    assert fig.layout.yaxis.title.text == "|ΔpIC50|"
+
+
+def test_selectivity_sali_uses_on_minus_off():
+    records = [(1, 8.0), (2, 6.0)]
+    offs = {1: 5.0, 2: 6.0}
+    points = build_sali_points(records, [(2, 1, 0.5)], off_by_oid=offs)
+    assert len(points) == 1
+    point = points[0]
+    assert (point.oid_a, point.oid_b) == (1, 2)
+    assert point.delta_on == -2.0
+    assert point.delta_off == 1.0
+    assert point.signed_delta == -3.0
+    assert point.abs_delta == 3.0
+    assert abs(point.sali - 6.0) < 1e-12
+
+
+def test_selectivity_pair_order_is_canonical():
+    records = [(1, 8.0), (2, 6.0)]
+    offs = {1: 5.0, 2: 6.0}
+    forward = build_sali_points(records, [(1, 2, 0.5)], off_by_oid=offs)
+    reverse = build_sali_points(records, [(2, 1, 0.5)], off_by_oid=offs)
+    assert (forward[0].delta_on, forward[0].delta_off, forward[0].signed_delta) == (
+        reverse[0].delta_on,
+        reverse[0].delta_off,
+        reverse[0].signed_delta,
+    )
+
+
+def test_activity_sali_leaves_component_deltas_empty():
+    points = build_sali_points([(1, 1.0), (2, 3.0)], [(1, 2, 0.7)])
+    assert points[0].signed_delta == 2.0
+    assert points[0].delta_on is None
+    assert points[0].delta_off is None
+
+
+def test_selectivity_min_difference_uses_abs_delta_selectivity():
+    records = [(1, 8.0), (2, 6.0)]
+    offs = {1: 5.0, 2: 6.0}
+    kept = build_sali_points(
+        records,
+        [(1, 2, 0.5)],
+        min_activity_difference=3,
+        off_by_oid=offs,
+    )
+    dropped = build_sali_points(
+        records,
+        [(1, 2, 0.5)],
+        min_activity_difference=3.1,
+        off_by_oid=offs,
+    )
+    assert len(kept) == 1
+    assert dropped == []
+
+
+def test_missing_off_target_drops_the_pair():
+    points = build_sali_points(
+        [(1, 8.0), (2, 6.0)],
+        [(1, 2, 0.5)],
+        off_by_oid={1: 5.0},
+    )
+    assert points == []
+
+
+def test_legacy_sali_point_dict_still_loads():
+    from molmanager.analysis.sali_analysis import SaliPoint
+
+    point = SaliPoint(
+        **{
+            "pair_index": 0,
+            "oid_a": 1,
+            "oid_b": 2,
+            "similarity": 0.8,
+            "abs_delta": 2.0,
+            "signed_delta": 2.0,
+            "sali": 10.0,
+        }
+    )
+    assert point.delta_on is None
+    assert point.delta_off is None
+
+
+def test_sali_dialog_selectivity_requires_two_columns(qapp):  # noqa: ARG001
+    from molmanager.ui.dialogs.sali import SaliDialog
+
+    dlg = SaliDialog(
+        structure_sources=["Structure"],
+        activity_columns=["pIC50"],
+        selected_row_count=0,
+    )
+    dlg.mode_combo.setCurrentIndex(dlg.mode_combo.findData("selectivity"))
+    assert not dlg.off_combo.isHidden()
+    assert dlg._ok_button is not None
+    assert not dlg._ok_button.isEnabled()
+    dlg.deleteLater()
+
+
+def test_sali_dialog_selectivity_params(qapp):  # noqa: ARG001
+    from molmanager.ui.dialogs.sali import SaliDialog
+
+    dlg = SaliDialog(
+        structure_sources=["Structure"],
+        activity_columns=["pKi_off", "pIC50"],
+        selected_row_count=0,
+    )
+    assert dlg.params().off_target_column == ""
+    assert dlg.off_combo.isHidden()
+    dlg.mode_combo.setCurrentIndex(dlg.mode_combo.findData("selectivity"))
+    params = dlg.params()
+    assert params.activity_column == "pIC50"
+    assert params.off_target_column == "pKi_off"
+    assert dlg._ok_button is not None
+    assert dlg._ok_button.isEnabled()
+    fig = build_sali_figure(
+        build_sali_points([(1, 8.0), (2, 6.0)], [(1, 2, 0.5)], off_by_oid={1: 5.0, 2: 6.0}),
+        activity_column=params.activity_column,
+        selectivity=True,
+    )
+    assert fig.layout.yaxis.title.text == "|Δselectivity|"
+    dlg.deleteLater()
