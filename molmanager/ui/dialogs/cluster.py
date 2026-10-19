@@ -717,9 +717,7 @@ class ClusterDialog(QDialog):
                 "agglomerative": self._ex_agglomerative.isChecked(),
                 "dbscan": self._ex_dbscan.isChecked(),
                 "butina": self._ex_butina.isChecked() and self._ex_butina.isEnabled(),
-                "sphere_exclusion": (
-                    self._ex_sphere.isChecked() and self._ex_sphere.isEnabled()
-                ),
+                "sphere_exclusion": (self._ex_sphere.isChecked() and self._ex_sphere.isEnabled()),
                 "jarvis_patrick": self._ex_jp.isChecked() and self._ex_jp.isEnabled(),
             }
             if not any(include.values()):

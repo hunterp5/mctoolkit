@@ -168,9 +168,7 @@ def _combine_feature_matrix(
     if standardize and n_numeric > 0:
         from ..descriptors.ml_feature_matrix import standardize_feature_matrix
 
-        numeric_block, _scaler = standardize_feature_matrix(
-            numeric_block, n_numeric, enabled=True
-        )
+        numeric_block, _scaler = standardize_feature_matrix(numeric_block, n_numeric, enabled=True)
     if not fps:
         return numeric_block
     bits = np.asarray(_dense_fingerprint_matrix(fps), dtype=np.float64)
@@ -644,9 +642,7 @@ def _format_params(method: str, params: dict) -> str:
     if method == "dbscan":
         metric = str(params.get("metric") or "")
         suffix = f", {metric}" if metric and metric != "cosine" else ""
-        return (
-            f"eps={float(params['eps']):.3f}, min_samples={int(params['min_samples'])}{suffix}"
-        )
+        return f"eps={float(params['eps']):.3f}, min_samples={int(params['min_samples'])}{suffix}"
     if method == "butina":
         r = ", reorder" if params.get("reordering") else ""
         return f"cutoff={float(params.get('cutoff', 0.2)):.3f}{r}"
