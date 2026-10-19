@@ -33,7 +33,7 @@ Molecules from the chosen structure source; core SMARTS/SMILES must match. Optio
 
 ## Use cases
 
-- Build an R1/R2 matrix for a lead series.
+- Build an R1/R2 matrix for a lead series, then open **Data → SAR Matrix**.
 - Feed R-group columns into category filters.
 - Compare greedy vs exhaustive matching on ambiguous cores.
 
