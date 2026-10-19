@@ -19,7 +19,7 @@ Starts from a blank canvas or an existing molecule when launched in an edit cont
 - **Canvas** - interactive drawing surface with bond/atom tools and a reaction arrow.
 - **Element** and **bond order** controls.
 - **Reaction arrow** - drag to split the sketch into reactants (tail) and products (head). **Export to Table** then adds **Reaction SMARTS** and renders the 2D scheme in Structure.
-- **Edit** - Undo/Redo, **Copy** / **Paste** of a selected fragment (Ctrl+C / Ctrl+V), and **Delete Selection** (Del, same as the table Edit menu). Right-click the canvas for the same Copy / Paste at the top of the menu.
+- **Edit** - Undo/Redo, **Copy** / **Paste** of a selected fragment (Ctrl+C / Ctrl+V), and **Delete Selection** (Del, same as **Edit → Selection → Delete Selection** on the table). Right-click the canvas for the same Copy / Paste at the top of the menu.
 - **Edit tools** - select, erase, and ring templates as provided.
 - **Apply / accept** - push the drawn molecule or reaction back to the caller or table.
 
