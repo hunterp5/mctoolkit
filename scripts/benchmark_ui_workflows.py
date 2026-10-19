@@ -176,8 +176,7 @@ def _bench_one(scale: int) -> dict[str, float]:
             app._search_col_combo.setCurrentIndex(j)
             break
     app._search_partial_cb.setChecked(True)
-    app._search_substructure_cb.setChecked(False)
-    app._search_query_edit.setText("group_11")
+    app._search_query_edit.setText('"group_11"')
     t0 = time.perf_counter()
     app._run_table_search()
     search_ms = (time.perf_counter() - t0) * 1000.0
