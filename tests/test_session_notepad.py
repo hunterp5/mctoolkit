@@ -42,14 +42,9 @@ def _skip_session_auto_render(monkeypatch) -> None:
     )
 
 
-def _utilities_menu(window: ChemistryWorkspaceWindow):
+def _tools_menu(window: ChemistryWorkspaceWindow):
     bar = window.menuBar()
-    tools = next(act.menu() for act in bar.actions() if act.text().replace("&", "") == "Tools")
-    return next(
-        act.menu()
-        for act in tools.actions()
-        if act.menu() and act.text().replace("&", "") == "Utilities"
-    )
+    return next(act.menu() for act in bar.actions() if act.text().replace("&", "") == "Tools")
 
 
 def _document_format(panel):
@@ -61,7 +56,7 @@ def _document_format(panel):
 def test_utilities_menu_opens_floating_notepad(qapp):  # noqa: ARG001
     window = ChemistryWorkspaceWindow()
     action = next(
-        act for act in _utilities_menu(window).actions() if act.text().replace("&", "") == "Notepad"
+        act for act in _tools_menu(window).actions() if act.text().replace("&", "") == "Notepad"
     )
     action.trigger()
     host = window.session_notepad
