@@ -360,7 +360,7 @@ class ProteinViewerPharmacophoreMixin:
             QMessageBox.information(
                 self,
                 "Pharmacophore",
-                f"Saved to {path}. Open Tools → Conformations → Screen Pharmacophore… "
+                f"Saved to {path}. Open Chemistry → Conformations → Screen Pharmacophore… "
                 "and browse to that file.",
             )
             return
