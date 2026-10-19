@@ -213,7 +213,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_potency",
                 "Potency Standardization",
                 "Potency Standardization",
-                "Convert activity units to molar, pIC50 or pKi, and optional Ki.",
+                "Convert mixed activity units, including mg/mL via molecular weight, to nM or uM.",
             ),
             _e(
                 "tools_sketcher",
@@ -285,12 +285,6 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Diverse Subset",
                 "Pick a chemically diverse subset of rows.",
             ),
-            _e(
-                "tools_cluster",
-                "Cluster",
-                "Cluster",
-                "Cluster rows by fingerprint, numeric columns, or both.",
-            ),
         ),
     ),
     GuideSection(
@@ -347,6 +341,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "R-Group Decomposition",
                 "R-Group Decomposition",
                 "Match a core and extract R-group columns.",
+            ),
+            _e(
+                "tools_rgroup_enum",
+                "R-Group Enumeration",
+                "R-Group Enumeration",
+                "Attach building-block lists to a numbered core and append the products.",
             ),
             _e(
                 "tools_activity_cliff",
@@ -437,6 +437,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Join Columns",
                 "Join Columns",
                 "Join two columns with a delimiter into a new column.",
+            ),
+            _e(
+                "tools_cluster",
+                "Cluster",
+                "Cluster",
+                "Data → Cluster. Group rows by fingerprint, numeric columns, or both.",
             ),
             _e(
                 "data_pca",
