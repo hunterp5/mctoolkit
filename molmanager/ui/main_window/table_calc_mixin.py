@@ -176,11 +176,15 @@ class TableCalcMixin:
         if not self.headers:
             return
         numeric_columns = list(self.global_bounds.keys())
+        unit_columns = [h for h in self.headers if h not in ("ID_HIDDEN", "Structure")]
         from ..dialogs import PotencyStandardizationDialog
 
         def _factory():
             dialog = PotencyStandardizationDialog(
-                numeric_columns, len(self._selected_logical_rows()), self
+                numeric_columns,
+                len(self._selected_logical_rows()),
+                self,
+                unit_columns=unit_columns,
             )
             dialog.setModal(False)
             dialog.setAttribute(Qt.WA_DeleteOnClose, True)
@@ -196,14 +200,24 @@ class TableCalcMixin:
         )
 
     def _run_potency_from_dialog(self, dlg) -> None:
-        from ...chem.potency import output_headers, standardize_activity
+        from ...chem.potency import (
+            needs_molecular_weight,
+            output_headers,
+            standardize_activity,
+        )
         from ..dialogs import PotencyStandardizationDialog
 
         if not isinstance(dlg, PotencyStandardizationDialog):
             return
         request = dlg.pending_request
-        if request is None or request.column not in self.headers:
-            QMessageBox.warning(self, TOOL_POTENCY, "Choose an activity column from the table.")
+        if (
+            request is None
+            or request.column not in self.headers
+            or request.unit_column not in self.headers
+        ):
+            QMessageBox.warning(
+                self, TOOL_POTENCY, "Choose a data column and a unit column from the table."
+            )
             return
         only_selected = dlg.only_selected_rows()
         allowed = self._selected_oids_set() if only_selected else None
@@ -216,38 +230,52 @@ class TableCalcMixin:
             QMessageBox.information(self, TOOL_POTENCY, "No rows to process for this scope.")
             return
         activity_col = self.headers.index(request.column)
+        unit_col = self.headers.index(request.unit_column)
         headers = output_headers(
             request.measure,
-            write_molar=request.write_molar,
+            desired_unit=request.desired_unit,
             write_p=request.write_p,
             write_ki=request.write_ki,
         )
-        substrate_fixed = _fixed_molar(request.substrate_constant, request.substrate_unit)
-        km_fixed = _fixed_molar(request.km_constant, request.km_unit)
-        rows: list[tuple[int, dict[str, str]]] = []
+        prepared: list[tuple[int, str, str]] = []
         for oid in oids:
             row = self.logical_row_for_oid(oid)
             activity = "" if row < 0 else self._table_cell_text(row, activity_col)
-            substrate = substrate_fixed
-            km = km_fixed
-            if request.write_ki and request.substrate_column:
-                substrate = _column_molar(
-                    self, oid, request.substrate_column, request.substrate_unit, allow_zero=True
+            unit_text = "" if row < 0 else self._table_cell_text(row, unit_col)
+            prepared.append((int(oid), activity, unit_text))
+        structure_mw: dict[int, float] = {}
+        if request.mw_column is None and any(
+            needs_molecular_weight(unit_text) for _oid, _activity, unit_text in prepared
+        ):
+            structure_mw = _structure_molecular_weights(
+                self,
+                [oid for oid, _activity, _unit in prepared],
+                only_selected=only_selected,
+            )
+        rows: list[tuple[int, dict[str, str]]] = []
+        for oid, activity, unit_text in prepared:
+            assay_terms = None
+            if request.write_ki:
+                assay_terms = _assay_terms_molar(self, oid, request.assay_concentrations)
+            molar_mass = None
+            if needs_molecular_weight(unit_text):
+                molar_mass = (
+                    _positive_column_value(self, oid, request.mw_column)
+                    if request.mw_column
+                    else structure_mw.get(oid)
                 )
-            if request.write_ki and request.km_column:
-                km = _column_molar(self, oid, request.km_column, request.km_unit, allow_zero=False)
             rows.append(
                 (
-                    int(oid),
+                    oid,
                     standardize_activity(
                         activity,
-                        unit=request.unit,
+                        unit=unit_text,
                         measure=request.measure,
-                        write_molar=request.write_molar,
+                        desired_unit=request.desired_unit,
                         write_p=request.write_p,
                         write_ki=request.write_ki,
-                        substrate_molar=substrate,
-                        km_molar=km,
+                        assay_terms=assay_terms,
+                        molar_mass=molar_mass,
                     ),
                 )
             )
@@ -653,6 +681,41 @@ class TableCalcMixin:
         )
 
 
+def _structure_molecular_weights(app, oids: list[int], *, only_selected: bool) -> dict[int, float]:
+    """RDKit average molecular weight in g/mol for rows that have a structure."""
+    import math
+
+    from rdkit.Chem import Descriptors
+
+    wanted = {int(oid) for oid in oids}
+    weights: dict[int, float] = {}
+    try:
+        pairs = app.collect_scoped_table_mols("Structure", only_selected=only_selected)
+    except (RuntimeError, TypeError, ValueError):
+        return weights
+    for oid, mol in pairs:
+        if int(oid) not in wanted or mol is None:
+            continue
+        try:
+            mw = float(Descriptors.MolWt(mol))
+        except (TypeError, ValueError, RuntimeError):
+            continue
+        if math.isfinite(mw) and mw > 0:
+            weights[int(oid)] = mw
+    return weights
+
+
+def _positive_column_value(app, oid: int, column: str) -> float | None:
+    from ...chem.potency import parse_concentration
+
+    if column not in app.headers:
+        return None
+    row = app.logical_row_for_oid(oid)
+    if row < 0:
+        return None
+    return parse_concentration(app._table_cell_text(row, app.headers.index(column)))
+
+
 def _fixed_molar(value: float | None, unit: str) -> float | None:
     from ...chem.potency import to_molar
 
@@ -675,3 +738,23 @@ def _column_molar(app, oid: int, column: str, unit: str, *, allow_zero: bool) ->
     if value is None:
         return None
     return to_molar(value, unit)
+
+
+def _assay_terms_molar(app, oid: int, specs) -> list[tuple[float, float]] | None:
+    """Molar (concentration, Km or Kd) pairs for one row, or ``None`` if any pair is missing."""
+    terms: list[tuple[float, float]] = []
+    for spec in specs:
+        concentration = (
+            _column_molar(app, oid, spec.conc_column, spec.conc_unit, allow_zero=True)
+            if spec.conc_column
+            else _fixed_molar(spec.conc_constant, spec.conc_unit)
+        )
+        reference = (
+            _column_molar(app, oid, spec.ref_column, spec.ref_unit, allow_zero=False)
+            if spec.ref_column
+            else _fixed_molar(spec.ref_constant, spec.ref_unit)
+        )
+        if concentration is None or reference is None:
+            return None
+        terms.append((concentration, reference))
+    return terms
