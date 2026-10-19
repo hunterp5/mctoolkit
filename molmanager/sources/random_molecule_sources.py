@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Random molecules from ChEMBL, PubChem, or ZINC (Tools → Utilities → Random → Molecule)."""
+"""Random molecules from ChEMBL, PubChem, or ZINC (Tools → Random → Molecule)."""
 
 from __future__ import annotations
 
