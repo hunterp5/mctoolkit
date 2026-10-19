@@ -437,12 +437,6 @@ class ClusterDialog(QDialog):
             QMessageBox.warning(self, "Cluster", "Could not read trial parameters for this row.")
             return
 
-        only_selected = selection_scope_checked(self)
-        src = self.src_combo.currentText()
-        rows = self._prepare_cluster_payloads(src, only_selected)
-        if not rows:
-            return
-
         resolved = self._resolve_cluster_inputs()
         if resolved is None:
             return
@@ -532,7 +526,8 @@ class ClusterDialog(QDialog):
             item = model.item(i)
             if item is not None:
                 item.setEnabled(allow_tanimoto or key not in TANIMOTO_CLUSTER_METHODS)
-        if not allow_tanimoto and str(self.method_combo.currentData() or "") in TANIMOTO_CLUSTER_METHODS:
+        current = str(self.method_combo.currentData() or "")
+        if not allow_tanimoto and current in TANIMOTO_CLUSTER_METHODS:
             self.method_combo.setCurrentIndex(0)
         for box, key in (
             (self._ex_butina, "butina"),
@@ -540,9 +535,7 @@ class ClusterDialog(QDialog):
             (self._ex_jp, "jarvis_patrick"),
         ):
             box.setEnabled(allow_tanimoto or key not in TANIMOTO_CLUSTER_METHODS)
-        metric = "cosine distance" if allow_tanimoto or not has_cols else "Euclidean distance"
-        if not use_fp:
-            metric = "Euclidean distance"
+        metric = "cosine distance" if use_fp and not has_cols else "Euclidean distance"
         self.dbscan_eps.setToolTip(
             f"Neighborhood radius ({metric}). Smaller values yield more clusters and more noise."
         )
@@ -703,13 +696,10 @@ class ClusterDialog(QDialog):
     def _on_run(self) -> None:
         if self.parent_app is None:
             return
-        only_selected = selection_scope_checked(self)
-        src = self.src_combo.currentText()
-        rows = self._prepare_cluster_payloads(src, only_selected)
-        if not rows:
+        resolved = self._resolve_cluster_inputs()
+        if resolved is None:
             return
-
-        fp_choice = self.fp_combo.currentText()
+        rows, fp_choice, numeric_by_oid, standardize, rows_are_payloads = resolved
 
         from ...platform_support.memory_guards import check_cluster_workload
 
@@ -723,9 +713,11 @@ class ClusterDialog(QDialog):
                 "kmeans": self._ex_kmeans.isChecked(),
                 "agglomerative": self._ex_agglomerative.isChecked(),
                 "dbscan": self._ex_dbscan.isChecked(),
-                "butina": self._ex_butina.isChecked(),
-                "sphere_exclusion": self._ex_sphere.isChecked(),
-                "jarvis_patrick": self._ex_jp.isChecked(),
+                "butina": self._ex_butina.isChecked() and self._ex_butina.isEnabled(),
+                "sphere_exclusion": (
+                    self._ex_sphere.isChecked() and self._ex_sphere.isEnabled()
+                ),
+                "jarvis_patrick": self._ex_jp.isChecked() and self._ex_jp.isEnabled(),
             }
             if not any(include.values()):
                 QMessageBox.warning(
@@ -737,19 +729,27 @@ class ClusterDialog(QDialog):
             self.run_btn.setEnabled(False)
             self._disconnect_process_queue_thread_finished()
             max_runs = int(self.explore_max_runs.value())
+
+            def _explore_rows(payloads):
+                if rows_are_payloads:
+                    return oid_mol_rows_from_payloads(payloads)
+                return list(payloads)
+
             self._active_cluster_job_id = enqueue_process_queue_job(
                 self.parent_app,
                 "Exploring clusters",
                 len(rows),
-                lambda ev, ps, r=rows, fc=fp_choice, mr=max_runs, inc=include, ws=self.parent_app.signals: (
+                lambda ev, ps, r=rows, fc=fp_choice, mr=max_runs, inc=include, ws=self.parent_app.signals, nb=numeric_by_oid, st=standardize: (
                     ClusterExploreWorker(
-                        oid_mol_rows_from_payloads(r),
+                        _explore_rows(r),
                         fc,
                         mr,
                         inc,
                         ws,
                         cancel_event=ev,
                         progress_state=ps,
+                        numeric_by_oid=nb,
+                        standardize_numeric=st,
                     )
                 ),
                 queue_label=f"Cluster explore ({len(rows)} rows, ≤{max_runs} trials)",
@@ -795,7 +795,16 @@ class ClusterDialog(QDialog):
             return
 
         col_name = self._unique_cluster_column()
-        self._enqueue_cluster_worker(rows, fp_choice, method, params, col_name)
+        self._enqueue_cluster_worker(
+            rows,
+            fp_choice,
+            method,
+            params,
+            col_name,
+            numeric_by_oid=numeric_by_oid,
+            standardize_numeric=standardize,
+            rows_are_payloads=rows_are_payloads,
+        )
 
     def enable_run_after_job(self) -> None:
         """Call when the process queue finishes so the dialog can run again."""
