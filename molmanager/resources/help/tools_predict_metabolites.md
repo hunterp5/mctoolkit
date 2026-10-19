@@ -36,7 +36,7 @@ Run `python scripts/bootstrap_biotransformer.py`, use **Browse JAR…** / **Inst
 2. Choose table rows or paste SMILES.
 3. Pick metabolism, steps, and the product cap.
 4. Run **Predict** and wait on **Processes**.
-5. Review parent columns (**Metabolite Count**, **Metabolite Reactions**, **Metabolite SMILES**) and the **Predict Metabolites Browser**. The table lists the parent first, then metabolites (structure, reaction, enzyme, step); click a row to show that structure on the canvas. **Browse Only Selected** is in the footer. Reopen it from **Tools → Predict → Metabolites → Viewer** when those columns are already in the table.
+5. Review parent columns (**Metabolite Count**, **Metabolite Reactions**, **Metabolite SMILES**) and the **Predict Metabolites Browser**. The table lists the parent first, then metabolites (structure, reaction, enzyme, step); click a row to show that structure on the canvas. **Browse Only Selected** is in the footer. Reopen it from **Chemistry → Predict → Metabolites → Viewer** when those columns are already in the table.
 
 ## Use cases
 
