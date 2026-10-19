@@ -240,6 +240,7 @@ class ChemistryWorkspaceWindow(
         self.session_notepad = SessionNotepadHost(self)
         _qc = Qt.QueuedConnection
         self.signals.mols_loaded.connect(self.on_file_loaded, _qc)
+        self.signals.file_load_failed.connect(self.on_file_load_failed, _qc)
         self.signals.structure_source_probe.connect(self._on_structure_source_probe, _qc)
         self.signals.rendered.connect(self.on_row_ready, _qc)
         self.signals.rendered_batch.connect(self.on_render2d_rows_ready, _qc)
