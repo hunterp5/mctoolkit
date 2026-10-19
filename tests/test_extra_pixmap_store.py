@@ -39,6 +39,17 @@ def test_extra_pixmap_store_lru_keeps_png_bytes(qapp):  # noqa: ARG001
     assert store.pixmap(1, "Copy") is not None
 
 
+def test_extra_pixmap_png_bytes_roundtrip(qapp):  # noqa: ARG001
+    store = ExtraPixmapStore()
+    raw = b"\x89PNG\r\n\x1a\n-fake"
+    store.set_png_bytes(4, "Img", raw)
+    assert store.png_bytes(4, "Img") == raw
+    assert store.png_bytes_for_header("Img") == {4: raw}
+    store.set_png_bytes_batch("Img", [(4, None), (5, raw)])
+    assert store.png_bytes(4, "Img") is None
+    assert store.png_bytes(5, "Img") == raw
+
+
 def test_extra_pixmap_store_misses_skip_sqlite(qapp):  # noqa: ARG001
     store = ExtraPixmapStore()
     pm = QPixmap(8, 8)
