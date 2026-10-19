@@ -6,11 +6,15 @@
   Shared resize scheduler for embedded web views (Plotly shell, 3Dmol viewers).
 
   - Watches a container with ResizeObserver (window "resize" when unavailable).
-  - Redraws on the first change, then at most once per animation frame with at most
-    one redraw in flight; slow redraws stretch the interval to their own duration.
+  - The first change of a burst redraws synchronously inside the observer callback.
+    ResizeObserver runs after layout and before paint, so a dock, undock, or page
+    switch draws the figure at its new size in the same frame it first appears.
+    That includes a page that was hidden: its notifications arrive in the first
+    visible frame.
+  - Later changes in the burst (a splitter drag) redraw at most once per animation
+    frame with at most one redraw in flight; slow redraws stretch the interval to
+    their own duration.
   - Runs one settle pass after the size stops changing.
-  - molmanagerHoldResize(true/false) defers redraws during dock/undock; a hold expires
-    on its own so a lost release cannot leave a view frozen.
   - window.molmanagerPerfStats() returns JSON timing stats for local benchmarking.
 */
 (function () {
@@ -59,16 +63,15 @@
 
   /**
    * opts.target      element to observe (defaults to document.body)
-   * opts.onResize    function({settle: bool}) -> optional Promise; performs the redraw
+   * opts.onResize    function({settle: bool, first: bool}) -> optional Promise; redraws.
+   *                  ``first`` is the synchronous pass at the start of a burst.
    * opts.settleMs    quiet period before the settle pass (default 120)
-   * opts.holdMaxMs   hold auto-expiry (default 1000)
    */
   window.molmanagerCreateResizeScheduler = function (opts) {
     opts = opts || {};
     var target = opts.target || document.body;
     var onResize = typeof opts.onResize === "function" ? opts.onResize : function () {};
     var settleMs = typeof opts.settleMs === "number" ? opts.settleMs : 120;
-    var holdMaxMs = typeof opts.holdMaxMs === "number" ? opts.holdMaxMs : 1000;
 
     var frameScheduled = false;
     var inFlight = false;
@@ -77,9 +80,6 @@
     var settleTimer = null;
     var lastEnd = 0;
     var lastDuration = 0;
-    var held = false;
-    var heldDirty = false;
-    var holdGen = 0;
     var active = false;
 
     function finish(start, settle) {
@@ -93,15 +93,11 @@
         scheduleFrame();
       } else if (settlePending) {
         settlePending = false;
-        run(true);
+        run(true, false);
       }
     }
 
-    function run(settle) {
-      if (held) {
-        heldDirty = true;
-        return;
-      }
+    function run(settle, first) {
       if (inFlight) {
         if (settle) settlePending = true;
         else pending = true;
@@ -112,7 +108,7 @@
       var start = now();
       var result;
       try {
-        result = onResize({ settle: !!settle });
+        result = onResize({ settle: !!settle, first: !!first });
       } catch (_err) {
         result = null;
       }
@@ -135,7 +131,7 @@
         nextFrame(onFrame);
         return;
       }
-      run(false);
+      run(false, false);
     }
 
     function scheduleFrame() {
@@ -152,36 +148,19 @@
       if (settleTimer) clearTimeout(settleTimer);
       settleTimer = setTimeout(function () {
         settleTimer = null;
-        run(true);
+        run(true, false);
       }, settleMs);
     }
 
     function request() {
+      var startsBurst = !active && !inFlight;
       active = true;
       armSettle();
-      if (held) {
-        heldDirty = true;
+      if (startsBurst) {
+        run(false, true);
         return;
       }
       scheduleFrame();
-    }
-
-    function hold(on) {
-      holdGen += 1;
-      if (on) {
-        held = true;
-        var gen = holdGen;
-        setTimeout(function () {
-          if (gen === holdGen && held) hold(false);
-        }, holdMaxMs);
-        return;
-      }
-      held = false;
-      if (heldDirty) {
-        heldDirty = false;
-        run(false);
-        armSettle();
-      }
     }
 
     if (typeof ResizeObserver === "function") {
@@ -196,9 +175,7 @@
 
     return {
       request: request,
-      hold: hold,
-      isActive: function () { return active; },
-      isHeld: function () { return held; }
+      isActive: function () { return active; }
     };
   };
 })();
