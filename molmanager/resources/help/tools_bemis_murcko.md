@@ -1,6 +1,6 @@
 # Bemis–Murcko
 
-**Chemistry → Substructure → Bemis–Murcko → Calculate** writes scaffold columns for the chosen structures.
+**Chemistry → Substructure → Bemis–Murcko** writes scaffold columns for the chosen structures.
 
 ## Goal
 
