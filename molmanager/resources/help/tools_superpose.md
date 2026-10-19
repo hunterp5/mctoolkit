@@ -33,7 +33,7 @@ Use **Conformers** after generating ensembles when you want a shared frame per m
 ## Workflow
 
 1. Select the series (or generate **confs** first for per-row ensembles).
-2. Open **Tools → Conformations → Superpose…**. Choose what to align, the geometry, and what to overlay on (whole molecule, a ring, or a custom core).
+2. Open **Chemistry → Conformations → Superpose…**. Choose what to align, the geometry, and what to overlay on (whole molecule, a ring, or a custom core).
 3. Optionally set a SMARTS core; leave MCS on for analog series.
 4. Run. Inspect the results window (overlay plus energy table when 3D topologies match). Browser arrows step through poses. If several conformer rows were processed, the first overlay opens; use **View Conformers** on other **superpose** cells.
 
