@@ -25,10 +25,105 @@ from PyQt5.QtWidgets import (
 )
 
 from ...workers.chemistry_descriptors import CalcDescriptorsRequest, CalcWorker
+from ...workers.common_core import CommonCoreWorker
 from ..analysis_job_support import enqueue_process_queue_job
+from ..strings import TOOL_BEMIS_MURCKO, TOOL_COMMON_CORE
 
 
 class DescriptorsToolsMixin:
+    def _on_calculated_results(self, res, calc_h) -> None:
+        """Write calculated columns, then depict new Murcko and common-core structures."""
+        oids = {int(oid) for oid, _row in (res or []) if oid is not None}
+
+        def _after_write(written: list[str]) -> None:
+            render = getattr(self, "_queue_murcko_column_renders", None)
+            if callable(render):
+                render(written, oids)
+
+        self.on_calc_finished(res, calc_h, on_complete=_after_write)
+
+    def _on_common_core_failed(self, message: str) -> None:
+        self._finish_tool_progress(TOOL_COMMON_CORE)
+        text = message or "Common core search failed."
+        if text == "Cancelled.":
+            self.status_label.setText(self._consume_partial_results_notice() or "Cancelled.")
+            return
+        self.status_label.setText("Ready.")
+        QMessageBox.warning(self, TOOL_COMMON_CORE, text)
+
+    def open_bemis_murcko(self) -> None:
+        if not self.headers:
+            return
+        from ..dialogs import BemisMurckoDialog
+
+        sources = self.chemistry_tool_structure_sources()
+        dialog = BemisMurckoDialog(sources, len(self._selected_logical_rows()), self)
+        self._prepare_tool_dialog(dialog)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        dialog.accepted.connect(lambda *_, dlg=dialog: self._on_bemis_murcko_accepted(dlg))
+        dialog.show()
+
+    def _on_bemis_murcko_accepted(self, dialog) -> None:
+        headers, keys = dialog.get_selected()
+        if not headers:
+            return
+        src = dialog.src_combo.currentText()
+        rows = self._rows_for_structure_column_job(src, dialog.only_selected_rows(), TOOL_BEMIS_MURCKO)
+        if rows is None:
+            return
+        data, oids_list, is_text = rows
+        self._enqueue_column_calc(
+            title=TOOL_BEMIS_MURCKO,
+            data=data,
+            disp_headers=self._result_column_names(headers, oids_list),
+            int_fns=keys,
+            is_text=is_text,
+        )
+
+    def open_common_core(self) -> None:
+        if not self.headers:
+            return
+        from ..dialogs import CommonCoreDialog
+
+        sources = self.chemistry_tool_structure_sources()
+        dialog = CommonCoreDialog(sources, len(self._selected_logical_rows()), self)
+        self._prepare_tool_dialog(dialog)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        dialog.accepted.connect(lambda *_, dlg=dialog: self._on_common_core_accepted(dlg))
+        dialog.show()
+
+    def _on_common_core_accepted(self, dialog) -> None:
+        params = dialog.params()
+        rows = self._rows_for_structure_column_job(
+            params.structure_source, dialog.only_selected_rows(), TOOL_COMMON_CORE
+        )
+        if rows is None:
+            return
+        data, _oids, _is_text = rows
+        if len(data) < 2:
+            QMessageBox.information(
+                self,
+                TOOL_COMMON_CORE,
+                "Common core needs at least two structures.",
+            )
+            self.status_label.setText("Ready.")
+            return
+        enqueue_process_queue_job(
+            self,
+            TOOL_COMMON_CORE,
+            len(data),
+            lambda ev, ps, payload=data, opts=params: CommonCoreWorker(
+                payload,
+                outliers=opts.outliers,
+                complete_rings=opts.complete_rings,
+                timeout=opts.timeout,
+                signals=self.signals,
+                cancel_event=ev,
+                progress_state=ps,
+            ),
+            queue_label=f"{TOOL_COMMON_CORE} ({len(data)} rows)",
+        )
+
     def open_calc(self):
         if not self.headers:
             return
