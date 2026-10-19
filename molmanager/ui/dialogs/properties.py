@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ...chem.structural_alerts import available_alert_catalogs
 from ...descriptors.catalog import iter_descriptor_tab_items
 from ...reference.descriptor_tooltips import descriptor_checkbox_tooltip
 from ..qt_widget_utils import make_window_minimizable
@@ -49,11 +50,14 @@ class PropertyDialog(QDialog):
 
     def _init_property_state(self, columns, selected_row_count: int) -> None:
         self.setWindowTitle("Calculate Descriptors")
-        self.setMinimumWidth(780)
         self.resize(820, 700)
         self._source_columns = [c for c in columns if (c or "").strip()]
         self._selected_row_count = int(selected_row_count)
         self._have_selection = selected_row_count > 0
+        self._alert_catalogs = ()
+        self._alert_checks = {}
+        self._scaffold_columns = ()
+        self._scaffold_checks = {}
 
     def _build_property_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -94,14 +98,76 @@ class PropertyDialog(QDialog):
             tab_lyt.addStretch()
             scroll.setWidget(tab)
             self.tabs.addTab(scroll, cat_name)
+        self._add_structural_alerts_tab()
+        self._add_scaffolds_tab()
 
         root.addWidget(self.tabs, 1)
         self._button_box = QDialogButtonBox(QDialogButtonBox.Ok)
         root.addWidget(self._button_box)
+        self._lock_width_to_tabs()
+
+    def _lock_width_to_tabs(self) -> None:
+        """Open wide enough for every tab label, and refuse a narrower resize."""
+        bar = self.tabs.tabBar()
+        bar.ensurePolished()
+        margins = self.layout().contentsMargins()
+        width = bar.sizeHint().width() + margins.left() + margins.right()
+        self.setMinimumWidth(width)
+        if self.width() < width:
+            self.resize(width, self.height())
 
     def _wire_property_ui(self) -> None:
         self._button_box.accepted.connect(self.accept)
         make_window_minimizable(self)
+
+    def _add_structural_alerts_tab(self) -> None:
+        """Catalog checkboxes. Each checked set writes a count column and a name column."""
+        catalogs = available_alert_catalogs()
+        if not catalogs:
+            return
+        self._alert_catalogs = catalogs
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        tab = QWidget()
+        tab_lyt = QVBoxLayout(tab)
+        for spec in catalogs:
+            cb = QCheckBox(spec.label)
+            count_header, _count_key = spec.column_pairs()[0]
+            names_header, _names_key = spec.column_pairs()[1]
+            cb.setToolTip(f"{spec.summary} Writes {count_header} and {names_header}.")
+            tab_lyt.addWidget(cb)
+            self._alert_checks[spec.key] = cb
+        tab_lyt.addStretch()
+        scroll.setWidget(tab)
+        insert_at = self.tabs.count()
+        for index in range(self.tabs.count()):
+            if self.tabs.tabText(index) == "Drug-likeness":
+                insert_at = index + 1
+                break
+        self.tabs.insertTab(insert_at, scroll, "Structural Alerts")
+
+    def _add_scaffolds_tab(self) -> None:
+        """Bemis–Murcko scaffold, framework, ring systems, and a per-run count."""
+        from ...chem.murcko import SCAFFOLD_COLUMNS
+
+        self._scaffold_columns = SCAFFOLD_COLUMNS
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        tab = QWidget()
+        tab_lyt = QVBoxLayout(tab)
+        for header, _internal, tip in SCAFFOLD_COLUMNS:
+            cb = QCheckBox(header)
+            cb.setToolTip(tip)
+            tab_lyt.addWidget(cb)
+            self._scaffold_checks[header] = cb
+        tab_lyt.addStretch()
+        scroll.setWidget(tab)
+        insert_at = self.tabs.count()
+        for index in range(self.tabs.count()):
+            if self.tabs.tabText(index) == "Structural Alerts":
+                insert_at = index + 1
+                break
+        self.tabs.insertTab(insert_at, scroll, "Scaffolds")
 
     def get_selected(self):
         sel_disp, sel_int = [], []
@@ -109,6 +175,15 @@ class PropertyDialog(QDialog):
             if cb.isChecked():
                 sel_disp.append(d)
                 sel_int.append(i)
+        for spec in self._alert_catalogs:
+            if self._alert_checks[spec.key].isChecked():
+                for header, internal in spec.column_pairs():
+                    sel_disp.append(header)
+                    sel_int.append(internal)
+        for header, internal, _tip in self._scaffold_columns:
+            if self._scaffold_checks[header].isChecked():
+                sel_disp.append(header)
+                sel_int.append(internal)
         return sel_disp, sel_int
 
     def only_selected_rows(self) -> bool:
