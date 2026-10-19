@@ -8,7 +8,7 @@ Mark sites in the pocket (H-bond donors and acceptors, aromatic centroids, hydro
 
 ## When to use
 
-Use **Protein Viewer → Tools → Pharmacophore** after a structure is on the canvas and you want reusable spatial constraints. Use **Protein → Dock Ligand → Gnina → Pharmacophore** to keep docked poses that occupy those spheres. Use **Tools → Conformations → Screen Pharmacophore** (or **Protein Viewer → Tools → Pharmacophore → Screen Table…**) to find table molecules whose ensembles match the same feature pattern.
+Use **Protein Viewer → Tools → Pharmacophore** after a structure is on the canvas and you want reusable spatial constraints. Use **Protein → Dock Ligand → Gnina → Pharmacophore** to keep docked poses that occupy those spheres. Use **Chemistry → Conformations → Screen Pharmacophore** (or **Protein Viewer → Tools → Pharmacophore → Screen Table…**) to find table molecules whose ensembles match the same feature pattern.
 
 ## Inputs / scope
 
@@ -31,7 +31,7 @@ The **Tools → Pharmacophore** menu is **Editor**, **Screen Table…**, and **O
 - **Open…** — load a pharmacophore JSON (menu or editor).
 - **Save… / Clear** — in the editor; write the JSON or remove all features from this viewer.
 - **Send to Gnina** — in the editor; write the file if needed and fill the Gnina **Pharmacophore** field.
-- **Screen Table…** — open **Tools → Conformations → Screen Pharmacophore…** with this pharmacophore against packed `confs` / `superpose` / `poses`.
+- **Screen Table…** — open **Chemistry → Conformations → Screen Pharmacophore…** with this pharmacophore against packed `confs` / `superpose` / `poses`.
 - **Gnina → Pharmacophore / Slack** — path to the JSON and extra match tolerance (default 0.50 Å). Docked poses that miss a required sphere are dropped.
 
 ## Workflow
@@ -41,7 +41,7 @@ The **Tools → Pharmacophore** menu is **Editor**, **Screen Table…**, and **O
 3. Click an atom to fill X/Y/Z and **Atom**, then **Add**, or **From ligand**. Adjust type, atom, and radius in the table.
 4. **Save…** the pharmacophore for reuse.
 5. **Send to Gnina** (or browse the file in the Gnina dialog) and run docking as usual.
-6. To find analogs in the compound table, generate conformers, then **Screen Table…** (or **Tools → Conformations → Screen Pharmacophore…**).
+6. To find analogs in the compound table, generate conformers, then **Screen Table…** (or **Chemistry → Conformations → Screen Pharmacophore…**).
 
 ## Use cases
 
