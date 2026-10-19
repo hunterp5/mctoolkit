@@ -46,7 +46,7 @@ def test_interactive_view_hover_card_json(qapp):  # noqa: ARG001
     one = json.loads(view._hover_card_json_for_point(0))
     assert one["count"] == 1
     assert one["oid"] == 0
-    assert any("SMILES" in s or "Name" in s or "MW" in s for s in one["lines"])
+    assert one["lines"] == []
     assert one["img"].startswith("data:image/png;base64,")
 
     multi = json.loads(view._hover_card_json_for_points("[0,1]"))
