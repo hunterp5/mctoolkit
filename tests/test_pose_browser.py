@@ -262,6 +262,61 @@ def test_closed_pose_browser_does_not_restore_overlay_on_viewer_reopen(qapp, tmp
         parent.close()
 
 
+def test_closing_protein_viewer_closes_docked_pose_browser(qapp, tmp_path, monkeypatch):  # noqa: ARG001
+    from PyQt5.QtWidgets import QApplication
+
+    from molmanager.ui.dock_complex_viewer import DockComplexEmbedView
+    from molmanager.ui.main_window import ChemistryWorkspaceWindow
+    from molmanager.ui.pose_browser import PoseBrowserDialog
+    from molmanager.ui.protein_embed import ProteinEmbedView
+    from molmanager.ui.qt_widget_utils import qobject_is_deleted
+
+    monkeypatch.setattr(DockComplexEmbedView, "_ensure_web", lambda self: None)
+    monkeypatch.setattr(ProteinEmbedView, "_ensure_web", lambda self: None)
+
+    rec = tmp_path / "rec.pdb"
+    rec.write_text(
+        "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\n"
+        "HETATM    2  C1  LIG A  99       1.000   0.000   0.000  1.00  0.00           C\n"
+        "END\n",
+        encoding="utf-8",
+    )
+    parent = ChemistryWorkspaceWindow()
+    viewer = parent.open_protein_viewer()
+    viewer.load_structure_path(rec)
+    parent.open_dock_results_window(
+        [_ethanol_pose("-8.100", 1.0)],
+        title="Pose browser",
+        receptor_path=str(rec),
+    )
+    panel = parent._live_pose_browser()
+    try:
+        assert panel is not None
+        assert viewer.is_side_docked(panel)
+        viewer.close()
+        qapp.processEvents()
+        assert parent._live_pose_browser() is None
+        dlg = getattr(parent, "_pose_browser_dialog", None)
+        assert dlg is None or qobject_is_deleted(dlg)
+        floating = [
+            w
+            for w in QApplication.topLevelWidgets()
+            if isinstance(w, PoseBrowserDialog) and w.isVisible()
+        ]
+        assert floating == []
+        assert parent._last_dock_results
+    finally:
+        live = parent._live_pose_browser()
+        if live is not None:
+            host = live.window()
+            if host is not None and host is not live:
+                host.close()
+        viewer = parent._live_protein_viewer()
+        if viewer is not None:
+            viewer.close()
+        parent.close()
+
+
 def test_hidden_pose_browser_does_not_restore_overlay_on_viewer_reopen(qapp, tmp_path, monkeypatch):  # noqa: ARG001
     from molmanager.ui.dock_complex_viewer import DockComplexEmbedView
     from molmanager.ui.main_window import ChemistryWorkspaceWindow
