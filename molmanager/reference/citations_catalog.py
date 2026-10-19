@@ -385,6 +385,44 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 notes="Counts via RDKit Lipinski helpers.",
             ),
             _t(
+                "structural_alerts",
+                "Structural alerts (RDKit FilterCatalog)",
+                "PAINS, Brenk, NIH, ZINC, and ChEMBL alert columns (Calculate Descriptors → Structural Alerts).",
+                (
+                    (
+                        "Baell, J. B.; Holloway, G. A. New Substructure Filters for Removal of "
+                        "Pan Assay Interference Compounds (PAINS) from Screening Libraries and "
+                        "for Their Exclusion in Bioassays. J. Med. Chem. 2010, 53, 2719–2740.",
+                        "https://doi.org/10.1021/jm901137j",
+                    ),
+                    (
+                        "Brenk, R.; et al. Lessons Learnt from Assembling Screening Libraries for "
+                        "Drug Discovery for Neglected Diseases. ChemMedChem 2008, 3, 435–444.",
+                        "https://doi.org/10.1002/cmdc.200700139",
+                    ),
+                ),
+                LIC_BSD3,
+                notes=(
+                    "Matched with rdkit.Chem.FilterCatalog. NIH, ZINC, and ChEMBL sets are the "
+                    "catalogs shipped with RDKit. ChEMBL sets appear when that RDKit build includes them."
+                ),
+            ),
+            _t(
+                "murcko",
+                "Bemis–Murcko scaffolds",
+                "Murcko scaffold, framework, ring systems, and scaffold count "
+                "(Calculate Descriptors → Scaffolds).",
+                (
+                    (
+                        "Bemis, G. W.; Murcko, M. A. The Properties of Known Drugs. 1. Molecular "
+                        "Frameworks. J. Med. Chem. 1996, 39, 2887–2893.",
+                        "https://doi.org/10.1021/jm9602928",
+                    ),
+                ),
+                LIC_BSD3,
+                notes="Computed with rdkit.Chem.Scaffolds.MurckoScaffold.",
+            ),
+            _t(
                 "ab_mps",
                 "AB-MPS",
                 "AbbVie MPS-style score from |LogD7.4 − 3| + aromatic rings + rotatable bonds.",
