@@ -33,6 +33,11 @@ logger = logging.getLogger(__name__)
 
 from .platform_support.app_logging import configure_app_logging, install_crash_excepthook  # noqa: E402
 from .platform_support.rdkit_runtime_setup import configure_rdkit_for_desktop_app  # noqa: E402
+from .table.open_messages import (  # noqa: E402
+    message_for_read_failure,
+    message_for_session_read_failure,
+    no_path_message,
+)
 from .ui.main_window import ChemistryWorkspaceWindow  # noqa: E402
 from .ui.theme import bootstrap_application_gui  # noqa: E402
 
@@ -57,11 +62,16 @@ def _preload_qt_webengine() -> None:
         )
 
 
-def _argv_for_qt(argv: list[str]) -> tuple[list[str], str | None, str | None]:
-    """Remove MolManager-only flags so ``QApplication`` does not see unknown options."""
+def _argv_for_qt(argv: list[str]) -> tuple[list[str], str | None, str | None, list[str]]:
+    """Remove MolManager-only flags so ``QApplication`` does not see unknown options.
+
+    The last item lists ``"session"`` and/or ``"file"`` when that flag was given
+    with no path.
+    """
     out: list[str] = [argv[0]] if argv else []
     load_session: str | None = None
     open_file: str | None = None
+    missing: list[str] = []
     i = 1
     while i < len(argv):
         a = argv[i]
@@ -70,6 +80,7 @@ def _argv_for_qt(argv: list[str]) -> tuple[list[str], str | None, str | None]:
                 load_session = argv[i + 1]
                 i += 2
                 continue
+            missing.append("session")
             i += 1
             continue
         if a in ("--open", "-o"):
@@ -77,11 +88,12 @@ def _argv_for_qt(argv: list[str]) -> tuple[list[str], str | None, str | None]:
                 open_file = argv[i + 1]
                 i += 2
                 continue
+            missing.append("file")
             i += 1
             continue
         out.append(a)
         i += 1
-    return out, load_session, open_file
+    return out, load_session, open_file, missing
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -103,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         return demo_main()
 
     _preload_qt_webengine()
-    argv_qt, load_session, open_file = _argv_for_qt(list(argv))
+    argv_qt, load_session, open_file, missing_open = _argv_for_qt(list(argv))
     app = QApplication(argv_qt)
     bootstrap_application_gui(app)
 
@@ -112,6 +124,16 @@ def main(argv: list[str] | None = None) -> int:
     from .platform_support.qt_webengine_flags import schedule_qtwebengine_prewarm
 
     schedule_qtwebengine_prewarm()
+    if "session" in missing_open:
+        QTimer.singleShot(
+            0,
+            lambda: w._warn_could_not_open("Open Session", no_path_message(kind="session")),
+        )
+    if "file" in missing_open:
+        QTimer.singleShot(
+            0,
+            lambda: w._warn_could_not_open("Open File", no_path_message(kind="file")),
+        )
     if load_session:
         try:
             p = load_session.lower()
@@ -121,6 +143,9 @@ def main(argv: list[str] | None = None) -> int:
                 w.load_session_csv(load_session)
         except Exception as e:
             logger.warning("Startup session load failed (%s): %s", load_session, e, exc_info=True)
+            w._warn_could_not_open(
+                "Open Session", message_for_session_read_failure(load_session, e)
+            )
     if open_file:
         path = os.path.abspath(open_file)
 
@@ -129,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
                 w.load_file(path)
             except Exception as e:
                 logger.warning("Startup file load failed (%s): %s", path, e, exc_info=True)
+                w._warn_could_not_open("Open File", message_for_read_failure(path, e))
 
         QTimer.singleShot(0, _do_open)
     code = app.exec_()
