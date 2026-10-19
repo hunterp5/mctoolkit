@@ -30,6 +30,7 @@ from ...conformers.conformer_column_codec import (
     is_packed_ensemble_header,
     resolve_blocks_b64_for_viewer,
 )
+from ...docking.pose_file_io import is_poses_header
 from ...chem.molecule_conversion import mol_structure_copy_texts
 from ..strings import TOOL_RENDER_2D
 from ..widgets import CategoryFilterCard, FilterCard, TextFilterCard
@@ -244,6 +245,17 @@ class TableMenuMixin:
             logs.add(name_in)
         if old_n in self.global_bounds:
             self.global_bounds[name_in] = self.global_bounds.pop(old_n)
+        contexts = getattr(self, "_pose_column_contexts", None)
+        pose_column = is_poses_header(old_n) or (isinstance(contexts, dict) and old_n in contexts)
+        if isinstance(contexts, dict) and old_n in contexts and old_n != name_in:
+            contexts[name_in] = contexts.pop(old_n)
+            if getattr(self, "_last_pose_column", None) == old_n:
+                self._last_pose_column = name_in
+            snap = getattr(self, "_last_dock_results", None)
+            if isinstance(snap, dict) and snap.get("pose_column") == old_n:
+                snap["pose_column"] = name_in
+        if pose_column and old_n != name_in:
+            self._retarget_packed_column_store(old_n, name_in)
         cols = self._filterable_data_column_names()
         for f in self.filters:
             if isinstance(f, FilterCard):
@@ -251,6 +263,56 @@ class TableMenuMixin:
             elif isinstance(f, (TextFilterCard, CategoryFilterCard)):
                 f.update_prop_list(cols, old_n, name_in)
         self.status_label.setText(f"Renamed column '{old_n}' to '{name_in}'.")
+
+    def _retarget_packed_column_store(self, old_n: str, name_in: str) -> None:
+        """Keep a renamed poses column's packed cells and ensemble store in sync."""
+        import json
+
+        store = getattr(self, "_confs_blocks_sidecar", None)
+        if store is not None:
+            try:
+                keys = [
+                    key
+                    for key in list(store)
+                    if isinstance(key, tuple) and len(key) >= 2 and str(key[1]) == old_n
+                ]
+            except (TypeError, RuntimeError):
+                keys = []
+            for key in keys:
+                payload = store.get(key)
+                if payload is None:
+                    continue
+                store[(int(key[0]), name_in)] = payload
+                try:
+                    del store[key]
+                except KeyError:
+                    continue
+        model = getattr(self, "_table_model", None)
+        if model is None:
+            return
+        try:
+            n_rows = int(model.rowCount())
+        except (TypeError, RuntimeError, ValueError):
+            return
+        for row in range(n_rows):
+            raw = model.backing_value_for_row_header(row, name_in)
+            if not raw or old_n not in str(raw):
+                continue
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict) or str(payload.get("h") or "") != old_n:
+                continue
+            payload["h"] = name_in
+            oid_text = model.cell_text(row, 0)
+            if not str(oid_text).isdigit():
+                continue
+            model.set_backing_text(
+                int(oid_text),
+                name_in,
+                json.dumps(payload, separators=(",", ":"), ensure_ascii=True),
+            )
 
     def _column_can_toggle_logarithmic(self, header_name: str) -> bool:
         if header_name in ("ID_HIDDEN", "Structure"):
@@ -379,20 +441,26 @@ class TableMenuMixin:
             menu.addSeparator()
 
         packed_confs_b64 = None
+        pose_column = False
         if 0 <= col < len(self.headers):
             hdr = self.headers[col]
             raw_cell = self._table_model.backing_value_for_row_header(row, hdr)
             packed_confs_b64 = resolve_blocks_b64_for_viewer(
                 raw_cell, hdr, oid, getattr(self, "_confs_blocks_sidecar", {})
             )
+            contexts = getattr(self, "_pose_column_contexts", None) or {}
+            pose_column = is_poses_header(hdr) or (isinstance(contexts, dict) and hdr in contexts)
 
         chem_col = self._column_eligible_for_table_chemistry_menu(row, col)
         mol_ctx = self._mol_for_table_context_menu(row, col) if chem_col else None
 
-        sketch_act = view_conformers_act = browser_act = render2d_act = None
+        sketch_act = view_poses_act = view_conformers_act = browser_act = render2d_act = None
         structure_menu = False
         if chem_col and mol_ctx is not None:
             sketch_act = menu.addAction("Open in Sketcher…")
+            structure_menu = True
+        if packed_confs_b64 is not None and pose_column:
+            view_poses_act = menu.addAction("View Poses")
             structure_menu = True
         if packed_confs_b64 is not None:
             view_conformers_act = menu.addAction("View Conformers…")
@@ -446,6 +514,9 @@ class TableMenuMixin:
                 exporter(int(oid), som_header)
         elif action == sketch_act and mol_ctx is not None:
             self.open_sketcher(mol_ctx)
+        elif view_poses_act is not None and action == view_poses_act and oid is not None:
+            column = self.headers[col] if 0 <= col < len(self.headers) else ""
+            self.show_packed_poses_in_viewer(int(oid), column)
         elif (
             view_conformers_act is not None
             and action == view_conformers_act

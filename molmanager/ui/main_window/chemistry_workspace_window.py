@@ -352,6 +352,8 @@ class ChemistryWorkspaceWindow(
         self._floating_result_dialogs: list = []
         self._dock_result_windows: list = []
         self._last_dock_results: dict | None = None
+        self._last_pose_column: str | None = None
+        self._pose_column_contexts: dict[str, dict[str, str | None]] = {}
         self._dock_results_mode = False
         self._column_selection_anchor: int | None = None
         self._plot_table_sync_timer = QTimer(self)

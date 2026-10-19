@@ -436,6 +436,7 @@ class SessionSaveMixin:
             "ionization_sidecar": serialize_ionization_sidecar(),
             "mmp_ledger": self._session_mmp_ledger_payload(),
             "dock_results": self._session_dock_results_payload(oids=want),
+            "pose_column_contexts": self._session_pose_column_contexts(),
             "protein_viewer": self._collect_protein_viewer(),
             "gnina_dock": self._collect_gnina_dock(),
         }

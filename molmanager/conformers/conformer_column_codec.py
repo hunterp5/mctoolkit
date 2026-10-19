@@ -149,6 +149,64 @@ def conformer_mol_blocks_b64_json(mol: Chem.Mol) -> str:
     return base64.b64encode(payload).decode("ascii")
 
 
+def sd_blocks_b64_json_from_mols(mols: list[Chem.Mol]) -> str:
+    """Base64(JSON list of base64(SDF record)) so each docked pose keeps its properties."""
+    from io import StringIO
+
+    blocks: list[str] = []
+    for mol in mols:
+        if mol is None:
+            continue
+        try:
+            buf = StringIO()
+            writer = Chem.SDWriter(buf)
+            writer.write(mol)
+            writer.close()
+            text = buf.getvalue()
+        except (RuntimeError, ValueError, OSError):
+            continue
+        if not text.strip():
+            continue
+        blocks.append(base64.b64encode(text.encode("utf-8")).decode("ascii"))
+    return base64.b64encode(json.dumps(blocks).encode("utf-8")).decode("ascii")
+
+
+def mols_from_blocks_b64(blocks_b64: str) -> list[Chem.Mol]:
+    """One molecule per packed block, keeping SDF properties when the record has them."""
+    from io import BytesIO
+
+    try:
+        encoded = json.loads(base64.b64decode(str(blocks_b64).encode("ascii")))
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return []
+    if not isinstance(encoded, list):
+        return []
+    out: list[Chem.Mol] = []
+    for item in encoded:
+        if not isinstance(item, str):
+            continue
+        try:
+            text = base64.b64decode(item.encode("ascii")).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        mol = None
+        try:
+            supplier = Chem.ForwardSDMolSupplier(
+                BytesIO(text.encode("utf-8")), sanitize=True, removeHs=False
+            )
+            mol = next(iter(supplier), None)
+        except (RuntimeError, ValueError, OSError):
+            mol = None
+        if mol is None:
+            try:
+                mol = Chem.MolFromMolBlock(text, sanitize=True, removeHs=False)
+            except (RuntimeError, ValueError):
+                mol = None
+        if mol is not None and int(mol.GetNumConformers()) > 0:
+            out.append(mol)
+    return out
+
+
 def mol_blocks_b64_json_from_mols(mols: list[Chem.Mol]) -> str:
     """Base64(JSON list of base64(mol block)) for one structure per molecule (first conformer)."""
     blocks: list[str] = []
@@ -210,7 +268,10 @@ def pack_mols_as_confs_cell(
             merged.RemoveAllConformers()
             for m in singles:
                 merged.AddConformer(Chem.Conformer(m.GetConformer(0)), assignId=True)
-            return pack_confs_cell(meta, merged, max_chars=max_chars)
+            pose_blocks = None
+            if str((meta or {}).get("op") or "") == "gnina":
+                pose_blocks = sd_blocks_b64_json_from_mols(singles)
+            return pack_confs_cell(meta, merged, max_chars=max_chars, blocks_b64=pose_blocks)
         except Exception:
             logger.debug("pack_mols_as_confs_cell: multi-conf merge failed", exc_info=True)
     blocks_b64 = mol_blocks_b64_json_from_mols(singles)
@@ -229,7 +290,11 @@ def pack_mols_as_confs_cell(
 
 
 def pack_confs_cell(
-    meta: dict, mol: Chem.Mol | None, *, max_chars: int = CONFS_CELL_PACK_MAX_CHARS
+    meta: dict,
+    mol: Chem.Mol | None,
+    *,
+    max_chars: int = CONFS_CELL_PACK_MAX_CHARS,
+    blocks_b64: str | None = None,
 ) -> str:
     """
     Store generation metadata plus, when possible, all conformers as mol blocks for later 3D viewing.
@@ -247,11 +312,12 @@ def pack_confs_cell(
         nconf = 0
     if nconf < 1:
         return base
-    try:
-        blocks_b64 = conformer_mol_blocks_b64_json(mol)
-    except Exception:
-        logger.exception("pack_confs_cell: mol block serialization failed")
-        return base
+    if not blocks_b64:
+        try:
+            blocks_b64 = conformer_mol_blocks_b64_json(mol)
+        except (RuntimeError, ValueError, TypeError):
+            logger.exception("pack_confs_cell: mol block serialization failed")
+            return base
     meta_out = {k: meta[k] for k in _META_KEYS if k in meta}
     inner: dict[str, Any] = {"v": CONFS_PACK_VERSION, "m": meta_out, "b": blocks_b64}
     s = json.dumps(inner, separators=(",", ":"), ensure_ascii=True)

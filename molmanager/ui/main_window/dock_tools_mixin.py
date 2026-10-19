@@ -59,6 +59,7 @@ class DockToolsMixin:
         title: str = "Pose browser",
         receptor_path: str | None = None,
         crystal_path: str | None = None,
+        remember: bool = True,
     ):
         """Open the pose browser in the Protein Viewer Manager, or as a floating window."""
         from ..pose_browser import PoseBrowserDialog, PoseBrowserWidget
@@ -69,12 +70,13 @@ class DockToolsMixin:
         copies = _copy_dock_pose_mols(usable)
         rec_path = (receptor_path or "").strip() or None
         xtal_path = (crystal_path or "").strip() or None
-        self._store_last_dock_results(
-            copies,
-            title=title,
-            receptor_path=rec_path,
-            crystal_path=xtal_path,
-        )
+        if remember:
+            self._store_last_dock_results(
+                copies,
+                title=title,
+                receptor_path=rec_path,
+                crystal_path=xtal_path,
+            )
         protein = self._live_protein_viewer()
         if protein is not None:
             self._prepare_protein_viewer_for_poses(protein, rec_path, crystal_path=xtal_path)
@@ -332,22 +334,236 @@ class DockToolsMixin:
         title: str = "Pose browser",
         receptor_path: str | None = None,
         crystal_path: str | None = None,
+        pose_column: str | None = None,
     ) -> None:
         """Keep the last docking run so Pose Browser can reopen, including after Open Session."""
         copies = _copy_dock_pose_mols(mols)
         rec_path = (receptor_path or "").strip() or None
         xtal_path = (crystal_path or "").strip() or None
+        column = (pose_column or getattr(self, "_last_pose_column", None) or "").strip() or None
         self._last_dock_results = (
             {
                 "mols": copies,
                 "title": str(title or "Pose browser"),
                 "receptor_path": rec_path,
                 "crystal_path": xtal_path,
+                "pose_column": column,
             }
             if copies
             else None
         )
         self._set_pose_browser_action_enabled(bool(copies))
+
+    def _remember_pose_column_context(
+        self,
+        column: str,
+        *,
+        receptor_path: str | None,
+        crystal_path: str | None,
+        set_last: bool = True,
+    ) -> None:
+        """Remember which pocket a ``poses`` column was docked into."""
+        name = (column or "").strip()
+        rec = (receptor_path or "").strip() or None
+        xtal = (crystal_path or "").strip() or None
+        if not name or (rec is None and xtal is None):
+            return
+        contexts = getattr(self, "_pose_column_contexts", None)
+        if not isinstance(contexts, dict):
+            contexts = {}
+            self._pose_column_contexts = contexts
+        contexts[name] = {"receptor_path": rec, "crystal_path": xtal}
+        if set_last:
+            self._last_pose_column = name
+
+    def _session_pose_column_contexts(self) -> dict | None:
+        """Pocket paths for poses columns that are still on the table."""
+        raw = getattr(self, "_pose_column_contexts", None) or {}
+        if not isinstance(raw, dict):
+            return None
+        headers = set(getattr(self, "headers", []) or [])
+        out: dict[str, dict[str, str | None]] = {}
+        for column, ctx in raw.items():
+            name = str(column or "").strip()
+            if not name or name not in headers or not isinstance(ctx, dict):
+                continue
+            rec = str(ctx.get("receptor_path") or "").strip() or None
+            xtal = str(ctx.get("crystal_path") or "").strip() or None
+            if rec or xtal:
+                out[name] = {"receptor_path": rec, "crystal_path": xtal}
+        return out or None
+
+    def restore_pose_column_contexts(self, payload) -> None:
+        """Restore per-column pocket paths after Open Session."""
+        self._pose_column_contexts = {}
+        if not isinstance(payload, dict):
+            self._backfill_pose_column_context_from_last_dock()
+            return
+        for column, ctx in payload.items():
+            if not isinstance(ctx, dict):
+                continue
+            self._remember_pose_column_context(
+                str(column),
+                receptor_path=ctx.get("receptor_path"),
+                crystal_path=ctx.get("crystal_path"),
+                set_last=False,
+            )
+        self._backfill_pose_column_context_from_last_dock()
+        snap = getattr(self, "_last_dock_results", None) or {}
+        recorded = str(snap.get("pose_column") or "").strip()
+        if recorded:
+            self._last_pose_column = recorded
+
+    def _backfill_pose_column_context_from_last_dock(self) -> None:
+        """Older sessions stored one receptor on the last docking run."""
+        snap = getattr(self, "_last_dock_results", None) or {}
+        rec = str(snap.get("receptor_path") or "").strip() or None
+        xtal = str(snap.get("crystal_path") or "").strip() or None
+        if rec is None and xtal is None:
+            return
+        recorded = str(snap.get("pose_column") or "").strip()
+        headers = [h for h in list(getattr(self, "headers", []) or []) if is_poses_header(h)]
+        if recorded and recorded in headers:
+            targets = [recorded]
+        elif len(headers) == 1:
+            targets = headers
+        else:
+            return
+        contexts = getattr(self, "_pose_column_contexts", None)
+        if not isinstance(contexts, dict):
+            contexts = {}
+            self._pose_column_contexts = contexts
+        for column in targets:
+            contexts.setdefault(column, {"receptor_path": rec, "crystal_path": xtal})
+
+    def _pocket_for_pose_column(self, column: str) -> tuple[str | None, str | None, str | None]:
+        """Return ``(receptor, crystal, missing_receptor)`` for a poses column."""
+        contexts = getattr(self, "_pose_column_contexts", None) or {}
+        ctx = contexts.get(column) if isinstance(contexts, dict) else None
+        if not isinstance(ctx, dict):
+            ctx = {}
+        rec = str(ctx.get("receptor_path") or "").strip() or None
+        xtal = str(ctx.get("crystal_path") or "").strip() or None
+        missing = rec if rec and not Path(rec).is_file() else None
+        return rec, xtal, missing
+
+    def _viewer_has_structure(self, dlg, path: str) -> bool:
+        target = Path(path)
+        try:
+            resolved = target.resolve()
+        except OSError:
+            resolved = target
+        for slot in getattr(dlg, "_slots", []) or []:
+            slot_path = getattr(slot, "path", None)
+            if slot_path is None:
+                continue
+            other = Path(slot_path)
+            try:
+                if other.resolve() == resolved:
+                    return True
+            except OSError:
+                if str(other) == str(target):
+                    return True
+        return False
+
+    def _load_pocket_into_viewer(
+        self, dlg, receptor_path: str | None, crystal_path: str | None
+    ) -> None:
+        """Load the dock receptor and crystal ligand when the viewer does not already have them."""
+        if dlg is None:
+            return
+        rec = (receptor_path or "").strip()
+        if rec and Path(rec).is_file() and not self._viewer_has_structure(dlg, rec):
+            adder = getattr(dlg, "add_structure_path", None)
+            if callable(adder):
+                adder(Path(rec), refit=True)
+        crystal = (crystal_path or "").strip()
+        if crystal and Path(crystal).is_file() and not self._viewer_has_structure(dlg, crystal):
+            lig_add = getattr(dlg, "add_ligand_path", None)
+            if callable(lig_add):
+                lig_add(crystal, name="Crystal ligand", color_scheme="default", refit=False)
+        try:
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+        except RuntimeError:
+            pass
+
+    def _mols_for_pose_cell(self, oid: int, column: str) -> list:
+        from ...conformers.conformer_column_codec import (
+            mols_from_blocks_b64,
+            resolve_blocks_b64_for_viewer,
+        )
+        from ...conformers.conformer_output import iter_single_conformer_mols
+        from .conformer_writeback import mol_for_ensemble_column
+
+        blocks_b64 = None
+        model = getattr(self, "_table_model", None)
+        finder = getattr(self, "logical_row_for_oid", None)
+        row = -1
+        if callable(finder):
+            try:
+                row = int(finder(int(oid)))
+            except (TypeError, ValueError, RuntimeError):
+                row = -1
+        if model is not None and row >= 0:
+            raw = model.backing_value_for_row_header(row, column)
+            blocks_b64 = resolve_blocks_b64_for_viewer(
+                raw, column, int(oid), getattr(self, "_confs_blocks_sidecar", {})
+            )
+        mols = mols_from_blocks_b64(blocks_b64) if blocks_b64 else []
+        if not mols:
+            packed = mol_for_ensemble_column(self, int(oid), column, min_conformers=1)
+            mols = iter_single_conformer_mols(packed) if packed is not None else []
+        out: list = []
+        for mol in mols:
+            try:
+                mol.SetProp(COLUMN_PARENT_OID, str(int(oid)))
+            except (RuntimeError, ValueError):
+                pass
+            out.append(mol)
+        return out
+
+    def show_packed_poses_in_viewer(self, oid: int, column: str) -> None:
+        """Open one packed poses cell in the Protein Viewer pocket it was docked into."""
+        mols = self._mols_for_pose_cell(oid, column)
+        if not mols:
+            QMessageBox.information(self, "View Poses", "This cell has no docked poses.")
+            return
+        rec, xtal, missing = self._pocket_for_pose_column(column)
+        if missing:
+            QMessageBox.warning(
+                self,
+                "View Poses",
+                f"The receptor file is not available:\n{missing}\n\n"
+                "The poses will open without that pocket.",
+            )
+            rec = None
+        elif rec is None:
+            QMessageBox.information(
+                self,
+                "View Poses",
+                "This poses column has no saved receptor, so the pocket cannot be loaded.",
+            )
+        ensure = getattr(self, "_ensure_protein_viewer", None)
+        dlg = ensure(show=True) if callable(ensure) else self._live_protein_viewer()
+
+        def _show() -> None:
+            self._load_pocket_into_viewer(dlg, rec, xtal)
+            self.open_dock_results_window(
+                mols,
+                title=f"Poses — {column}",
+                receptor_path=rec,
+                crystal_path=xtal,
+                remember=False,
+            )
+            self._dock_pose_zoomed = False
+
+        queue = getattr(dlg, "queue_after_canvas_bootstrap", None) if dlg is not None else None
+        if callable(queue) and not getattr(dlg, "_canvas_bootstrapped", True):
+            queue(_show)
+        else:
+            _show()
 
     def _set_pose_browser_action_enabled(self, enabled: bool) -> None:
         act = getattr(self, "_act_dock_viewer", None)
@@ -443,7 +659,13 @@ class DockToolsMixin:
         if setter(mol, zoom=zoom, caption=text):
             self._dock_pose_zoomed = True
 
-    def write_dock_poses_to_table(self, mols: list) -> str | None:
+    def write_dock_poses_to_table(
+        self,
+        mols: list,
+        *,
+        receptor_path: str | None = None,
+        crystal_path: str | None = None,
+    ) -> str | None:
         """Pack docked poses into a ``poses`` column, grouped by parent table row."""
         usable = [m for m in (mols or []) if m is not None]
         if not usable:
@@ -481,6 +703,12 @@ class DockToolsMixin:
             pairs.append((int(oid), pack_mols_as_confs_cell(dock_poses_pack_meta(group), group)))
         if pairs:
             self._write_packed_ensemble_cells(col, pairs)
+        self._last_pose_column = col
+        self._remember_pose_column_context(
+            col,
+            receptor_path=receptor_path,
+            crystal_path=crystal_path,
+        )
         return col
 
     def _append_orphan_dock_pose_row(self, mols: list) -> int | None:

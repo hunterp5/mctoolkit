@@ -564,6 +564,10 @@ def test_session_roundtrip_restores_dock_results(qapp, monkeypatch) -> None:  # 
     assert len(mols) == 2
     assert mols[0].GetProp("minimizedAffinity") == "-8.100"
     assert snap.get("receptor_path") == "/tmp/rec.pdbqt"
+    assert snap.get("pose_column") == "poses"
+    pocket = w2._pose_column_contexts["poses"]
+    assert pocket["receptor_path"] == "/tmp/rec.pdbqt"
+    assert pocket["crystal_path"] == "/tmp/xtal.sdf"
     assert "poses" in w2.headers
     raw = w2._table_model.backing_value_for_row_header(0, "poses")
     full = rehydrate_v1_confs_cell(raw, "poses", 0, getattr(w2, "_confs_blocks_sidecar", {}) or {})
@@ -577,8 +581,128 @@ def test_session_roundtrip_restores_dock_results(qapp, monkeypatch) -> None:  # 
     assert isinstance(panel, PoseBrowserWidget)
     assert len(panel._all_mols) == 2
     assert panel._all_mols[0].GetProp("minimizedAffinity") == "-8.100"
+    legacy = dict(doc)
+    legacy.pop("pose_column_contexts", None)
+    legacy_dock = dict(legacy.get("dock_results") or {})
+    legacy_dock.pop("pose_column", None)
+    legacy["dock_results"] = legacy_dock
+    w3 = ChemistryWorkspaceWindow()
+    w3._apply_session_document(legacy)
+    assert w3._pose_column_contexts["poses"]["receptor_path"] == "/tmp/rec.pdbqt"
+    w3.close()
     w.close()
     w2.close()
+
+
+def test_view_poses_reopens_the_column_pocket_after_session(qapp, monkeypatch, tmp_path) -> None:  # noqa: ARG001
+    from PyQt5.QtCore import QPoint
+    from PyQt5.QtWidgets import QMenu
+
+    from molmanager.services.column_labels import COLUMN_PARENT_OID
+    from molmanager.ui.dock_complex_viewer import DockComplexEmbedView
+    from molmanager.ui.pose_browser import PoseBrowserWidget
+
+    monkeypatch.setattr(DockComplexEmbedView, "_ensure_web", lambda self: None)
+    rec_a = tmp_path / "pocket_a.pdb"
+    rec_b = tmp_path / "pocket_b.pdb"
+    crystal = tmp_path / "crystal.sdf"
+    rec_a.write_text("ATOM\n", encoding="utf-8")
+    rec_b.write_text("ATOM\n", encoding="utf-8")
+    crystal.write_text("\n", encoding="utf-8")
+
+    w = ChemistryWorkspaceWindow()
+    w2 = None
+    try:
+        w.headers = ["ID_HIDDEN", "Structure", "SMILES"]
+        w._table_model.set_headers(list(w.headers))
+        w._table_model.append_row(0, {"SMILES": "CCO"})
+        w.mols[0] = Chem.MolFromSmiles("CCO")
+        w.next_oid = 1
+        a = _session_ethanol_pose("-8.100", 1.0)
+        b = _session_ethanol_pose("-6.400", 4.0)
+        a.SetProp(COLUMN_PARENT_OID, "0")
+        b.SetProp(COLUMN_PARENT_OID, "0")
+        assert (
+            w.write_dock_poses_to_table([a, b], receptor_path=str(rec_a), crystal_path=str(crystal))
+            == "poses"
+        )
+        assert w.write_dock_poses_to_table([a, b], receptor_path=str(rec_b)) == "poses (1)"
+        w._rename_column_header(w.headers.index("poses"), "docked")
+        assert w._pose_column_contexts["docked"]["receptor_path"] == str(rec_a)
+        assert len(w._mols_for_pose_cell(0, "docked")) == 2
+        assert float(w._mols_for_pose_cell(0, "docked")[0].GetProp("minimizedAffinity")) == -8.1
+
+        labels: list[str] = []
+
+        def _exec(menu, *_args, **_kwargs):
+            labels.extend(act.text() for act in menu.actions())
+            return None
+
+        monkeypatch.setattr(QMenu, "exec_", _exec)
+        src = w._table_model.index(0, w.headers.index("docked"))
+        view_ix = w._filter_proxy_model.mapFromSource(src)
+        monkeypatch.setattr(w.table, "indexAt", lambda _pos: view_ix)
+        w.show_table_menu(QPoint(1, 1))
+        assert "View Poses" in labels
+        assert "View Conformers…" in labels
+
+        w.open_dock_results_window([a, b], title="Pose browser — second", receptor_path=str(rec_b))
+        doc = w._build_session_document()
+        assert doc["pose_column_contexts"]["docked"]["receptor_path"] == str(rec_a)
+        assert doc["pose_column_contexts"]["docked"]["crystal_path"] == str(crystal)
+        assert doc["pose_column_contexts"]["poses (1)"]["receptor_path"] == str(rec_b)
+
+        w2 = ChemistryWorkspaceWindow()
+        w2._apply_session_document(doc)
+        assert w2._pose_column_contexts["docked"]["receptor_path"] == str(rec_a)
+        assert w2._pose_column_contexts["poses (1)"]["receptor_path"] == str(rec_b)
+
+        loaded: list[str] = []
+        ligands: list[str] = []
+
+        class _Viewer:
+            _canvas_bootstrapped = True
+            _slots: list = []
+
+            def add_structure_path(self, path, *, refit=True):
+                loaded.append(str(path))
+
+            def add_ligand_path(self, path, **_kwargs):
+                ligands.append(str(path))
+                return True
+
+            def show(self):
+                return None
+
+            def raise_(self):
+                return None
+
+            def activateWindow(self):
+                return None
+
+        w2._ensure_protein_viewer = lambda show=True: _Viewer()
+        before = (w2._last_dock_results or {}).get("receptor_path")
+        w2.show_packed_poses_in_viewer(0, "docked")
+        assert loaded == [str(rec_a)]
+        assert ligands == [str(crystal)]
+        assert (w2._last_dock_results or {}).get("receptor_path") == before
+        panel = w2._live_pose_browser()
+        assert isinstance(panel, PoseBrowserWidget)
+        assert len(panel._all_mols) == 2
+        assert float(panel._all_mols[0].GetProp("minimizedAffinity")) == -8.1
+        assert float(panel._all_mols[1].GetProp("minimizedAffinity")) == -6.4
+    finally:
+        for window in (w2, w):
+            if window is None:
+                continue
+            live = window._live_pose_browser()
+            if live is not None:
+                host = live.window()
+                if host is not None and host is not live:
+                    host.close()
+                else:
+                    live.close()
+            window.close()
 
 
 def test_session_roundtrip_restores_pose_browser_from_table_poses(qapp, monkeypatch) -> None:  # noqa: ARG001

@@ -644,6 +644,9 @@ class SessionRestoreMixin:
         from ...docking.pose_file_io import restore_dock_results_for_session
 
         restore_dock_results_for_session(self, doc.get("dock_results"))
+        restorer = getattr(self, "restore_pose_column_contexts", None)
+        if callable(restorer):
+            restorer(doc.get("pose_column_contexts"))
         self._pending_session_table_layout = doc.get("table_layout")
         self._restore_table_layout(self._pending_session_table_layout)
         restore_search = getattr(self, "restore_table_search_session", None)

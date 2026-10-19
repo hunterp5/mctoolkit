@@ -591,12 +591,16 @@ def serialize_dock_results_payload(
         return None
     rec = str(snap.get("receptor_path") or "").strip()
     xtal = str(snap.get("crystal_path") or "").strip()
-    return {
+    column = str(snap.get("pose_column") or "").strip()
+    payload: dict[str, Any] = {
         "title": str(snap.get("title") or "Pose browser"),
         "receptor_path": rec or None,
         "crystal_path": xtal or None,
         "poses": poses,
     }
+    if column:
+        payload["pose_column"] = column
+    return payload
 
 
 def deserialize_dock_results_payload(raw: Any) -> dict[str, Any] | None:
@@ -622,11 +626,13 @@ def deserialize_dock_results_payload(raw: Any) -> dict[str, Any] | None:
         return None
     rec = str(raw.get("receptor_path") or "").strip()
     xtal = str(raw.get("crystal_path") or "").strip()
+    column = str(raw.get("pose_column") or "").strip()
     return {
         "mols": mols,
         "title": str(raw.get("title") or "Pose browser"),
         "receptor_path": rec or None,
         "crystal_path": xtal or None,
+        "pose_column": column or None,
     }
 
 
@@ -637,6 +643,7 @@ def restore_dock_results_for_session(app: Any, payload: Any = None) -> int:
     title = str((snap or {}).get("title") or "Pose browser")
     rec = (snap or {}).get("receptor_path") if snap else None
     xtal = (snap or {}).get("crystal_path") if snap else None
+    column = (snap or {}).get("pose_column") if snap else None
     if not mols:
         loader = getattr(app, "_mols_from_table_pose_columns", None)
         if callable(loader):
@@ -647,7 +654,7 @@ def restore_dock_results_for_session(app: Any, payload: Any = None) -> int:
                 mols = []
     store = getattr(app, "_store_last_dock_results", None)
     if callable(store):
-        store(mols, title=title, receptor_path=rec, crystal_path=xtal)
+        store(mols, title=title, receptor_path=rec, crystal_path=xtal, pose_column=column)
         return len(mols)
     try:
         app._last_dock_results = (
@@ -656,6 +663,7 @@ def restore_dock_results_for_session(app: Any, payload: Any = None) -> int:
                 "title": title,
                 "receptor_path": rec,
                 "crystal_path": xtal,
+                "pose_column": column,
             }
             if mols
             else None

@@ -228,6 +228,8 @@ class TableUIMixin(
             clearer([], title="Pose browser")
         else:
             self._last_dock_results = None
+        self._last_pose_column = None
+        self._pose_column_contexts = {}
         self._dock_pose_zoomed = False
         if getattr(self, "_undo_stack", None) is not None:
             self._undo_stack.clear()

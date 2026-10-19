@@ -313,10 +313,17 @@ class GninaDockWorker(QObject):
         if not callable(opener) or not mols:
             return
         rec = h._receptor_for_gnina() or (h.edit_receptor.text() or "").strip()
+        crystal = existing_crystal_ligand_path(
+            h._crystal_ligand_path
+        ) or existing_crystal_ligand_path(h._validation_ligand_path)
         writer = getattr(h._main_window, "write_dock_poses_to_table", None)
         if callable(writer):
             try:
-                col = writer(mols)
+                col = writer(
+                    mols,
+                    receptor_path=rec or None,
+                    crystal_path=crystal or None,
+                )
             except Exception:
                 col = None
             if col:
@@ -324,9 +331,6 @@ class GninaDockWorker(QObject):
         title = f"Pose browser — {Path(path).name}"
         if h._crystal_rmsd is not None:
             title += f"  (crystal RMSD {h._crystal_rmsd:.3f} Å)"
-        crystal = existing_crystal_ligand_path(
-            h._crystal_ligand_path
-        ) or existing_crystal_ligand_path(h._validation_ligand_path)
         opener(mols, title=title, receptor_path=rec or None, crystal_path=crystal or None)
         h.log.append(system_stamp(f"Opened {len(mols)} pose(s) in the pose browser."))
 

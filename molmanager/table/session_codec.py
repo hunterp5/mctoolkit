@@ -65,6 +65,7 @@ _OMIT_IF_EMPTY = frozenset(
         "ionization_sidecar",
         "mmp_ledger",
         "dock_results",
+        "pose_column_contexts",
         "structure_smiles",
         "structure_mols",
         "global_bounds",

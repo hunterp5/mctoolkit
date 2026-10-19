@@ -144,6 +144,9 @@ def blocks_b64_to_ensemble_blob(blocks_b64: str | None) -> bytes | None:
             return None
         try:
             block = base64.b64decode(enc.encode("ascii")).decode("utf-8")
+            # RDKit writes SDF data tags as ``>  <name>``. Compact blobs keep coordinates only.
+            if "\n>" in block:
+                return None
             frag = Chem.MolFromMolBlock(block, sanitize=True, removeHs=False)
         except Exception:
             return None

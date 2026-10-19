@@ -57,4 +57,6 @@ MolManager prepends matching conda `lib` dirs to `LD_LIBRARY_PATH`. If `nvidia-s
 
 ## Tips and limits
 
+Right-click a packed **poses** cell and choose **View Poses** to open that row's poses in the Protein Viewer pocket. The receptor and crystal-ligand paths from the run are kept with the column, including after **File → Session → Open Session**. If the receptor file has moved, the poses still open and the missing pocket is reported.
+
 Docking quality hinges on box placement and ligand/receptor prep. Prefer an SDF ligand; PDBQT stores AutoDock types, not Kekulé orders. Covalent docking and custom CNN `.pt` models are Extra-args only in this dialog. Flexible side chains are in the **Flexible side chains** section (not Extra). Long CNN refinement jobs occupy the GPU - prefer **Rescore** for screening. Prebuilt Gnina is Linux/WSL; do not expect a native Windows `.exe`.
