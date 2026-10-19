@@ -41,7 +41,7 @@ DEFAULT_PRODUCT_PREFIX = "Product"
 
 @dataclass(frozen=True)
 class ReactionExtractParams:
-    """Settings for Tools → Reaction → Extract."""
+    """Settings for Chemistry → Reaction → Extract."""
 
     source_column: str
     mode: ExtractMode
