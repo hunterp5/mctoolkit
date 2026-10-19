@@ -21,12 +21,16 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 
 logger = logging.getLogger(__name__)
 
 _QTWEBENGINE_CHROMIUM_FLAGS_ENV = "QTWEBENGINE_CHROMIUM_FLAGS"
 _QUIET_LOG_LEVEL_FLAG = "--log-level=3"
+_DISABLE_LOGGING_FLAG = "--disable-logging"
 _PREWARM_VIEW = None
+_STDERR_FILTER_INSTALLED = False
+_STDERR_FILTER_THREAD: threading.Thread | None = None
 
 # Chromium needs a real windowing surface. These platform plugins provide none.
 _PLATFORMS_WITHOUT_WEBENGINE = frozenset({"offscreen", "minimal", "vnc"})
@@ -44,20 +48,179 @@ def webengine_views_supported() -> bool:
     return plugin.split(":")[0] not in _PLATFORMS_WITHOUT_WEBENGINE
 
 
+def chromium_gpu_stderr_is_noise(line: str) -> bool:
+    """True for the harmless WebGL SharedImage / GLES spam Chromium writes to stderr."""
+    low = line.lower()
+    return (
+        "doendsharedimageaccesschromium" in low
+        or "bound texture is not a shared image" in low
+        or "gles2_cmd_decoder" in low
+        or "sharedimagemanager" in low
+        or "non-existent mailbox" in low
+        or "invalid mailbox" in low
+    )
+
+
+def filter_chromium_stderr_bytes(pending: bytes, chunk: bytes) -> tuple[bytes, bytes]:
+    """Drop GPU-noise lines from *chunk*. Return ``(kept, new_pending)``."""
+    pending = pending + chunk
+    kept: list[bytes] = []
+    while b"\n" in pending:
+        line, pending = pending.split(b"\n", 1)
+        text = line.decode("utf-8", errors="replace")
+        if chromium_gpu_stderr_is_noise(text):
+            continue
+        kept.append(line + b"\n")
+    return b"".join(kept), pending
+
+
 def configure_qtwebengine_quiet_logs() -> str:
     """
     Hide Chromium GPU ERROR spam on stderr (SharedImage / GLES while rotating WebGL).
 
     Must run before ``QtWebEngineWidgets`` is imported. Leaves an existing
     ``--log-level=`` value alone so a user can still raise Chromium verbosity.
+    The renderer still prints some GLES shared-image errors past those flags, so a
+    stderr filter drops that one family of lines.
     """
     current = (os.environ.get(_QTWEBENGINE_CHROMIUM_FLAGS_ENV) or "").strip()
     parts = current.split()
-    if not any(part.startswith("--log-level=") for part in parts):
+    user_set_level = any(part.startswith("--log-level=") for part in parts)
+    if not user_set_level:
         parts.append(_QUIET_LOG_LEVEL_FLAG)
+    if _wants_quiet_chromium_logs(parts) and _DISABLE_LOGGING_FLAG not in parts:
+        parts.append(_DISABLE_LOGGING_FLAG)
     flags = " ".join(parts)
     os.environ[_QTWEBENGINE_CHROMIUM_FLAGS_ENV] = flags
+    if _wants_quiet_chromium_logs(parts):
+        install_chromium_stderr_filter()
     return flags
+
+
+def _wants_quiet_chromium_logs(parts: list[str]) -> bool:
+    """False when the user asked Chromium to keep logging."""
+    level: int | None = None
+    for part in parts:
+        if part == "--enable-logging" or part.startswith("--enable-logging="):
+            return False
+        if not part.startswith("--log-level="):
+            continue
+        try:
+            level = int(part.split("=", 1)[1])
+        except ValueError:
+            return False
+    return level is None or level >= 3
+
+
+def install_chromium_stderr_filter() -> bool:
+    """Retarget process stderr through a filter before Chromium inherits it.
+
+    Chromium's renderer writes ``DoEndSharedImageAccessCHROMIUM`` with ``LOG(ERROR)``
+    on its own stderr handle. ``--log-level`` does not reliably reach that process.
+    Returns False when the filter is already installed, skipped under pytest, or stderr
+    cannot be redirected.
+    """
+    global _STDERR_FILTER_INSTALLED, _STDERR_FILTER_THREAD
+    if _STDERR_FILTER_INSTALLED or "pytest" in sys.modules:
+        return False
+    saved_fd: int | None = None
+    read_fd: int | None = None
+    write_fd: int | None = None
+    redirected = False
+    try:
+        saved_fd = os.dup(2)
+        read_fd, write_fd = os.pipe()
+        os.set_inheritable(saved_fd, False)
+        os.set_inheritable(read_fd, False)
+        os.set_inheritable(write_fd, True)
+        os.dup2(write_fd, 2)
+        redirected = True
+        os.close(write_fd)
+        write_fd = None
+        os.set_inheritable(2, True)
+        _point_windows_stderr_at(2)
+        thread = threading.Thread(
+            target=_chromium_stderr_filter_loop,
+            args=(read_fd, saved_fd),
+            name="chromium-stderr-filter",
+            daemon=True,
+        )
+        thread.start()
+        _STDERR_FILTER_THREAD = thread
+    except (OSError, RuntimeError):
+        logger.debug("Chromium stderr filter was not installed", exc_info=True)
+        if redirected and saved_fd is not None:
+            try:
+                os.dup2(saved_fd, 2)
+                _point_windows_stderr_at(2)
+            except OSError:
+                logger.debug("Could not restore stderr after filter failure", exc_info=True)
+        for fd in (read_fd, write_fd, saved_fd):
+            if fd is None:
+                continue
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        return False
+    _STDERR_FILTER_INSTALLED = True
+    return True
+
+
+def _point_windows_stderr_at(fd: int) -> None:
+    """Point the Win32 standard-error handle at *fd* so Chromium children inherit the pipe."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    import msvcrt
+
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.SetStdHandle.argtypes = [wintypes.DWORD, wintypes.HANDLE]
+    kernel32.SetStdHandle.restype = wintypes.BOOL
+    kernel32.SetHandleInformation.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD]
+    kernel32.SetHandleInformation.restype = wintypes.BOOL
+    handle = wintypes.HANDLE(msvcrt.get_osfhandle(fd))
+    # (DWORD)-12 is STD_ERROR_HANDLE.
+    if not kernel32.SetStdHandle(wintypes.DWORD(0xFFFFFFF4), handle):
+        raise OSError(ctypes.get_last_error(), "SetStdHandle(STD_ERROR_HANDLE) failed")
+    inherit = wintypes.DWORD(0x00000001)
+    kernel32.SetHandleInformation(handle, inherit, inherit)
+
+
+def _chromium_stderr_filter_loop(read_fd: int, saved_fd: int) -> None:
+    pending = b""
+    try:
+        while True:
+            try:
+                chunk = os.read(read_fd, 8192)
+            except OSError:
+                break
+            if not chunk:
+                break
+            kept, pending = filter_chromium_stderr_bytes(pending, chunk)
+            _write_all(saved_fd, kept)
+        if pending and not chromium_gpu_stderr_is_noise(pending.decode("utf-8", errors="replace")):
+            _write_all(saved_fd, pending)
+    finally:
+        for fd in (read_fd, saved_fd):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        try:
+            written = os.write(fd, view)
+        except OSError:
+            return
+        if written <= 0:
+            return
+        view = view[written:]
 
 
 def schedule_qtwebengine_prewarm(*, delay_ms: int = 0) -> None:
