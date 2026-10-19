@@ -20,12 +20,12 @@ from __future__ import annotations
 
 from molmanager.ui.browsers.chrome import (
     BROWSER_DATA_TABLE_QSS,
-    BROWSER_GROUP_QSS,
     BROWSER_PREVIEW_CANVAS_QSS,
     BROWSER_PREVIEW_FRAME_QSS,
     BROWSER_PREVIEW_STRUCT_QSS,
     BrowserHostDialog,
 )
+from molmanager.ui.qt_widget_utils import group_box_stylesheet_for
 from molmanager.ui.browsers.pair_browser import PairBrowserDialog
 from molmanager.ui.dockable_plot import PLOT_BODY_MARGINS, PLOT_BODY_SPACING
 from molmanager.ui.metabolite_browser import MetaboliteBrowserDialog, MetaboliteBrowserWidget
@@ -92,7 +92,9 @@ def test_pair_browsers_use_shared_group_and_structure_theme(qapp):  # noqa: ARG0
     for dlg in (mmp, sali):
         assert dlg._left_panel["struct"].styleSheet() == BROWSER_PREVIEW_STRUCT_QSS
         assert dlg._right_panel["struct"].styleSheet() == BROWSER_PREVIEW_STRUCT_QSS
-        assert dlg._left_panel["box"].styleSheet() == BROWSER_GROUP_QSS
+        assert dlg._left_panel["box"].styleSheet() == group_box_stylesheet_for(
+            dlg._left_panel["box"]
+        )
         margins = dlg.layout().contentsMargins()
         assert (
             margins.left(),
@@ -100,7 +102,7 @@ def test_pair_browsers_use_shared_group_and_structure_theme(qapp):  # noqa: ARG0
             margins.right(),
             margins.bottom(),
         ) == PLOT_BODY_MARGINS
-    assert mmp._prop_box.styleSheet() == BROWSER_GROUP_QSS
+    assert mmp._prop_box.styleSheet() == group_box_stylesheet_for(mmp._prop_box)
     assert sali._row_table.styleSheet() == BROWSER_DATA_TABLE_QSS
     mmp.deleteLater()
     sali.deleteLater()
@@ -142,7 +144,7 @@ def test_sali_browser_pair_table_and_jump_field(qapp):  # noqa: ARG001
         if root.itemAt(i).layout() is not None
         and root.itemAt(i).layout().indexOf(dlg._left_panel["box"]) >= 0
     )
-    assert dlg._metrics_box.styleSheet() == BROWSER_GROUP_QSS
+    assert dlg._metrics_box.styleSheet() == group_box_stylesheet_for(dlg._metrics_box)
     assert pair_index < root.indexOf(dlg._metrics_box) < root.indexOf(dlg._row_table)
     assert dlg._row_table.rowCount() == 2
     assert dlg._row_table.verticalHeaderItem(0).text() == "A"
