@@ -21,13 +21,14 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt5.QtCore import QEvent, QObject, Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QColor, QFont, QPalette
 from PyQt5.QtWidgets import (
     QAbstractScrollArea,
     QAbstractSpinBox,
     QApplication,
     QComboBox,
     QDial,
+    QGroupBox,
     QSlider,
     QTextEdit,
     QWidget,
@@ -127,6 +128,126 @@ class _UnfocusedWheelPassthroughFilter(QObject):
         finally:
             self._forwarding = False
         return True
+
+
+def _mix_color(base: QColor, other: QColor, toward_other: float) -> QColor:
+    amount = min(1.0, max(0.0, toward_other))
+    return QColor(
+        int(base.red() * (1.0 - amount) + other.red() * amount),
+        int(base.green() * (1.0 - amount) + other.green() * amount),
+        int(base.blue() * (1.0 - amount) + other.blue() * amount),
+    )
+
+
+def group_box_stylesheet(palette: QPalette, *, titled: bool = True) -> str:
+    """Frame whose title breaks the border, with a light tint instead of a solid panel.
+
+    The title stays the opaque window color so it covers the line. The fill and
+    border are a softened mix of the window and mid tones. Untitled boxes keep a
+    continuous border.
+    """
+    window = palette.color(QPalette.Window)
+    mid = palette.color(QPalette.Mid)
+    fill = _mix_color(window, mid, 0.14)
+    fill.setAlpha(150)
+    border = _mix_color(window, mid, 0.42)
+    border.setAlpha(160)
+    margin = "8px" if titled else "0px"
+    sheet = (
+        "QGroupBox {"
+        f" border: 1px solid {border.name(QColor.HexArgb)};"
+        " border-radius: 3px;"
+        f" margin-top: {margin};"
+        f" background-color: {fill.name(QColor.HexArgb)};"
+        "}"
+    )
+    if not titled:
+        return sheet
+    return (
+        sheet + "QGroupBox::title {"
+        " subcontrol-origin: margin;"
+        " subcontrol-position: top left;"
+        " left: 8px;"
+        " padding: 0 4px;"
+        f" background-color: {window.name()};"
+        "}"
+    )
+
+
+def group_box_stylesheet_for(box: QGroupBox) -> str:
+    """Stylesheet for *box* from the application palette and whether it has a title.
+
+    A stylesheet changes the palette ``QWidget.palette()`` reports, so the colors
+    come from the application palette that themes set.
+    """
+    app = QApplication.instance()
+    palette = app.palette() if app is not None else box.palette()
+    titled = bool((box.title() or "").strip())
+    return group_box_stylesheet(palette, titled=titled)
+
+
+_GROUP_BOX_APPLYING = "_mm_group_qss_applying"
+_GROUP_BOX_FILTER_NAME = "molmanager_group_box_style"
+
+
+def apply_group_box_style(box: QGroupBox) -> None:
+    """Paint *box* with the shared group-box frame. No-op when it already matches."""
+    if qobject_is_deleted(box):
+        return
+    sheet = group_box_stylesheet_for(box)
+    if box.styleSheet() == sheet:
+        return
+    setattr(box, _GROUP_BOX_APPLYING, True)
+    try:
+        box.setStyleSheet(sheet)
+    finally:
+        setattr(box, _GROUP_BOX_APPLYING, False)
+
+
+class _GroupBoxStyleFilter(QObject):
+    """Apply the shared group-box frame as each box is polished."""
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        if event.type() != QEvent.Polish or not isinstance(obj, QGroupBox):
+            return False
+        if getattr(obj, _GROUP_BOX_APPLYING, False):
+            return False
+        apply_group_box_style(obj)
+        return False
+
+
+def install_group_box_style(app: QApplication | None = None) -> QObject | None:
+    """Style every QGroupBox, including ones created after startup.
+
+    Colors are baked from the palette, so a theme change must call
+    ``restyle_application_group_boxes``. This does not set an application stylesheet.
+    """
+    if app is None:
+        app = QApplication.instance()
+    if app is None:
+        return None
+    existing = app.findChild(_GroupBoxStyleFilter, _GROUP_BOX_FILTER_NAME)
+    if existing is not None and not qobject_is_deleted(existing):
+        return existing
+    filt = _GroupBoxStyleFilter(app)
+    filt.setObjectName(_GROUP_BOX_FILTER_NAME)
+    app.installEventFilter(filt)
+    return filt
+
+
+def restyle_application_group_boxes(app: QApplication | None = None) -> None:
+    """Rewrite group-box stylesheets from the palette now on each box."""
+    if app is None:
+        app = QApplication.instance()
+    if app is None:
+        return
+    for widget in app.allWidgets():
+        if not isinstance(widget, QGroupBox):
+            continue
+        try:
+            apply_group_box_style(widget)
+        except RuntimeError:
+            continue
 
 
 def install_unfocused_wheel_passthrough(app: QApplication | None = None) -> QObject | None:
