@@ -437,6 +437,7 @@ class SessionSaveMixin:
             "mmp_ledger": self._session_mmp_ledger_payload(),
             "dock_results": self._session_dock_results_payload(oids=want),
             "protein_viewer": self._collect_protein_viewer(),
+            "gnina_dock": self._collect_gnina_dock(),
         }
         collect_search = getattr(self, "collect_table_search_session", None)
         if callable(collect_search):
