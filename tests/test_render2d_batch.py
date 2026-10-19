@@ -187,6 +187,38 @@ def _png_rows(oids):
     return _mp_render_structure_batch(([(o, blob) for o in oids], 242, 202))
 
 
+def test_batched_handler_streams_pngs_instead_of_buffering() -> None:
+    from molmanager.storage.structure_render_store import StructureRenderStore
+    from molmanager.ui.main_window.render2d_results_mixin import Render2DResultsMixin
+
+    app = _App(rows_in_table={1, 2}, goal=4)
+    store = StructureRenderStore(max_decoded_pixmaps=4, max_png_entries=0)
+    try:
+        app._render2d_stream_store = store
+        app._render2d_pixmap_target = None
+        app._render2d_flush_max_width = 0
+        app._render2d_write_png_rows = lambda rows: Render2DResultsMixin._render2d_write_png_rows(
+            app, rows
+        )
+        app.on_render2d_rows_ready(_png_rows([1, 2]), 7)
+        assert app._render2d_pending == {}
+        assert store.png_bytes(1).startswith(b"\x89PNG")
+        assert store.png_bytes(2).startswith(b"\x89PNG")
+        assert app._import_render_done == 2
+        assert not app.flushed
+    finally:
+        store.close()
+
+
+def test_worker_count_caps_by_available_ram(monkeypatch) -> None:
+    monkeypatch.delenv("MOLMANAGER_RENDER2D_PROCESS_WORKERS", raising=False)
+    monkeypatch.setattr(
+        "molmanager.platform_support.memory_usage.available_physical_bytes",
+        lambda: 96 * 1024 * 1024,
+    )
+    assert render2d_process_worker_count() == 2
+
+
 def test_batched_handler_stores_results_and_finishes_batch() -> None:
     app = _App(rows_in_table={1, 2, 3, 4}, goal=4)
     app.on_render2d_rows_ready(_png_rows([1, 2]), 7)
