@@ -72,19 +72,11 @@ def test_file_session_submenu_outline():
     ]
 
 
-def test_edit_selection_submenu_order():
+def test_edit_selection_actions_are_on_edit_menu():
     edit = find_submenu(MAIN_WINDOW_MENUS, "Edit")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(edit.items)]
-    assert "Invert Selection" not in labels
-    assert "Clear Selection" not in labels
-    assert "Delete Selection" not in labels
-    assert "Selection" in labels
-    selection = find_submenu(edit.items, "Selection")
-    assert menu_outline(selection.items) == [
-        "Invert Selection",
-        "Clear Selection",
-        "Delete Selection",
-    ]
+    assert "Selection" not in labels
+    assert labels[-3:] == ["Invert Selection", "Clear Selection", "Delete Selection"]
 
 
 def test_conformations_menu_outline():
