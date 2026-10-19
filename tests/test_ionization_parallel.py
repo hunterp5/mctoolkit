@@ -45,9 +45,37 @@ def _force_sequential_ionization_cache(monkeypatch) -> None:
 
 def test_plan_ionization_auto_uses_mp_from_two_unique(monkeypatch) -> None:
     monkeypatch.setattr(ionization_parallel, "unipka_cuda_available", lambda: False)
+    monkeypatch.setattr(
+        "molmanager.platform_support.memory_usage.available_physical_bytes",
+        lambda: 32 * 1024**3,
+    )
     use_mp, workers = plan_ionization_process_workers(3, None)
     assert use_mp is True
-    assert workers >= 2
+    assert workers == 1
+
+
+def test_plan_ionization_stays_one_process_when_ram_is_plentiful(monkeypatch) -> None:
+    monkeypatch.setattr(ionization_parallel, "unipka_cuda_available", lambda: False)
+    monkeypatch.setattr(
+        "molmanager.platform_support.memory_usage.available_physical_bytes",
+        lambda: 64 * 1024**3,
+    )
+    use_mp, workers = plan_ionization_process_workers(20, None)
+    assert use_mp is True
+    assert workers == 1
+    use_mp, workers = plan_ionization_process_workers(20, 8)
+    assert workers == 1
+
+
+def test_plan_ionization_auto_is_one_worker_when_ram_is_tight(monkeypatch) -> None:
+    monkeypatch.setattr(ionization_parallel, "unipka_cuda_available", lambda: False)
+    monkeypatch.setattr(
+        "molmanager.platform_support.memory_usage.available_physical_bytes",
+        lambda: 3 * 1024**3,
+    )
+    use_mp, workers = plan_ionization_process_workers(12, None)
+    assert use_mp is True
+    assert workers == 1
 
 
 def test_plan_ionization_cuda_uses_one_worker_pool(monkeypatch) -> None:
