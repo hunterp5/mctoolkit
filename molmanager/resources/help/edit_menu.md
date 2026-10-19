@@ -18,7 +18,9 @@ Operates on the current table and selection. Undo depth depends on recent editab
 
 - **Undo** / **Redo** - reverse or reapply recent table edits.
 - **Copy** / **Paste** - copy a rectangular cell block as tab-separated text (Excel-compatible). Paste at the top-left of the current selection. Multi-cell clipboards ask whether to fill this cell only or multiple cells; overwriting populated cells requires confirmation. Extra rows/columns that do not fit the table are skipped. Structure cells still need SMILES, InChI, or a MolBlock.
-- **Selection** - Invert Selection, Clear Selection, then Delete Selection. Delete Selection deletes selected rows, deletes selected columns (when no rows are selected), or clears values from selected cells. When both rows and columns are selected, choose which to delete. Structure cannot be removed as a column.
+- **Invert Selection** - select every row that is not currently selected, including rows hidden by filters.
+- **Clear Selection** - clear the current cell or row selection.
+- **Delete Selection** - delete selected rows, delete selected columns (when no rows are selected), or clear values from selected cells. When both rows and columns are selected, choose which to delete. Structure cannot be removed as a column.
 - Related edit actions exposed in the menu for the active table focus.
 
 ## Workflow
