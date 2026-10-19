@@ -8,7 +8,7 @@ Partition a library into clusters for series assignment, exemplars, or stratifie
 
 ## When to use
 
-Use after cleanup when you need structure-based or property-based grouping rather than a single diverse subset.
+Use after cleanup when you need groups based on structure, on calculated properties, or on both.
 
 ## Inputs / scope
 
