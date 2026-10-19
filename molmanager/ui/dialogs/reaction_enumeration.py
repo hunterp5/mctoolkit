@@ -59,8 +59,16 @@ ReactionEnumerationDialogParams = ReactionEnumerationRequest
 class ReactionEnumerationOutputPanel(QWidget):
     """Destination checkboxes for table append and SDF export."""
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        save_placeholder: str = "reaction_products.sdf",
+        browse_title: str = "Save reaction products",
+    ):
         super().__init__(parent)
+        self._save_placeholder = save_placeholder
+        self._browse_title = browse_title
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -79,7 +87,7 @@ class ReactionEnumerationOutputPanel(QWidget):
 
         path_row = QHBoxLayout()
         self.save_path_edit = QLineEdit()
-        self.save_path_edit.setPlaceholderText("reaction_products.sdf")
+        self.save_path_edit.setPlaceholderText(self._save_placeholder)
         self.save_path_edit.setEnabled(False)
         path_row.addWidget(self.save_path_edit, 1)
         self.save_browse_btn = QPushButton("Browse…")
@@ -95,8 +103,8 @@ class ReactionEnumerationOutputPanel(QWidget):
     def _browse_save_path(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Save reaction products",
-            self.save_path_edit.text() or "reaction_products.sdf",
+            self._browse_title,
+            self.save_path_edit.text() or self._save_placeholder,
             "SDF (*.sdf);;All files (*.*)",
         )
         if path:
