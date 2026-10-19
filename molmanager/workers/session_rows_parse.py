@@ -148,6 +148,38 @@ class SessionRowsParseSignals(QObject):
     failed = pyqtSignal(str)
 
 
+def parse_session_rows(
+    rows: list[dict],
+    data_headers: list[str],
+    structure_smiles: list[str] | None = None,
+    structure_mols: list[str] | None = None,
+) -> SessionRowsParseResult:
+    """Turn saved row dicts into table cells and mol-decode jobs."""
+    smiles = list(structure_smiles or [])
+    mols = list(structure_mols or [])
+    prepared: list[tuple[int, dict[str, str]]] = []
+    jobs: list[tuple[int, bytes | None, str]] = []
+    max_id = -1
+    for i, entry in enumerate(rows):
+        if not isinstance(entry, dict):
+            continue
+        try:
+            oid = int(entry["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        max_id = max(max_id, oid)
+        cells = entry.get("cells") or {}
+        if not isinstance(cells, dict):
+            cells = {}
+        saved_smi = str(smiles[i] or "") if i < len(smiles) else ""
+        smi = row_structure_smiles(cells, saved_smi)
+        row_cells = {cname: str(cells.get(cname, "") or "") for cname in data_headers}
+        prepared.append((oid, row_cells))
+        blob = decode_mol_blob_b64(mols[i]) if i < len(mols) else None
+        jobs.append((oid, blob, smi))
+    return SessionRowsParseResult(prepared_rows=prepared, mol_jobs=jobs, max_id=max_id)
+
+
 class SessionRowsParseWorker(QRunnable):
     """Load session structures off the GUI thread (mol binary first, SMILES fallback)."""
 
@@ -172,38 +204,14 @@ class SessionRowsParseWorker(QRunnable):
 
     def run(self) -> None:
         try:
-            prepared: list[tuple[int, dict[str, str]]] = []
-            jobs: list[tuple[int, bytes | None, str]] = []
-            max_id = -1
-            headers = self.data_headers
-            for i, entry in enumerate(self.rows):
-                if not isinstance(entry, dict):
-                    continue
-                try:
-                    oid = int(entry["id"])
-                except (KeyError, TypeError, ValueError):
-                    continue
-                max_id = max(max_id, oid)
-                cells = entry.get("cells") or {}
-                if not isinstance(cells, dict):
-                    cells = {}
-                saved_smi = ""
-                if i < len(self.structure_smiles):
-                    saved_smi = str(self.structure_smiles[i] or "")
-                smi = row_structure_smiles(cells, saved_smi)
-                row_cells = {cname: str(cells.get(cname, "") or "") for cname in headers}
-                prepared.append((oid, row_cells))
-                blob = None
-                if i < len(self.structure_mols):
-                    blob = decode_mol_blob_b64(self.structure_mols[i])
-                jobs.append((oid, blob, smi))
             _safe_emit(
                 self.signals,
                 "finished",
-                SessionRowsParseResult(
-                    prepared_rows=prepared,
-                    mol_jobs=jobs,
-                    max_id=max_id,
+                parse_session_rows(
+                    self.rows,
+                    self.data_headers,
+                    self.structure_smiles,
+                    self.structure_mols,
                 ),
             )
         except Exception as exc:

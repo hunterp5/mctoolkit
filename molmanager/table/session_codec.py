@@ -34,7 +34,9 @@ SESSION_FORMAT_ALIASES = frozenset(
     {"molmanager_session", "MOLMANAGER_session", "chemmanager_session"}
 )
 SESSION_VERSION_CURRENT = 2
-SESSION_VERSIONS_SUPPORTED = frozenset({1, 2})
+SESSION_VERSIONS_SUPPORTED = frozenset({1, 2, 3})
+SESSION_V3_MANIFEST = "manifest.json"
+SESSION_V3_CHUNK_ROWS = 10_000
 
 _GZIP_MAGIC = b"\x1f\x8b"
 _ZIP_MAGIC = b"PK"
@@ -143,6 +145,119 @@ def _session_zip_payload(data: bytes) -> tuple[bytes, bytes | None]:
     return cms, ensembles
 
 
+def session_path_is_v3(path: str) -> bool:
+    """True when *path* is a chunked version-3 session zip."""
+    try:
+        if not zipfile.is_zipfile(path):
+            return False
+        with zipfile.ZipFile(path) as zf:
+            return SESSION_V3_MANIFEST in zf.namelist()
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+
+def read_session_v3_manifest(path: str) -> dict[str, Any]:
+    """Read the small manifest. Row chunks stay on disk."""
+    with zipfile.ZipFile(path) as zf:
+        manifest = _loads_json_bytes(zf.read(SESSION_V3_MANIFEST))
+    if not isinstance(manifest, dict):
+        raise ValueError("Session manifest must be a JSON object.")
+    return manifest
+
+
+def session_v3_chunk_names(path: str) -> list[str]:
+    with zipfile.ZipFile(path) as zf:
+        return sorted(
+            name for name in zf.namelist() if name.startswith("rows/") and name.endswith(".json")
+        )
+
+
+def read_session_v3_chunk(path: str, name: str) -> dict[str, Any]:
+    with zipfile.ZipFile(path) as zf:
+        chunk = _loads_json_bytes(zf.read(name))
+    if not isinstance(chunk, dict):
+        raise ValueError(f"Session chunk {name} must be a JSON object.")
+    return chunk
+
+
+def read_session_v3_ensembles(path: str) -> bytes | None:
+    with zipfile.ZipFile(path) as zf:
+        if SESSION_ENSEMBLES_MEMBER not in zf.namelist():
+            return None
+        return zf.read(SESSION_ENSEMBLES_MEMBER)
+
+
+def session_v3_chunk_rows(
+    chunk: dict[str, Any], data_headers: list[str]
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    """One version-3 chunk as restore rows plus parallel structure lists."""
+    ids = list(chunk.get("ids") or [])
+    values = list(chunk.get("values") or [])
+    saved_structure = chunk.get("structure_smiles")
+    if not isinstance(saved_structure, list):
+        saved_structure = []
+    saved_mols = chunk.get("structure_mols")
+    keep_mols = isinstance(saved_mols, list)
+    if not keep_mols:
+        saved_mols = []
+    rows: list[dict[str, Any]] = []
+    structure_smiles: list[str] = []
+    structure_mols: list[str] = []
+    n = min(len(ids), len(values))
+    for i in range(n):
+        try:
+            oid = int(ids[i])
+        except (TypeError, ValueError):
+            continue
+        row_vals = values[i]
+        if not isinstance(row_vals, (list, tuple)):
+            continue
+        cells: dict[str, str] = {}
+        for j, header in enumerate(data_headers):
+            if j < len(row_vals) and row_vals[j] is not None:
+                cells[str(header)] = str(row_vals[j])
+            else:
+                cells[str(header)] = ""
+        rows.append({"id": oid, "cells": cells})
+        saved_smi = str(saved_structure[i] or "") if i < len(saved_structure) else ""
+        structure_smiles.append(row_structure_smiles(cells, saved_smi))
+        if keep_mols:
+            structure_mols.append(str(saved_mols[i] or "") if i < len(saved_mols) else "")
+    return rows, structure_smiles, structure_mols
+
+
+def _load_v3_zip(data: bytes) -> dict[str, Any]:
+    """Reassemble a version-3 zip into one document. Streaming open does not use this."""
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        manifest = _loads_json_bytes(zf.read(SESSION_V3_MANIFEST))
+        if not isinstance(manifest, dict):
+            raise ValueError("Session manifest must be a JSON object.")
+        ids: list[Any] = []
+        values: list[Any] = []
+        smiles: list[Any] = []
+        mols: list[Any] = []
+        names = sorted(
+            name for name in zf.namelist() if name.startswith("rows/") and name.endswith(".json")
+        )
+        for name in names:
+            chunk = _loads_json_bytes(zf.read(name))
+            if not isinstance(chunk, dict):
+                raise ValueError(f"Session chunk {name} must be a JSON object.")
+            ids.extend(chunk.get("ids") or [])
+            values.extend(chunk.get("values") or [])
+            smiles.extend(chunk.get("structure_smiles") or [])
+            mols.extend(chunk.get("structure_mols") or [])
+        manifest["ids"] = ids
+        manifest["values"] = values
+        if smiles:
+            manifest["structure_smiles"] = smiles
+        if any(mols):
+            manifest["structure_mols"] = mols
+        if SESSION_ENSEMBLES_MEMBER in zf.namelist():
+            manifest[SESSION_ENSEMBLES_KEY] = zf.read(SESSION_ENSEMBLES_MEMBER)
+    return manifest
+
+
 def loads_session_bytes(raw: bytes | str) -> dict[str, Any]:
     """Parse session file bytes (gzip JSON, zip bundle, or plain JSON) into a dict."""
     if isinstance(raw, str):
@@ -151,6 +266,13 @@ def loads_session_bytes(raw: bytes | str) -> dict[str, Any]:
         data = raw
     ensembles = None
     if data.startswith(_ZIP_MAGIC):
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                v3 = SESSION_V3_MANIFEST in zf.namelist()
+        except zipfile.BadZipFile:
+            v3 = False
+        if v3:
+            return _load_v3_zip(data)
         data, ensembles = _session_zip_payload(data)
     if data.startswith(_GZIP_MAGIC):
         try:

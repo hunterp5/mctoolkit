@@ -40,13 +40,13 @@ from ...table.open_messages import (
 )
 from ...table.session_codec import (
     compact_global_bounds,
-    dumps_session_document,
     expand_session_document,
     loads_session_bytes,
+    session_path_is_v3,
     session_format_ok,
     session_version_ok,
 )
-from ...table.session_document_build import assemble_session_document
+from ...table.session_document_build import assemble_session_document, write_session_v3
 from ...chem.molecule_conversion import mol_to_canonical_smiles
 from ...workers.session_save import SessionSaveWorker
 from ..background_jobs import register_background_job, unregister_background_job
@@ -643,9 +643,7 @@ class SessionSaveMixin:
         """Fallback when the thread pool or save signals are unavailable."""
         path = pending["path"]
         try:
-            payload = dumps_session_document(assemble_session_document(snapshot))
-            with open(path, "wb") as handle:
-                handle.write(payload)
+            write_session_v3(path, snapshot)
         except Exception as e:
             logger.exception("Save session failed: %s", path)
             QMessageBox.warning(self, pending.get("dialog_title") or "Save Session", str(e))
@@ -732,6 +730,17 @@ class SessionSaveMixin:
             logger.warning("Open session: %s", problem)
             self._warn_could_not_open("Open Session", problem)
             return False
+        if session_path_is_v3(path):
+            self._note_open_attempt("Open Session")
+            self._session_source_path = path
+            try:
+                self._apply_session_v3_file(path)
+            except Exception:
+                logger.exception("Open session: apply failed for %s", path)
+                self._finish_failed_open()
+                self._warn_could_not_open("Open Session", damaged_session_message(path))
+                return False
+            return True
         try:
             with open(path, "rb") as f:
                 raw = f.read()

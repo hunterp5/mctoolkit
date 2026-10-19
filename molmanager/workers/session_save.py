@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Background compact + gzip write of a ``.cms`` session snapshot."""
+"""Background write of a chunked version-3 ``.cms`` session snapshot."""
 
 from __future__ import annotations
 
@@ -24,8 +24,7 @@ from typing import Any
 from PyQt5.QtCore import QRunnable
 
 from ..platform_support.tool_progress import ToolProgressState, report_tool_progress
-from ..table.session_codec import dumps_session_document
-from ..table.session_document_build import assemble_session_document
+from ..table.session_document_build import write_session_v3
 from .signals import SessionSaveSignals
 
 logger = logging.getLogger(__name__)
@@ -64,11 +63,11 @@ class SessionSaveWorker(QRunnable):
         n = max(1, len(self.snapshot.get("entries") or []))
         try:
             self._emit_progress("Saving session…", 0, n)
-            document = assemble_session_document(self.snapshot)
-            self._emit_progress("Saving session…", max(1, n // 2), n)
-            payload = dumps_session_document(document)
-            with open(self.path, "wb") as handle:
-                handle.write(payload)
+            write_session_v3(
+                self.path,
+                self.snapshot,
+                on_progress=lambda done, total: self._emit_progress("Saving session…", done, total),
+            )
             self._emit_progress("Saving session…", n, n)
             self.signals.finished.emit(self.job_gen, self.path)
         except Exception as exc:

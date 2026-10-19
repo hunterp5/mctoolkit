@@ -80,7 +80,7 @@ def test_assemble_session_document_fills_blob_from_smiles_cell():
     assert Chem.MolToSmiles(roundtrip) == "CC"
 
 
-def test_session_save_worker_writes_gzip_cms(qapp, tmp_path):  # noqa: ARG001
+def test_session_save_worker_writes_chunked_cms(qapp, tmp_path):  # noqa: ARG001
     sig = SessionSaveSignals()
     results: list[tuple[int, str]] = []
     sig.finished.connect(lambda gen, path: results.append((gen, path)))
@@ -100,7 +100,71 @@ def test_session_save_worker_writes_gzip_cms(qapp, tmp_path):  # noqa: ARG001
     qapp.processEvents()
     assert results and results[0] == (4, str(out))
     raw = Path(out).read_bytes()
-    assert raw.startswith(b"\x1f\x8b")
+    assert raw.startswith(b"PK")
     doc = expand_session_document(loads_session_bytes(raw))
     assert [row["id"] for row in doc["rows"]] == [1]
     assert "CCO" in (doc["rows"][0]["cells"].get("SMILES") or "")
+
+
+def test_version3_chunks_round_trip_display_text(tmp_path):
+    from molmanager.table.session_codec import (
+        read_session_v3_ensembles,
+        read_session_v3_manifest,
+        session_path_is_v3,
+        session_v3_chunk_names,
+    )
+    from molmanager.table.session_document_build import write_session_v3
+
+    out = tmp_path / "chunked.cms"
+    write_session_v3(
+        str(out),
+        {
+            "headers": ["ID_HIDDEN", "Structure", "SMILES", "MW"],
+            "entries": [
+                (1, {"SMILES": "CCO", "MW": "1.50"}),
+                (2, {"SMILES": "CC", "MW": "2.00"}),
+            ],
+            "payloads": {},
+            "metadata": _metadata(),
+            "ensembles": b"ensemble-bytes",
+        },
+        chunk_rows=1,
+    )
+    assert session_path_is_v3(str(out))
+    assert session_v3_chunk_names(str(out)) == ["rows/00000.json", "rows/00001.json"]
+    manifest = read_session_v3_manifest(str(out))
+    assert manifest["version"] == 3
+    assert "values" not in manifest
+    assert read_session_v3_ensembles(str(out)) == b"ensemble-bytes"
+    doc = expand_session_document(loads_session_bytes(out.read_bytes()))
+    assert [row["cells"]["MW"] for row in doc["rows"]] == ["1.50", "2.00"]
+
+
+def test_open_version3_session_applies_chunks(qapp, tmp_path):  # noqa: ARG001
+    from molmanager.table.session_document_build import write_session_v3
+    from molmanager.ui.main_window import ChemistryWorkspaceWindow
+
+    out = tmp_path / "open.cms"
+    meta = _metadata()
+    meta["next_oid"] = 3
+    write_session_v3(
+        str(out),
+        {
+            "headers": ["ID_HIDDEN", "Structure", "SMILES", "MW"],
+            "entries": [
+                (1, {"SMILES": "CCO", "MW": "1.50"}),
+                (2, {"SMILES": "CC", "MW": "2.00"}),
+            ],
+            "payloads": {},
+            "metadata": meta,
+            "ensembles": None,
+        },
+        chunk_rows=1,
+    )
+    window = ChemistryWorkspaceWindow()
+    assert window.apply_saved_session_from_file(str(out)) is True
+    model = window._table_model
+    assert model.rowCount() == 2
+    assert model.cell_text(0, 3) == "1.50"
+    assert model.cell_text(1, 3) == "2.00"
+    assert model._rows.column_kind("MW") == "float"

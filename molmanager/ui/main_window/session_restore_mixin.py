@@ -33,6 +33,11 @@ from ...table.session_codec import (
     SESSION_ENSEMBLES_KEY,
     expand_session_document,
     parse_session_global_bounds,
+    read_session_v3_chunk,
+    read_session_v3_ensembles,
+    read_session_v3_manifest,
+    session_v3_chunk_names,
+    session_v3_chunk_rows,
 )
 from ...storage import ensure_confs_sidecar, load_mols_from_parse_result, reset_mol_store
 from ..strings import LOADING_DETAIL_SESSION, TOOL_RENDER_2D, loaded_session_status
@@ -42,6 +47,7 @@ from ...workers.session_rows_parse import (
     SessionRowsParseResult,
     SessionRowsParseSignals,
     SessionRowsParseWorker,
+    parse_session_rows,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,18 +70,12 @@ class SessionRestoreMixin:
         self.filters.append(card)
         self._sync_filter_panel_scroll_content()
 
-    def _apply_session_document(self, doc: dict) -> None:
-        try:
-            doc = expand_session_document(doc)
-        except ValueError as exc:
-            raise ValueError(str(exc) or "Unsupported session format.") from exc
-        if not self._session_format_ok(doc.get("format")) or not self._session_version_ok(
-            doc.get("version")
-        ):
-            raise ValueError("Unsupported session format.")
+    def _prepare_session_surface(self, doc: dict) -> int:
+        """Clear the workspace and install session headers. Returns the load generation."""
         self._session_mutation_paused = True
         self._pending_session_clean_on_ready = True
         self._session_restore_ctx = None
+        self._session_v3_ctx = None
         self._session_finalize_ctx = None
         self._session_parse_busy = False
         self._session_awaiting_ready = False
@@ -128,6 +128,18 @@ class SessionRestoreMixin:
         reset_mol_store(self)
         self._clear_filter_target_smiles_cache()
         self.global_bounds = {}
+        return gen
+
+    def _apply_session_document(self, doc: dict) -> None:
+        try:
+            doc = expand_session_document(doc)
+        except ValueError as exc:
+            raise ValueError(str(exc) or "Unsupported session format.") from exc
+        if not self._session_format_ok(doc.get("format")) or not self._session_version_ok(
+            doc.get("version")
+        ):
+            raise ValueError("Unsupported session format.")
+        gen = self._prepare_session_surface(doc)
         rows = doc.get("rows") or []
         try:
             self.table.setUpdatesEnabled(False)
@@ -170,12 +182,137 @@ class SessionRestoreMixin:
         if "pytest" in sys.modules:
             self._drain_pending_session_load()
 
+    def _apply_session_v3_file(self, path: str) -> None:
+        """Open a version-3 zip one row chunk at a time."""
+        manifest = read_session_v3_manifest(path)
+        if not self._session_format_ok(manifest.get("format")) or not self._session_version_ok(
+            manifest.get("version")
+        ):
+            raise ValueError("Unsupported session format.")
+        ensembles = read_session_v3_ensembles(path)
+        if ensembles:
+            manifest[SESSION_ENSEMBLES_KEY] = ensembles
+        names = session_v3_chunk_names(path)
+        gen = self._prepare_session_surface(manifest)
+        try:
+            self.table.setUpdatesEnabled(False)
+        except Exception:
+            pass
+        total = int(manifest.get("row_count") or 0)
+        self._session_v3_ctx = {
+            "path": path,
+            "names": names,
+            "index": 0,
+            "gen": gen,
+            "doc": manifest,
+            "max_id": -1,
+            "applied": 0,
+            "total": total,
+        }
+        if not names:
+            self._session_v3_ctx = None
+            self._begin_session_finalize(manifest, -1, gen=gen)
+        else:
+            self._session_parse_busy = True
+            self._loading_detail.setText(f"Parsing structures…\n0 / {total:,} rows")
+            self.status_label.setText(f"Loading session… (parsing {total:,} rows)")
+            QTimer.singleShot(0, self._session_v3_step)
+        if "pytest" in sys.modules:
+            self._drain_pending_session_load()
+
+    def _session_v3_data_headers(self, doc: dict) -> list[str]:
+        saved = doc.get("data_headers")
+        if isinstance(saved, list) and saved:
+            return [str(name) for name in saved]
+        return [str(name) for name in list(self.headers)[2:]]
+
+    def _session_v3_step(self) -> None:
+        ctx = getattr(self, "_session_v3_ctx", None)
+        if not ctx or ctx.get("gen") != getattr(self, "_session_load_generation", 0):
+            return
+        names = ctx["names"]
+        index = int(ctx["index"])
+        if index >= len(names):
+            self._finish_session_v3(ctx)
+            return
+        try:
+            chunk = read_session_v3_chunk(ctx["path"], names[index])
+            headers = self._session_v3_data_headers(ctx["doc"])
+            rows, smiles, mols = session_v3_chunk_rows(chunk, headers)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self._session_v3_ctx = None
+            self._on_session_rows_parse_failed(
+                str(exc) or "Could not read a session chunk.", ctx["gen"]
+            )
+            return
+        ctx["index"] = index + 1
+        if "pytest" in sys.modules:
+            self._on_session_v3_parsed(
+                parse_session_rows(rows, headers, smiles, mols), ctx["gen"], ctx["doc"]
+            )
+            return
+        signals = SessionRowsParseSignals(self)
+
+        def _on_parsed(result, g=ctx["gen"], d=ctx["doc"]) -> None:
+            self._on_session_v3_parsed(result, g, d)
+
+        def _on_failed(message, g=ctx["gen"]) -> None:
+            self._session_v3_ctx = None
+            self._on_session_rows_parse_failed(message, g)
+
+        worker = SessionRowsParseWorker(
+            rows,
+            data_headers=headers,
+            signals=signals,
+            generation=int(ctx["gen"]),
+            structure_smiles=smiles,
+            structure_mols=mols,
+        )
+        signals.finished.connect(_on_parsed, type=Qt.QueuedConnection)
+        signals.failed.connect(_on_failed, type=Qt.QueuedConnection)
+        start_runnable_on_app_pool(self, worker)
+
+    def _on_session_v3_parsed(self, result: object, generation: int, doc: dict) -> None:
+        if generation != getattr(self, "_session_load_generation", 0):
+            return
+        ctx = getattr(self, "_session_v3_ctx", None)
+        if not ctx or ctx.get("gen") != generation:
+            return
+        if not isinstance(result, SessionRowsParseResult):
+            self._session_v3_ctx = None
+            self._on_session_rows_parse_failed("Invalid session parse result.", generation)
+            return
+        prepared = list(result.prepared_rows or [])
+        load_mols_from_parse_result(self, result)
+        if prepared:
+            self._table_model.append_rows_batch(prepared)
+        ctx["max_id"] = max(int(ctx["max_id"]), int(result.max_id))
+        ctx["applied"] = int(ctx["applied"]) + len(prepared)
+        applied = int(ctx["applied"])
+        total = max(int(ctx["total"]), applied)
+        self.status_label.setText(f"Loading session… ({applied}/{total} rows)")
+        self._loading_detail.setText(f"Loading session…\n{applied:,} / {total:,} rows")
+        if int(ctx["index"]) < len(ctx["names"]):
+            QTimer.singleShot(0, self._session_v3_step)
+            return
+        self._finish_session_v3(ctx)
+
+    def _finish_session_v3(self, ctx: dict) -> None:
+        self._session_v3_ctx = None
+        self._session_parse_busy = False
+        applied = int(ctx["applied"])
+        self._loading_detail.setText(
+            f"Session loaded ({applied:,} row(s)).\nRestoring filters and workspace…"
+        )
+        self._begin_session_finalize(ctx["doc"], int(ctx["max_id"]), gen=int(ctx["gen"]))
+
     def _drain_pending_session_load(self, *, timeout_s: float = 60.0) -> None:
         """Process Qt events until session parse/apply/finalize complete."""
         deadline = time.monotonic() + float(timeout_s)
         while time.monotonic() < deadline:
             busy = bool(getattr(self, "_session_parse_busy", False))
             busy = busy or getattr(self, "_session_restore_ctx", None) is not None
+            busy = busy or getattr(self, "_session_v3_ctx", None) is not None
             busy = busy or getattr(self, "_csv_session_ctx", None) is not None
             busy = busy or getattr(self, "_session_finalize_ctx", None) is not None
             busy = busy or bool(getattr(self, "_session_awaiting_ready", False))
