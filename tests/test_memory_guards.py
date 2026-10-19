@@ -99,9 +99,13 @@ def test_memory_guards_block_oversized_workloads(monkeypatch) -> None:
     assert check_product_enumeration(10).ok
 
 
-def test_dimred_cap_allows_25k_fingerprint_rows():
+def test_dimred_cap_allows_25k_fingerprint_rows(monkeypatch):
     from molmanager.platform_support.config import load_config
 
+    monkeypatch.setattr(
+        "molmanager.platform_support.memory_usage.available_physical_bytes",
+        lambda: 32 * 1024**3,
+    )
     assert load_config().memory_guard_dimred_max_points == 25_000
     assert clamp_dimred_max_points(100_000) == 25_000
     assert check_fp_matrix_workload(25_000, n_bits=2048).ok
