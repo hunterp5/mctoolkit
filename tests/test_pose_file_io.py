@@ -528,6 +528,40 @@ def test_stamp_pose_ff_energies_writes_mmff_and_uff():
     assert math.isfinite(uff)
 
 
+def _sulfonamide_with_extra_hydrogen() -> Chem.Mol:
+    """Neutral sulfonamide whose nitrogen has two explicit H (Gnina/OpenBabel)."""
+    mol = Chem.AddHs(Chem.MolFromSmiles("CS(=O)(=O)NC"))
+    assert mol is not None
+    assert AllChem.EmbedMolecule(mol, randomSeed=1) == 0
+    edited = Chem.RWMol(mol)
+    nitrogen = next(atom.GetIdx() for atom in edited.GetAtoms() if atom.GetSymbol() == "N")
+    hydrogen = edited.AddAtom(Chem.Atom(1))
+    edited.AddBond(nitrogen, hydrogen, Chem.BondType.SINGLE)
+    conf = edited.GetConformer()
+    pos = conf.GetAtomPosition(nitrogen)
+    conf.SetAtomPosition(hydrogen, (pos.x + 1.0, pos.y, pos.z))
+    return edited.GetMol()
+
+
+def test_load_sdf_mols_drops_extra_sulfonamide_hydrogen(tmp_path):
+    bad = _sulfonamide_with_extra_hydrogen()
+    dest = tmp_path / "pose.sdf"
+    block = Chem.MolToMolBlock(bad, kekulize=False)
+    dest.write_text(block + "> <minimizedAffinity>\n-7.100\n\n$$$$\n", encoding="utf-8")
+    mols = load_sdf_mols(dest)
+    assert len(mols) == 1
+    mol = mols[0]
+    Chem.SanitizeMol(mol)
+    nitrogen = next(atom for atom in mol.GetAtoms() if atom.GetSymbol() == "N")
+    heavy_neighbors = [nbr for nbr in nitrogen.GetNeighbors() if nbr.GetAtomicNum() > 1]
+    hydrogen_neighbors = [nbr for nbr in nitrogen.GetNeighbors() if nbr.GetAtomicNum() == 1]
+    assert len(heavy_neighbors) == 2
+    assert len(hydrogen_neighbors) + int(nitrogen.GetTotalNumHs()) == 1
+    assert mol.GetProp("minimizedAffinity") == "-7.100"
+    stamp_pose_ff_energies([mol])
+    assert math.isfinite(float(mol.GetProp("E_UFF")))
+
+
 def test_dock_result_headers_include_ff_energies():
     mol = Chem.MolFromSmiles("CCO")
     assert mol is not None
