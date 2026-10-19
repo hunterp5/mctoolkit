@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Random Number column dialog (Tools → Utilities → Random → Number)."""
+"""Random Number column dialog (Tools → Random → Number)."""
 
 from __future__ import annotations
 
