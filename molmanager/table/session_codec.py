@@ -68,6 +68,7 @@ _OMIT_IF_EMPTY = frozenset(
         "global_bounds",
         "table_search",
         "protein_viewer",
+        "gnina_dock",
         "row_lists",
         "notepad",
     }
