@@ -18,8 +18,10 @@ Rows with valid molecules in the chosen **Target Column** / structure source. Op
 
 - **Target Column** - structure column to describe.
 - **Selected Rows Only** - compute for the selection when checked.
-- Category tabs / groups such as **Physiochemical**, **3D**, **Name**, **Drug-likeness**, **Structural Counts**, **Ring Counts**, **Atom Counts**, **Complexity**, **Electronic**, **Fingerprints**.
+- Category tabs / groups such as **Physiochemical**, **3D**, **Name**, **Drug-likeness**, **Structural Alerts**, **Scaffolds**, **Structural Counts**, **Ring Counts**, **Atom Counts**, **Complexity**, **Electronic**, **Fingerprints**.
 - Per-descriptor checkboxes (e.g. LogP, Mol Weight, TPSA, QED, rule-of-five style flags). Hover a checkbox for a short description.
+- **Structural Alerts** lists RDKit FilterCatalog sets (PAINS, Brenk, NIH, ZINC, and ChEMBL sets when this RDKit includes them). Each checked catalog writes a count column and a column of matched pattern names. No hit is `0` and a blank name cell. Invalid structures write **N/A**. These are the catalogs compiled into RDKit, not the Lilly medchem rules.
+- **Scaffolds** writes Bemis–Murcko columns. **Murcko scaffold** keeps rings and linkers. **Murcko framework** is that skeleton as carbon with single bonds. **Murcko ring systems** drops linker atoms. **Scaffold count** is how many rows in the same run share the scaffold (`0` when there are no rings). The scaffold, framework, and ring-system columns are structure text, so Render 2D can draw them.
 - **Name** includes local identifiers (SMILES, InChI Key, formula) plus **Common Name** and **Synonyms**, which query PubChem for a preferred name when one exists.
 - Confirm with **OK** to run (often as a background job).
 - **QED Score**, **AB-MPS score**, and **CNS MPO score** columns are colored automatically (green = more favorable, through yellow, to red). QED uses 0–1, CNS MPO 0–6, and AB-MPS 0–14 (literature threshold) with worse values trending red. Change or clear this with the column header **Color** action.
@@ -35,6 +37,7 @@ Rows with valid molecules in the chosen **Target Column** / structure source. Op
 
 - Compute MW/LogP/TPSA for BOILED-Egg or Golden Triangle.
 - Add drug-likeness flags before slider filtering.
+- Flag PAINS, Brenk, or NIH patterns and filter on the count column.
 - Generate fingerprint bit columns when a workflow expects them in-table.
 
 ## Tips and limits
