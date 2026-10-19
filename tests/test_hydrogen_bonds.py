@@ -106,6 +106,9 @@ def test_detects_protein_ligand_hbond():
     names = {bond.donor_name, bond.acceptor_name}
     assert "OG" in names
     assert "O1" in names
+    assert bond.to_payload()["showResidues"] == [
+        {"chain": "A", "resn": "SER", "resi": "10", "icode": ""}
+    ]
 
 
 def test_detects_ligand_intramolecular_hbond():
@@ -133,3 +136,45 @@ def test_uses_explicit_hydrogen_geometry():
 
 def test_ignores_water_contacts():
     assert detect_hydrogen_bonds(_WATER_NEAR_SER, "pdb") == ()
+
+
+# Sulfonyl O1 sits 2.7 Å from Asn OD1. S is the only heavy neighbor of O1.
+_SULFONYL_NO_HYDROGEN = """\
+ATOM      1  CG  ASN A 142      -1.400   0.000   0.000  1.00  0.00           C
+ATOM      2  OD1 ASN A 142       0.000   0.000   0.000  1.00  0.00           O
+HETATM  100  S   LIG A 289       4.050   0.150   0.000  1.00  0.00           S
+HETATM  101  O1  LIG A 289       2.700   0.100   0.000  1.00  0.00           O
+END
+"""
+
+# Same sulfonyl, plus a carbon-bound hydrogen so the ligand counts as protonated,
+# and a serine hydroxyl hydrogen aimed at O1.
+_SULFONYL_PROTONATED = """\
+ATOM      1  CB  SER A  10      -1.430   0.400   0.000  1.00  0.00           C
+ATOM      2  OG  SER A  10       0.000   0.000   0.000  1.00  0.00           O
+ATOM      3  HG  SER A  10       0.900   0.000   0.000  1.00  0.00           H
+HETATM  100  S   LIG A 289       4.050   0.150   0.000  1.00  0.00           S
+HETATM  101  O1  LIG A 289       2.700   0.100   0.000  1.00  0.00           O
+HETATM  102  C1  LIG A 289       5.400   0.150   0.000  1.00  0.00           C
+HETATM  103  H1  LIG A 289       5.400   1.200   0.000  1.00  0.00           H
+END
+"""
+
+
+def test_sulfonyl_oxygen_without_hydrogen_is_not_a_donor():
+    assert detect_hydrogen_bonds(_SULFONYL_NO_HYDROGEN, "pdb") == ()
+
+
+def test_protonated_sulfonyl_oxygen_accepts_and_does_not_donate():
+    bonds = detect_hydrogen_bonds(_SULFONYL_PROTONATED, "pdb")
+    assert len(bonds) == 1
+    bond = bonds[0]
+    assert bond.kind == HBOND_KIND_COMPLEX
+    assert bond.donor_resn == "SER"
+    assert bond.donor_name == "OG"
+    assert bond.acceptor_resn == "LIG"
+    assert bond.acceptor_name == "O1"
+    assert bond.has_hydrogen is True
+    assert bond.to_payload()["showResidues"] == [
+        {"chain": "A", "resn": "SER", "resi": "10", "icode": ""}
+    ]

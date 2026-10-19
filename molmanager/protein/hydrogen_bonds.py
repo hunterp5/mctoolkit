@@ -43,7 +43,9 @@ HBOND_COLORS = {
     HBOND_KIND_COMPLEX: "#2ECC71",
 }
 
-# Baker–Hubbard-like cutoffs with a heavy-atom fallback for crystal structures.
+# Baker–Hubbard-like cutoffs. A residue that already has explicit hydrogens
+# donates only from atoms that carry one. Residues with no hydrogens fall back
+# to heavy-atom distances, except sulfonyl and N-oxide oxygens, which are not donors.
 HBOND_DA_MAX = 3.5
 HBOND_DA_MIN = 2.3
 HBOND_HA_MAX = 2.5
@@ -146,7 +148,7 @@ class HydrogenBond:
 
     def to_payload(self, color: str | None = None) -> dict:
         """JSON object consumed by the Protein Viewer hydrogen-bond overlay."""
-        return {
+        payload = {
             "kind": self.kind,
             "color": color or HBOND_COLORS.get(self.kind, "#E6C229"),
             "start": {"x": self.start[0], "y": self.start[1], "z": self.start[2]},
@@ -171,6 +173,11 @@ class HydrogenBond:
                 self.acceptor_kind,
             ),
         }
+        if self.kind == HBOND_KIND_COMPLEX:
+            residue = _polymer_partner_residue(self)
+            if residue:
+                payload["showResidues"] = [residue]
+        return payload
 
 
 def detect_hydrogen_bonds(
@@ -359,6 +366,7 @@ def _donor_sites(
     kinds: dict[tuple[str, str, str, str], str],
     neighbors: list[list[int]],
 ) -> list[tuple[int, int | None]]:
+    protonated = _protonated_residue_keys(atoms)
     sites: list[tuple[int, int | None]] = []
     for i, atom in enumerate(atoms):
         if _is_hydrogen(atom) or atom.elem not in _DONOR_ELEMENTS:
@@ -375,8 +383,12 @@ def _donor_sites(
             continue
         if hydrogens:
             sites.extend((i, h) for h in hydrogens)
-        else:
-            sites.append((i, None))
+            continue
+        if kind != "polymer" and _residue_key(atom) in protonated:
+            continue
+        if kind != "polymer" and not _implicit_heavy_donor(atoms, neighbors, i):
+            continue
+        sites.append((i, None))
     return sites
 
 
@@ -413,6 +425,59 @@ def _ligand_is_donor(atom: StructureAtom, n_heavy: int, hydrogens: list[int]) ->
     if atom.elem == "S":
         return n_heavy <= 1
     return False
+
+
+def _protonated_residue_keys(atoms: list[StructureAtom]) -> set[tuple[str, str, str, str]]:
+    """Residues that already carry explicit hydrogens."""
+    return {_residue_key(atom) for atom in atoms if _is_hydrogen(atom)}
+
+
+def _implicit_heavy_donor(
+    atoms: list[StructureAtom],
+    neighbors: list[list[int]],
+    index: int,
+) -> bool:
+    """Whether a hydrogen-free ligand atom may still donate.
+
+    Sulfonyl, sulfoxide, sulfate, and nitrogen-bound oxygens donate only when a
+    hydrogen is actually present. A hydroxyl oxygen on carbon stays eligible so
+    crystal structures without hydrogens can still match.
+    """
+    atom = atoms[index]
+    if atom.elem != "O":
+        return True
+    return all(atoms[j].elem not in {"S", "N"} for j in _heavy_neighbors(atoms, neighbors, index))
+
+
+def _polymer_partner_residue(bond: HydrogenBond) -> dict[str, str | int] | None:
+    """Protein residue to draw when a geometric protein–ligand bond is shown."""
+    if bond.donor_kind == "polymer":
+        chain, resn, resi, icode = (
+            bond.donor_chain,
+            bond.donor_resn,
+            bond.donor_resi,
+            bond.donor_icode,
+        )
+    elif bond.acceptor_kind == "polymer":
+        chain, resn, resi, icode = (
+            bond.acceptor_chain,
+            bond.acceptor_resn,
+            bond.acceptor_resi,
+            bond.acceptor_icode,
+        )
+    else:
+        return None
+    if not str(resi).strip() and not (chain or resn):
+        return None
+    record: dict[str, str | int] = {
+        "chain": chain,
+        "resn": resn,
+        "resi": str(resi),
+        "icode": icode or "",
+    }
+    if bond.model is not None:
+        record["model"] = bond.model
+    return record
 
 
 def _ligand_is_acceptor(atom: StructureAtom, n_heavy: int, n_h: int) -> bool:
