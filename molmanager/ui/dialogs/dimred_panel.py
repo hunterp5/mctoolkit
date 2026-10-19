@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -36,10 +37,10 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSpinBox,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
+from ...platform_support.session_log import record_ui_log
 from ..dockable_plot import hide_plot_options_dialog
 from ...analysis.dimensionality_reduction import (
     EMBEDDING_PCA_DIM,
@@ -60,7 +61,6 @@ from ...plotting.plot_marker_color import (
 from ..dimred_plot import build_dimension_reduction_figure, dimension_reduction_result_with_color
 from ..plotly_interactive_view import PlotlyInteractiveView
 from ..plot_table_sync import visible_oids_for_plot
-from ..qt_widget_utils import apply_monospace_to_text_edit
 from ..result_plot_panel import DockableResultPlotPanel
 from .scope import selection_scope_checked
 
@@ -239,13 +239,6 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         run_row.addStretch()
         trail.addLayout(run_row)
 
-        self.summary_text = QTextEdit()
-        self.summary_text.setReadOnly(True)
-        self.summary_text.setMaximumHeight(100)
-        apply_monospace_to_text_edit(self.summary_text)
-        trail.addWidget(QLabel("Results"))
-        trail.addWidget(self.summary_text)
-
     def _wire_dimred_ui(self, parent: ChemistryWorkspaceWindow | None) -> None:
         self.fp_combo.currentIndexChanged.connect(self._on_fp_selection_changed)
         self.target_dimensions.currentIndexChanged.connect(self._sync_target_dimension_controls)
@@ -306,6 +299,46 @@ class DimensionReductionPanel(DockableResultPlotPanel):
             self.reveal_plot_window()
             return
         self._open_plot_options()
+
+    def _calculating_status_text(self) -> str:
+        return f"{self._window_title}: calculating…"
+
+    def _close_options_for_run(self) -> None:
+        """Hide Plot Options so progress is the main-window status line."""
+        hide_plot_options_dialog(self._opts_dialog)
+        if self._plot_window_is_visible() or self.parent_app is None:
+            return
+        try:
+            self.parent_app.raise_()
+            self.parent_app.activateWindow()
+        except RuntimeError:
+            return
+
+    def _show_calculating_status(self) -> None:
+        """Tell the main window a dimred plot is running, without a percent."""
+        app = self.parent_app
+        if app is None:
+            return
+        message = self._calculating_status_text()
+        job_id = getattr(self, "_bg_job_id", None)
+        begin = getattr(app, "_begin_tool_progress", None)
+        if job_id and callable(begin):
+            # Negative total is indeterminate: status text only, no 0/N (pct%).
+            begin(message, -1, job_id=job_id)
+            return
+        label = getattr(app, "status_label", None)
+        if label is not None:
+            label.setText(message)
+
+    def _log_dimred_summary(self, summary: str) -> None:
+        text = (summary or "").strip()
+        if not text:
+            return
+        record_ui_log(f"{self._window_title}\n{text}")
+
+    def _log_dimred_failure(self, message: str) -> None:
+        detail = (message or "Computation failed.").strip()
+        record_ui_log(f"{self._window_title}: {detail}", level=logging.ERROR)
 
     def _clear_selection(self) -> None:
         """Clear table and plot point selection."""
@@ -436,7 +469,7 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         }
         if self._last_result is not None:
             state["result"] = result_to_dict(self._last_result)
-            state["summary"] = self.summary_text.toPlainText()
+            state["summary"] = self._last_result.summary
         return state
 
     def apply_session_state(self, state: dict | None) -> None:
@@ -469,11 +502,6 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         raw_result = state.get("result")
         if isinstance(raw_result, dict):
             self._last_result = DimensionReductionResult(**raw_result)
-            summary = state.get("summary")
-            if isinstance(summary, str):
-                self.summary_text.setPlainText(summary)
-            elif isinstance(raw_result.get("summary"), str):
-                self.summary_text.setPlainText(raw_result["summary"])
             QTimer.singleShot(0, self._refresh_plot_colors)
 
     @classmethod
@@ -687,13 +715,10 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         if color_col == "(none)":
             color_col = None
 
-        # Keep Plot Options up on the first run (no empty plot window yet).
-        if self._plot_window_is_visible():
-            hide_plot_options_dialog(self._opts_dialog)
+        self._close_options_for_run()
         self._job_running = True
         self.run_btn.setEnabled(False)
-        self.summary_text.setPlainText("Computing…")
-        self.parent_app.status_label.setText(f"{self._window_title}: preparing…")
+        self._show_calculating_status()
 
         prep = {
             "use_fp": use_fp,
@@ -730,7 +755,6 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         mol_payloads = None
         if use_fp:
             src = str(prep.get("struct_src") or "")
-            self.parent_app.status_label.setText(f"{self._window_title}: collecting structures…")
             mol_payloads = self._collect_table_payloads(src, only_sel)
             if len(mol_payloads) < 2 and not features:
                 self._reset_dimred_job_ui()
@@ -764,14 +788,7 @@ class DimensionReductionPanel(DockableResultPlotPanel):
             f"{self._window_title}…",
             cancel=self._bg_cancel_event.set,
         )
-        n = len(oids)
-        begin = getattr(self.parent_app, "_begin_tool_progress", None)
-        if callable(begin):
-            begin(self._window_title, n, job_id=self._bg_job_id)
-        else:
-            self.parent_app.status_label.setText(
-                f"{self._window_title}: computing in background ({n:,} row(s))…"
-            )
+        self._show_calculating_status()
         worker = DimensionReductionWorker(params, self._signals, cancel_event=self._bg_cancel_event)
         self.parent_app.threadpool.start(worker)
 
@@ -806,7 +823,7 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         self._clear_dimred_background_job()
         self._job_running = False
         self.run_btn.setEnabled(True)
-        self.summary_text.setPlainText(result.summary)
+        self._log_dimred_summary(getattr(result, "summary", ""))
         self._last_result = result
         if self._plot_view is None:
             if self.parent_app is not None:
@@ -842,7 +859,6 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         self._job_running = False
         self.run_btn.setEnabled(True)
         if message == "Cancelled.":
-            self.summary_text.setPlainText("Cancelled.")
             if self.parent_app is not None:
                 msg = f"{self._window_title}: cancelled."
                 finish = getattr(self.parent_app, "_finish_tool_progress", None)
@@ -853,7 +869,7 @@ class DimensionReductionPanel(DockableResultPlotPanel):
             if not self._plot_window_is_visible():
                 self._open_plot_options()
             return
-        self.summary_text.setPlainText("")
+        self._log_dimred_failure(message)
         if self.parent_app is not None:
             msg = f"{self._window_title}: failed."
             finish = getattr(self.parent_app, "_finish_tool_progress", None)

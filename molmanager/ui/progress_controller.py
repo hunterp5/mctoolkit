@@ -103,11 +103,18 @@ class ProgressController:
         return state.snapshot()
 
     def _begin_tool_progress(self, message: str, total: int, job_id: str | None = None) -> None:
-        """Start polled status updates for a long-running queued tool."""
-        total_i = max(1, int(total))
+        """Start polled status updates for a long-running queued tool.
+
+        ``total < 0`` is indeterminate: the status line is the message only.
+        """
         self._active_label = str(message or "")
-        self._app._tool_progress_state.begin(message, total_i, job_id=job_id)
-        self._on_tool_progress(message, 0, total_i, job_id=job_id)
+        total_i = int(total)
+        if total_i < 0:
+            self._on_tool_progress(message, 0, -1, job_id=job_id)
+        else:
+            total_i = max(1, total_i)
+            self._app._tool_progress_state.begin(message, total_i, job_id=job_id)
+            self._on_tool_progress(message, 0, total_i, job_id=job_id)
         if not self._poll_timer.isActive():
             self._poll_timer.start()
 

@@ -16,7 +16,11 @@
 
 """Dimred Plot Options open before the empty plot window."""
 
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QLabel, QListWidgetItem
+
 from molmanager.analysis.dimensionality_reduction import EMBEDDING_PCA_DIM
+from molmanager.platform_support.session_log import session_log_buffer
 from molmanager.ui.dialogs.dimensionality_reduction import (
     PCADialog,
     SOMPlotPanel,
@@ -178,6 +182,93 @@ def test_som_map_depth_is_used_for_3d_only(qapp):
         assert params["grid_depth"] == 4
     finally:
         _close_dimred_panel(panel, qapp)
+
+
+class _StatusLabel:
+    def __init__(self) -> None:
+        self.text = ""
+
+    def setText(self, text: str) -> None:  # noqa: N802 — Qt-shaped stand-in
+        self.text = text
+
+
+class _RunHost:
+    def __init__(self) -> None:
+        self.status_label = _StatusLabel()
+        self.began: list[tuple] = []
+
+    def _begin_tool_progress(self, message: str, total: int, job_id: str | None = None) -> None:
+        self.began.append((message, total, job_id))
+        self.status_label.setText(message)
+
+    def raise_(self) -> None:
+        return None
+
+    def activateWindow(self) -> None:  # noqa: N802 — Qt-shaped stand-in
+        return None
+
+
+def test_dimred_options_omit_results_section(qapp):
+    dlg = PCADialog(None)
+    try:
+        panel = dlg._panel
+        labels = [w.text() for w in panel._opts_dialog.findChildren(QLabel)]
+        assert "Results" not in labels
+        assert not hasattr(panel, "summary_text")
+    finally:
+        panel._opts_dialog.hide()
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_run_closes_options_and_sets_calculating_status(qapp):
+    dlg = PCADialog(None)
+    panel = dlg._panel
+    host = _RunHost()
+    panel.parent_app = host
+    item = QListWidgetItem("MW")
+    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+    item.setCheckState(Qt.Checked)
+    panel.column_list.addItem(item)
+    try:
+        panel.present_initial_ui()
+        qapp.processEvents()
+        assert panel._opts_dialog.isVisible()
+        panel._on_run()
+        assert not panel._opts_dialog.isVisible()
+        assert panel._job_running
+        assert host.status_label.text == "Principal Component Analysis: calculating…"
+        assert "%" not in host.status_label.text
+        assert host.began == []
+        panel._bg_job_id = "dimred-test"
+        panel._show_calculating_status()
+        assert host.began == [("Principal Component Analysis: calculating…", -1, "dimred-test")]
+        assert "%" not in host.status_label.text
+    finally:
+        panel._job_running = False
+        panel._opts_dialog.hide()
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_dimred_summary_is_written_to_the_session_log(qapp):
+    session_log_buffer().clear()
+    dlg = PCADialog(None)
+    try:
+        dlg._panel._log_dimred_summary("Samples used: 4\nFeatures: 2")
+        entries, _seq, _gen = session_log_buffer().snapshot()
+        assert any(
+            "Principal Component Analysis" in entry.message and "Samples used: 4" in entry.message
+            for entry in entries
+        )
+    finally:
+        session_log_buffer().clear()
+        dlg._panel._opts_dialog.hide()
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
 
 
 def test_pca_plot_has_no_preprocess_checkbox(qapp):
