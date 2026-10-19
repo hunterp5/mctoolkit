@@ -159,6 +159,9 @@ def discard_ionization_process_pool() -> None:
         _PERSISTENT_POOL_WORKERS = 0
         _PERSISTENT_POOL_REFS = 0
     shutdown_process_pool_executor(ex, kill_workers=True)
+    from molmanager.ionization.unipka_score_host import shutdown_unipka_score_host
+
+    shutdown_unipka_score_host()
 
 
 def _acquire_persistent_pool(n_workers: int) -> ProcessPoolExecutor:
@@ -291,27 +294,19 @@ def plan_ionization_process_workers(
     """
     Decide whether to use a process pool and how many workers.
 
-    ``configured`` is the tool-specific env override (``None`` = auto).
-    CUDA wheels use a one-worker process pool so GPU scoring stays in a child
-    that can be terminated on app close. The GUI process must not call
-    ``torch.cuda.is_available()`` (Windows spawn then hangs; WebEngine GL breaks).
+    ``configured`` is the tool-specific env override (``None`` = auto). Scoring is
+    always one torch process: each extra worker used to load its own ~1.9 GB
+    checkpoint. ``configured`` above 1 still only starts that one process;
+    conformer generation fans out separately. CUDA stays in that child so the
+    GUI process must not call ``torch.cuda.is_available()``.
     """
+    if configured is not None and int(configured) <= 0:
+        return False, 1
     if unipka_cuda_available():
-        if configured is not None and int(configured) <= 0:
-            return False, 1
         return n_unique >= 1, 1
     cpu = os.cpu_count() or 4
-    auto_workers = min(n_unique, max(1, min(8, cpu - 1)))
-    if configured is None:
-        use_mp = cpu > 1 and n_unique >= 1
-        return use_mp, auto_workers if use_mp else 1
-    cfg_i = int(configured)
-    if cfg_i <= 0:
-        return False, 1
-    if cfg_i == 1:
-        return cpu > 1 and n_unique >= 1, 1
-    proc_workers = min(cfg_i, n_unique, 8)
-    return proc_workers > 1 and n_unique >= 2, proc_workers
+    use_mp = cpu > 1 and n_unique >= 1
+    return use_mp, 1
 
 
 def _mp_compute_microstates(task: tuple[str, bytes]) -> tuple[str, object | None]:
@@ -325,12 +320,8 @@ def _mp_compute_microstates_chunk(
     flag_indices: list[int] | None = None,
 ) -> list[tuple[str, object | None]]:
     """Score a chunk of structures in one Uni-pKa free-energy call."""
-    from molmanager.ionization.unipka_ensembles import (
-        pin_unipka_torch_threads,
-        predict_ionization_ensembles,
-    )
+    from molmanager.ionization.unipka_ensembles import predict_ionization_ensembles
 
-    pin_unipka_torch_threads()
     keys: list[str] = []
     mols: list[Chem.Mol | None] = []
     for key, mol_blob in tasks:
@@ -354,9 +345,7 @@ def _mp_compute_microstates_chunk(
                 mark_structure_progress(progress_flags, [flag_indices[i]], 1)
     ensembles: list[object | None] = [None] * len(keys)
     if usable_idx:
-        usable_flags = (
-            [flag_indices[i] for i in usable_idx] if flag_indices is not None else None
-        )
+        usable_flags = [flag_indices[i] for i in usable_idx] if flag_indices is not None else None
 
         def _report(done: int, _total: int) -> None:
             mark_structure_progress(progress_flags, usable_flags, done)
