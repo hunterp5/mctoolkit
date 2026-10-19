@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from molmanager.ui.main_window.menu_spec import (
+    HELP_MENU,
     MAIN_WINDOW_MENUS,
     find_submenu,
     menu_outline,
@@ -53,7 +54,6 @@ def test_top_level_menu_order():
         "Data",
         "Lists",
         "Settings",
-        "Help",
     ]
 
 
@@ -69,6 +69,21 @@ def test_file_session_submenu_outline():
         "New Session",
         "Duplicate Session",
         "Close Session",
+    ]
+
+
+def test_edit_selection_submenu_order():
+    edit = find_submenu(MAIN_WINDOW_MENUS, "Edit")
+    labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(edit.items)]
+    assert "Invert Selection" not in labels
+    assert "Clear Selection" not in labels
+    assert "Delete Selection" not in labels
+    assert "Selection" in labels
+    selection = find_submenu(edit.items, "Selection")
+    assert menu_outline(selection.items) == [
+        "Invert Selection",
+        "Clear Selection",
+        "Delete Selection",
     ]
 
 
@@ -137,16 +152,15 @@ def test_lists_menu_sits_between_data_and_settings():
     ]
 
 
-def test_help_follows_settings():
+def test_help_menu_sits_inside_settings():
     labels = []
     for item in MAIN_WINDOW_MENUS:
         outline = menu_outline((item,))[0]
         labels.append(next(iter(outline)) if isinstance(outline, dict) else outline)
-    assert labels[-1] == "Help"
-    assert labels[-2] == "Settings"
-    help_menu = find_submenu(MAIN_WINDOW_MENUS, "Help")
-    assert menu_outline(help_menu.items) == ["User Guide", "Citations"]
-    assert help_menu.attr == "_help_menu"
+    assert labels[-1] == "Settings"
+    assert "Help" not in labels
+    assert menu_outline(HELP_MENU.items) == ["User Guide", "Citations"]
+    assert HELP_MENU.attr == "_help_menu"
 
 
 def test_data_table_operations_submenu():
