@@ -45,6 +45,7 @@ from .iupac_style import (
     iupac_sketch_style,
     iupac_structure_font,
 )
+from .rgroups import is_rgroup_node
 from .wildcards import _is_wildcard_node, _normalize_wildcard_elements
 
 
@@ -79,6 +80,8 @@ class SketchWidgetPaintMixin:
         if n.get("abbrev"):
             return str(n.get("abbrev") or "")
         el = n.get("element")
+        if is_rgroup_node(n):
+            return str(el)
         if el == WILDCARD_ELEMENT:
             return "*"
         if el == "C":
@@ -99,6 +102,8 @@ class SketchWidgetPaintMixin:
 
         Returns ``(display_text, attach_at_end)``.
         """
+        if is_rgroup_node(n):
+            return str(n.get("element") or text), False
         left, right, _up, _down = neighbor_bond_sides(
             int(n["id"]),
             (float(n["pos"].x()), float(n["pos"].y())),
@@ -1112,7 +1117,11 @@ class SketchWidgetPaintMixin:
         self._after_sketch_edit()
 
     def _should_paint_sketch_with_rdkit(self) -> bool:
-        if not self.nodes or self.sketch_has_wildcards():
+        if (
+            not self.nodes
+            or self.sketch_has_wildcards()
+            or any(is_rgroup_node(n) for n in self.nodes)
+        ):
             return False
         # Wavy / dative use custom ACS glyphs; keep those sketches on the local painter.
         for b in self.bonds:
@@ -1185,7 +1194,7 @@ class SketchWidgetPaintMixin:
         return False
 
     def _node_implicit_h_count(self, n: dict, *, include_carbon: bool = False) -> int:
-        if _is_wildcard_node(n):
+        if _is_wildcard_node(n) or is_rgroup_node(n):
             return 0
         el = str(n.get("element") or "")
         if el in ("H", "D", "T", WILDCARD_ELEMENT):
@@ -1428,7 +1437,7 @@ class SketchWidgetPaintMixin:
         self._paint_sketch_oxidation_states(p, style)
 
     def _node_lone_pair_count(self, n: dict) -> int:
-        if _is_wildcard_node(n):
+        if _is_wildcard_node(n) or is_rgroup_node(n):
             return 0
         nid = int(n["id"])
         fc = int(n.get("charge", 0) or 0)
@@ -1519,7 +1528,7 @@ class SketchWidgetPaintMixin:
                 self._draw_lone_pair_at(p, cx, cy, ang, style)
 
     def _node_oxidation_state(self, n: dict) -> int | None:
-        if _is_wildcard_node(n):
+        if _is_wildcard_node(n) or is_rgroup_node(n):
             return None
         nid = int(n["id"])
         partners: list[tuple[str, int]] = []
@@ -1607,6 +1616,16 @@ class SketchWidgetPaintMixin:
                     self._draw_formal_charge(
                         p, pos, ch, symbol=str(abbrev), font_pt=style.label_font_pt, node=n
                     )
+            elif is_rgroup_node(n):
+                self._draw_element_label(
+                    p,
+                    pos,
+                    str(el),
+                    font_pt=style.label_font_pt,
+                    fill=QColor(20, 70, 140),
+                    node=n,
+                )
+                continue
             elif el == WILDCARD_ELEMENT:
                 self._draw_element_label(
                     p, pos, "*", font_pt=style.label_font_pt + 1, fill=QColor(80, 40, 120), node=n
