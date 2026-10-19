@@ -46,10 +46,6 @@ _VISIBLE_SOURCE_ROWS_UNSET = object()
 class TableSelectionMixin:
     """Programmatic and user-driven table selection (including large OID overrides)."""
 
-    def _select_column(self, col: int) -> None:
-        self._column_selection_anchor = col
-        self._select_columns([col], anchor_col=col)
-
     def _select_column_range(self, anchor_col: int, end_col: int) -> None:
         """Select all visible columns from ``anchor_col`` to ``end_col`` (inclusive)."""
         hh = self.table.horizontalHeader()
