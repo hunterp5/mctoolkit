@@ -89,6 +89,21 @@ def test_ensemble_store_set_get_and_export_import():
         other.close()
 
 
+def test_ensemble_import_merges_without_materializing_rows():
+    store = EnsembleStore()
+    other = EnsembleStore()
+    try:
+        assert store.store_mol(1, "confs", _ethanol_ensemble(2))
+        assert other.store_mol(2, "confs", _ethanol_ensemble(2))
+        other.import_sqlite_bytes(store.export_sqlite_bytes(), replace=False)
+        assert (1, "confs") in other
+        assert (2, "confs") in other
+        assert other.mol_for(1, "confs").GetNumConformers() == 2
+    finally:
+        store.close()
+        other.close()
+
+
 def test_ensure_confs_sidecar_upgrades_dict():
     class Holder:
         _confs_blocks_sidecar = {(1, "confs"): "YWFh"}
