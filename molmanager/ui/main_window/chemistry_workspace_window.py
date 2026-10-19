@@ -92,6 +92,8 @@ from .external_records_mixin import ExternalRecordsMixin
 from .fast_prepare_tools_mixin import FastPrepareToolsMixin
 from .fragment_tools_mixin import FragmentToolsMixin
 from .free_wilson_mixin import FreeWilsonMixin
+from .sar_matrix_mixin import SarMatrixMixin
+from .interaction_fingerprint_mixin import InteractionFingerprintMixin
 from .ingest_export_mixin import IngestExportMixin
 from .ingest_load_mixin import IngestLoadMixin
 from .medchem_space_mixin import MedChemSpaceMixin
@@ -272,6 +274,8 @@ class ChemistryWorkspaceWindow(
         self.signals.reaction_enum_failed.connect(self.on_reaction_enum_failed, _qc)
         self.signals.rgroup_enum_finished.connect(self.on_rgroup_enum_finished, _qc)
         self.signals.rgroup_enum_failed.connect(self.on_rgroup_enum_failed, _qc)
+        self.signals.ifp_finished.connect(self.on_ifp_finished, _qc)
+        self.signals.ifp_failed.connect(self.on_ifp_failed, _qc)
         self.signals.mmp_finished.connect(self.on_mmp_finished, _qc)
         self.signals.mmp_failed.connect(self.on_mmp_failed, _qc)
         self.signals.free_wilson_finished.connect(self.on_free_wilson_finished, _qc)
@@ -380,6 +384,7 @@ class ChemistryWorkspaceWindow(
         self._chembl_dialog = None
         self._patent_query_dialog = None
         self._smina_dock_dialog = None
+        self._gnina_dock_session = None
         self._pdbqt_generator_dialog = None
         self._pdb_fixer_dialog = None
         self._export_busy = False
@@ -745,6 +750,12 @@ install_window_forwards(
 )
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.qsar", (QsarMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.free_wilson", (FreeWilsonMixin,))
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.sar_matrix", (SarMatrixMixin,))
+install_window_forwards(
+    ChemistryWorkspaceWindow,
+    "workspace_tools.interaction_fingerprint",
+    (InteractionFingerprintMixin,),
+)
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.mpo", (MpoMixin,))
 install_window_forwards(
     ChemistryWorkspaceWindow,
