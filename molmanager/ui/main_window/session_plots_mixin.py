@@ -77,6 +77,49 @@ class SessionPlotsMixin:
         except RuntimeError:
             pass
 
+    def _collect_gnina_dock(self) -> dict | None:
+        """Gnina paths and options from the open dialog, or the last closed snapshot."""
+        from ..dialogs.gnina_dock import gnina_session_worth_saving
+
+        dlg = getattr(self, "_smina_dock_dialog", None)
+        state = None
+        if dlg is not None and not qobject_is_deleted(dlg):
+            collect = getattr(dlg, "gnina_session_state", None)
+            if callable(collect):
+                try:
+                    state = collect()
+                except RuntimeError:
+                    state = None
+        if not isinstance(state, dict):
+            state = getattr(self, "_gnina_dock_session", None)
+        if not gnina_session_worth_saving(state):
+            return None
+        try:
+            return json.loads(json.dumps(state))
+        except (TypeError, ValueError):
+            logger.exception("Skipping Gnina session snapshot with non-JSON state")
+            return None
+
+    def _restore_gnina_dock(self, payload: object) -> None:
+        """Keep the Gnina setup and refill an already-open dialog."""
+        from ..dialogs.gnina_dock import gnina_session_worth_saving
+
+        if not gnina_session_worth_saving(payload):
+            self._gnina_dock_session = None
+            return
+        try:
+            self._gnina_dock_session = json.loads(json.dumps(payload))
+        except (TypeError, ValueError):
+            logger.exception("Skipping Gnina restore with invalid session state")
+            self._gnina_dock_session = None
+            return
+        dlg = getattr(self, "_smina_dock_dialog", None)
+        if dlg is None or qobject_is_deleted(dlg):
+            return
+        apply_state = getattr(dlg, "apply_gnina_session", None)
+        if callable(apply_state):
+            apply_state(self._gnina_dock_session)
+
     def _collect_docked_plots(self) -> dict:
         """Docked plot widgets keyed by workspace pane (Plotter and analysis maps)."""
         mgr = getattr(self, "_workspace_layout", None)
