@@ -508,6 +508,13 @@ def test_build_protein_viewer_html_has_setters():
     assert "applyPocketSurface" in html
     assert "p.wireframe" in html
     assert "p.surfaceType" in html
+    assert "paintPocketResidueColors" in html
+    assert "paintPocketCharges" in html
+    assert "partialCharge" in html
+    assert "showAtoms" in html
+    assert "showResidues" in html
+    assert "applyInteractionResidues" in html
+    assert "applyInteractionAtoms" in html
     assert "molmanagerSetHydrogens" in html
     assert "molmanagerSetHbonds" in html
     assert "applyHydrogenVisibility" in html
@@ -1235,6 +1242,27 @@ def test_manager_named_groups(qapp, tmp_path):  # noqa: ARG001
     dlg2.close()
 
 
+def test_tools_dock_ligand_opens_gnina(qapp):  # noqa: ARG001
+    from PyQt5.QtWidgets import QWidget
+
+    from molmanager.ui.protein_viewer import ProteinViewerDialog
+
+    class _Host(QWidget):
+        def __init__(self) -> None:
+            super().__init__()
+            self.opened = 0
+
+        def open_gnina_dock(self) -> None:
+            self.opened += 1
+
+    host = _Host()
+    dlg = ProteinViewerDialog(host)
+    dlg._act_dock_ligand.trigger()
+    assert host.opened == 1
+    dlg.close()
+    host.close()
+
+
 def test_unscoped_component_id():
     from molmanager.ui.protein_viewer_models import unscoped_component_id
 
@@ -1264,7 +1292,7 @@ def test_sequence_window_select_and_edit(qapp, tmp_path):  # noqa: ARG001
     assert "Sequence" not in labels
     tools_menu = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Tools")
     tools_labels = [a.text().replace("&", "") for a in tools_menu.actions() if a.text().strip()]
-    assert tools_labels[:2] == ["Prepare", "Pharmacophore"]
+    assert tools_labels[:3] == ["Prepare", "Dock Ligand…", "Pharmacophore"]
     corner = mb.cornerWidget(Qt.TopRightCorner)
     assert corner is not None
     assert dlg._btn_sequence is not None
@@ -1504,6 +1532,11 @@ def test_normalize_pocket_surface_settings():
     assert clamped["opacity"] == 1.0
     assert clamped["linewidth"] == 0.5
     assert clamped["surfaceType"] == "ms"
+    hydro = normalize_pocket_surface_settings({"colorScheme": "hydrophobicity"})
+    assert hydro["colorScheme"] == "hydrophobicity"
+    assert hydro["color"] == "lightgray"
+    charge = normalize_pocket_surface_settings({"color": "charge"})
+    assert charge["colorScheme"] == "charge"
     assert (
         normalize_pocket_surface_settings({})["opacity"]
         == DEFAULT_POCKET_SURFACE_SETTINGS["opacity"]
@@ -1532,6 +1565,10 @@ def test_pocket_surface_menu_toggle(qapp, tmp_path, monkeypatch):  # noqa: ARG00
     surf = dlg._pocket_surface_dialog
     assert isinstance(surf, ProteinPocketSurfaceDialog)
     assert surf.isVisible()
+    assert not surf.chk_show.isChecked()
+    assert dlg._pocket_surface_payload is None
+    surf.btn_ok.click()
+    assert not surf.isVisible()
     assert surf.chk_show.isChecked()
     payload = dlg._pocket_surface_payload
     assert payload is not None
@@ -1551,6 +1588,18 @@ def test_pocket_surface_menu_toggle(qapp, tmp_path, monkeypatch):  # noqa: ARG00
     vdw = surf.combo_type.findData("vdw")
     surf.combo_type.setCurrentIndex(vdw)
     assert dlg._pocket_surface_payload["surfaceType"] == "vdw"
+    hydro = surf.combo_color.findData("hydrophobicity")
+    surf.combo_color.setCurrentIndex(hydro)
+    assert dlg._pocket_surface_payload["colorScheme"] == "hydrophobicity"
+    residue_colors = dlg._pocket_surface_payload["residueColors"]
+    assert residue_colors["ARG"] != residue_colors["ILE"]
+    charge = surf.combo_color.findData("charge")
+    surf.combo_color.setCurrentIndex(charge)
+    assert dlg._pocket_surface_payload["colorScheme"] == "charge"
+    assert "residueColors" not in dlg._pocket_surface_payload
+    surf.combo_color.setCurrentIndex(green)
+    assert dlg._pocket_surface_payload["color"] == "green"
+    assert dlg._pocket_surface_payload["colorScheme"] == "solid"
     dlg._on_render_style_chosen("polymer", "cartoon")
     assert dlg._pocket_surface_payload is not None
     dlg._reset_camera()
@@ -1580,8 +1629,15 @@ def test_pocket_surface_menu_toggle(qapp, tmp_path, monkeypatch):  # noqa: ARG00
     dlg3.load_structure_path(empty)
     dlg3.open_pocket_surface_dialog()
     assert dlg3._pocket_surface_dialog is not None
+    assert dlg3._pocket_surface_dialog.isVisible()
     assert not dlg3._pocket_surface_dialog.is_showing()
+    assert dlg3._pocket_surface_payload is None
+    assert shown == []
+    dlg3._pocket_surface_dialog.btn_ok.click()
     assert "Pocket Surface" in shown
+    assert dlg3._pocket_surface_dialog.isVisible()
+    assert not dlg3._pocket_surface_dialog.is_showing()
+    assert dlg3._pocket_surface_payload is None
     dlg3._pocket_surface_dialog.close()
     dlg3.close()
 
