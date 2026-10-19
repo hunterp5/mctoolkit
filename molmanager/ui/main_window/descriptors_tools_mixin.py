@@ -46,23 +46,43 @@ class DescriptorsToolsMixin:
 
         disp, fns = d.get_selected()
         src = d.src_combo.currentText()
-        is_s = src != "Structure"
-        s_idx = self.headers.index(src)
         only_selected = d.only_selected_rows()
-        allowed = self._selected_oids_set() if only_selected else None
-        if self._abort_if_only_selected_but_empty(only_selected, allowed, "Calculate Descriptors"):
+        rows = self._rows_for_structure_column_job(src, only_selected, "Calculate Descriptors")
+        if rows is None:
             return
-        oids_list = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids_list = [o for o in oids_list if o in allowed]
+        data, oids_list, is_text = rows
         calc_headers = self._result_column_names(disp, oids_list)
-
         packed_confs, confs_cols, ensemble_db = (
             self._ensemble_inputs_for_descriptor_job(oids_list, src)
             if int_fns_need_3d(fns)
             else ({}, {}, None)
         )
-        if not is_s:
+        self._enqueue_column_calc(
+            title="Calculate descriptors",
+            data=data,
+            disp_headers=calc_headers,
+            int_fns=fns,
+            is_text=is_text,
+            confs_by_idx=packed_confs,
+            confs_col_by_idx=confs_cols,
+            ensemble_db=ensemble_db,
+        )
+
+    def _rows_for_structure_column_job(self, src: str, only_selected: bool, title: str):
+        """Return ``(row inputs, oids, text source)`` or None when the job should not start.
+
+        A text source is any column other than Structure: those cells are parsed as
+        molecule text. Structure uses the stored molecule.
+        """
+        is_text = src != "Structure"
+        s_idx = self.headers.index(src)
+        allowed = self._selected_oids_set() if only_selected else None
+        if self._abort_if_only_selected_but_empty(only_selected, allowed, title):
+            return None
+        oids_list = self._all_oids_in_table_order()
+        if allowed is not None:
+            oids_list = [o for o in oids_list if o in allowed]
+        if not is_text:
             data = self._structure_tool_inputs(src, allowed)
         else:
             data = [
@@ -71,25 +91,38 @@ class DescriptorsToolsMixin:
         if not data:
             QMessageBox.information(
                 self,
-                "Calculate Descriptors",
+                title,
                 "No rows to process for this scope and source.",
             )
             self.status_label.setText("Ready.")
-            return
+            return None
+        return data, oids_list, is_text
 
+    def _enqueue_column_calc(
+        self,
+        *,
+        title: str,
+        data,
+        disp_headers,
+        int_fns,
+        is_text: bool,
+        confs_by_idx=None,
+        confs_col_by_idx=None,
+        ensemble_db=None,
+    ) -> None:
         req = CalcDescriptorsRequest(
             data=data,
-            disp_headers=calc_headers,
-            int_fns=fns,
-            is_smiles=is_s,
-            confs_by_idx=packed_confs,
-            confs_col_by_idx=confs_cols,
+            disp_headers=disp_headers,
+            int_fns=int_fns,
+            is_smiles=is_text,
+            confs_by_idx=confs_by_idx,
+            confs_col_by_idx=confs_col_by_idx,
             ensemble_db=ensemble_db,
+            progress_label=title,
         )
-
         enqueue_process_queue_job(
             self,
-            "Calculate descriptors",
+            title,
             len(data),
             lambda ev, ps, request=req: CalcWorker(
                 request,
@@ -97,7 +130,7 @@ class DescriptorsToolsMixin:
                 cancel_event=ev,
                 progress_state=ps,
             ),
-            queue_label=f"Calculate descriptors ({len(data)} rows)",
+            queue_label=f"{title} ({len(data)} rows)",
         )
 
     def _ensemble_inputs_for_descriptor_job(
