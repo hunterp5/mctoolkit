@@ -16,7 +16,9 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import sys
 import threading
 from contextlib import nullcontext
 
@@ -24,12 +26,33 @@ from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
 from ...platform_support.config import load_config
+from ...table.open_messages import preflight_open_path
 from ...table.table_file_formats import TABLE_OPEN_FILTER, TABLE_SAVE_FILTER
 from ...workers import ExportWorker, UniversalLoadWorker
 from ..strings import LOADING_DETAIL_APPEND, LOADING_DETAIL_READING_DISK
 
+logger = logging.getLogger(__name__)
+
 
 class IngestExportMixin:
+    def _warn_could_not_open(self, title: str, message: str) -> None:
+        """Show one open failure. Headless tests record the message and skip the dialog."""
+        text = message or "Could not open that file."
+        self._last_open_error = text
+        logger.warning("%s: %s", title, text)
+        if "pytest" in sys.modules:
+            return
+        QMessageBox.warning(self, title, text)
+
+    def _reject_unopenable_path(self, path: str, *, title: str) -> bool:
+        """Warn and return True when *path* is missing, a folder, or not readable."""
+        problem = preflight_open_path(path)
+        if not problem:
+            self._last_open_error = None
+            return False
+        self._warn_could_not_open(title, problem)
+        return True
+
     def open_file_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open File", "", TABLE_OPEN_FILTER)
         if path:
@@ -41,6 +64,9 @@ class IngestExportMixin:
             self.import_file(path)
 
     def load_file(self, path: str) -> None:
+        if self._reject_unopenable_path(path, title="Open File"):
+            return
+        self._note_open_attempt("Open File")
         self._accept_file_ingest_results()
         self._ingest_append_mode = False
         self._structure_field_override = None
@@ -56,11 +82,17 @@ class IngestExportMixin:
         self.status_label.setText("Reading file…")
         self._ensure_structure_choice_event().set()
         batch_size = load_config().ingest_worker_batch_size
+        gen = int(self._file_ingest_generation)
         self.process_queue.enqueue(
             f"Open file: {path}",
-            lambda ev, p=path, s=self.signals, sce=self._structure_choice_event, bs=batch_size: (
+            lambda ev, p=path, s=self.signals, sce=self._structure_choice_event, bs=batch_size, g=gen: (
                 UniversalLoadWorker(
-                    p, s, batch_size=bs, cancel_event=ev, structure_choice_event=sce
+                    p,
+                    s,
+                    batch_size=bs,
+                    cancel_event=ev,
+                    structure_choice_event=sce,
+                    ingest_generation=g,
                 )
             ),
         )
@@ -78,6 +110,9 @@ class IngestExportMixin:
 
     def import_file(self, path: str) -> None:
         """Load molecules from disk and append them to the current table (merge columns as needed)."""
+        if self._reject_unopenable_path(path, title="Import Data"):
+            return
+        self._note_open_attempt("Import Data")
         self._accept_file_ingest_results()
         self._pending_batches = []
         self._processing_batches = False
@@ -96,11 +131,17 @@ class IngestExportMixin:
         self.status_label.setText("Importing…")
         self._ensure_structure_choice_event().set()
         batch_size = load_config().ingest_worker_batch_size
+        gen = int(self._file_ingest_generation)
         self.process_queue.enqueue(
             f"Import data: {path}",
-            lambda ev, p=path, s=self.signals, sce=self._structure_choice_event, bs=batch_size: (
+            lambda ev, p=path, s=self.signals, sce=self._structure_choice_event, bs=batch_size, g=gen: (
                 UniversalLoadWorker(
-                    p, s, batch_size=bs, cancel_event=ev, structure_choice_event=sce
+                    p,
+                    s,
+                    batch_size=bs,
+                    cancel_event=ev,
+                    structure_choice_event=sce,
+                    ingest_generation=g,
                 )
             ),
         )
