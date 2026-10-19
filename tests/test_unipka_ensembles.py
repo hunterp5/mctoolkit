@@ -335,9 +335,14 @@ def test_unipkainfer_spike_when_weights_present() -> None:
     ckpt = Path(default_model_dir()) / f"fold_{DEFAULT_FOLD}" / "checkpoint_best.pt"
     if not ckpt.is_file():
         pytest.skip("Uni-pKa fold checkpoint is not downloaded")
+    from molmanager.ionization.unipka_score_host import shutdown_unipka_score_host
+
     mol = Chem.MolFromSmiles("CCO")
     assert mol is not None
-    energies = score_microstate_free_energies([mol])
+    try:
+        energies = score_microstate_free_energies([mol])
+    finally:
+        shutdown_unipka_score_host()
     assert len(energies) == 1
     assert math.isfinite(energies[0])
 
@@ -355,15 +360,20 @@ def test_live_acetic_and_aniline_pka_in_aqueous_range() -> None:
     ckpt = Path(default_model_dir()) / f"fold_{DEFAULT_FOLD}" / "checkpoint_best.pt"
     if not ckpt.is_file():
         pytest.skip("Uni-pKa fold checkpoint is not downloaded")
+    from molmanager.ionization.unipka_score_host import shutdown_unipka_score_host
+
     cases = (
         ("CC(=O)O", 4.76, 2.0),
         ("Nc1ccccc1", 4.60, 2.0),
     )
-    for smi, expected, tol in cases:
-        mol = Chem.MolFromSmiles(smi)
-        assert mol is not None
-        ens = predict_ionization_ensemble(mol)
-        assert ens is not None
-        assert ens.macro_pkas, smi
-        nearest = min(ens.macro_pkas, key=lambda p: abs(p - expected))
-        assert abs(nearest - expected) < tol, (smi, ens.macro_pkas)
+    try:
+        for smi, expected, tol in cases:
+            mol = Chem.MolFromSmiles(smi)
+            assert mol is not None
+            ens = predict_ionization_ensemble(mol)
+            assert ens is not None
+            assert ens.macro_pkas, smi
+            nearest = min(ens.macro_pkas, key=lambda p: abs(p - expected))
+            assert abs(nearest - expected) < tol, (smi, ens.macro_pkas)
+    finally:
+        shutdown_unipka_score_host()
