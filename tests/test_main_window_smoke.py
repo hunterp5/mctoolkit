@@ -1318,6 +1318,7 @@ def test_data_menu_nests_analyze_and_split_under_table(qapp):  # noqa: ARG001
     data = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Data")
     labels = [a.text().replace("&", "") for a in data.actions()]
     assert labels[0] == "Table"
+    assert labels[1] == "Lists"
     assert "Statistics…" not in labels
     assert "Analyze Table…" not in labels
     assert "Split Column…" not in labels
