@@ -42,6 +42,22 @@ def test_single_point_energy_kcal_mmff_and_uff():
     assert mmff != uff
 
 
+def test_single_point_energy_kcal_invalid_valence_returns_none():
+    mol = Chem.AddHs(Chem.MolFromSmiles("CS(=O)(=O)NC"))
+    assert mol is not None
+    assert AllChem.EmbedMolecule(mol, randomSeed=1) == 0
+    edited = Chem.RWMol(mol)
+    nitrogen = next(atom.GetIdx() for atom in edited.GetAtoms() if atom.GetSymbol() == "N")
+    hydrogen = edited.AddAtom(Chem.Atom(1))
+    edited.AddBond(nitrogen, hydrogen, Chem.BondType.SINGLE)
+    conf = edited.GetConformer()
+    pos = conf.GetAtomPosition(nitrogen)
+    conf.SetAtomPosition(hydrogen, (pos.x + 1.0, pos.y, pos.z))
+    bad = edited.GetMol()
+    assert single_point_energy_kcal(bad, "UFF") is None
+    assert single_point_energy_kcal(bad, "MMFF") is None
+
+
 def test_run_strain_energy_relative_to_reference():
     m = Chem.MolFromSmiles("CCO")
     out, meta = run_conformer_generation(
