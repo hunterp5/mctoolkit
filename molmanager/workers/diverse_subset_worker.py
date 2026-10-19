@@ -487,7 +487,9 @@ def materialize_pool_fingerprints(
         batch_size = max(1, int(load_config().descriptor_process_pool_batch_size))
         items = [(i, row.mol.ToBinary() if row.mol is not None else b"") for i, row in missing]
         batches = [items[s : s + batch_size] for s in range(0, len(items), batch_size)]
-        proc_workers = min(max(2, (os.cpu_count() or 4) - 1), 8)
+        from ..platform_support.worker_budget import rdkit_process_workers
+
+        proc_workers = rdkit_process_workers()
         ex = register_process_pool(ProcessPoolExecutor(max_workers=proc_workers))
         try:
             pending = {ex.submit(_mp_fp_batch, (batch, fp_choice)): batch for batch in batches}
