@@ -373,7 +373,15 @@ def _run_descriptor_process_pool(
     for start in range(0, len(row_items), batch_size):
         chunk = row_items[start : start + batch_size]
         batch_args.append((chunk, tuple(disp_headers), tuple(int_fns), bool(pka_cache_used)))
-    proc_workers = min(max_workers, max(2, (os.cpu_count() or 4) - 1), 8)
+    from ..platform_support.worker_budget import RDKIT_PROCESS_BYTES, plan_process_workers
+
+    requested = max(1, int(max_workers))
+    cpu_cap = min(8, requested, max(2, (os.cpu_count() or 4) - 1))
+    proc_workers = plan_process_workers(
+        per_worker_bytes=RDKIT_PROCESS_BYTES,
+        cpu_cap=max(1, cpu_cap),
+        min_workers=1 if requested <= 1 else min(2, max(1, cpu_cap)),
+    )
     emit_progress(0, force=True)
     mp_results_dict: dict = {}
     done_count = 0
@@ -749,9 +757,7 @@ class CalcWorker(QRunnable):
     ) -> None:
         from ..chem.murcko import apply_murcko_scaffold_counts
 
-        results = apply_murcko_scaffold_counts(
-            results, prepared, self.disp_headers, self.int_fns
-        )
+        results = apply_murcko_scaffold_counts(results, prepared, self.disp_headers, self.int_fns)
         results, cancelled = _attach_name_lookup_columns(
             results,
             prepared=prepared,
