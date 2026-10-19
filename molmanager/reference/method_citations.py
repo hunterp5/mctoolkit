@@ -78,6 +78,27 @@ LIPINSKI_RO5 = (
     "NumHAcceptors and standard limits vs MolWt / MolLogP."
 )
 
+STRUCTURAL_ALERTS = (
+    "Structural alerts: RDKit FilterCatalog. PAINS: Baell, J. B.; Holloway, G. A. "
+    "J. Med. Chem. 2010, 53, 2719–2740. https://doi.org/10.1021/jm901137j — "
+    "Brenk: Brenk, R.; et al. ChemMedChem 2008, 3, 435–444. "
+    "https://doi.org/10.1002/cmdc.200700139 — NIH, ZINC, and ChEMBL sets as shipped with RDKit."
+)
+
+
+def structural_alerts_dialog_footer_html() -> str:
+    """Rich text for the Structural Alerts catalog method."""
+    return (
+        "<small><b>Catalogs</b>: RDKit FilterCatalog (BSD). "
+        "<b>PAINS</b>: "
+        '<a href="https://doi.org/10.1021/jm901137j">Baell &amp; Holloway, J. Med. Chem. 2010</a>. '
+        "<b>Brenk</b>: "
+        '<a href="https://doi.org/10.1002/cmdc.200700139">Brenk et al., ChemMedChem 2008</a>. '
+        "NIH, ZINC, and ChEMBL sets are the catalogs shipped with this RDKit. "
+        "A count of 0 with a blank name cell means that catalog did not match.</small>"
+    )
+
+
 BOILED_EGG = (
     "BOILED-Egg (TPSA vs WLOGP, GIA / BBB regions): Daina, A.; Zoete, V. A BOILED-Egg To Predict "
     "Gastrointestinal Absorption and Brain Penetration of Small Molecules. ChemMedChem 2016, 11 (11), "
@@ -206,7 +227,7 @@ def descriptor_dialog_footer_html() -> str:
         "<b>QED:</b> "
         '<a href="https://doi.org/10.1038/nchem.1243">Bickerton et al., Nat. Chem. 2012</a> (RDKit QED).<br>'
         "<b>Ro5:</b> Lipinski et al., Adv. Drug Deliv. Rev. 1997 (RDKit Lipinski counts).<br>"
-        "<b>2D pharmacophore (Gobbi) on-bits:</b> RDKit Pharm2D / Gobbi–Poppinger definitions.<br>"
+        "<b>2D pharmacophore (Gobbi):</b> RDKit Pharm2D / Gobbi–Poppinger definitions.<br>"
         "<b>Common Name / Synonyms:</b> "
         '<a href="https://doi.org/10.1093/nar/gkac956">PubChem</a> preferred name (Title) and '
         "compound synonyms via PubChemPy (network lookup; N/A if not in PubChem).<br>"
