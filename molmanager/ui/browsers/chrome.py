@@ -43,7 +43,7 @@ from ...table.structure_depiction_layout import (
 )
 from ..dockable_plot import PLOT_BODY_MARGINS, PLOT_BODY_SPACING
 from ..dockable_plot_constants import _BROWSER_NAV_BTN_HEIGHT
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import apply_group_box_style, make_window_minimizable
 
 # RDKit depictions sit on white; keep the well white in light and dark app themes.
 BROWSER_PREVIEW_CANVAS_QSS = (
@@ -53,10 +53,6 @@ BROWSER_PREVIEW_FRAME_QSS = "border: 1px solid palette(mid); border-radius: 4px;
 BROWSER_PREVIEW_STRUCT_QSS = "background-color: #ffffff; border: none; padding: 0px;"
 BROWSER_DATA_TABLE_QSS = (
     "QTableWidget { background-color: palette(base); "
-    "border: 1px solid palette(mid); border-radius: 4px; }"
-)
-BROWSER_GROUP_QSS = (
-    "QGroupBox { margin-top: 10px; background-color: palette(base); "
     "border: 1px solid palette(mid); border-radius: 4px; }"
 )
 BROWSER_EMPHASIS_LABEL_QSS = "font-weight: 600;"
@@ -93,7 +89,7 @@ def style_browser_data_table(table: QTableWidget) -> None:
 
 def style_browser_group_box(box: QGroupBox) -> None:
     """Property / molecule grouping used by pair browsers."""
-    box.setStyleSheet(BROWSER_GROUP_QSS)
+    apply_group_box_style(box)
 
 
 def style_browser_emphasis_label(label: QLabel) -> None:
