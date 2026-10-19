@@ -93,6 +93,8 @@ _PROLIF_INTERACTIONS = (
     "XBAcceptor",
 )
 
+_HBOND_LIGAND_DONOR = frozenset({"HBDonor", "ImplicitHBDonor"})
+_HBOND_PROTEIN_DONOR = frozenset({"HBAcceptor", "ImplicitHBAcceptor"})
 _LIGAND_DISPLAYED_ATOM = {
     "HBDonor": 1,
     "XBDonor": 1,
@@ -140,10 +142,12 @@ class ProteinInteraction:
     protein_name: str
     protein_kind: str
     model: int | None = None
+    show_atoms: tuple[dict[str, str | int], ...] = ()
+    show_residues: tuple[dict[str, str | int], ...] = ()
 
     def to_payload(self, color: str | None = None) -> dict:
         """JSON object consumed by the Protein Viewer interaction overlay."""
-        return {
+        payload = {
             "kind": HBOND_KIND_COMPLEX,
             "family": self.family,
             "interaction": self.interaction,
@@ -168,6 +172,11 @@ class ProteinInteraction:
                 self.protein_kind,
             ),
         }
+        if self.show_atoms:
+            payload["showAtoms"] = [dict(atom) for atom in self.show_atoms]
+        if self.show_residues:
+            payload["showResidues"] = [dict(residue) for residue in self.show_residues]
+        return payload
 
 
 def prolif_available() -> bool:
@@ -702,7 +711,161 @@ def _contact_from_metadata(
         protein_name=_atom_name(prot_res, prot_idx, interaction, _PROTEIN_DISPLAYED_ATOM),
         protein_kind=prot_kind if prot_kind == "polymer" else "polymer",
         model=model,
+        show_atoms=_hbond_show_atoms(
+            interaction,
+            lig_res,
+            lig_idx,
+            prot_res,
+            prot_idx,
+            atoms,
+            model=model,
+        ),
+        show_residues=_protein_show_residue(
+            prot_chain,
+            prot_resn,
+            str(prot_resi),
+            prot_icode,
+            model=model,
+        ),
     )
+
+
+def _hbond_show_atoms(
+    interaction: str,
+    lig_res: Any,
+    lig_idx: tuple,
+    prot_res: Any,
+    prot_idx: tuple,
+    atoms: list[StructureAtom],
+    *,
+    model: int | None,
+) -> tuple[dict[str, str | int], ...]:
+    """Ligand donor, hydrogen, and acceptor atoms to draw for a ProLIF hydrogen bond."""
+    if interaction in _HBOND_LIGAND_DONOR:
+        specs = (
+            (lig_res, lig_idx, 0, "donor"),
+            (lig_res, lig_idx, 1, "hydrogen"),
+            (prot_res, prot_idx, 0, "acceptor"),
+        )
+    elif interaction in _HBOND_PROTEIN_DONOR:
+        specs = (
+            (prot_res, prot_idx, 0, "donor"),
+            (prot_res, prot_idx, 1, "hydrogen"),
+            (lig_res, lig_idx, 0, "acceptor"),
+        )
+    else:
+        return ()
+    shown: list[dict[str, str | int]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for residue, indices, slot, role in specs:
+        if residue is not lig_res:
+            continue
+        if slot >= len(indices):
+            continue
+        if role == "hydrogen" and not _residue_atom_is_hydrogen(residue, indices[slot]):
+            continue
+        record = _show_atom_record(residue, int(indices[slot]), atoms, role, model)
+        if record is None:
+            continue
+        key = (
+            str(record["chain"]),
+            str(record["resi"]),
+            str(record["icode"]),
+            str(record["atom"]),
+            role,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        shown.append(record)
+    return tuple(shown)
+
+
+def _protein_show_residue(
+    chain: str,
+    resn: str,
+    resi: str,
+    icode: str,
+    *,
+    model: int | None,
+) -> tuple[dict[str, str | int], ...]:
+    """Protein residue to draw in full when ProLIF reports a contact with it."""
+    if not str(resi).strip() and not (chain or resn):
+        return ()
+    record: dict[str, str | int] = {
+        "chain": chain,
+        "resn": resn,
+        "resi": str(resi),
+        "icode": icode or "",
+    }
+    if model is not None:
+        record["model"] = model
+    return (record,)
+
+
+def _show_atom_record(
+    residue: Any,
+    index: int,
+    atoms: list[StructureAtom],
+    role: str,
+    model: int | None,
+) -> dict[str, str | int] | None:
+    """Map one ProLIF atom onto a structure atom the viewer can select."""
+    xyz = _atom_xyz(residue, index)
+    hydrogen = _residue_atom_is_hydrogen(residue, index)
+    matched = _nearest_atom(atoms, xyz) if xyz is not None else None
+    if matched is not None and _structure_atom_is_hydrogen(matched) != hydrogen:
+        matched = None
+    if matched is not None:
+        chain, resn, resi, icode = matched.chain, matched.resn, matched.resi, matched.icode
+        name = matched.name.strip()
+    elif hydrogen:
+        return None
+    else:
+        chain, resn, resi, icode = _residue_fields(residue, None)
+        name = _atom_name(residue, (index,), "", {})
+    if not name:
+        return None
+    record: dict[str, str | int] = {
+        "chain": chain,
+        "resn": resn,
+        "resi": str(resi),
+        "icode": icode,
+        "atom": name,
+        "role": role,
+    }
+    if model is not None:
+        record["model"] = model
+    return record
+
+
+def _atom_xyz(residue: Any, index: int) -> tuple[float, float, float] | None:
+    try:
+        point = residue.GetConformer().GetAtomPosition(int(index))
+    except Exception:
+        return None
+    return (float(point.x), float(point.y), float(point.z))
+
+
+def _residue_atom_is_hydrogen(residue: Any, index: int) -> bool:
+    try:
+        atom = residue.GetAtomWithIdx(int(index))
+    except Exception:
+        return False
+    try:
+        if int(atom.GetAtomicNum()) == 1:
+            return True
+    except Exception:
+        pass
+    try:
+        symbol = str(atom.GetSymbol() or "").strip().upper()
+    except Exception:
+        symbol = ""
+    return symbol in {"H", "D", "T"}
+
+
+def _structure_atom_is_hydrogen(atom: StructureAtom) -> bool:
+    return (atom.elem or "").strip().upper() in {"H", "D", "T"}
 
 
 def _endpoint_xyz(
