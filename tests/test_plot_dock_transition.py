@@ -22,10 +22,9 @@ import pytest
 
 pytest.importorskip("PyQt5.QtWidgets")
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QApplication, QSplitter, QWidget
+from PyQt5.QtWidgets import QApplication, QWidget
 
-from molmanager.ui.plot_dock_host import PlotDockHost, _SplitterSizeBatch
+from molmanager.ui.plot_dock_host import PlotDockHost, _SplitterSizeBatch, fit_host_to_child
 
 
 @pytest.fixture(scope="module")
@@ -66,6 +65,37 @@ def test_dock_transition_refuses_reentry(qapp):
         assert batch1 is not None
         with host._dock_transition(widget) as batch2:
             assert batch2 is None
+
+
+def test_fit_host_keeps_nested_surface_when_footer_returns(qapp):
+    """Undock shows the footer again; the dialog grows so the figure does not."""
+    del qapp
+    from PyQt5.QtWidgets import QDialog, QSizePolicy, QVBoxLayout, QWidget
+
+    plot = QWidget()
+    plot_layout = QVBoxLayout(plot)
+    plot_layout.setContentsMargins(2, 0, 2, 2)
+    plot_layout.setSpacing(6)
+    footer = QWidget()
+    footer.setFixedHeight(20)
+    surface = QWidget()
+    surface.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    plot_layout.addWidget(footer)
+    plot_layout.addWidget(surface, 1)
+    footer.hide()
+    plot.resize(500, 400)
+    plot_layout.invalidate()
+    plot_layout.activate()
+    target_w, target_h = surface.width(), surface.height()
+    footer.show()
+
+    dialog = QDialog()
+    root = QVBoxLayout(dialog)
+    root.addWidget(plot, 1)
+    fit_host_to_child(dialog, surface, target_w, target_h)
+
+    assert abs(surface.width() - target_w) <= 1
+    assert abs(surface.height() - target_h) <= 1
 
 
 def test_dock_transition_restores_updates(qapp):
