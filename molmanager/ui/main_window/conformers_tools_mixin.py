@@ -129,22 +129,10 @@ class ConformersToolsMixin:
         dlg.activateWindow()
         return dlg
 
-    def _collect_mols_for_conformer_tools(
-        self, *, only_selected: bool
-    ) -> list[tuple[int, Chem.Mol]]:
+    def _collect_mols_for_conformer_tools(self, *, only_selected: bool) -> list[tuple]:
+        """Structure ``(oid, blob_or_text)`` inputs; conformer workers rebuild the molecules."""
         allowed = self._selected_oids_set() if only_selected else None
-        oids_list = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids_list = [o for o in oids_list if o in allowed]
-        data: list[tuple[int, Chem.Mol]] = []
-        for o in oids_list:
-            r = self.logical_row_for_oid(o)
-            m = self.mols.get(o) if r >= 0 else None
-            if m is None and r >= 0:
-                m = self._mol_for_structure_row(r)
-            if m is not None:
-                data.append((o, m))
-        return data
+        return self._structure_tool_inputs("Structure", allowed)
 
     def _on_generate_conformations_dialog_accepted(self, d) -> None:
         only_selected = d.only_selected_rows()
@@ -580,9 +568,7 @@ class ConformersToolsMixin:
             "Superpose",
             n,
             lambda ev, ps, rid=ref_oid, rm=ref_mol, pr=probes, p=params, sigs=self.signals: (
-                SuperposeStructuresWorker(
-                    rid, rm, pr, p, sigs, cancel_event=ev, progress_state=ps
-                )
+                SuperposeStructuresWorker(rid, rm, pr, p, sigs, cancel_event=ev, progress_state=ps)
             ),
             queue_label=f"Superpose ({n} structures)",
         )

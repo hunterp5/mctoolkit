@@ -41,7 +41,11 @@ from rdkit import Chem
 
 from ..chem.fragment_disconnect import largest_fragment_and_rest
 from ..chem.structure_neutralize import neutralize_mol
-from ..chem.molecule_conversion import mol_to_canonical_smiles, parse_molecule_from_cell_text
+from ..chem.molecule_conversion import (
+    mol_graph_binary,
+    mol_to_canonical_smiles,
+    parse_molecule_from_cell_text,
+)
 from .process_pool_utils import (
     register_process_pool,
     should_terminate_process_pool,
@@ -97,7 +101,7 @@ def _prepare_one(
     if neutralize:
         out = neutralize_mol(parent) or parent
     smiles = mol_to_canonical_smiles(out) if need_smiles else ""
-    return out.ToBinary(), fragments, smiles
+    return mol_graph_binary(out) or out.ToBinary(), fragments, smiles
 
 
 def _mp_fast_prepare_batch(args: tuple) -> list[tuple]:
@@ -125,9 +129,11 @@ def _mp_fast_prepare_batch(args: tuple) -> list[tuple]:
 class FastPrepareWorker(QRunnable):
     """Disconnect (and optionally neutralize) every row in ``items``, batched across child processes.
 
-    ``items`` are ``(oid, mol, source_text)`` tuples, or ``(oid, cell_text)`` when
-    ``params.is_smiles``. Emits ``signals.fast_prepared`` with
-    ``(oid, mol_blob, fragments_text, canonical_smiles)`` rows.
+    ``items`` are ``(oid, structure, source_text)`` tuples, where ``structure`` is a stored mol
+    blob (preferred: the GUI thread never has to hydrate it) or a live mol, or
+    ``(oid, cell_text)`` when ``params.is_smiles``. Emits ``signals.fast_prepared`` with
+    ``(oid, mol_blob, fragments_text, canonical_smiles)`` rows; blobs are connection-table only,
+    matching what :class:`~molmanager.storage.mol_store.MolStore` stores.
     """
 
     def __init__(
@@ -165,12 +171,15 @@ class FastPrepareWorker(QRunnable):
             if self.params.is_smiles:
                 tasks.append((oid, str(row[1] or ""), None))
                 continue
-            mol = row[1]
+            structure = row[1]
             source_text = (str(row[2]).strip() or None) if len(row) >= 3 and row[2] else None
-            try:
-                blob = mol.ToBinary() if mol is not None else b""
-            except Exception:
-                blob = b""
+            if isinstance(structure, (bytes, bytearray)):
+                blob = bytes(structure)
+            else:
+                try:
+                    blob = structure.ToBinary() if structure is not None else b""
+                except Exception:
+                    blob = b""
             tasks.append((oid, blob, source_text))
         return tasks
 

@@ -68,9 +68,10 @@ from ..chem.structure_neutralize import neutralize_mol
 from ..chem.structure_hydrogens import add_explicit_hydrogens, remove_explicit_hydrogens
 from ..chem.reaction_file_io import RXN_TABLE_HEADERS, load_rxn_file
 from ..chem.molecule_conversion import (
-    parse_molecule_from_cell_text,
+    mol_from_tool_input,
     row_cells_from_mol,
     safe_mol_prop_string,
+    tool_structure_result,
 )
 from ..platform_support.tool_progress import ToolProgressState, report_tool_progress
 from .signals import WorkerSignals, emit_partial_results_if_cancelled
@@ -499,7 +500,11 @@ class RenderWorker(QRunnable):
 
 
 class DisconnectFragmentsWorker(QRunnable):
-    """Keep the largest fragment and record smaller fragments for each row."""
+    """Keep the largest fragment and record smaller fragments for each row.
+
+    Rows are ``(oid, mol_or_blob_or_text[, source_text])``, or ``(oid, cell_text)`` when
+    *is_smiles*. Emits ``(oid, parent_blob, fragments, parent_smiles)`` per kept row.
+    """
 
     def __init__(
         self,
@@ -527,19 +532,15 @@ class DisconnectFragmentsWorker(QRunnable):
                 cancelled = True
                 break
             done_count = done
-            mol = None
-            source_text: str | None = None
             oid = row[0]
             if self.is_smiles:
-                source_text = str(row[1] or "").strip()
-                mol = parse_molecule_from_cell_text(source_text) if source_text else None
-            elif len(row) >= 3:
-                mol = row[1]
-                source_text = (str(row[2]).strip() if row[2] else None) or None
+                source_text = str(row[1] or "").strip() or None
+                mol = mol_from_tool_input(source_text)
             else:
-                mol = row[1]
+                mol = mol_from_tool_input(row[1])
+                source_text = (str(row[2]).strip() if len(row) >= 3 and row[2] else None) or None
             if mol is None and source_text:
-                mol = parse_molecule_from_cell_text(source_text)
+                mol = mol_from_tool_input(source_text)
             if mol is None:
                 _emit_structure_tool_progress(
                     message="Disconnect fragments…",
@@ -561,7 +562,9 @@ class DisconnectFragmentsWorker(QRunnable):
                     throttle=self._progress_throttle,
                 )
                 continue
-            res.append((oid, parent, fragments))
+            packed = tool_structure_result(oid, parent)
+            if packed is not None:
+                res.append((packed[0], packed[1], fragments, packed[2]))
             _emit_structure_tool_progress(
                 message="Disconnect fragments…",
                 done=done,
@@ -577,7 +580,7 @@ class DisconnectFragmentsWorker(QRunnable):
 
 
 class NeutralizeWorker(QRunnable):
-    """Neutralize each structure in ``mols_data`` (``(oid, mol)`` or ``(oid, cell_text)`` when *is_smiles*)."""
+    """Neutralize each ``(oid, mol_or_blob_or_text)`` row; emits ``(oid, blob, smiles)`` rows."""
 
     def __init__(
         self,
@@ -606,11 +609,7 @@ class NeutralizeWorker(QRunnable):
                 break
             done_count = done
             oid = row[0]
-            if self.is_smiles:
-                raw = str(row[1] or "").strip()
-                mol = parse_molecule_from_cell_text(raw) if raw else None
-            else:
-                mol = row[1]
+            mol = mol_from_tool_input(row[1])
             if mol is None:
                 _emit_structure_tool_progress(
                     message="Neutralize…",
@@ -621,9 +620,9 @@ class NeutralizeWorker(QRunnable):
                     throttle=self._progress_throttle,
                 )
                 continue
-            neutral = neutralize_mol(mol)
-            if neutral is not None:
-                res.append((oid, neutral))
+            packed = tool_structure_result(oid, neutralize_mol(mol))
+            if packed is not None:
+                res.append(packed)
             _emit_structure_tool_progress(
                 message="Neutralize…",
                 done=done,
@@ -666,11 +665,7 @@ class AddExplicitHydrogensWorker(QRunnable):
                 break
             done_count = done
             oid = row[0]
-            if self.is_smiles:
-                raw = str(row[1] or "").strip()
-                mol = parse_molecule_from_cell_text(raw) if raw else None
-            else:
-                mol = row[1]
+            mol = mol_from_tool_input(row[1])
             if mol is None:
                 _emit_structure_tool_progress(
                     message="Add explicit hydrogens…",
@@ -681,9 +676,9 @@ class AddExplicitHydrogensWorker(QRunnable):
                     throttle=self._progress_throttle,
                 )
                 continue
-            with_h = add_explicit_hydrogens(mol)
-            if with_h is not None:
-                res.append((oid, with_h))
+            packed = tool_structure_result(oid, add_explicit_hydrogens(mol))
+            if packed is not None:
+                res.append(packed)
             _emit_structure_tool_progress(
                 message="Add explicit hydrogens…",
                 done=done,
@@ -728,11 +723,7 @@ class RemoveExplicitHydrogensWorker(QRunnable):
                 break
             done_count = done
             oid = row[0]
-            if self.is_smiles:
-                raw = str(row[1] or "").strip()
-                mol = parse_molecule_from_cell_text(raw) if raw else None
-            else:
-                mol = row[1]
+            mol = mol_from_tool_input(row[1])
             if mol is None:
                 _emit_structure_tool_progress(
                     message="Remove explicit hydrogens…",
@@ -743,9 +734,9 @@ class RemoveExplicitHydrogensWorker(QRunnable):
                     throttle=self._progress_throttle,
                 )
                 continue
-            stripped = remove_explicit_hydrogens(mol)
-            if stripped is not None:
-                res.append((oid, stripped))
+            packed = tool_structure_result(oid, remove_explicit_hydrogens(mol))
+            if packed is not None:
+                res.append(packed)
             _emit_structure_tool_progress(
                 message="Remove explicit hydrogens…",
                 done=done,

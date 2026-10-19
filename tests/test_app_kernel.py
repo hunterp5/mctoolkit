@@ -239,7 +239,7 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
     assert hasattr(w, "run_fast_prepare")
     assert hasattr(w, "run_disconnect_fragments")
     assert hasattr(w, "run_neutralize")
-    assert hasattr(w, "_write_mol_to_source_column")
+    assert hasattr(w, "_write_tool_structures")
     assert w.table_write._unique_table_column_names(["LogP"]) == ["LogP"]
     unsatisfied = {
         role.__name__: sorted(n for n in _protocol_members(role) if not hasattr(w, n))

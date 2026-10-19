@@ -247,11 +247,6 @@ class Render2DResultsMixin:
             pending = getattr(self, "_render2d_pending", None) or {}
             if pix_target and column_pixmap_mode:
                 self._table_model.register_pixmap_column(pix_target)
-            set_pixmap = (
-                self._table_model.set_column_pixmap
-                if column_pixmap_mode
-                else self._table_model.set_cell_pixmap
-            )
             if lazy_structure:
                 cfg = load_config()
                 # Never cap below this completed batch size — otherwise Fast Prepare /
@@ -283,39 +278,24 @@ class Render2DResultsMixin:
                 self._render2d_eager_flush_idx = 0
                 self._render2d_eager_uniform_height = False
             else:
-                eager: list[tuple[int, QPixmap | None]] = []
+                # PNGs are decoded chunk by chunk below, so a large batch never decodes and
+                # stores every image in one GUI-thread pass.
                 cfg = load_config()
                 set_uniform_height = len(ordered) >= cfg.structure_render_lazy_min_rows
+                eager: list[tuple[int, tuple | None]] = []
                 max_w = 0
                 for oid in ordered:
-                    row = self._resolve_structure_row_for_oid(int(oid))
                     rec = pending.get(oid)
-                    if not rec:
-                        if pix_target:
-                            set_pixmap(oid, pix_target, None)
-                        else:
-                            eager.append((int(oid), None))
-                        continue
-                    img_b, ok, rw, rh = rec
-                    if ok:
-                        max_w = max(max_w, int(rw))
-                    if not ok or row < 0:
-                        if pix_target:
-                            set_pixmap(oid, pix_target, None)
-                        else:
-                            eager.append((int(oid), None))
-                        continue
-                    pm = pixmap_from_structure_render_png(img_b, rw, rh)
-                    if pix_target:
-                        set_pixmap(oid, pix_target, pm)
-                    else:
-                        eager.append((int(oid), pm))
-                    if row >= 0 and not set_uniform_height and self.table.rowHeight(row) != rh:
-                        self.table.setRowHeight(row, rh)
+                    if rec and rec[1]:
+                        max_w = max(max_w, int(rec[2]))
+                        eager.append((int(oid), rec))
+                    elif not pix_target:
+                        eager.append((int(oid), None))
                 self._render2d_flush_max_width = max_w
-                self._render2d_eager_flush_queue = eager if not pix_target else []
+                self._render2d_eager_flush_queue = eager
                 self._render2d_eager_flush_idx = 0
                 self._render2d_eager_uniform_height = bool(set_uniform_height and not pix_target)
+                self._render2d_eager_set_row_heights = not set_uniform_height
 
         queue = getattr(self, "_render2d_eager_flush_queue", None) or []
         idx = int(getattr(self, "_render2d_eager_flush_idx", 0))
@@ -327,7 +307,11 @@ class Render2DResultsMixin:
                 pass
             try:
                 slice_items = queue[idx : idx + chunk]
-                self._table_model.apply_structure_pixmaps_batch(slice_items, emit=False)
+                decoded = self._decode_render2d_flush_slice(slice_items)
+                if pix_target:
+                    self._table_model.set_column_pixmaps_batch(pix_target, decoded)
+                else:
+                    self._table_model.apply_structure_pixmaps_batch(decoded, emit=False)
             finally:
                 try:
                     self.table.setUpdatesEnabled(True)
@@ -360,6 +344,26 @@ class Render2DResultsMixin:
         self._render2d_eager_flush_queue = None
         self._render2d_eager_flush_idx = 0
         self._render2d_eager_uniform_height = False
+
+    def _decode_render2d_flush_slice(
+        self, slice_items: list[tuple[int, tuple | None]]
+    ) -> list[tuple[int, QPixmap | None]]:
+        """Decode one flush chunk's PNGs; set per-row heights when the batch is not uniform."""
+        set_heights = bool(getattr(self, "_render2d_eager_set_row_heights", False))
+        decoded: list[tuple[int, QPixmap | None]] = []
+        for oid, rec in slice_items:
+            if rec is None:
+                decoded.append((oid, None))
+                continue
+            img_b, _ok, rw, rh = rec
+            row = self._resolve_structure_row_for_oid(oid)
+            if row < 0:
+                decoded.append((oid, None))
+                continue
+            decoded.append((oid, pixmap_from_structure_render_png(img_b, rw, rh)))
+            if set_heights and self.table.rowHeight(row) != rh:
+                self.table.setRowHeight(row, rh)
+        return decoded
 
     def on_cell_double_click(self, view_row, c):
         if c != 1:

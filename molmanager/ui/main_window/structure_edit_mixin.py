@@ -21,9 +21,6 @@ from __future__ import annotations
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMessageBox
 
-from rdkit import Chem
-
-from ...chem.molecule_conversion import mol_to_canonical_smiles
 from ...workers import DisconnectFragmentsWorker
 from ..analysis_job_support import enqueue_process_queue_job
 
@@ -76,68 +73,25 @@ class StructureEditMixin:
         self._disconnect_largest_col = src if update_target else largest_col
         self._disconnect_fragments_col = fragments_col
         self._disconnect_no_render_2d = no_render_2d
-        if src == "Structure":
-            data = []
-            oids_walk = self._all_oids_in_table_order()
-            if allowed is not None:
-                oids_walk = [o for o in oids_walk if o in allowed]
-            for oid in oids_walk:
-                mol = self.mols.get(oid)
-                if mol is None:
-                    continue
-                raw = self._disconnect_source_text_for_oid(oid, src)
-                data.append((oid, mol, raw))
-            if not data:
-                QMessageBox.information(
-                    self,
-                    "Disconnect Largest Fragments",
-                    "No rows match the current scope and structure field.",
-                )
-                self.status_label.setText("Ready.")
-                return
-            title = f"{queue_title_prefix}disconnect largest fragments"
-            enqueue_process_queue_job(
+        data = self._structure_tool_inputs(src, allowed, with_source_text=True)
+        if not data:
+            QMessageBox.information(
                 self,
-                "Disconnect fragments",
-                len(data),
-                lambda ev, ps, d=data, s=self.signals: (
-                    DisconnectFragmentsWorker(
-                        d, s, is_smiles=False, cancel_event=ev, progress_state=ps
-                    )
-                ),
-                queue_label=title,
+                "Disconnect Largest Fragments",
+                "No rows match the current scope and structure field.",
             )
-        else:
-            col = self.headers.index(src)
-            data = []
-            oids_walk = self._all_oids_in_table_order()
-            if allowed is not None:
-                oids_walk = [o for o in oids_walk if o in allowed]
-            for oid in oids_walk:
-                r = self.logical_row_for_oid(oid)
-                if r == -1:
-                    continue
-                data.append((oid, self._table_cell_text(r, col)))
-            if not data:
-                QMessageBox.information(
-                    self,
-                    "Disconnect Largest Fragments",
-                    "No rows match the current scope and structure field.",
-                )
-                self.status_label.setText("Ready.")
-                return
-            title = f"{queue_title_prefix}disconnect largest fragments (column)"
-            enqueue_process_queue_job(
-                self,
-                "Disconnect fragments",
-                len(data),
-                lambda ev, ps, d=data, s=self.signals: (
-                    DisconnectFragmentsWorker(
-                        d, s, is_smiles=True, cancel_event=ev, progress_state=ps
-                    )
-                ),
-                queue_label=title,
-            )
+            self.status_label.setText("Ready.")
+            return
+        suffix = "" if src == "Structure" else " (column)"
+        enqueue_process_queue_job(
+            self,
+            "Disconnect fragments",
+            len(data),
+            lambda ev, ps, d=data, s=self.signals: DisconnectFragmentsWorker(
+                d, s, is_smiles=False, cancel_event=ev, progress_state=ps
+            ),
+            queue_label=f"{queue_title_prefix}disconnect largest fragments{suffix}",
+        )
 
     def run_add_explicit_hydrogens(self) -> None:
         if not self.headers or not self.mols:
@@ -176,14 +130,7 @@ class StructureEditMixin:
         self._add_explicit_hydrogens_source = src
         self._add_explicit_hydrogens_no_render_2d = no_render_2d
         allowed = self._selected_oids_set() if only_selected else None
-        data: list[tuple[int, Chem.Mol]] = []
-        oids_walk = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids_walk = [o for o in oids_walk if o in allowed]
-        for oid in oids_walk:
-            mol = self._mol_for_structure_tool_oid(oid, src)
-            if mol is not None:
-                data.append((oid, mol))
+        data = self._structure_tool_inputs(src, allowed)
         if not data:
             QMessageBox.information(
                 self,
@@ -196,10 +143,8 @@ class StructureEditMixin:
             self,
             "Add explicit hydrogens",
             len(data),
-            lambda ev, ps, d=data, s=self.signals: (
-                AddExplicitHydrogensWorker(
-                    d, s, is_smiles=False, cancel_event=ev, progress_state=ps
-                )
+            lambda ev, ps, d=data, s=self.signals: AddExplicitHydrogensWorker(
+                d, s, is_smiles=False, cancel_event=ev, progress_state=ps
             ),
             queue_label="Add explicit hydrogens",
         )
@@ -245,14 +190,7 @@ class StructureEditMixin:
         self._remove_explicit_hydrogens_source = src
         self._remove_explicit_hydrogens_no_render_2d = no_render_2d
         allowed = self._selected_oids_set() if only_selected else None
-        data: list[tuple[int, Chem.Mol]] = []
-        oids_walk = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids_walk = [o for o in oids_walk if o in allowed]
-        for oid in oids_walk:
-            mol = self._mol_for_structure_tool_oid(oid, src)
-            if mol is not None:
-                data.append((oid, mol))
+        data = self._structure_tool_inputs(src, allowed)
         if not data:
             QMessageBox.information(
                 self,
@@ -265,10 +203,8 @@ class StructureEditMixin:
             self,
             "Remove explicit hydrogens",
             len(data),
-            lambda ev, ps, d=data, s=self.signals: (
-                RemoveExplicitHydrogensWorker(
-                    d, s, is_smiles=False, cancel_event=ev, progress_state=ps
-                )
+            lambda ev, ps, d=data, s=self.signals: RemoveExplicitHydrogensWorker(
+                d, s, is_smiles=False, cancel_event=ev, progress_state=ps
             ),
             queue_label="Remove explicit hydrogens",
         )
@@ -304,23 +240,17 @@ class StructureEditMixin:
         *,
         only_selected: bool = False,
         no_render_2d: bool = False,
-        rows: list[tuple[int, Chem.Mol]] | None = None,
+        rows: list[tuple] | None = None,
         queue_title_prefix: str = "",
     ) -> None:
+        """Queue neutralization; *rows* (``(oid, mol_or_blob_or_text)``) overrides the scope."""
         from ...workers import NeutralizeWorker
 
         self._neutralize_source = src
         self._neutralize_no_render_2d = no_render_2d
         if rows is None:
             allowed = self._selected_oids_set() if only_selected else None
-            data: list[tuple[int, Chem.Mol]] = []
-            oids_walk = self._all_oids_in_table_order()
-            if allowed is not None:
-                oids_walk = [o for o in oids_walk if o in allowed]
-            for oid in oids_walk:
-                mol = self._mol_for_structure_tool_oid(oid, src)
-                if mol is not None:
-                    data.append((oid, mol))
+            data = self._structure_tool_inputs(src, allowed)
         else:
             data = list(rows)
         if not data:
@@ -356,71 +286,29 @@ class StructureEditMixin:
         self._disconnect_no_render_2d = False
 
         self._ensure_disconnect_output_column(fragments_col)
+        dest = src if update_target else largest_col
         if not update_target:
             self._ensure_disconnect_output_column(largest_col)
-
-        update_mols_cache = update_target and src == "Structure"
-        if no_render_2d:
-            render_largest = False
-        elif update_target:
-            render_largest = src == "Structure" or (
-                src in self.headers and self._table_model.is_pixmap_data_column(src)
-            )
-        else:
-            render_largest = True
-            if largest_col in self.headers:
+            if not no_render_2d and largest_col in self.headers:
                 self._table_model.register_pixmap_column(largest_col)
-        smiles_h = self._canonical_smiles_header_for_updates()
-        update_smiles_col = (
-            update_target
-            and smiles_h is not None
-            and src == smiles_h
-            and not self._table_model.is_pixmap_data_column(smiles_h)
-        )
-        target_is_text = (
-            update_target
-            and src in self.headers
-            and not self._table_model.is_pixmap_data_column(src)
-            and src != "Structure"
-        )
-        new_largest_is_text = (
-            not update_target
-            and not render_largest
-            and largest_col in self.headers
-            and not self._table_model.is_pixmap_data_column(largest_col)
-        )
 
-        for oid, mol, fragments in results:
-            if update_mols_cache:
-                self.mols[oid] = mol
-            row = self.logical_row_for_oid(oid)
-            if row == -1:
-                continue
-            if update_target and src == "Structure":
-                self._table_model.set_structure_pixmap(oid, None)
-            elif render_largest and not update_target and largest_col in self.headers:
-                self._table_model.set_column_pixmap(oid, largest_col, None)
-            elif target_is_text:
-                self._table_model.set_cell_text(oid, src, mol_to_canonical_smiles(mol))
-            elif new_largest_is_text:
-                self._table_model.set_cell_text(oid, largest_col, mol_to_canonical_smiles(mol))
-            if fragments_col in self.headers:
-                self._table_model.set_cell_text(oid, fragments_col, fragments)
-            if update_smiles_col:
-                self._table_model.set_cell_text(oid, smiles_h, mol_to_canonical_smiles(mol))
+        prepared = [
+            (int(oid), bytes(blob), fragments, smiles)
+            for oid, blob, fragments, smiles in results
+            if blob
+        ]
+        oids = self._write_tool_structures(
+            dest, [(oid, blob, smiles) for oid, blob, _fragments, smiles in prepared]
+        )
+        if fragments_col in self.headers:
+            self._table_model.set_column_text_by_oids(
+                fragments_col, [(oid, fragments) for oid, _blob, fragments, _smiles in prepared]
+            )
         self.schedule_calculate_global_bounds()
-        self.table.setSortingEnabled(False)
         self._clear_tool_progress()
 
-        render_src = src if update_target else largest_col
-        if (
-            results
-            and render_largest
-            and not no_render_2d
-            and not getattr(self, "_render2d_batch_active", False)
-        ):
-            mol_results = [(oid, mol) for oid, mol, _frag in results]
-            if self._start_mol_tool_render2d(mol_results, render_src):
+        if not no_render_2d and self._tool_target_renders_2d(dest):
+            if self._render_tool_structures(dest, oids):
                 return
         self.status_label.setText(self._consume_partial_results_notice() or "Done.")
 

@@ -50,23 +50,8 @@ def _seeded_window() -> ChemistryWorkspaceWindow:
 def _run_fast_prepare_inline(
     win: ChemistryWorkspaceWindow, src: str, *, neutralize: bool = False
 ) -> None:
-    """Run the worker synchronously, then feed its results to the real GUI handler."""
-    prepare_col = getattr(win, "_fast_prepare_source", src)
-    need_smiles = win._fast_prepare_target_is_text(prepare_col)
-    is_smiles = src != "Structure"
-    if is_smiles:
-        col = win.headers.index(src)
-        items = [
-            (oid, win._table_cell_text(win.logical_row_for_oid(oid), col))
-            for oid in win._all_oids_in_table_order()
-        ]
-    else:
-        items = [
-            (oid, win.mols.get(oid), None)
-            for oid in win._all_oids_in_table_order()
-            if win.mols.get(oid) is not None
-        ]
-
+    """Run the worker synchronously on the real collected items, then the real GUI handler."""
+    items = win._collect_fast_prepare_items(src, None)
     captured: list = []
 
     class _Sig:
@@ -84,8 +69,8 @@ def _run_fast_prepare_inline(
     FastPrepareWorker(
         items,
         FastPrepareParams(
-            is_smiles=is_smiles,
-            need_smiles=need_smiles,
+            is_smiles=src != "Structure",
+            need_smiles=True,
             neutralize=neutralize,
             process_pool_min_rows=10**9,
         ),
@@ -147,6 +132,61 @@ def test_fast_prepare_new_column_target_gets_canonical_smiles(qapp):  # noqa: AR
             parsed = Chem.MolFromSmiles(v)
             assert parsed is not None
             assert Chem.GetFormalCharge(parsed) == 0
+            assert len(Chem.GetMolFrags(parsed)) == 1
+    finally:
+        win.close()
+
+
+def test_fast_prepare_does_not_hydrate_molecules_on_gui_thread(qapp, monkeypatch):  # noqa: ARG001
+    from molmanager.storage.mol_store import MolStore
+
+    win = _seeded_window()
+    try:
+        win._fast_prepare_source = "Structure"
+        win._fast_prepare_fragments_col = "Fragments"
+        win._fast_prepare_update_target = True
+        win._fast_prepare_allowed_oids = None
+        win.mols._lru.clear()
+
+        def _no_hydrate(self, key):
+            raise AssertionError(f"GUI thread hydrated mol {key}")
+
+        monkeypatch.setattr(MolStore, "__getitem__", _no_hydrate)
+        monkeypatch.setattr(MolStore, "__setitem__", _no_hydrate)
+        monkeypatch.setattr(win, "_start_render_2d_batch", lambda *_a, **_k: None)
+        _run_fast_prepare_inline(win, "Structure", neutralize=True)
+        renders, _ = win._build_render2d_tasks_in_table_order("Structure", 80, 80, None)
+        assert len(renders) == len(SALTS)
+    finally:
+        monkeypatch.undo()
+        win.close()
+
+
+def test_fast_prepare_pixmap_column_target_keeps_structure(qapp):  # noqa: ARG001
+    win = _seeded_window()
+    try:
+        win.headers.append("Prepared")
+        win._table_model.set_headers(list(win.headers))
+        win._table_model.register_pixmap_column("Prepared")
+        oids = win._all_oids_in_table_order()
+        win._table_model.set_column_backing_text_by_oids(
+            "Prepared", [(oid, smi) for oid, smi in zip(oids, SALTS)]
+        )
+        before = {oid: Chem.MolToSmiles(win.mols[oid]) for oid in oids}
+        win._fast_prepare_source = "Prepared"
+        win._fast_prepare_fragments_col = "Fragments"
+        win._fast_prepare_update_target = True
+        win._fast_prepare_allowed_oids = None
+
+        _run_fast_prepare_inline(win, "Prepared", neutralize=True)
+
+        assert {oid: Chem.MolToSmiles(win.mols[oid]) for oid in oids} == before
+        for oid in oids:
+            text = win._table_model.backing_value_for_row_header(
+                win.logical_row_for_oid(oid), "Prepared"
+            )
+            parsed = Chem.MolFromSmiles(text)
+            assert parsed is not None
             assert len(Chem.GetMolFrags(parsed)) == 1
     finally:
         win.close()

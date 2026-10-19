@@ -53,29 +53,19 @@ class FilterSubstructureMixin:
 
     def _substructure_filter_targets(
         self, structure_source: str = "Structure"
-    ) -> list[tuple[int, object]]:
-        """(oid, Mol) per row for ``SubstructureFilterWorker``.
+    ) -> list[tuple[int, bytes | str]]:
+        """``(oid, blob_or_text)`` per row for ``SubstructureFilterWorker``.
 
-        Prefer in-memory mols for ``Structure``; for other sources resolve via
-        ``_mol_for_structure_tool_oid`` (same as chemistry tools) so SMILES/InChI
-        columns work without overwriting the Structure cache.
+        Stored blobs / cell text only; the worker rebuilds molecules so filtering a large
+        table does not hydrate every row on the GUI thread.
         """
         src = (structure_source or "Structure").strip() or "Structure"
-        resolve = getattr(self, "_mol_for_structure_tool_oid", None)
-        mols = getattr(self, "mols", None) or {}
-        oids = self._table_model.all_oids_in_order()
-        if src == "Structure" and not callable(resolve):
-            return [(int(oid), mols.get(int(oid))) for oid in oids]
-        targets: list[tuple[int, object]] = []
-        for oid in oids:
-            oid_i = int(oid)
-            mol = None
-            if callable(resolve):
-                mol = resolve(oid_i, src)
-            elif src == "Structure":
-                mol = mols.get(oid_i)
-            targets.append((oid_i, mol))
-        return targets
+        if src != "Structure" and src not in self.headers:
+            return []
+        return [
+            (int(p.oid), p.blob or p.smiles)
+            for p in self.collect_scoped_table_structure_payloads(src)
+        ]
 
     def _mol_for_substructure_filter_row(self, row: int, structure_source: str):
         """Molecule used when evaluating a substructure filter card on *row*."""

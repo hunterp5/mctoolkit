@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from rdkit import Chem
 
+from .molecule_conversion import parse_molecule_from_cell_text
 from .structure_2d_depiction import render_molecule_png, render_reaction_png
 
 # Tags for serialized Render 2D payloads. Keeping structures in these forms lets the GUI
@@ -36,11 +37,11 @@ def _as_text(raw) -> str:
     return raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw or "")
 
 
-def _mol_from_render_payload(blob, smiles: str):
-    """Rebuild a structure from its stored pickle, falling back to SMILES.
+def _mol_from_render_payload(blob, text: str):
+    """Rebuild a structure from its stored pickle, falling back to its cell text.
 
-    The fallback matters for sessions written by a newer RDKit, whose pickles this build
-    cannot read; without it those rows would silently render blank.
+    The text is SMILES, InChI, or a mol block. The fallback also covers sessions written by a
+    newer RDKit, whose pickles this build cannot read; without it those rows would render blank.
     """
     if blob:
         try:
@@ -49,12 +50,18 @@ def _mol_from_render_payload(blob, smiles: str):
             mol = None
         if mol is not None:
             return mol
-    if not smiles:
+    if not text:
         return None
-    try:
-        return Chem.MolFromSmiles(smiles)
-    except Exception:  # noqa: BLE001 — RDKit raises varied C++ wrap errors
-        return None
+    return parse_molecule_from_cell_text(text)
+
+
+def mol_from_render_payload(payload):
+    """Molecule a Render 2D task payload describes (tagged tuple, pickle bytes, or live mol)."""
+    if isinstance(payload, tuple) and payload and payload[0] == STRUCTURE_PAYLOAD_TAG:
+        return _mol_from_render_payload(payload[1], _as_text(payload[2]))
+    if isinstance(payload, (bytes, bytearray)):
+        return _mol_from_render_payload(payload, "")
+    return payload
 
 
 def mp_render_structure_batch(args: tuple) -> list[tuple]:
@@ -79,7 +86,14 @@ def mp_render_structure_batch(args: tuple) -> list[tuple]:
             continue
         try:
             if isinstance(payload, tuple) and payload[0] == REACTION_PAYLOAD_TAG:
-                png = render_reaction_png(_as_text(payload[1]), width, height)
+                text = _as_text(payload[1])
+                try:
+                    png = render_reaction_png(text, width, height)
+                except Exception:  # noqa: BLE001 — text that only looked like a reaction
+                    mol = parse_molecule_from_cell_text(text)
+                    if mol is None:
+                        raise
+                    png = render_molecule_png(mol, width, height)
             elif isinstance(payload, tuple) and payload[0] == STRUCTURE_PAYLOAD_TAG:
                 mol = _mol_from_render_payload(payload[1], _as_text(payload[2]))
                 if mol is None:

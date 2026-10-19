@@ -340,3 +340,36 @@ def mol_from_binary_blob(blob) -> object | None:
         return Chem.Mol(bytes(blob))
     except Exception:
         return None
+
+
+def mol_from_tool_input(item) -> object | None:
+    """Molecule for one tool job input: a live mol, a stored ``ToBinary`` blob, or cell text.
+
+    The GUI thread hands workers stored blobs / text (see ``_structure_tool_inputs``) and the
+    worker thread rebuilds molecules here, so large tables never hydrate on the GUI thread.
+    """
+    if item is None:
+        return None
+    if isinstance(item, (bytes, bytearray, memoryview)):
+        return mol_from_binary_blob(item)
+    if isinstance(item, str):
+        text = item.strip()
+        return parse_molecule_from_cell_text(text) if text else None
+    return item
+
+
+def tool_structure_result(oid: int, mol) -> tuple[int, bytes, str] | None:
+    """``(oid, blob, canonical_smiles)`` built on the worker so the GUI stores results in bulk."""
+    if mol is None:
+        return None
+    blob = mol_graph_binary(mol)
+    if not blob:
+        try:
+            blob = mol.ToBinary()
+        except Exception:
+            return None
+    try:
+        smiles = mol_to_canonical_smiles(mol)
+    except Exception:
+        smiles = ""
+    return int(oid), bytes(blob), smiles

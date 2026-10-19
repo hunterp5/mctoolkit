@@ -156,6 +156,31 @@ class CompoundTableBulkMixin:
             self._mark_numeric_bounds_dirty({column_name})
         self._emit_data_changed_row_spans(rows_changed, col, col)
 
+    def set_column_backing_text_by_oids(
+        self, column_name: str, oid_values: list[tuple[int, str]]
+    ) -> None:
+        """Like :meth:`set_column_text_by_oids`, but also writes pixmap-only columns' hidden text."""
+        if column_name not in self._pixmap_columns:
+            self.set_column_text_by_oids(column_name, oid_values)
+            return
+        try:
+            col = self._headers.index(column_name)
+        except ValueError:
+            return
+        rows_changed: list[int] = []
+        for oid, text in oid_values:
+            r = self.logical_row_for_oid(oid)
+            if r < 0:
+                continue
+            self._rows[r].values[column_name] = str(text)
+            rows_changed.append(r)
+        self._emit_data_changed_row_spans(
+            rows_changed,
+            col,
+            col,
+            roles=[Qt.DisplayRole, Qt.EditRole, Qt.DecorationRole, Qt.SizeHintRole],
+        )
+
     def apply_columns_values_bulk(
         self,
         column_names: list[str],

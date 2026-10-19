@@ -306,9 +306,12 @@ def test_pixmap_structure_column_context_chemistry(qapp):  # noqa: ARG001
     render_mol = w._mol_for_render2d_source(0, "Protonated")
     assert render_mol is not None
     assert Chem.MolToSmiles(render_mol, canonical=True) == anion_smi
+    from molmanager.chem.render2d_mp import mol_from_render_payload
+
     renders, _ = w._build_render2d_tasks_in_table_order("Protonated", 64, 64)
     assert len(renders) == 1
-    assert Chem.MolToSmiles(renders[0][1], canonical=True) == anion_smi
+    render_payload_mol = mol_from_render_payload(renders[0][1])
+    assert Chem.MolToSmiles(render_payload_mol, canonical=True) == anion_smi
     assert Chem.MolToSmiles(w.mols[0], canonical=True) == parent_smi
 
     assert w._paste_clipboard_into_table_cell(0, prot_col, 0, clip_text="CCO", quiet=True)

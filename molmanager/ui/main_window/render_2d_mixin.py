@@ -32,6 +32,7 @@ from ...table.structure_depiction_layout import (
     structure_depict_width,
 )
 from ...chem.reaction_file_io import looks_like_reaction_smarts, parse_reaction_smarts
+from ...chem.render2d_mp import REACTION_PAYLOAD_TAG
 from ...chem.structure_2d_depiction import ReactionDrawSpec
 from ...workers import (
     STRUCTURE_PAYLOAD_TAG,
@@ -95,39 +96,31 @@ class Render2DMixin:
         base_h: int,
         allowed_oids: set[int] | None = None,
     ) -> tuple[list, dict[int, int]]:
-        """Collect (oid, mol, w, h) tasks in current visual row order (top to bottom) and oid→row map."""
-        renders = []
-        row_by_oid: dict[int, int] = {}
+        """Collect ``(oid, payload, w, h)`` tasks in table row order, plus the oid→row map.
+
+        Payloads stay serialized (:data:`STRUCTURE_PAYLOAD_TAG` / :data:`REACTION_PAYLOAD_TAG`
+        tuples); the render subprocesses parse them. Hydrating every row here costs tens of
+        seconds of GUI freeze on 100k-row tables.
+        """
         if src != "Structure" and src not in self.headers:
             return [], {}
-        for r in range(self._table_model.rowCount()):
-            t0 = self._table_model.cell_text(r, 0)
-            if not t0.isdigit():
-                continue
-            oid = int(t0)
-            if allowed_oids is not None and oid not in allowed_oids:
-                continue
-            if src == "Structure":
-                mol = self.mols.get(oid)
-                if mol is None:
-                    mol = self._mol_for_structure_row(r)
-                if mol is None:
-                    continue
-                self.mols[oid] = mol
-                payload = mol
-            else:
-                payload = self._depict_payload_for_render2d_source(r, src)
-                if payload is None:
-                    continue
+        payloads = self.collect_scoped_table_structure_payloads(src, allowed_oids=allowed_oids)
+        renders: list = []
+        row_by_oid: dict[int, int] = {}
+        row_for_oid = self._table_model.logical_row_for_oid
+        zoom_w, zoom_h = structure_depict_width() * 2, structure_depict_height() * 2
+        for payload in payloads:
+            oid = int(payload.oid)
+            text = (payload.smiles or "").strip()
             zoomed = oid in self.zoomed_ids
-            if isinstance(payload, ReactionDrawSpec):
+            if src != "Structure" and looks_like_reaction_smarts(text):
+                task_payload: tuple = (REACTION_PAYLOAD_TAG, text.encode("utf-8"))
                 rw, rh = reaction_depict_size(zoomed=zoomed)
-            elif zoomed:
-                rw, rh = structure_depict_width() * 2, structure_depict_height() * 2
             else:
-                rw, rh = base_w, base_h
-            renders.append((oid, payload, rw, rh))
-            row_by_oid[oid] = r
+                task_payload = (STRUCTURE_PAYLOAD_TAG, payload.blob or b"", text.encode("utf-8"))
+                rw, rh = (zoom_w, zoom_h) if zoomed else (base_w, base_h)
+            renders.append((oid, task_payload, rw, rh))
+            row_by_oid[oid] = row_for_oid(oid)
         return renders, row_by_oid
 
     def _build_render2d_tasks_for_oids(
@@ -136,27 +129,10 @@ class Render2DMixin:
         base_w: int,
         base_h: int,
     ) -> tuple[list, dict[int, int]]:
-        """Build render tasks for explicit oids (O(n) in ``oids``; used after bulk external append)."""
-        renders: list = []
-        row_by_oid: dict[int, int] = {}
-        for oid in oids:
-            row = self._table_model.logical_row_for_oid(int(oid))
-            if row < 0:
-                continue
-            mol = self.mols.get(int(oid))
-            if mol is None:
-                mol = self._mol_for_structure_row(row)
-            if mol is None:
-                continue
-            self.mols[int(oid)] = mol
-            rw, rh = (
-                (structure_depict_width() * 2, structure_depict_height() * 2)
-                if int(oid) in self.zoomed_ids
-                else (base_w, base_h)
-            )
-            renders.append((int(oid), mol, rw, rh))
-            row_by_oid[int(oid)] = row
-        return renders, row_by_oid
+        """Build Structure render tasks for explicit oids (used after bulk external append)."""
+        return self._build_render2d_tasks_in_table_order(
+            "Structure", base_w, base_h, {int(oid) for oid in oids}
+        )
 
     def _try_auto_render_all_structures_after_ingest(self) -> bool:
         """Queue 2D renders for every row with an in-memory Structure mol (file ingest, SQL, or session)."""
@@ -431,16 +407,13 @@ class Render2DMixin:
         skip_snapshot = after_ingest or lazy_structure
         tgt = self._render2d_pixmap_target
         if tgt:
-            if self._render2d_column_pixmap_mode:
+            # Cancel restores this snapshot; above the lazy threshold decoding every image to
+            # keep a copy costs more than redrawing them.
+            if len(oids) <= cfg.structure_render_lazy_min_rows:
                 self._render2d_snapshot = self._table_model.snapshot_column_pixmaps(tgt, oids)
-                clear_pixmap = self._table_model.set_column_pixmap
             else:
-                self._render2d_snapshot = {
-                    oid: self._table_model.cell_pixmap_copy(oid, tgt) for oid in oids
-                }
-                clear_pixmap = self._table_model.set_cell_pixmap
-            for oid in oids:
-                clear_pixmap(oid, tgt, None)
+                self._render2d_snapshot = {}
+            self._table_model.clear_column_pixmaps_for_oids(tgt, oids)
         elif lazy_structure:
             self._render2d_snapshot = {}
             self._table_model.clear_structure_png_store()

@@ -63,14 +63,7 @@ class DescriptorsToolsMixin:
             else ({}, {}, None)
         )
         if not is_s:
-            data = []
-            for o in oids_list:
-                r = self.logical_row_for_oid(o)
-                m = self.mols.get(o) if r >= 0 else None
-                if m is None and r >= 0:
-                    m = self._mol_for_structure_row(r)
-                if m is not None:
-                    data.append((o, m))
+            data = self._structure_tool_inputs(src, allowed)
         else:
             data = [
                 (o, self._table_cell_text(self.logical_row_for_oid(o), s_idx)) for o in oids_list

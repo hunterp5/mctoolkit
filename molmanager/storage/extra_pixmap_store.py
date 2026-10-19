@@ -222,6 +222,41 @@ class ExtraPixmapStore:
         self._conn.commit()
         self._keys.add(key)
 
+    def set_pixmaps_batch(self, header_name: str, items: list[tuple[int, QPixmap | None]]) -> None:
+        """Store or clear many images in one header with a single commit."""
+        header = str(header_name)
+        writes: list[tuple[int, str, bytes]] = []
+        clears: list[tuple[int, str]] = []
+        for oid, pixmap in items:
+            key = (int(oid), header)
+            self._lru.pop(key, None)
+            raw = pixmap_to_png_bytes(pixmap)
+            if raw:
+                writes.append((key[0], header, raw))
+            elif key in self._keys:
+                clears.append(key)
+        if writes:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO images (oid, header, blob) VALUES (?, ?, ?)", writes
+            )
+        if clears:
+            self._conn.executemany("DELETE FROM images WHERE oid = ? AND header = ?", clears)
+        if writes or clears:
+            self._conn.commit()
+        self._keys.update((oid, header) for oid, header, _raw in writes)
+        self._keys.difference_update(clears)
+
+    def remove_keys(self, keys: list[tuple[int, str]]) -> None:
+        """Delete many ``(oid, header)`` images in one transaction."""
+        dropped = [k for k in ((int(o), str(h)) for o, h in keys) if k in self._keys]
+        if not dropped:
+            return
+        self._conn.executemany("DELETE FROM images WHERE oid = ? AND header = ?", dropped)
+        self._conn.commit()
+        for key in dropped:
+            self._keys.discard(key)
+            self._lru.pop(key, None)
+
     def remove_oid(self, oid: int) -> None:
         oid_i = int(oid)
         dropped = {k for k in self._keys if k[0] == oid_i}

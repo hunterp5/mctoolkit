@@ -328,9 +328,11 @@ def test_session_restore_render_tasks_keep_neutral_structure(qapp):  # noqa: ARG
 
     w2 = ChemistryWorkspaceWindow()
     w2._apply_session_document(doc)
+    from molmanager.chem.render2d_mp import mol_from_render_payload
+
     renders, _ = w2._build_render2d_tasks_in_table_order("Structure", 80, 80, None)
     assert renders
-    restored = mol_to_canonical_smiles(renders[0][1])
+    restored = mol_to_canonical_smiles(mol_from_render_payload(renders[0][1]))
     assert restored == mol_to_canonical_smiles(parent)
     assert "+" not in restored
 

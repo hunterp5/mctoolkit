@@ -23,8 +23,6 @@ import logging
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMessageBox
 
-from rdkit import Chem
-
 from ...table.structure_depiction_layout import structure_depict_height, structure_depict_width
 from ..analysis_job_support import enqueue_process_queue_job
 
@@ -66,15 +64,7 @@ class ProtonateToolsMixin:
         if self._abort_if_only_selected_but_empty(only_selected, allowed, "Protonate"):
             return
 
-        data: list[tuple[int, Chem.Mol | None]] = []
-        oids_walk = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids_walk = [o for o in oids_walk if o in allowed]
-        for oid in oids_walk:
-            mol = self._mol_for_structure_tool_oid(oid, src)
-            data.append((int(oid), mol))
-
-        data = [(oid, mol) for oid, mol in data if mol is not None]
+        data = self._structure_tool_inputs(src, allowed)
         if not data:
             QMessageBox.information(
                 self,

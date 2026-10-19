@@ -28,6 +28,7 @@ from PyQt5.QtCore import QRunnable
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+from ..chem.molecule_conversion import mol_from_tool_input
 from ..platform_support.config import load_config
 from .chemistry_worker_common import (
     emit_tool_progress_throttled,
@@ -539,7 +540,7 @@ class ConformerGenerationWorker(QRunnable):
     def run(self):
         nrows = len(self.data)
         tot = max(nrows, 1)
-        tasks = [(oid, mol, self.params) for oid, mol in self.data]
+        tasks = [(oid, mol_from_tool_input(item), self.params) for oid, item in self.data]
         cfg = load_config()
         if cfg.conformer_threads is not None:
             max_workers = cfg.conformer_threads

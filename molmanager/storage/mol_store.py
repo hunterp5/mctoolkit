@@ -29,6 +29,8 @@ from .temp_sqlite import close_owned_sqlite, open_owned_sqlite
 
 _DEFAULT_LRU = 256
 _AUTOCOMMIT_EVERY = 64
+# SQLite's default bound-parameter limit is 999 on older builds.
+_SQLITE_IN_CHUNK = 900
 
 
 def _as_oid(key: object) -> int:
@@ -196,8 +198,31 @@ class MolStore(MutableMapping[int, Chem.Mol]):
         for oid, blob, smiles in cursor:
             yield int(oid), (bytes(blob) if blob else None), (smiles or "")
 
+    def structure_payloads_for(
+        self, oids: Iterable[int]
+    ) -> Iterator[tuple[int, bytes | None, str]]:
+        """Yield ``(oid, blob, smiles)`` for just *oids*, in chunked ``IN`` queries.
+
+        Scoped tools (selected rows, one clicked row) would otherwise scan every stored row.
+        """
+        wanted = sorted({int(oid) for oid in oids})
+        if not wanted:
+            return
+        self._flush()
+        for start in range(0, len(wanted), _SQLITE_IN_CHUNK):
+            chunk = wanted[start : start + _SQLITE_IN_CHUNK]
+            marks = ",".join("?" * len(chunk))
+            cursor = self._conn.execute(
+                f"SELECT oid, blob, smiles FROM mols WHERE oid IN ({marks})", chunk
+            )
+            for oid, blob, smiles in cursor:
+                yield int(oid), (bytes(blob) if blob else None), (smiles or "")
+
     def ingest_jobs(self, jobs: Iterable[tuple[int, bytes | None, str]]) -> None:
-        """Persist session (oid, blob, smiles) rows without constructing molecules."""
+        """Persist (oid, blob, smiles) rows without constructing molecules.
+
+        Replaced oids are dropped from the LRU so a later read cannot return the old structure.
+        """
         rows: list[tuple[int, bytes | None, str | None]] = []
         for oid, blob, smiles in jobs:
             blob_b = bytes(blob) if blob else None
@@ -213,6 +238,9 @@ class MolStore(MutableMapping[int, Chem.Mol]):
             rows,
         )
         self._conn.commit()
+        if self._lru:
+            for oid, _blob, _smiles in rows:
+                self._lru.pop(oid, None)
 
     def ingest_structures(
         self, rows: Iterable[tuple[int, Chem.Mol | None, bytes | None, str]]

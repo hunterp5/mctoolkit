@@ -129,6 +129,48 @@ class CompoundTableStructureMixin:
             return
         self._set_extra_pixmap(oid, header_name, pixmap)
 
+    def set_column_pixmaps_batch(
+        self, header_name: str, items: list[tuple[int, QPixmap | None]], *, emit: bool = True
+    ) -> None:
+        """Set extra-column images for many rows in one store write; batched ``dataChanged``."""
+        if not items or header_name not in self._headers:
+            return
+        if header_name in ("ID_HIDDEN", "Structure"):
+            return
+        self._extra_pixmaps.set_pixmaps_batch(header_name, items)
+        if not emit:
+            return
+        rows_changed = [r for r in (self.logical_row_for_oid(int(o)) for o, _p in items) if r >= 0]
+        c = self._headers.index(header_name)
+        self._emit_data_changed_row_spans(
+            rows_changed,
+            c,
+            c,
+            roles=[Qt.DecorationRole, Qt.SizeHintRole, Qt.DisplayRole, Qt.ToolTipRole],
+        )
+
+    def clear_column_pixmaps_for_oids(
+        self, header_name: str, oids: list[int], *, emit: bool = True
+    ) -> None:
+        """Drop extra-column images for many rows; ``dataChanged`` only for the changed row runs."""
+        if header_name not in self._headers or header_name in ("ID_HIDDEN", "Structure"):
+            return
+        keys = [
+            (int(oid), header_name)
+            for oid in oids
+            if (int(oid), header_name) in self._extra_pixmaps
+        ]
+        self._extra_pixmaps.remove_keys(keys)
+        rows_changed = [r for r in (self.logical_row_for_oid(oid) for oid, _h in keys) if r >= 0]
+        if emit and rows_changed:
+            c = self._headers.index(header_name)
+            self._emit_data_changed_row_spans(
+                rows_changed,
+                c,
+                c,
+                roles=[Qt.DecorationRole, Qt.SizeHintRole, Qt.DisplayRole, Qt.ToolTipRole],
+            )
+
     def _set_extra_pixmap(self, oid: int, header_name: str, pixmap: QPixmap | None) -> None:
         if header_name not in self._headers or header_name in ("ID_HIDDEN", "Structure"):
             return

@@ -236,28 +236,55 @@ class TableChemistryAccessMixin:
             visible_rows = None if vis is None else set(vis)
         return allowed, visible_rows
 
+    def _plain_store_structure_payloads(
+        self, allowed: set[int] | None
+    ) -> list[tuple[int, bytes | None, str]]:
+        """``(oid, blob, smiles)`` from a plain-dict mol store (tests, legacy sessions)."""
+        rows: list[tuple[int, bytes | None, str]] = []
+        oids = list(self.mols) if allowed is None else [o for o in allowed if o in self.mols]
+        for oid in oids:
+            mol = self.mols.get(oid)
+            if mol is None:
+                continue
+            try:
+                blob = mol.ToBinary()
+            except (AttributeError, RuntimeError):
+                continue
+            rows.append((int(oid), bytes(blob) if blob else None, ""))
+        return rows
+
     def collect_scoped_table_structure_payloads(
         self,
         src: str,
         *,
         only_selected: bool = False,
         only_visible: bool = False,
+        allowed_oids: set[int] | None = None,
     ) -> list[StructurePayload]:
         """Copy ``(oid, blob, smiles)`` in scope without hydrating RDKit molecules.
 
         ``src`` is ``"Structure"`` (MolStore blob/SMILES plus the SMILES column) or a
-        data-column header (cell / pixmap backing text only). Callers that need live
-        mols should hydrate on a worker with :func:`mols_from_payloads`.
+        data-column header (cell / pixmap backing text only). ``allowed_oids`` narrows the
+        scope to those ids and replaces ``only_selected``. Rows come back in table order.
+        Callers that need live mols should hydrate on a worker with :func:`mols_from_payloads`.
         """
         allowed, visible_rows = self._scoped_row_filters(
-            only_selected=only_selected, only_visible=only_visible
+            only_selected=only_selected and allowed_oids is None, only_visible=only_visible
         )
+        if allowed_oids is not None:
+            allowed = set(allowed_oids)
         store_map: dict[int, tuple[bytes | None, str]] = {}
         if src == "Structure":
+            scoped_fn = getattr(self.mols, "structure_payloads_for", None)
             iter_fn = getattr(self.mols, "iter_structure_payloads", None)
-            if callable(iter_fn):
-                for oid, blob, smi in iter_fn():
-                    store_map[int(oid)] = (blob, smi or "")
+            if allowed is not None and callable(scoped_fn):
+                rows = scoped_fn(allowed)
+            elif callable(iter_fn):
+                rows = iter_fn()
+            else:
+                rows = self._plain_store_structure_payloads(allowed)
+            for oid, blob, smi in rows:
+                store_map[int(oid)] = (blob, smi or "")
         smiles_h = self._canonical_smiles_header_for_updates() if src == "Structure" else None
         ov = getattr(self, "_structure_field_override", None)
         ov_s = str(ov).strip() if isinstance(ov, str) else ""

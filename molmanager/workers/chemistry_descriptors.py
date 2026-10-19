@@ -74,7 +74,11 @@ from ..sources.pubchem_names import (
 )
 from ..ionization.unipka_ensembles import int_fns_need_ionization, microstates_for_mol
 from .ionization_parallel import build_microstates_cache_for_rows
-from ..chem.molecule_conversion import mol_to_canonical_smiles, parse_molecule_from_cell_text
+from ..chem.molecule_conversion import (
+    mol_from_tool_input,
+    mol_to_canonical_smiles,
+    parse_molecule_from_cell_text,
+)
 from ..chem.rdkit_fingerprints import (
     fingerprint_onbits_for_descriptor,
     fingerprint_onbits_for_internal_key,
@@ -503,7 +507,7 @@ class CalcWorker(QRunnable):
                 if packed is None and smi:
                     packed = smi
             else:
-                mol = item
+                mol = mol_from_tool_input(item)
             prepared.append((i, mol))
             if need_3d:
                 col = self.confs_col_by_idx.get(int(i))

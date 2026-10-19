@@ -54,3 +54,25 @@ def test_mol_store_ingest_jobs_does_not_hydrate():
         assert 1 in store._lru
     finally:
         store.close()
+
+
+def test_mol_store_ingest_jobs_replaces_cached_mol():
+    store = MolStore(lru_max=8)
+    try:
+        store[1] = Chem.MolFromSmiles("CC[NH3+]")
+        assert 1 in store._lru
+        store.ingest_jobs([(1, Chem.MolFromSmiles("CCN").ToBinary(), "CCN")])
+        assert Chem.MolToSmiles(store[1]) == "CCN"
+    finally:
+        store.close()
+
+
+def test_mol_store_structure_payloads_for_returns_only_requested():
+    store = MolStore(lru_max=8)
+    try:
+        store.ingest_jobs([(oid, None, "C" * (oid + 1)) for oid in range(2000)])
+        got = {oid: smi for oid, _blob, smi in store.structure_payloads_for([5, 1500, 9999])}
+        assert got == {5: "C" * 6, 1500: "C" * 1501}
+        assert list(store.structure_payloads_for([])) == []
+    finally:
+        store.close()

@@ -23,6 +23,7 @@ import logging
 from PyQt5.QtCore import QRunnable
 from rdkit import Chem
 
+from ..chem.molecule_conversion import mol_from_tool_input
 from ..platform_support.tool_progress import ToolProgressState, report_tool_progress
 from .signals import SubstructureFilterSignals
 
@@ -113,11 +114,7 @@ class SubstructureFilterWorker(QRunnable):
                     if or_groups:
                         for i, (oid, raw_target) in enumerate(targets):
                             try:
-                                if isinstance(raw_target, Chem.Mol):
-                                    m = raw_target
-                                else:
-                                    smi = (raw_target or "").strip()
-                                    m = Chem.MolFromSmiles(smi) if smi else None
+                                m = mol_from_tool_input(raw_target)
                                 if mol_matches_pattern_groups(m, or_groups):
                                     matched.add(int(oid))
                             except Exception:
@@ -156,13 +153,7 @@ class SubstructureFilterWorker(QRunnable):
                 matched: set[int] = set()
                 for i, (oid, raw_target) in enumerate(targets):
                     try:
-                        if isinstance(raw_target, Chem.Mol):
-                            m = raw_target
-                        else:
-                            smi = (raw_target or "").strip()
-                            if not smi:
-                                continue
-                            m = Chem.MolFromSmiles(smi)
+                        m = mol_from_tool_input(raw_target)
                         if m is not None and m.HasSubstructMatch(q):
                             matched.add(int(oid))
                     except Exception:

@@ -14,65 +14,96 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Mol writeback helpers for structure-prep tools (``WorkspaceTools.structure_prep``)."""
+"""Job inputs and bulk writeback for structure-prep tools (``WorkspaceTools.structure_prep``).
+
+Tools read stored blobs / cell text on the GUI thread and let workers rebuild molecules;
+workers return ``(oid, blob, smiles)`` rows that are written back in one batch. Per-row
+``MolStore`` reads and writes froze the GUI for tens of seconds on 100k-row tables.
+"""
 
 from __future__ import annotations
 
 from rdkit import Chem
 
+from ...chem.molecule_conversion import mol_from_binary_blob
 from ...table.structure_depiction_layout import structure_depict_height, structure_depict_width
-from ...chem.molecule_conversion import mol_to_canonical_smiles
 
 
 class StructureWritebackMixin:
-    def _write_mol_to_source_column(
-        self,
-        oid: int,
-        mol,
-        src: str,
-        *,
-        smiles_h: str | None,
-        update_smiles_col: bool,
-    ) -> None:
-        """Write one molecule into Structure, a depiction column, or a SMILES column."""
-        if src == "Structure":
-            self.mols[oid] = mol
-            self._table_model.set_structure_pixmap(oid, None)
-        elif src in self.headers:
-            if self._table_model.is_pixmap_data_column(src):
-                try:
-                    smi = mol_to_canonical_smiles(mol)
-                except Exception:
-                    smi = ""
-                if smi:
-                    self._table_model.set_backing_text(oid, src, smi)
-                self._table_model.set_column_pixmap(oid, src, None)
-            else:
-                self._table_model.set_cell_text(oid, src, mol_to_canonical_smiles(mol))
-        if update_smiles_col and smiles_h:
-            self._table_model.set_cell_text(oid, smiles_h, mol_to_canonical_smiles(mol))
+    def _structure_tool_inputs(
+        self, src: str, allowed: set[int] | None, *, with_source_text: bool = False
+    ) -> list[tuple]:
+        """Scoped job inputs for *src* in table order, read without hydrating molecules.
 
-    def _start_mol_tool_render2d(self, results, src: str) -> bool:
-        """Queue 2D redraws for ``(oid, mol)`` pairs. Return True when a batch started."""
-        base_w, base_h = structure_depict_width(), structure_depict_height()
-        renders = []
-        row_by_oid: dict[int, int] = {}
-        for oid, mol in results:
-            if mol is None:
+        Rows are ``(oid, blob_or_text)`` for :func:`~molmanager.chem.molecule_conversion.mol_from_tool_input`.
+        With *with_source_text* they are ``(oid, blob_or_None, source_text)`` so disconnect
+        tools also see the original multi-component cell text.
+        """
+        rows: list[tuple] = []
+        for payload in self.collect_scoped_table_structure_payloads(src, allowed_oids=allowed):
+            oid = int(payload.oid)
+            if not with_source_text:
+                rows.append((oid, payload.blob or payload.smiles))
                 continue
-            row = self.logical_row_for_oid(oid)
-            if row < 0:
-                continue
-            rw, rh = (
-                (structure_depict_width() * 2, structure_depict_height() * 2)
-                if oid in self.zoomed_ids
-                else (base_w, base_h)
+            text = payload.smiles
+            if src == "Structure":
+                text = self._disconnect_source_text_for_oid(oid, src) or text
+            rows.append((oid, payload.blob, text))
+        return rows
+
+    def _store_structure_blobs(self, rows: list[tuple[int, bytes, str]]) -> None:
+        """Replace Structure entries with ``(oid, blob, smiles)`` rows in one store write."""
+        ingest = getattr(self.mols, "ingest_jobs", None)
+        if callable(ingest):
+            ingest(rows)
+            return
+        for oid, blob, _smiles in rows:
+            mol = mol_from_binary_blob(blob)
+            if mol is not None:
+                self.mols[oid] = mol
+
+    def _write_tool_structures(self, dest: str, rows: list[tuple[int, bytes, str]]) -> list[int]:
+        """Write worker ``(oid, blob, smiles)`` rows into *dest*; return the written oids.
+
+        Structure goes to the molecule store; other columns get the SMILES (hidden backing
+        text for depiction columns). Stale depictions are dropped so they can be re-rendered.
+        """
+        model = self._table_model
+        oids = [int(oid) for oid, _blob, _smiles in rows]
+        if dest == "Structure":
+            self._store_structure_blobs(rows)
+            model.clear_structure_pixmaps_for_oids(oids)
+        elif dest in self.headers:
+            model.set_column_backing_text_by_oids(
+                dest, [(oid, smiles) for oid, _blob, smiles in rows]
             )
-            renders.append((oid, mol, rw, rh))
-            row_by_oid[oid] = row
+            if model.is_pixmap_data_column(dest):
+                model.clear_column_pixmaps_for_oids(dest, oids)
+        return oids
+
+    def _tool_target_renders_2d(self, dest: str) -> bool:
+        return dest == "Structure" or (
+            dest in self.headers and self._table_model.is_pixmap_data_column(dest)
+        )
+
+    def _render_tool_structures(
+        self, dest: str, oids: list[int], *, queue_title_prefix: str = ""
+    ) -> bool:
+        """Queue 2D redraws of *dest* for *oids*. Return True when a batch started."""
+        if not oids or getattr(self, "_render2d_batch_active", False):
+            return False
+        renders, row_by_oid = self._build_render2d_tasks_in_table_order(
+            dest, structure_depict_width(), structure_depict_height(), set(oids)
+        )
         if not renders:
             return False
-        self._start_render_2d_batch(renders, row_by_oid, src, column_pixmap_mode=src != "Structure")
+        self._start_render_2d_batch(
+            renders,
+            row_by_oid,
+            dest,
+            column_pixmap_mode=dest != "Structure",
+            queue_title_prefix=queue_title_prefix,
+        )
         return True
 
     def _apply_mol_tool_results(
@@ -83,34 +114,18 @@ class StructureWritebackMixin:
         no_render_2d: bool,
         done_label: str = "Done.",
     ) -> None:
-        """Write mol-tool results into the source column, then optionally render 2D."""
-        render_target = src == "Structure" or (
-            src in self.headers and self._table_model.is_pixmap_data_column(src)
-        )
-        smiles_h = self._canonical_smiles_header_for_updates()
-        update_smiles_col = smiles_h is not None and src == smiles_h
-
-        for oid, mol in results:
-            if mol is None:
-                continue
-            self._write_mol_to_source_column(
-                oid, mol, src, smiles_h=smiles_h, update_smiles_col=update_smiles_col
-            )
-
+        """Write ``(oid, blob, smiles)`` tool results into *src*, then optionally render 2D."""
+        rows = [(int(oid), bytes(blob), smiles) for oid, blob, smiles in results if blob]
+        oids = self._write_tool_structures(src, rows)
         self.schedule_calculate_global_bounds()
         self._clear_tool_progress()
-        if (
-            results
-            and render_target
-            and not no_render_2d
-            and not getattr(self, "_render2d_batch_active", False)
-        ):
-            if self._start_mol_tool_render2d(results, src):
+        if not no_render_2d and self._tool_target_renders_2d(src):
+            if self._render_tool_structures(src, oids):
                 return
         self.status_label.setText(self._consume_partial_results_notice() or done_label)
 
     def _mol_for_structure_tool_oid(self, oid: int, src: str) -> Chem.Mol | None:
-        """Molecule for a prepare-structures tool row and source column."""
+        """Molecule for one row and source column (single-row callers only; hydrates)."""
         row = self.logical_row_for_oid(oid)
         if row < 0:
             return None

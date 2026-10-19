@@ -31,6 +31,7 @@ from molmanager.ionization.unipka_ensembles import (
     populations_from_states,
     unipka_import_error,
 )
+from ..chem.molecule_conversion import mol_from_tool_input
 from ..platform_support.config import load_config
 from .ionization_parallel import build_microstates_cache_by_key
 from .pka_predictor import _quieter_unipka_loggers
@@ -100,7 +101,7 @@ class ProtonateWorker(QRunnable):
 
     def __init__(
         self,
-        rows: list[tuple[int, Chem.Mol | None]],
+        rows: list[tuple[int, Chem.Mol | bytes | str | None]],
         pH: float,
         *,
         signals: ProtonateSignals,
@@ -129,7 +130,9 @@ class ProtonateWorker(QRunnable):
                 return
 
             cancel_ev = self.cancel_event
-            order, rep, oids_map = group_rows_by_structure(self.rows)
+            order, rep, oids_map = group_rows_by_structure(
+                [(oid, mol_from_tool_input(item)) for oid, item in self.rows]
+            )
             n_work = sum(len(oids_map[k]) for k in order)
             tot = max(n_work, 1)
 

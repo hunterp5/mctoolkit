@@ -245,7 +245,7 @@ def test_substructure_async_without_smiles_column_uses_mols(qapp, monkeypatch): 
     w.calculate_global_bounds()
     targets = w._substructure_filter_targets()
     assert len(targets) == 70
-    assert isinstance(targets[0][1], Chem.Mol)
+    assert isinstance(targets[0][1], bytes)
     card = SubstructureFilterCard()
     card.set_smarts("c1ccccc1")
     w.filters = [card]

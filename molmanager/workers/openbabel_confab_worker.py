@@ -24,6 +24,7 @@ import threading
 from PyQt5.QtCore import QRunnable
 from rdkit import Chem
 
+from ..chem.molecule_conversion import mol_from_tool_input
 from ..conformers.openbabel_confab import (
     SystematicConfParams,
     ensure_openbabel_confab_ready,
@@ -78,10 +79,11 @@ class SystematicConformerWorker(QRunnable):
             )
         except Exception:
             pass
-        for i, (oid, mol) in enumerate(self.data):
+        for i, (oid, item) in enumerate(self.data):
             if should_terminate_process_pool(self.cancel_event):
                 cancelled = True
                 break
+            mol = mol_from_tool_input(item)
             results.append(_row_result(int(oid), mol, self.params, self.cancel_event))
             if should_terminate_process_pool(self.cancel_event):
                 cancelled = True

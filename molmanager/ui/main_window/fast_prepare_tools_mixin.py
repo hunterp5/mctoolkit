@@ -21,11 +21,7 @@ from __future__ import annotations
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMessageBox
 
-from rdkit import Chem
-
 from ...platform_support.config import load_config
-from ...table.structure_depiction_layout import structure_depict_height, structure_depict_width
-from ...chem.molecule_conversion import mol_from_binary_blob
 from ..analysis_job_support import enqueue_process_queue_job
 
 
@@ -72,6 +68,18 @@ class FastPrepareToolsMixin:
             prepare_col in self.headers and self._table_model.is_pixmap_data_column(prepare_col)
         )
 
+    def _collect_fast_prepare_items(self, src: str, allowed: set[int] | None) -> list[tuple]:
+        """Worker input rows for the scope, in table order, without hydrating molecules.
+
+        The Structure column sends ``(oid, stored_blob, source_text)``; the worker rebuilds each
+        molecule in its child process. Any other column sends ``(oid, cell_text)``, read from the
+        backing text so image-only columns work too.
+        """
+        rows = self._structure_tool_inputs(src, allowed, with_source_text=True)
+        if src != "Structure":
+            return [(oid, text) for oid, _blob, text in rows]
+        return [(oid, blob or b"", text or None) for oid, blob, text in rows]
+
     def _enqueue_fast_prepare(
         self, src: str, prepare_col: str, *, only_selected: bool, neutralize: bool = False
     ) -> None:
@@ -79,27 +87,8 @@ class FastPrepareToolsMixin:
         from ...workers.fast_prepare import FastPrepareParams, FastPrepareWorker
 
         allowed = self._selected_oids_set() if only_selected else None
-        oids_walk = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids_walk = [o for o in oids_walk if o in allowed]
-
-        # Same source split the disconnect job used: the Structure column reads cached mols, any
-        # other column is read as cell text.
         is_smiles = src != "Structure"
-        data: list[tuple] = []
-        if is_smiles:
-            col = self.headers.index(src)
-            for oid in oids_walk:
-                row = self.logical_row_for_oid(oid)
-                if row == -1:
-                    continue
-                data.append((oid, self._table_cell_text(row, col)))
-        else:
-            for oid in oids_walk:
-                mol = self.mols.get(oid)
-                if mol is None:
-                    continue
-                data.append((oid, mol, self._disconnect_source_text_for_oid(oid, src)))
+        data = self._collect_fast_prepare_items(src, allowed)
 
         if not data:
             QMessageBox.information(
@@ -110,13 +99,12 @@ class FastPrepareToolsMixin:
             self.status_label.setText("Ready.")
             return
 
-        # Canonical SMILES is only needed when the output column stores text; computing it in the
-        # child processes keeps MolToSmiles off the GUI thread.
-        need_smiles = self._fast_prepare_target_is_text(prepare_col)
+        # The mol store keeps a SMILES beside every blob (session save reads it), so the child
+        # processes always canonicalize; the GUI thread never runs MolToSmiles.
         cfg = load_config()
         params = FastPrepareParams(
             is_smiles=is_smiles,
-            need_smiles=need_smiles,
+            need_smiles=True,
             neutralize=bool(neutralize),
             batch_size=int(cfg.fast_prepare_batch_size),
             process_pool_min_rows=int(cfg.fast_prepare_process_pool_min_rows),
@@ -125,8 +113,8 @@ class FastPrepareToolsMixin:
             self,
             "Fast prepare",
             len(data),
-            lambda ev, ps, d=data, p=params, s=self.signals: (
-                FastPrepareWorker(d, p, s, cancel_event=ev, progress_state=ps)
+            lambda ev, ps, d=data, p=params, s=self.signals: FastPrepareWorker(
+                d, p, s, cancel_event=ev, progress_state=ps
             ),
             queue_label="Fast prepare: prepare structures",
         )
@@ -141,7 +129,6 @@ class FastPrepareToolsMixin:
         prepare_col = getattr(self, "_fast_prepare_source", "Structure")
         fragments_col = getattr(self, "_fast_prepare_fragments_col", "Fragments")
         update_target = getattr(self, "_fast_prepare_update_target", True)
-        allowed_oids = getattr(self, "_fast_prepare_allowed_oids", None)
         self._fast_prepare_source = "Structure"
         self._fast_prepare_allowed_oids = None
         self._fast_prepare_fragments_col = "Fragments"
@@ -151,48 +138,23 @@ class FastPrepareToolsMixin:
         if not update_target:
             self._ensure_disconnect_output_column(prepare_col)
 
-        target_is_text = self._fast_prepare_target_is_text(prepare_col)
-        write_fragments = fragments_col in self.headers
-        smiles_h = self._canonical_smiles_header_for_updates()
-        sync_smiles_col = smiles_h is not None and smiles_h == prepare_col and target_is_text
-
-        for oid, blob, fragments, smiles in results:
-            mol = self._fast_prepare_mol_from_blob(blob)
-            if mol is None:
-                continue
-            if target_is_text:
-                self._table_model.set_cell_text(oid, prepare_col, smiles)
-                if sync_smiles_col:
-                    self._table_model.set_cell_text(oid, smiles_h, smiles)
-            else:
-                self.mols[oid] = mol
-                if prepare_col == "Structure":
-                    self._table_model.set_structure_pixmap(oid, None)
-                else:
-                    self._table_model.set_column_pixmap(oid, prepare_col, None)
-            if write_fragments:
-                self._table_model.set_cell_text(oid, fragments_col, fragments)
+        prepared = [
+            (int(oid), bytes(blob), fragments, smiles)
+            for oid, blob, fragments, smiles in results
+            if blob
+        ]
+        oids = self._write_tool_structures(
+            prepare_col, [(oid, blob, smiles) for oid, blob, _fragments, smiles in prepared]
+        )
+        if fragments_col in self.headers:
+            self._table_model.set_column_text_by_oids(
+                fragments_col, [(oid, fragments) for oid, _blob, fragments, _smiles in prepared]
+            )
 
         self.schedule_calculate_global_bounds()
         self._clear_tool_progress()
 
-        if results and not getattr(self, "_render2d_batch_active", False):
-            renders, row_by_oid = self._build_render2d_tasks_in_table_order(
-                prepare_col, structure_depict_width(), structure_depict_height(), allowed_oids
-            )
-            if renders:
-                self.status_label.setText("Fast prepare: rendering 2D…")
-                self._start_render_2d_batch(
-                    renders,
-                    row_by_oid,
-                    prepare_col,
-                    column_pixmap_mode=(prepare_col != "Structure"),
-                    queue_title_prefix="Fast prepare: ",
-                )
-                return
+        if self._render_tool_structures(prepare_col, oids, queue_title_prefix="Fast prepare: "):
+            self.status_label.setText("Fast prepare: rendering 2D…")
+            return
         self.status_label.setText(self._consume_partial_results_notice() or "Fast prepare done.")
-
-    @staticmethod
-    def _fast_prepare_mol_from_blob(blob) -> Chem.Mol | None:
-        """Rebuild a molecule from the worker's binary payload."""
-        return mol_from_binary_blob(blob)  # type: ignore[return-value]
