@@ -934,7 +934,8 @@ def test_docking_from_table_only_uses_split_view(qapp):  # noqa: ARG001
     assert w._workspace_layout.ensure_single_plot_pane() is pane
 
 
-def test_dock_matches_pane_width_to_floating_plot_size(qapp):  # noqa: ARG001
+def test_dock_fits_plot_to_existing_pane(qapp):  # noqa: ARG001
+    """Docking sizes the widget to the pane; the pane split does not move."""
     from PyQt5.QtWidgets import QLabel
 
     from molmanager.ui.main_window.workspace_layout import LAYOUT_TABLE_SINGLE
@@ -946,19 +947,21 @@ def test_dock_matches_pane_width_to_floating_plot_size(qapp):  # noqa: ARG001
     qapp.processEvents()
     w.apply_workspace_layout(LAYOUT_TABLE_SINGLE)
     qapp.processEvents()
+    before = w._plot_panel_splitter_sizes()
+    assert before is not None
 
     plot = QLabel("plot")
     plot.dockable_in_workspace = True
-    plot.resize(520, 400)
+    plot.resize(1000, 900)
     plot.show()
     qapp.processEvents()
-    assert plot.width() == 520
 
     assert w.dock_plot_widget(plot) is True
     qapp.processEvents()
-    sizes = w._plot_panel_splitter_sizes()
-    assert sizes is not None
-    assert sizes[1] >= 500
+    assert w._plot_panel_splitter_sizes() == before
+    pane = w._workspace_layout.plot_panes()[0]
+    assert plot.width() == pane._stack.width()
+    assert plot.height() == pane._stack.height()
 
 
 def test_undock_resizes_floating_dialog_to_docked_size(qapp, monkeypatch):  # noqa: ARG001
@@ -1003,13 +1006,12 @@ def test_undock_resizes_floating_dialog_to_docked_size(qapp, monkeypatch):  # no
     qapp.processEvents()
     host = plot.window()
     assert isinstance(host, _Dlg)
-    # Dialog chrome may make the outer window larger; content must match docked size.
-    assert abs(plot.width() - src_w) <= 40
-    assert abs(plot.height() - src_h) <= 40
+    assert abs(plot.width() - src_w) <= 1
+    assert abs(plot.height() - src_h) <= 1
 
 
-def test_redock_does_not_shrink_open_plot_panel(qapp, monkeypatch):  # noqa: ARG001
-    """Grow-only matching: docking a smaller floating plot must not ratchet the pane down."""
+def test_redock_keeps_pane_size(qapp, monkeypatch):  # noqa: ARG001
+    """A resized floating window does not change the pane it is docked back into."""
     from PyQt5.QtWidgets import QDialog, QLabel, QVBoxLayout
 
     from molmanager.ui.main_window.workspace_layout import LAYOUT_TABLE_SINGLE
@@ -1051,15 +1053,12 @@ def test_redock_does_not_shrink_open_plot_panel(qapp, monkeypatch):  # noqa: ARG
     qapp.processEvents()
     host = plot.window()
     assert isinstance(host, _Dlg)
-    # Simulate a smaller floating host (chrome / content loss between cycles).
     host.resize(360, 300)
     qapp.processEvents()
 
     assert w.dock_plot_widget(plot) is True
     qapp.processEvents()
-    after = w._plot_panel_splitter_sizes()
-    assert after is not None
-    assert after[1] >= before[1] - 2
+    assert w._plot_panel_splitter_sizes() == before
 
 
 def test_dock_wire_syncs_only_docked_plot(qapp, monkeypatch):  # noqa: ARG001
