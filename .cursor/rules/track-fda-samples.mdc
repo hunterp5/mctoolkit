@@ -1,0 +1,12 @@
+---
+description: Always commit and push the FDA-approved sample files
+alwaysApply: true
+---
+
+# FDA-approved samples stay in git
+
+`samples/fda_approved.sdf` and `samples/fda_approved.cms` are project samples. If either file is untracked or modified, commit it and push it to GitHub with the branch. Do not treat them as local-only sample data.
+
+- Commit both files when they change. They are one sample set and may share a commit.
+- Leave `*.mctcache` untracked. Those sidecars are a local render cache, including `samples/fda_approved.mctcache` and `samples/fda_approved.cms.mctcache`.
+- Other large extracts under `samples/` stay untracked unless a request names them.
