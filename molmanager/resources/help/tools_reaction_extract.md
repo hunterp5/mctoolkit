@@ -8,7 +8,7 @@ Turn packed reaction cells into individual structure columns for filtering, enum
 
 ## When to use
 
-Use **Tools → Reaction → Extract** after loading an RXN file, sketching a reaction into the table, or importing SMIRKS when you need the components as separate fields.
+Use **Chemistry → Reaction → Extract** after loading an RXN file, sketching a reaction into the table, or importing SMIRKS when you need the components as separate fields.
 
 ## Inputs / scope
 
@@ -26,7 +26,7 @@ One table column whose cells contain reaction SMARTS or SMIRKS (`>>`, or reactan
 1. Select the reaction column (or keep the Reaction SMARTS default).
 2. Choose reactants, products, or both.
 3. Optionally restrict to selected rows.
-4. Apply and inspect the new columns. Use **Tools → Render 2D** if you want depictions.
+4. Apply and inspect the new columns. Use **Chemistry → Render 2D** if you want depictions.
 
 ## Use cases
 
