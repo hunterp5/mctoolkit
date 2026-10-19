@@ -331,6 +331,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Protein Sequence",
                 "Align FASTA or Viewer polymer chains with a local MAFFT install.",
             ),
+            _e(
+                "protein_interaction_fp",
+                "Interaction Fingerprint",
+                "Interaction Fingerprint",
+                "Protein → Interaction Fingerprint. Residue contacts for each stored pose.",
+            ),
         ),
     ),
     GuideSection(
@@ -390,12 +396,29 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "pKa",
                 "Uni-pKa macro pKa values from a structure column or SMILES.",
             ),
-            _e("data_qsar", "QSAR", "QSAR", "Train and apply QSAR models on table features."),
+            _e(
+                "data_qsar",
+                "Generate Model",
+                "Generate Model",
+                "Train a QSAR model on chosen features (Data → QSAR).",
+            ),
+            _e(
+                "data_auto_qsar",
+                "AutoQSAR",
+                "AutoQSAR",
+                "Search descriptors and models for an activity column (Data → QSAR).",
+            ),
             _e(
                 "data_free_wilson",
                 "Free-Wilson",
                 "Free-Wilson",
                 "Additive substituent contributions and predicted missing analogs.",
+            ),
+            _e(
+                "data_sar_matrix",
+                "SAR Matrix",
+                "SAR Matrix",
+                "Data → SAR Matrix. R1 × R2 grid colored by an activity column.",
             ),
             _e("data_mpo", "MPO Scoring", "MPO Scoring", "Multi-parameter desirability scores."),
         ),
@@ -484,7 +507,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "data_sali",
                 "SALI",
                 "SALI",
-                "Fingerprint similarity vs |Δactivity| colored by SALI.",
+                "Fingerprint similarity vs |Δactivity| or |Δselectivity|, colored by SALI.",
             ),
             _e(
                 "tools_mmp",
