@@ -118,6 +118,16 @@ class SqliteTableStore:
             return
         self._insert_rows_payload(self._headers, rows)
 
+    def abort_bulk_load(self) -> None:
+        """Roll back an incremental ingest that did not finish."""
+        if not self._bulk_loading:
+            return
+        try:
+            self._conn.rollback()
+        except Exception:
+            pass
+        self._bulk_loading = False
+
     def finalize_bulk_load(self) -> None:
         """Finish incremental ingest: create index and commit the bulk transaction."""
         if not self._bulk_loading:
