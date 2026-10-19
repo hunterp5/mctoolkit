@@ -66,11 +66,13 @@ class SaliBrowserDialog(PairBrowserDialog):
         fp_choice: str = "",
         metric: str = "Tanimoto",
         start_index: int = 0,
+        off_target_column: str = "",
     ):
         self._all_points = list(points)
         self._points = list(points)
         self._fp_choice = fp_choice or ""
         self._metric = metric or "Tanimoto"
+        self._off_target_column = off_target_column or ""
         self._idx = max(0, int(start_index))
         if self._all_points and 0 <= self._idx < len(self._all_points):
             p0 = self._all_points[self._idx]
@@ -192,6 +194,7 @@ class SaliBrowserDialog(PairBrowserDialog):
         fp_choice: str | None = None,
         metric: str | None = None,
         start_index: int | None = None,
+        off_target_column: str | None = None,
     ) -> None:
         """Replace the pair list and refresh the view."""
         self._all_points = list(points or [])
@@ -201,6 +204,8 @@ class SaliBrowserDialog(PairBrowserDialog):
             self._fp_choice = fp_choice
         if metric is not None:
             self._metric = metric
+        if off_target_column is not None:
+            self._off_target_column = off_target_column
         prefer: tuple[int, int] | None = None
         if start_index is not None and self._all_points:
             si = max(0, min(int(start_index), len(self._all_points) - 1))
@@ -284,12 +289,7 @@ class SaliBrowserDialog(PairBrowserDialog):
         self._meta.clear()
         self._meta.setVisible(False)
         self._sync_pair_index(n)
-        sign = "+" if point.signed_delta >= 0 else ""
-        self._metrics_label.setText(
-            f"Similarity = {point.similarity:.3f}  ·  "
-            f"Δ{self._activity_column} = {sign}{point.signed_delta:.4g}  ·  "
-            f"SALI = {point.sali:.4g}"
-        )
+        self._metrics_label.setText(self._metrics_text(point))
         self._left_panel["box"].setTitle(f"Molecule A  (ID {point.oid_a})")
         self._right_panel["box"].setTitle(f"Molecule B  (ID {point.oid_b})")
         self._refresh_previews()
@@ -399,6 +399,54 @@ class SaliBrowserDialog(PairBrowserDialog):
             return None
         return getattr(app, "mols", {}).get(int(oid))
 
+    def _signed_text(self, value: float) -> str:
+        sign = "+" if value >= 0 else ""
+        return f"{sign}{value:.4g}"
+
+    def _metrics_text(self, point: SaliPoint) -> str:
+        similarity = f"Similarity = {point.similarity:.3f}"
+        sali = f"SALI = {point.sali:.4g}"
+        if point.delta_on is None or point.delta_off is None:
+            delta = f"Δ{self._activity_column} = {self._signed_text(point.signed_delta)}"
+            return f"{similarity}  ·  {delta}  ·  {sali}"
+        on_name = self._activity_column or "on-target"
+        off_name = self._off_target_column or "off-target"
+        return (
+            f"{similarity}  ·  "
+            f"Δ{on_name} = {self._signed_text(point.delta_on)}  ·  "
+            f"Δ{off_name} = {self._signed_text(point.delta_off)}  ·  "
+            f"Δselectivity = {self._signed_text(point.signed_delta)}  ·  "
+            f"{sali}"
+        )
+
+    def _activity_caption(self, oid: int, activity: float | None) -> str:
+        on_name = self._activity_column or "Activity"
+        if not self._off_target_column:
+            if activity is None:
+                return f"{on_name}: —"
+            return f"{on_name}: {activity:.4g}"
+        off = self._column_value_for_oid(oid, self._off_target_column)
+        lines = [
+            f"{on_name}: —" if activity is None else f"{on_name}: {activity:.4g}",
+            f"{self._off_target_column}: —"
+            if off is None
+            else f"{self._off_target_column}: {off:.4g}",
+        ]
+        if activity is None or off is None:
+            lines.append("Selectivity: —")
+        else:
+            lines.append(f"Selectivity: {activity - off:.4g}")
+        return "\n".join(lines)
+
+    def _column_value_for_oid(self, oid: int, column: str) -> float | None:
+        text = self._cell_text_for_oid(int(oid), column)
+        if not text:
+            return None
+        try:
+            return float(str(text).strip().replace(",", ""))
+        except ValueError:
+            return None
+
     def _update_molecule_panel(
         self,
         panel: dict[str, Any],
@@ -406,10 +454,7 @@ class SaliBrowserDialog(PairBrowserDialog):
         activity: float | None,
     ) -> None:
         label: QLabel = panel["struct"]
-        if activity is None:
-            panel["activity"].setText(f"{self._activity_column}: —")
-        else:
-            panel["activity"].setText(f"{self._activity_column}: {activity:.4g}")
+        panel["activity"].setText(self._activity_caption(oid, activity))
         mol = self._mol_for_oid(oid)
         pw, ph, dpr = self._preview_pixel_size(label)
         if mol is None:
