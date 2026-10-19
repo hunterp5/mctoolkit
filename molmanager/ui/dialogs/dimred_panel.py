@@ -417,11 +417,17 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(6)
         body.addWidget(self._titles)
+        markers = QGroupBox("Markers", panel)
+        markers_layout = QVBoxLayout(markers)
+        markers_layout.setContentsMargins(8, 6, 8, 6)
+        markers_layout.setSpacing(2)
         for row in row_layouts:
             row.setParent(None)
-            host = QWidget(panel)
-            host.setLayout(row)
-            body.addWidget(host)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            markers_layout.addLayout(row)
+        self._markers_group = markers
+        body.addWidget(markers)
         body.addWidget(self._hover_controls)
         body.addStretch(1)
         self._appearance_dialog = make_plot_options_dialog(
