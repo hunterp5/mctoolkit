@@ -32,13 +32,9 @@ from PyQt5.QtWidgets import (
 )
 
 _PLACEHOLDER_TEXT = (
-    'Match this column: e.g. >10, "eth*", NOT blank. Quote string text ("like this") so '
-    "&, |, and comma are not treated as operators. Press Enter to search."
-)
-_PLACEHOLDER_SUBSTRUCTURE = (
-    "Substructure (SMILES/SMARTS), e.g. c1ccccc1, [F,Cl], [!C;R], or [M]. "
-    "Daylight logic inside [] / bonds (! & , ;) is kept. "
-    "Search OR = | or comma between patterns; AND = &. Prefix NOT, !, or - to exclude. Press Enter."
+    'Quote column text ("eth*", NOT "blank") or compare (>10, empty). '
+    "Unquoted SMILES/SMARTS searches structures (c1ccccc1, [F,Cl], [!C;R]). "
+    "& AND, | or comma OR. NOT, !, or - excludes a pattern. Press Enter."
 )
 
 
@@ -72,8 +68,10 @@ class SearchCriterionRow(QWidget):
         self.glue_combo.addItem("NOT", "not")
         self.glue_combo.setFixedWidth(58)
         self.glue_combo.setToolTip(
-            "Combine this criterion with the rows above. "
-            "AND keeps rows in both, OR keeps either, NOT drops rows that match this criterion."
+            "On the first row, NOT selects every row that does not match; "
+            "AND and OR both start from the matching rows. "
+            "On later rows, AND keeps rows in both, OR keeps either, "
+            "and NOT drops rows that match this criterion."
         )
         lay.addWidget(self.glue_combo)
         self.glue_combo.setVisible(show_glue)
@@ -95,34 +93,24 @@ class SearchCriterionRow(QWidget):
         self.query_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         lay.addWidget(self.query_edit, 1)
 
-        self.partial_cb = QCheckBox("Partial match", self)
+        self.partial_cb = QCheckBox("Partial Match", self)
         self.partial_cb.setChecked(True)
         self.partial_cb.setToolTip(
-            "Substring match (and * ? wildcards). Off = whole cell must match."
+            "Quoted column text: substring match (and * ? wildcards). "
+            "Off = the whole cell must match. Unquoted SMILES/SMARTS ignores this."
         )
         lay.addWidget(self.partial_cb)
 
         self.case_cb = QCheckBox("Case Sensitive", self)
-        self.case_cb.setToolTip("When on, letter case must match.")
-        lay.addWidget(self.case_cb)
-
-        self.substructure_cb = QCheckBox("Substructure", self)
-        self.substructure_cb.setToolTip(
-            "Match structures with SMARTS/SMILES instead of column text."
+        self.case_cb.setToolTip(
+            "Quoted column text: letter case must match. Unquoted SMILES/SMARTS ignores this."
         )
-        self.substructure_cb.toggled.connect(self._on_substructure_toggled)
-        lay.addWidget(self.substructure_cb)
-
-    def _on_substructure_toggled(self, on: bool) -> None:
-        self.partial_cb.setEnabled(not on)
-        self.case_cb.setEnabled(not on)
-        self.query_edit.setPlaceholderText(_PLACEHOLDER_SUBSTRUCTURE if on else _PLACEHOLDER_TEXT)
+        lay.addWidget(self.case_cb)
 
     def copy_options_from(self, other: SearchCriterionRow) -> None:
         """Mirror checkbox state when adding another row."""
         self.partial_cb.setChecked(other.partial_cb.isChecked())
         self.case_cb.setChecked(other.case_cb.isChecked())
-        self.substructure_cb.setChecked(other.substructure_cb.isChecked())
 
     def glue(self) -> str:
         """``and``, ``or``, or ``not`` (only meaningful when the glue control is visible)."""
