@@ -374,12 +374,18 @@ def fingerprint_onbits_for_internal_key(internal_key: str) -> Callable[[Chem.Mol
 
 def descriptor_fingerprint_categories() -> dict[str, str]:
     """Display name → internal key for Calculate Descriptors → Fingerprints tab."""
-    return {f"{spec.label} on-bits": spec.internal_key for spec in FINGERPRINT_SPECS}
+    return {spec.label: spec.internal_key for spec in FINGERPRINT_SPECS}
 
 
 def descriptor_onbits_column_name(fp_label: str) -> str:
     """Table column header for fingerprint on-bit counts from Calculate Descriptors."""
-    return f"{resolve_fingerprint_label(fp_label)} on-bits"
+    return resolve_fingerprint_label(fp_label)
+
+
+def descriptor_onbits_column_aliases(fp_label: str) -> tuple[str, ...]:
+    """Current header, then the older ``… on-bits`` header from saved sessions."""
+    label = descriptor_onbits_column_name(fp_label)
+    return (label, f"{label} on-bits")
 
 
 def fingerprint_onbits_for_descriptor(
