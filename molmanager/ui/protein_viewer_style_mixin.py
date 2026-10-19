@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import logging
 from dataclasses import replace
@@ -90,11 +91,14 @@ class ProteinViewerStyleMixin:
                 act.setChecked(key == chosen)
                 act.blockSignals(False)
 
-    def _set_hydrogen_mode(self, mode: str) -> None:
+    def _set_hydrogen_mode(self, mode: str, *, record: bool = False) -> None:
         chosen = mode if mode in ("all", "polar", "none") else "polar"
+        before = self._capture_render() if record else None
         self._sync_hydrogen_mode_actions(chosen)
         self.viewer.set_hydrogens(chosen)
         self._mark_viewer_unsaved()
+        if before is not None:
+            self._commit_render(before)
 
     def _add_hydrogen_mode_menu(self, menu) -> None:
         """All / Polar / None hydrogen visibility (same mode as Render → Hydrogens)."""
@@ -129,7 +133,9 @@ class ProteinViewerStyleMixin:
             act.setToolTip(tip)
             group.addAction(act)
             menu.addAction(act)
-            act.triggered.connect(lambda _checked=False, m=mode: self._set_hydrogen_mode(m))
+            act.triggered.connect(
+                lambda _checked=False, m=mode: self._set_hydrogen_mode(m, record=True)
+            )
             store.setdefault(mode, []).append(act)
 
     def _protein_ligand_interaction_actions(self):
@@ -521,6 +527,7 @@ class ProteinViewerStyleMixin:
     def _apply_kind_style(self, kind: str, style: str) -> None:
         if not self._style_allowed_for_kind(kind, style):
             return
+        before = self._capture_render()
         changed = False
         for slot in self._slots:
             new_rows = []
@@ -535,6 +542,7 @@ class ProteinViewerStyleMixin:
         if changed:
             self.manager.apply_row_states(self._rows)
             self._push_states()
+            self._commit_render(before)
 
     def _add_select_style_menu(self, menu) -> None:
         for style_id, label in COMPONENT_STYLE_CHOICES:
@@ -575,6 +583,7 @@ class ProteinViewerStyleMixin:
         ids = set(self._require_selection())
         if not ids:
             return
+        before = self._capture_render()
         changed = False
         for slot in self._slots:
             new_rows = []
@@ -588,6 +597,7 @@ class ProteinViewerStyleMixin:
         if changed:
             self.manager.apply_row_states(self._rows)
             self._push_states()
+            self._commit_render(before)
 
     def _on_select_custom_color(self) -> None:
         chosen = QColorDialog.getColor(QColor("#2ca02c"), self, "Carbon color")
@@ -602,6 +612,7 @@ class ProteinViewerStyleMixin:
         ids = set(self._require_selection())
         if not ids:
             return
+        before = self._capture_render()
         changed = False
         for slot in self._slots:
             new_rows = []
@@ -615,6 +626,7 @@ class ProteinViewerStyleMixin:
         self._clear_pocket_overlay()
         if changed:
             self._push_states()
+            self._commit_render(before)
 
     def _add_render_style_menu(
         self,
@@ -671,6 +683,7 @@ class ProteinViewerStyleMixin:
         allowed = {key for key, _label in COMPONENT_COLOR_CHOICES}
         if color_scheme not in allowed:
             return
+        before = self._capture_render()
         changed = False
         for slot in self._slots:
             new_rows = []
@@ -684,6 +697,7 @@ class ProteinViewerStyleMixin:
         self._clear_pocket_overlay()
         if changed:
             self._push_states()
+            self._commit_render(before)
 
     def _checked_style(self, actions: dict[str, QAction], fallback: str) -> str:
         for style_id, act in actions.items():
@@ -1096,11 +1110,68 @@ class ProteinViewerStyleMixin:
         before: list[_LoadedSlot],
         after: list[_LoadedSlot],
     ) -> None:
-        self._manager_delete_undo.append((before, after))
+        self._push_viewer_undo(("structure", before, after))
+
+    def _render_signature(self, slots: list[_LoadedSlot]) -> tuple:
+        return tuple(
+            (row.spec.component_id, row.visible, row.style, row.color_scheme)
+            for slot in slots
+            for row in slot.rows
+        )
+
+    def _capture_render(self) -> tuple:
+        """Style, color, visibility, hydrogen mode, and focus-pocket state."""
+        pocket = getattr(self, "_pocket_payload_data", None)
+        return (
+            copy_loaded_slots(self._slots),
+            self._hydrogen_mode(),
+            copy.deepcopy(pocket) if isinstance(pocket, dict) else None,
+        )
+
+    def _commit_render(self, before: tuple) -> None:
+        after = self._capture_render()
+        if (
+            self._render_signature(before[0]) == self._render_signature(after[0])
+            and before[1] == after[1]
+            and before[2] == after[2]
+        ):
+            return
+        self._push_viewer_undo(("render", before, after))
+
+    def _push_viewer_undo(self, entry: tuple) -> None:
+        self._manager_delete_undo.append(entry)
         if len(self._manager_delete_undo) > _MANAGER_DELETE_UNDO_LIMIT:
             self._manager_delete_undo = self._manager_delete_undo[-_MANAGER_DELETE_UNDO_LIMIT:]
         self._manager_delete_redo = []
         self._sync_manager_edit_actions()
+
+    def _apply_undo_entry(self, entry: tuple, *, redo: bool) -> None:
+        kind = entry[0] if entry and entry[0] in {"structure", "render"} else "structure"
+        if kind == "render":
+            self._restore_render_state(entry[2] if redo else entry[1])
+            return
+        if kind == "structure" and len(entry) == 3:
+            before, after = entry[1], entry[2]
+        else:
+            before, after = entry[0], entry[1]
+        self._restore_manager_slots(after if redo else before)
+
+    def _restore_render_state(self, state: tuple) -> None:
+        slots, hydrogens, pocket = state
+        self._slots = copy_loaded_slots(slots)
+        self._reindex_models()
+        self._pocket_payload_data = copy.deepcopy(pocket) if isinstance(pocket, dict) else None
+        if not self._slots:
+            self.close_structure(keep_edit_history=True)
+            return
+        self._refresh_manager()
+        self._sync_render_menus_from_rows()
+        self._sync_hydrogen_mode_actions(hydrogens)
+        self.viewer.set_hydrogens({"mode": hydrogens, "apply": False})
+        pocket_payload = dict(self._pocket_payload_data or {"active": False})
+        pocket_payload["_apply"] = False
+        self.viewer.set_pocket(pocket_payload)
+        self._push_states()
 
     def _restore_manager_slots(self, slots: list[_LoadedSlot]) -> None:
         self._slots = copy_loaded_slots(slots)
@@ -1128,17 +1199,17 @@ class ProteinViewerStyleMixin:
     def undo_manager_delete(self) -> None:
         if not self._manager_delete_undo:
             return
-        before, after = self._manager_delete_undo.pop()
-        self._manager_delete_redo.append((before, after))
-        self._restore_manager_slots(before)
+        entry = self._manager_delete_undo.pop()
+        self._manager_delete_redo.append(entry)
+        self._apply_undo_entry(entry, redo=False)
         self._sync_manager_edit_actions()
 
     def redo_manager_delete(self) -> None:
         if not self._manager_delete_redo:
             return
-        before, after = self._manager_delete_redo.pop()
-        self._manager_delete_undo.append((before, after))
-        self._restore_manager_slots(after)
+        entry = self._manager_delete_redo.pop()
+        self._manager_delete_undo.append(entry)
+        self._apply_undo_entry(entry, redo=True)
         self._sync_manager_edit_actions()
 
     def focus_selected(self) -> None:
@@ -1148,31 +1219,23 @@ class ProteinViewerStyleMixin:
 
     def clear_selection(self) -> None:
         """Deselect Manager rows and drop the 3D atom/residue highlight."""
-        changed = False
         for slot in self._slots:
-            new_rows = []
-            for row in slot.rows:
-                if row.selected:
-                    new_rows.append(replace(row, selected=False))
-                    changed = True
-                else:
-                    new_rows.append(row)
-            slot.rows = new_rows
+            slot.rows = [
+                replace(row, selected=False) if row.selected else row for row in slot.rows
+            ]
         self._syncing_from_atom = True
         try:
             self.manager.apply_row_states(self._rows)
             clearer = getattr(self.manager, "clear_component_selection", None)
             if callable(clearer):
                 clearer()
-            self._set_residue_highlight([])
+            self._set_residue_highlight([], sync_selection=True)
             self._set_atom_status("")
         finally:
             self._syncing_from_atom = False
         sync_edit = getattr(self, "_sync_structure_edit_actions", None)
         if callable(sync_edit):
             sync_edit()
-        if changed:
-            self._push_states()
 
     def invert_selection(self) -> None:
         """Select unselected Manager components and deselect the current selection."""
@@ -1192,17 +1255,19 @@ class ProteinViewerStyleMixin:
         try:
             self.manager.apply_row_states(self._rows)
             if self._residue_highlight:
-                self._set_residue_highlight([])
+                self._residue_highlight = []
                 self._set_atom_status("")
+                changed = True
         finally:
             self._syncing_from_atom = False
         sync_edit = getattr(self, "_sync_structure_edit_actions", None)
         if callable(sync_edit):
             sync_edit()
         if changed:
-            self._push_states()
+            self._sync_canvas_selection()
 
     def _on_visibility_changed(self, component_id: str, visible: bool) -> None:
+        before = self._capture_render()
         changed = False
         for slot in self._slots:
             new_rows = []
@@ -1216,6 +1281,7 @@ class ProteinViewerStyleMixin:
         if changed:
             self.manager.apply_row_states(self._rows)
             self._push_states()
+            self._commit_render(before)
 
     def _on_manager_selection(self, ids: list) -> None:
         want = set(ids)
@@ -1232,10 +1298,17 @@ class ProteinViewerStyleMixin:
             slot.rows = new_rows
         if not self._syncing_from_atom and self._residue_highlight:
             self._residue_highlight = []
-            self.viewer.set_residue_highlight([])
             self._set_atom_status("")
+            changed = True
         if changed:
-            self._push_states()
+            self._sync_canvas_selection()
+
+    def _sync_canvas_selection(self) -> None:
+        """Move the 3D highlight without restyling the whole structure."""
+        selected_ids = [row.spec.component_id for row in self._rows if row.selected]
+        self.viewer.set_residue_highlight(
+            {"sels": list(self._residue_highlight), "selectedIds": selected_ids}
+        )
 
     def _on_style_requested(self, style: str) -> None:
         allowed = {key for key, _label in COMPONENT_STYLE_CHOICES}
@@ -1244,6 +1317,7 @@ class ProteinViewerStyleMixin:
         ids = set(self._require_selection())
         if not ids:
             return
+        before = self._capture_render()
         changed = False
         for slot in self._slots:
             new_rows = []
@@ -1262,6 +1336,7 @@ class ProteinViewerStyleMixin:
         if changed:
             self._push_states()
             self._sync_render_menus_from_rows()
+            self._commit_render(before)
 
     def _set_atom_status(self, text: str) -> None:
         lbl = getattr(self, "_atom_status", None)
@@ -1401,14 +1476,21 @@ class ProteinViewerStyleMixin:
             status = self._atom_status_text(data)
         self._syncing_from_atom = True
         try:
+            selection_changed = False
             for slot in self._slots:
-                slot.rows = [
-                    replace(row, selected=row.spec.component_id == cid) for row in slot.rows
-                ]
-            self.manager.apply_row_states(self._rows)
-            self._set_residue_highlight(highlights)
+                new_rows = []
+                for row in slot.rows:
+                    selected = row.spec.component_id == cid
+                    if row.selected != selected:
+                        new_rows.append(replace(row, selected=selected))
+                        selection_changed = True
+                    else:
+                        new_rows.append(row)
+                slot.rows = new_rows
+            if selection_changed:
+                self.manager.apply_row_states(self._rows)
+            self._set_residue_highlight(highlights, sync_selection=True)
             self._set_atom_status(status)
-            self._push_states()
         finally:
             self._syncing_from_atom = False
         sync_edit = getattr(self, "_sync_structure_edit_actions", None)
