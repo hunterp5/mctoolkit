@@ -31,6 +31,8 @@ These rules apply to all new or modified code in this repository.
 
 ### Git commits
 
-- Anytime a git commit is made, write **detailed messages for every file that was altered** (brief per-file bullets).
+- When one batch contains more than one functional change, give each file its own commit if a single message would mix unrelated work. See `.cursor/rules/per-file-commits.mdc`.
+- Each of those commits uses an imperative subject and a short paragraph on why.
+- Files that belong to one change may share a commit. A file that itself mixes two changes still gets one commit, and that message covers both reasons.
 - **Never** add `Co-authored-by`, "Coauthored by Cursor", Cursor Agent attribution, or `cursoragent@cursor.com` to commits, PRs, or other project text.
 
