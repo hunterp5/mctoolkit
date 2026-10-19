@@ -86,6 +86,9 @@ class WorkerSignals(QObject):
     # R-group enumeration: RGroupEnumerationJobResult
     rgroup_enum_finished = pyqtSignal(object)
     rgroup_enum_failed = pyqtSignal(str, str)
+    # Interaction fingerprint: InteractionFingerprintJobResult
+    ifp_finished = pyqtSignal(object)
+    ifp_failed = pyqtSignal(str)
     # Matched molecular pairs: (pairs, activity_column)
     mmp_finished = pyqtSignal(list, str)
     mmp_failed = pyqtSignal(str)
@@ -98,8 +101,8 @@ class WorkerSignals(QObject):
     # MMP pair neighborhood network: (pairs, activity_column)
     mmp_neighborhood_finished = pyqtSignal(list, str)
     mmp_neighborhood_failed = pyqtSignal(str)
-    # SALI landscape: (points, activity_column, fp_choice, metric)
-    sali_finished = pyqtSignal(list, str, str, str)
+    # SALI landscape: (points, activity_column, fp_choice, metric, off_target_column)
+    sali_finished = pyqtSignal(list, str, str, str, str)
     sali_failed = pyqtSignal(str)
     cluster_failed = pyqtSignal(str)
     # Exploratory clustering: list of dict rows (method, params, settings, metrics, notes)
