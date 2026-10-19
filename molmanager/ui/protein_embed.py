@@ -311,11 +311,17 @@ class ProteinEmbedView(QWidget):
             elif fn_name == "molmanagerSetResidueHighlight":
                 self._pending_residue_highlight = payload
                 if self._pending_payload is not None:
-                    self._pending_payload["residueHighlight"] = payload
+                    highlight = payload
+                    if isinstance(payload, dict) and "sels" in payload:
+                        highlight = payload.get("sels") or []
+                    self._pending_payload["residueHighlight"] = highlight
             elif fn_name == "molmanagerSetPocket":
                 self._pending_pocket = payload
                 if self._pending_payload is not None:
-                    self._pending_payload["pocket"] = payload
+                    pocket = payload
+                    if isinstance(payload, dict) and payload.get("_apply") is False:
+                        pocket = {k: v for k, v in payload.items() if k != "_apply"}
+                    self._pending_payload["pocket"] = pocket
             elif fn_name == "molmanagerSetPocketSurface":
                 self._pending_pocket_surface = payload
                 if self._pending_payload is not None:
@@ -323,7 +329,8 @@ class ProteinEmbedView(QWidget):
             elif fn_name == "molmanagerSetHydrogens":
                 self._pending_hydrogens = payload
                 if self._pending_payload is not None:
-                    self._pending_payload["hydrogens"] = payload
+                    mode = payload.get("mode") if isinstance(payload, dict) else payload
+                    self._pending_payload["hydrogens"] = mode
             elif fn_name == "molmanagerSetHbonds":
                 self._pending_hbonds = payload
                 if self._pending_payload is not None:
