@@ -117,11 +117,16 @@ def _menu_labels(window: ChemistryWorkspaceWindow) -> list[str]:
     return labels
 
 
-def test_lists_menu_between_data_and_settings(qapp):  # noqa: ARG001
+def test_lists_menu_is_under_data_table(qapp):  # noqa: ARG001
     window = ChemistryWorkspaceWindow()
     labels = [act.text().replace("&", "") for act in window.menuBar().actions() if act.text()]
-    assert labels[labels.index("Data") + 1] == "Lists"
-    assert labels[labels.index("Lists") + 1] == "Settings"
+    assert "Lists" not in labels
+    assert labels[labels.index("Data") + 1] == "Settings"
+    lists = window._lists_menu
+    table = lists.parent()
+    data = table.parent()
+    assert table.title().replace("&", "") == "Table"
+    assert data.title().replace("&", "") == "Data"
     assert _menu_labels(window) == ["Add Selected to List…", "", "Manage Lists…"]
     window.close()
 
