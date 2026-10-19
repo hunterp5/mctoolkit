@@ -18,9 +18,11 @@
 
 from ..services.column_labels import COLUMN_TANIMOTO_SIMILARITY as COLUMN_TANIMOTO_SIMILARITY
 
-TOOLS_ARROW_RENDER_2D = "Tools → Render 2D"
+TOOLS_ARROW_RENDER_2D = "Chemistry → Render 2D"
 TOOL_RENDER_2D = "Render 2D"
 TOOL_CORE_DECOMP = "Core-Based Decomposition"
+TOOL_BEMIS_MURCKO = "Bemis–Murcko"
+TOOL_COMMON_CORE = "Common Core"
 TOOL_BRICS_DECOMP = "BRICS Decomposition"
 TOOL_RECAP_DECOMP = "RECAP Decomposition"
 TOOL_BRICS_RECOMP = "BRICS Recomposition"
