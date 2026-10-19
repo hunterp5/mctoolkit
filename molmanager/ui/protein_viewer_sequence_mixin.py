@@ -108,9 +108,20 @@ class ProteinViewerSequenceMixin:
             return
         dlg.set_chains(self._sequence_chains)
 
-    def _set_residue_highlight(self, selections: list[dict]) -> None:
+    def _set_residue_highlight(
+        self,
+        selections: list[dict],
+        *,
+        sync_selection: bool = False,
+    ) -> None:
         self._residue_highlight = list(selections)
-        self.viewer.set_residue_highlight(self._residue_highlight)
+        if sync_selection:
+            selected_ids = [row.spec.component_id for row in self._rows if row.selected]
+            self.viewer.set_residue_highlight(
+                {"sels": self._residue_highlight, "selectedIds": selected_ids}
+            )
+        else:
+            self.viewer.set_residue_highlight(self._residue_highlight)
         atom_level = any(
             (sel or {}).get("atom") or ((sel or {}).get("serial") not in (None, ""))
             for sel in self._residue_highlight
