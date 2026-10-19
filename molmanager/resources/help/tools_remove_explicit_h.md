@@ -23,7 +23,7 @@ Molecules in the chosen structure scope; optional **Selected Rows Only**.
 ## Workflow
 
 1. Scope the rows that still carry explicit H.
-2. Run **Tools → Prepare Structures → Explicit Hydrogens → Remove**.
+2. Run **Chemistry → Prepare Structures → Explicit Hydrogens → Remove**.
 3. Verify valence-correct depictions.
 4. Proceed with descriptors or export.
 
