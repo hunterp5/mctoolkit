@@ -76,6 +76,8 @@ def header_looks_like_structure_text(name: str) -> bool:
         return True
     if _is_murcko_structure_header(n):
         return True
+    if is_common_core_structure_header(name):
+        return True
     if is_duplicated_structure_header(name):
         return True
     return False
@@ -100,13 +102,25 @@ def is_tool_generated_structure_header(name: str) -> bool:
         return True
     if _is_murcko_structure_header(n):
         return True
+    if is_common_core_structure_header(name):
+        return True
     if is_duplicated_structure_header(name):
         return True
     return False
 
 
-def _is_murcko_structure_header(normalized: str) -> bool:
+def is_common_core_structure_header(name: str) -> bool:
+    """The common-core structure column, including `` (1)`` copies."""
+    n = _norm(name)
+    return n == "common core" or n.startswith("common core ")
+
+
+def is_murcko_structure_header(name: str) -> bool:
     """Murcko scaffold, framework, and ring-system columns, including `` (1)`` copies."""
+    return _is_murcko_structure_header(_norm(name))
+
+
+def _is_murcko_structure_header(normalized: str) -> bool:
     for base in ("murcko scaffold", "murcko framework", "murcko ring systems"):
         if normalized == base or normalized.startswith(base + " "):
             return True
