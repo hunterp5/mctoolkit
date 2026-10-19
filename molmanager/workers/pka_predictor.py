@@ -39,7 +39,6 @@ from rdkit import Chem
 
 from molmanager.ionization.unipka_ensembles import (
     format_pka_and_pi,
-    pin_unipka_torch_threads,
     predict_ionization_ensemble,
     predict_ionization_ensembles,
     prepare_mol_for_ionization,
@@ -147,7 +146,6 @@ def _mp_compute_pka_chunk(
     """Score a chunk of structures in one Uni-pKa free-energy call."""
     from .ionization_parallel import mark_structure_progress
 
-    pin_unipka_torch_threads()
     err = unipka_import_error()
     if err:
         logger.error("pKa subprocess: %s", err)
@@ -189,9 +187,7 @@ def _mp_compute_pka_chunk(
     ensembles: list[object | None] = [None] * len(keys)
     failed = False
     if usable_idx:
-        usable_flags = (
-            [flag_indices[i] for i in usable_idx] if flag_indices is not None else None
-        )
+        usable_flags = [flag_indices[i] for i in usable_idx] if flag_indices is not None else None
 
         def _report(done: int, _total: int) -> None:
             mark_structure_progress(progress_flags, usable_flags, done)
@@ -433,7 +429,6 @@ class PKaPredictorWorker(QRunnable):
             else:
                 from molmanager.ionization.microstate_cache import store as cache_store
 
-                pin_unipka_torch_threads()
                 for key in order:
                     if should_terminate_process_pool(cancel_ev):
                         cancelled = True
