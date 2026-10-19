@@ -30,7 +30,6 @@ stalls the GUI for seconds.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
@@ -196,7 +195,9 @@ class FastPrepareWorker(QRunnable):
             (tasks[s : s + batch_size], p.is_smiles, p.need_smiles, p.neutralize)
             for s in range(0, len(tasks), batch_size)
         ]
-        workers = min(8, max(2, (os.cpu_count() or 4) - 1), 6)
+        from ..platform_support.worker_budget import rdkit_process_workers
+
+        workers = rdkit_process_workers(hard_cap=6)
         use_pool = len(tasks) >= max(2, int(p.process_pool_min_rows)) and workers > 1
 
         results: list[tuple] = []
