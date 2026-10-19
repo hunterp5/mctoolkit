@@ -21,7 +21,15 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt5.QtCore import QEvent, Qt
-from PyQt5.QtGui import QBrush, QColor, QFont, QTextCharFormat, QTextCursor, QTextListFormat
+from PyQt5.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QPalette,
+    QTextCharFormat,
+    QTextCursor,
+    QTextListFormat,
+)
 from PyQt5.QtWidgets import (
     QColorDialog,
     QHBoxLayout,
@@ -393,6 +401,12 @@ class NotepadWidget(QWidget):
                 self._edit.setPlainText(text)
                 self._apply_base_font()
                 self._apply_uniform_format()
+            # The empty-note ink color stays on the caret at position 0 until it moves.
+            loaded = self._edit.toPlainText()
+            if loaded:
+                cursor = self._edit.textCursor()
+                cursor.setPosition(len(loaded))
+                self._edit.setTextCursor(cursor)
             self._refresh_color_glyph()
         finally:
             self._edit.blockSignals(False)
@@ -478,23 +492,37 @@ class NotepadWidget(QWidget):
         font.setPointSize(self.font_pt())
         return font
 
+    def _pin_editor_ink(self) -> None:
+        """Keep the white page and black default ink when the app theme changes."""
+        palette = self._edit.palette()
+        palette.setColor(QPalette.Text, QColor(DEFAULT_NOTE_COLOR))
+        palette.setColor(QPalette.Base, QColor(NOTE_PAPER))
+        palette.setColor(QPalette.HighlightedText, QColor(DEFAULT_NOTE_COLOR))
+        self._edit.setPalette(palette)
+
     def _apply_base_font(self) -> None:
         font = self._base_font()
         self._edit.setFont(font)
         document = self._edit.document()
         if document is not None:
             document.setDefaultFont(font)
+        self._pin_editor_ink()
 
     def _apply_uniform_format(self) -> None:
+        """Paint the note in the current ink color, including the next typed character."""
         fmt = QTextCharFormat()
         fmt.setFont(self._base_font())
         fmt.setForeground(QBrush(self._color))
         cursor = self._edit.textCursor()
         cursor.select(QTextCursor.Document)
         cursor.setCharFormat(fmt)
-        self._edit.mergeCurrentCharFormat(fmt)
         cursor.clearSelection()
         self._edit.setTextCursor(cursor)
+        # Restoring the cursor drops the caret format on an empty note. Reapply ink
+        # only, so a later size change still follows the note font.
+        caret = QTextCharFormat()
+        caret.setForeground(QBrush(self._color))
+        self._edit.setCurrentCharFormat(caret)
 
     def _merge_format(self, fmt: QTextCharFormat, *, notify: bool = True) -> None:
         cursor = self._edit.textCursor()
