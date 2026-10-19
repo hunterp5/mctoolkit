@@ -52,11 +52,20 @@ class _Conf:
 
 
 class _Atom:
+    def __init__(self, name: str = " OD2", symbol: str = "O", atomic_num: int = 8) -> None:
+        self._name = name
+        self._symbol = symbol
+        self._atomic_num = atomic_num
+
     def GetPDBResidueInfo(self):
-        return SimpleNamespace(GetName=lambda: " OD2")
+        name = self._name
+        return SimpleNamespace(GetName=lambda: name)
 
     def GetSymbol(self):
-        return "O"
+        return self._symbol
+
+    def GetAtomicNum(self):
+        return self._atomic_num
 
 
 class _Residue:
@@ -66,15 +75,17 @@ class _Residue:
         number: int,
         chain: str,
         coords: dict[int, tuple[float, float, float]],
+        atoms: dict[int, _Atom] | None = None,
     ) -> None:
         self.resid = SimpleNamespace(name=name, number=number, chain=chain, insertion="")
         self._conf = _Conf(coords)
+        self._atoms = atoms or {}
 
     def GetConformer(self):
         return self._conf
 
     def GetAtomWithIdx(self, idx: int):
-        return _Atom()
+        return self._atoms.get(int(idx), _Atom())
 
 
 class _Mol:
@@ -192,6 +203,106 @@ def test_contacts_from_ifp_picks_shortest_and_skips_vdw() -> None:
     assert contacts[0].distance == pytest.approx(2.6)
     assert contacts[0].ligand_resn == "LIG"
     assert contacts[0].protein_resn == "ASP"
+    payload = contacts[0].to_payload()
+    shown = {atom["role"]: atom for atom in payload["showAtoms"]}
+    assert set(shown) == {"donor"}
+    assert shown["donor"]["atom"] == "N1"
+    assert shown["donor"]["resn"] == "LIG"
+    assert payload["showResidues"] == [
+        {"chain": "A", "resn": "ASP", "resi": "10", "icode": ""}
+    ]
+
+
+def test_hbond_show_atoms_follow_donor_side() -> None:
+    lig = _Residue(
+        "LIG",
+        99,
+        "A",
+        {0: (0.0, 0.0, 0.0), 2: (1.0, 0.0, 0.0), 3: (1.0, 1.0, 0.0)},
+        atoms={
+            0: _Atom(" O1 ", "O", 8),
+            2: _Atom(" N1 ", "N", 7),
+            3: _Atom(" H1 ", "H", 1),
+        },
+    )
+    prot = _Residue(
+        "SER",
+        10,
+        "A",
+        {4: (3.2, 0.0, 0.0), 5: (3.2, 1.0, 0.0)},
+        atoms={4: _Atom(" OG ", "O", 8), 5: _Atom(" HG ", "H", 1)},
+    )
+    atoms = [
+        StructureAtom("A", "LIG", "99", "", "O1", "O", 0.0, 0.0, 0.0, True),
+        StructureAtom("A", "LIG", "99", "", "N1", "N", 1.0, 0.0, 0.0, True),
+        StructureAtom("A", "LIG", "99", "", "H1", "H", 1.0, 1.0, 0.0, True),
+        StructureAtom("A", "SER", "10", "", "OG", "O", 3.2, 0.0, 0.0, False),
+        StructureAtom("A", "SER", "10", "", "HG", "H", 3.2, 1.0, 0.0, False),
+    ]
+    kinds = {("A", "LIG", "99", ""): "ligand", ("A", "SER", "10", ""): "polymer"}
+    donor_on_ligand = contacts_from_ifp(
+        {
+            ("LIG99.A", "SER10.A"): {
+                "HBDonor": ({"indices": {"ligand": (2, 3), "protein": (4,)}, "distance": 2.2},)
+            }
+        },
+        _Mol({"LIG99.A": lig}),
+        _Mol({"SER10.A": prot}),
+        atoms,
+        kinds,
+    )
+    donor_payload = donor_on_ligand[0].to_payload()
+    roles = {atom["role"]: atom["atom"] for atom in donor_payload["showAtoms"]}
+    assert roles == {"donor": "N1", "hydrogen": "H1"}
+    assert donor_payload["showResidues"] == [
+        {"chain": "A", "resn": "SER", "resi": "10", "icode": ""}
+    ]
+    donor_on_protein = contacts_from_ifp(
+        {
+            ("LIG99.A", "SER10.A"): {
+                "HBAcceptor": ({"indices": {"ligand": (0,), "protein": (4, 5)}, "distance": 2.4},)
+            }
+        },
+        _Mol({"LIG99.A": lig}),
+        _Mol({"SER10.A": prot}),
+        atoms,
+        kinds,
+    )
+    acceptor_payload = donor_on_protein[0].to_payload()
+    roles = {atom["role"]: atom["atom"] for atom in acceptor_payload["showAtoms"]}
+    assert roles == {"acceptor": "O1"}
+    assert acceptor_payload["showResidues"] == [
+        {"chain": "A", "resn": "SER", "resi": "10", "icode": ""}
+    ]
+
+
+def test_prolif_contact_shows_whole_protein_residue() -> None:
+    lig = _Residue("LIG", 99, "A", {0: (6.0, 0.0, 0.0)})
+    prot = _Residue("PHE", 42, "B", {0: (4.0, 0.0, 0.0), 1: (4.2, 0.8, 0.0)})
+    atoms = [
+        StructureAtom("A", "LIG", "99", "", "C1", "C", 6.0, 0.0, 0.0, True),
+        StructureAtom("B", "PHE", "42", "", "CZ", "C", 4.0, 0.0, 0.0, False),
+        StructureAtom("B", "PHE", "42", "", "HZ", "H", 4.2, 0.8, 0.0, False),
+    ]
+    kinds = {("A", "LIG", "99", ""): "ligand", ("B", "PHE", "42", ""): "polymer"}
+    contacts = contacts_from_ifp(
+        {
+            ("LIG99.A", "PHE42.B"): {
+                "Hydrophobic": ({"indices": {"ligand": (0,), "protein": (0,)}, "distance": 3.4},)
+            }
+        },
+        _Mol({"LIG99.A": lig}),
+        _Mol({"PHE42.B": prot}),
+        atoms,
+        kinds,
+        model=1,
+    )
+    assert len(contacts) == 1
+    payload = contacts[0].to_payload()
+    assert "showAtoms" not in payload
+    assert payload["showResidues"] == [
+        {"chain": "B", "resn": "PHE", "resi": "42", "icode": "", "model": 1}
+    ]
 
 
 def test_prolif_role_treats_atom_record_lig_as_ligand() -> None:
