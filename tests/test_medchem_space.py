@@ -244,6 +244,58 @@ def test_medchem_plot_draws_every_point_unless_capped(monkeypatch):
     assert "6,000" in capped.subsample_note
 
 
+def test_medchem_summary_is_in_app_log_only(qapp, caplog):
+    import logging
+
+    from PyQt5.QtWidgets import QLabel
+
+    from molmanager.analysis.medchem_space import (
+        MedChemSpaceBuildResult,
+        MedChemSpaceDataset,
+        MedChemSpacePoint,
+    )
+    from molmanager.platform_support.session_log import session_log_buffer
+    from molmanager.ui.dialogs.medchem_space import MedChemPlotPanel
+
+    point = MedChemSpacePoint(
+        oid=1,
+        tpsa=60.0,
+        wlogp=1.0,
+        mw=200.0,
+        logp=1.0,
+        hover="",
+        gia=True,
+        bbb=False,
+        golden_triangle=False,
+    )
+    dataset = MedChemSpaceDataset(points=(point,), skipped=0, gia_count=1, bbb_count=0)
+    panel = MedChemPlotPanel(
+        None,
+        plot_kind="boiled_egg",
+        window_title="BOILED-Egg",
+        session_restore=True,
+    )
+    try:
+        labels = [widget.text() for widget in panel.findChildren(QLabel)]
+        assert "Summary" not in labels
+        assert not hasattr(panel, "summary_text")
+        session_log_buffer().clear()
+        with caplog.at_level(logging.DEBUG):
+            panel._on_build_finished(MedChemSpaceBuildResult(full=dataset, plot=dataset))
+            panel.apply_session_state(panel.collect_session_state())
+        assert not any("GIA" in record.message for record in caplog.records)
+        entries, _seq, _gen = session_log_buffer().snapshot()
+        logged = [entry for entry in entries if "GIA" in entry.message]
+        assert logged
+        assert all(entry.source == "ui" for entry in logged)
+        assert all("BOILED-Egg" in entry.message for entry in logged)
+        assert "summary" not in panel.collect_session_state()
+    finally:
+        session_log_buffer().clear()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
 def test_large_medchem_cloud_fades_markers():
     assert marker_opacity_for_point_count(100) == 0.88
     assert marker_opacity_for_point_count(5_000) == 0.88
