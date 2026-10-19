@@ -14,11 +14,18 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""External data source dialogs (SQL, PubChem, ChEMBL, patent chemistry)."""
+"""External data source dialogs (SQL, PubChem, ChEMBL, vendors, patent chemistry)."""
 
 from .chembl import ChEMBLDialog
 from .external_db import ExternalDBDialog
 from .patent_query import PatentQueryDialog
 from .pubchem import PubChemDialog
+from .vendors import VendorQueryDialog
 
-__all__ = ["ChEMBLDialog", "ExternalDBDialog", "PatentQueryDialog", "PubChemDialog"]
+__all__ = [
+    "ChEMBLDialog",
+    "ExternalDBDialog",
+    "PatentQueryDialog",
+    "PubChemDialog",
+    "VendorQueryDialog",
+]
