@@ -23,11 +23,12 @@ import sys
 import time
 
 from PyQt5.QtCore import QTimer, Qt
-from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtWidgets import QApplication
 
 from ...platform_support.config import load_config
 from ...conformers.conformer_column_codec import deserialize_confs_sidecar
 from ...ionization.microstate_cache import restore_ionization_sidecar
+from ...table.open_messages import damaged_session_message
 from ...table.session_codec import (
     SESSION_ENSEMBLES_KEY,
     expand_session_document,
@@ -201,11 +202,10 @@ class SessionRestoreMixin:
             self.table.setUpdatesEnabled(True)
         except Exception:
             pass
-        self._set_ingest_loading(False)
-        self._session_mutation_paused = False
-        self._pending_session_clean_on_ready = False
-        self._set_workspace_stack_index(1)
-        QMessageBox.warning(self, "Open Session", message or "Session row parse failed.")
+        path = str(getattr(self, "_session_source_path", None) or "")
+        logger.warning("Session row parse failed for %s: %s", path, message)
+        self._finish_failed_open()
+        self._warn_could_not_open("Open Session", damaged_session_message(path))
 
     def _on_session_rows_parsed(self, result: object, generation: int, doc: dict) -> None:
         if generation != getattr(self, "_session_load_generation", 0):
@@ -613,6 +613,7 @@ class SessionRestoreMixin:
             refresh()
         self.status_label.setText(f"Loaded structure cache ({n:,} depiction(s)).")
         return True
+
     def _write_session_structure_cache(self, session_path: str | None = None) -> None:
         """Persist current Structure PNGs next to *session_path* (or the open session)."""
         path = session_path or getattr(self, "_session_source_path", None)
