@@ -25,7 +25,6 @@ from __future__ import annotations
 from .conformer_output import (
     ConformerOutputOptions,
     ConformerOutputOptionsPanel,
-    citation_footer_label,
     conformer_options_group,
 )
 from .disconnect_fragments import DisconnectFragmentsDialog
@@ -61,6 +60,5 @@ __all__ = [
     "SuperposeConformersDialog",
     "SuperposeDialog",
     "SuperposeStructuresDialog",
-    "citation_footer_label",
     "conformer_options_group",
 ]
