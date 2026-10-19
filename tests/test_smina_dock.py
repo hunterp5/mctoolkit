@@ -751,6 +751,17 @@ def test_present_dock_results_keeps_crystal_ref_on_validation_entry_only(qapp, t
     dlg.close()
 
 
+def test_stop_clears_ui_when_gnina_already_exited(qapp):  # noqa: ARG001
+    dlg = GninaDockDialog(None)
+    dlg._set_running_ui(True)
+    assert dlg.btn_stop.isEnabled()
+    dlg._worker.stop()
+    assert dlg.btn_run.isEnabled()
+    assert not dlg.btn_stop.isEnabled()
+    assert not dlg._batch_cancelled
+    dlg.close()
+
+
 def test_gnina_log_goes_to_protein_viewer(qapp):  # noqa: ARG001
     from types import SimpleNamespace
 
@@ -769,6 +780,61 @@ def test_gnina_log_goes_to_protein_viewer(qapp):  # noqa: ARG001
     assert "[system]" not in text
     dlg.close()
     viewer.close()
+
+
+def test_gnina_session_state_roundtrip(qapp):  # noqa: ARG001
+    from molmanager.ui.dialogs.gnina_dock import gnina_session_worth_saving
+
+    empty = GninaDockDialog(None)
+    assert gnina_session_worth_saving(empty.gnina_session_state()) is False
+    empty.close()
+
+    src = GninaDockDialog(None)
+    src.edit_receptor.setText("rec.pdbqt")
+    src.combo_ligand_source.setCurrentIndex(src.combo_ligand_source.findData("rows"))
+    src.combo_confs.addItem("poses")
+    src.combo_confs.setCurrentText("poses")
+    src.save_sdf_cb.setChecked(False)
+    src.edit_out.setText("poses.pdbqt")
+    src.autobox_cb.setChecked(True)
+    src.edit_autobox_ligand.setText("box.pdb")
+    src.spin_autobox_add.setValue(6.0)
+    src.combo_flex_mode.setCurrentIndex(src.combo_flex_mode.findData("res"))
+    src.edit_flexres.setText("A:123")
+    src.chk_full_flex.setChecked(True)
+    src.spin_exhaust.setValue(16)
+    src.minimize_poses_cb.setChecked(True)
+    src.validate_crystal_cb.setChecked(False)
+    src.gpu_cb.setChecked(False)
+    src.combo_cnn_model.setCurrentIndex(src.combo_cnn_model.findData("fast"))
+    src._crystal_ligand_path = "xtal.sdf"
+    state = src.gnina_session_state()
+    assert gnina_session_worth_saving(state) is True
+    dst = GninaDockDialog(None)
+    dst.apply_gnina_session(state)
+    again = dst.gnina_session_state()
+    for key in (
+        "receptor",
+        "ligand_source",
+        "confs_column",
+        "output",
+        "save_sdf",
+        "autobox",
+        "autobox_ligand",
+        "autobox_add",
+        "flex_mode",
+        "flexres",
+        "full_flex",
+        "exhaustiveness",
+        "minimize_poses",
+        "validate_crystal",
+        "gpu",
+        "cnn_model",
+        "crystal_ligand",
+    ):
+        assert again[key] == state[key], key
+    src.close()
+    dst.close()
 
 
 def test_gnina_start_hides_dialog(qapp, monkeypatch):  # noqa: ARG001
