@@ -137,6 +137,7 @@ def test_reaction_menu_outline():
     reaction = find_submenu(tools.items, "Reaction")
     rxn_labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(reaction.items)]
     assert rxn_labels.index("Extract…") < rxn_labels.index("R-Group Decomposition")
+    assert rxn_labels.index("Reaction Based Enumeration…") < rxn_labels.index("R-Group Enumeration…")
     decomp = find_submenu(reaction.items, "R-Group Decomposition")
     assert menu_outline(decomp.items) == [
         "Core-Based Decomposition…",
