@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QVBoxLayout,
 )
 
@@ -70,7 +71,8 @@ class SarMatrixDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
-        form = QFormLayout()
+        grid = QGroupBox("Grid")
+        form = QFormLayout(grid)
 
         self.row_combo = QComboBox()
         self.col_combo = QComboBox()
@@ -98,7 +100,10 @@ class SarMatrixDialog(QDialog):
         form.addRow("Row substituent:", self.row_combo)
         form.addRow("Column substituent:", self.col_combo)
         form.addRow("Page substituent:", self.page_combo)
+        root.addWidget(grid)
 
+        activity = QGroupBox("Activity")
+        activity_form = QFormLayout(activity)
         self.activity_combo = QComboBox()
         self.activity_combo.setMinimumWidth(220)
         if activity_columns:
@@ -108,8 +113,7 @@ class SarMatrixDialog(QDialog):
             self.activity_combo.addItem("(no numeric columns)")
             self.activity_combo.setEnabled(False)
         self.activity_combo.setToolTip("Numeric column used to color each filled cell.")
-        form.addRow("Activity column:", self.activity_combo)
-        root.addLayout(form)
+        activity_form.addRow("Activity column:", self.activity_combo)
 
         self.higher_cb = QCheckBox("Higher values are better")
         self.higher_cb.setChecked(True)
@@ -117,7 +121,7 @@ class SarMatrixDialog(QDialog):
             "Checked colors the largest activity darkest. Clear it for IC50 and other "
             "columns where a smaller number is the better result."
         )
-        root.addWidget(self.higher_cb)
+        activity_form.addRow("", self.higher_cb)
 
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
@@ -127,7 +131,8 @@ class SarMatrixDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
+        activity_form.addRow("", self.only_selected_cb)
+        root.addWidget(activity)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)

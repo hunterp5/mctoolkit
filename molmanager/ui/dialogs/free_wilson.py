@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QLineEdit,
     QMessageBox,
     QSpinBox,
@@ -75,11 +76,12 @@ class FreeWilsonDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
-        form = QFormLayout()
 
+        activity = QGroupBox("Activity")
+        activity_form = QFormLayout(activity)
         self.src_combo = QComboBox()
         self.src_combo.addItems(structure_sources)
-        form.addRow("Molecules from:", self.src_combo)
+        activity_form.addRow("Molecules from:", self.src_combo)
 
         self.activity_combo = QComboBox()
         self.activity_combo.setMinimumWidth(220)
@@ -92,16 +94,44 @@ class FreeWilsonDialog(QDialog):
         self.activity_combo.setToolTip(
             "Numeric activity fitted as an additive sum of substituent contributions."
         )
-        form.addRow("Activity column:", self.activity_combo)
+        activity_form.addRow("Activity column:", self.activity_combo)
 
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(
+                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
+            )
+        else:
+            self.only_selected_cb.setEnabled(False)
+        activity_form.addRow("", self.only_selected_cb)
+        root.addWidget(activity)
+
+        core = QGroupBox("Core")
+        core_form = QFormLayout(core)
         self.core_edit = QLineEdit()
         self.core_edit.setPlaceholderText("e.g. c1ccc([*:1])cc1[*:2] or SMARTS with dummy labels")
         self.core_edit.setToolTip(
             "Shared core, parsed as SMARTS first, then as SMILES. Label each attachment "
             "point with a dummy atom ([*:1], [*:2], …)."
         )
-        form.addRow("Core (SMARTS or SMILES):", self.core_edit)
+        core_form.addRow("Core (SMARTS or SMILES):", self.core_edit)
 
+        self.match_combo = QComboBox()
+        self.match_combo.addItems(["Greedy", "Exhaustive"])
+        self.match_combo.setToolTip("Greedy is faster; Exhaustive explores more core matchings.")
+        core_form.addRow("Matching strategy:", self.match_combo)
+
+        self.only_rg_cb = QCheckBox("Only match at R-groups")
+        self.only_rg_cb.setChecked(True)
+        self.only_rg_cb.setToolTip(
+            "When the core labels attachment points, require the match to use those dummies."
+        )
+        core_form.addRow(self.only_rg_cb)
+        root.addWidget(core)
+
+        fit = QGroupBox("Fit")
+        form = QFormLayout(fit)
         self.report_combo = QComboBox()
         self.report_combo.addItem("Fujita-Ban (vs reference)", REPORT_FUJITA_BAN)
         self.report_combo.addItem("Free-Wilson (sum to zero)", REPORT_FREE_WILSON)
@@ -138,29 +168,7 @@ class FreeWilsonDialog(QDialog):
             "Used only when missing combinations exceed Max new structures."
         )
         form.addRow("If the list is capped, keep:", self.direction_combo)
-
-        self.match_combo = QComboBox()
-        self.match_combo.addItems(["Greedy", "Exhaustive"])
-        self.match_combo.setToolTip("Greedy is faster; Exhaustive explores more core matchings.")
-        form.addRow("Matching strategy:", self.match_combo)
-
-        self.only_rg_cb = QCheckBox("Only match at R-groups")
-        self.only_rg_cb.setChecked(True)
-        self.only_rg_cb.setToolTip(
-            "When the core labels attachment points, require the match to use those dummies."
-        )
-        form.addRow(self.only_rg_cb)
-        root.addLayout(form)
-
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(
-                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
-            )
-        else:
-            self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
+        root.addWidget(fit)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self._on_accept)

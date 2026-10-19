@@ -61,6 +61,8 @@ def _canonical(smiles: str) -> str:
 
 
 def test_dialog_defaults_to_fujita_ban(qapp) -> None:  # noqa: ARG001
+    from PyQt5.QtWidgets import QGroupBox
+
     from molmanager.ui.dialogs.free_wilson import FreeWilsonDialog
 
     dialog = FreeWilsonDialog(
@@ -77,6 +79,7 @@ def test_dialog_defaults_to_fujita_ban(qapp) -> None:  # noqa: ARG001
     assert params.settings.prefer_higher is True
     assert params.settings.only_match_at_r_groups is True
     assert params.settings.core_query == _CORE
+    assert [box.title() for box in dialog.findChildren(QGroupBox)] == ["Activity", "Core", "Fit"]
     dialog.deleteLater()
 
 

@@ -393,6 +393,24 @@ def test_mmp_core_module_does_not_own_session_table_or_depict() -> None:
     assert "def highlight_atoms_for_pair" not in text
 
 
+def test_mmp_dialog_groups_options(qapp) -> None:  # noqa: ARG001
+    from PyQt5.QtWidgets import QGroupBox
+
+    from molmanager.ui.dialogs.mmp import MmpDialog
+
+    dialog = MmpDialog(
+        structure_sources=["Structure"],
+        activity_columns=["pIC50"],
+        selected_row_count=0,
+    )
+    assert [box.title() for box in dialog.findChildren(QGroupBox)] == [
+        "Activity",
+        "Core",
+        "Fragmentation",
+    ]
+    dialog.deleteLater()
+
+
 def test_is_mmp_result_header() -> None:
     from molmanager.analysis.mmp_table import is_mmp_result_header
 

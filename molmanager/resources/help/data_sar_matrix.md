@@ -16,9 +16,14 @@ Two substituent columns and one numeric activity column. Optional third substitu
 
 ## Options
 
+**Grid**
+
 - **Row substituent** — usually R1. These labels run down the side.
 - **Column substituent** — usually R2. These labels run across the top.
 - **Page substituent** — optional R3. Each value is its own grid, and the R1 and R2 labels stay in the same places.
+
+**Activity**
+
 - **Activity column** — number used to color a filled cell. Several compounds in one cell show their mean and a count.
 - **Higher values are better** — the largest number is the darkest green. Clear this for IC50 and other columns where smaller is better.
 - **Selected Rows Only**.

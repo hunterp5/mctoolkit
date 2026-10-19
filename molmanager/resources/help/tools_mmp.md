@@ -16,14 +16,22 @@ Structures from **Molecules from**; optional **Activity column**. Scope via **Se
 
 ## Options
 
+**Activity**
+
 - **Molecules from** - structure source.
 - **Activity column** - property for deltas.
-- **Core / MCS** - optional SMARTS or SMILES constant core; use **MCS from selection** to fill from selected molecules. When set, only matching molecules are analyzed and only fragmentations whose constant core still contains the pattern are kept.
-- **Max cuts** - fragmentation aggressiveness.
-- **Max variable heavy atoms** - size of the changing fragment.
 - **Minimum activity difference** - filter weak deltas (0 = no floor).
 - **Maximum activity difference** - exclude large deltas (0 = no ceiling).
 - **Selected Rows Only**.
+
+**Core**
+
+- **Core / MCS** - optional SMARTS or SMILES constant core; use **MCS from selection** to fill from selected molecules. When set, only matching molecules are analyzed and only fragmentations whose constant core still contains the pattern are kept.
+
+**Fragmentation**
+
+- **Max cuts** - fragmentation aggressiveness.
+- **Max variable heavy atoms** - size of the changing fragment.
 - **OK** / **Cancel**.
 
 ## Workflow

@@ -16,13 +16,22 @@ Molecules from the chosen structure source, a numeric activity column, and a cor
 
 ## Options
 
+**Activity**
+
+- **Molecules from** and **Activity column**.
+- **Selected Rows Only**.
+
+**Core**
+
 - **Core (SMARTS or SMILES)** — label each attachment point with a dummy (`[*:1]`, `[*:2]`, …).
+- **Matching strategy** — Greedy or Exhaustive core matching.
+- **Only match at R-groups**.
+
+**Fit**
+
 - **Coefficient report** — **Fujita-Ban** (default) is the change versus a reference substituent (hydrogen when that position has it, otherwise the most common). **Free-Wilson** recenters that same fit so the occurrence-weighted coefficients at each position sum to zero. Predictions match either way.
 - **Minimum substituent count** — substituents seen fewer times are dropped, and molecules that contain them are not fitted.
 - **Max new structures** — cap on missing combinations to list. When there are more, keep the highest or lowest predicted activity.
-- **Matching strategy** — Greedy or Exhaustive core matching.
-- **Only match at R-groups**.
-- **Selected Rows Only**.
 
 ## Workflow
 

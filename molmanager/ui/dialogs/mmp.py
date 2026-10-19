@@ -27,6 +27,7 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLineEdit,
     QMessageBox,
@@ -75,7 +76,8 @@ class MmpDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
+        activity = QGroupBox("Activity")
+        form = QFormLayout(activity)
         self.src_combo = QComboBox()
         self.src_combo.addItems(structure_sources)
         form.addRow("Molecules from:", self.src_combo)
@@ -92,42 +94,6 @@ class MmpDialog(QDialog):
             "Biological activity (or other numeric property) used to compute Δactivity for each pair."
         )
         form.addRow("Activity column:", self.activity_combo)
-
-        core_row = QHBoxLayout()
-        core_row.setSpacing(6)
-        self.core_edit = QLineEdit()
-        self.core_edit.setPlaceholderText("Optional SMARTS or SMILES (constant core / MCS)")
-        self.core_edit.setToolTip(
-            "When set, only molecules containing this substructure are analyzed, and only "
-            "MMP fragmentations whose constant core still contains it are kept. "
-            "Use SMARTS or SMILES (for example an MCS)."
-        )
-        core_row.addWidget(self.core_edit, 1)
-        self.core_mcs_btn = QPushButton("MCS from selection")
-        self.core_mcs_btn.setToolTip(
-            "Compute a maximum common substructure SMARTS from the currently selected "
-            "table molecules (at least two) and fill this field."
-        )
-        self.core_mcs_btn.setEnabled(self._have_selection and selected_row_count >= 2)
-        self.core_mcs_btn.clicked.connect(self._fill_core_from_selection_mcs)
-        core_row.addWidget(self.core_mcs_btn)
-        form.addRow("Core / MCS:", core_row)
-
-        self.max_cuts_sb = QSpinBox()
-        self.max_cuts_sb.setRange(1, 3)
-        self.max_cuts_sb.setValue(1)
-        self.max_cuts_sb.setToolTip(
-            "Maximum number of acyclic cuts (1 = classic single-point MMP transforms)."
-        )
-        form.addRow("Max cuts:", self.max_cuts_sb)
-
-        self.max_var_atoms_sb = QSpinBox()
-        self.max_var_atoms_sb.setRange(1, 50)
-        self.max_var_atoms_sb.setValue(13)
-        self.max_var_atoms_sb.setToolTip(
-            "Ignore pairs whose changing fragment exceeds this many heavy atoms."
-        )
-        form.addRow("Max variable heavy atoms:", self.max_var_atoms_sb)
 
         self.min_dact_sb = QDoubleSpinBox()
         self.min_dact_sb.setDecimals(6)
@@ -150,7 +116,6 @@ class MmpDialog(QDialog):
             "0 disables the upper bound."
         )
         form.addRow("Maximum activity difference:", self.max_dact_sb)
-        root.addLayout(form)
 
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
@@ -160,7 +125,50 @@ class MmpDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
+        form.addRow("", self.only_selected_cb)
+        root.addWidget(activity)
+
+        core = QGroupBox("Core")
+        core_form = QFormLayout(core)
+        core_row = QHBoxLayout()
+        core_row.setSpacing(6)
+        self.core_edit = QLineEdit()
+        self.core_edit.setPlaceholderText("Optional SMARTS or SMILES (constant core / MCS)")
+        self.core_edit.setToolTip(
+            "When set, only molecules containing this substructure are analyzed, and only "
+            "MMP fragmentations whose constant core still contains it are kept. "
+            "Use SMARTS or SMILES (for example an MCS)."
+        )
+        core_row.addWidget(self.core_edit, 1)
+        self.core_mcs_btn = QPushButton("MCS from selection")
+        self.core_mcs_btn.setToolTip(
+            "Compute a maximum common substructure SMARTS from the currently selected "
+            "table molecules (at least two) and fill this field."
+        )
+        self.core_mcs_btn.setEnabled(self._have_selection and selected_row_count >= 2)
+        self.core_mcs_btn.clicked.connect(self._fill_core_from_selection_mcs)
+        core_row.addWidget(self.core_mcs_btn)
+        core_form.addRow("Core / MCS:", core_row)
+        root.addWidget(core)
+
+        fragments = QGroupBox("Fragmentation")
+        frag_form = QFormLayout(fragments)
+        self.max_cuts_sb = QSpinBox()
+        self.max_cuts_sb.setRange(1, 3)
+        self.max_cuts_sb.setValue(1)
+        self.max_cuts_sb.setToolTip(
+            "Maximum number of acyclic cuts (1 = classic single-point MMP transforms)."
+        )
+        frag_form.addRow("Max cuts:", self.max_cuts_sb)
+
+        self.max_var_atoms_sb = QSpinBox()
+        self.max_var_atoms_sb.setRange(1, 50)
+        self.max_var_atoms_sb.setValue(13)
+        self.max_var_atoms_sb.setToolTip(
+            "Ignore pairs whose changing fragment exceeds this many heavy atoms."
+        )
+        frag_form.addRow("Max variable heavy atoms:", self.max_var_atoms_sb)
+        root.addWidget(fragments)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)

@@ -149,3 +149,17 @@ def test_panel_leaves_an_unmade_cell_blank(qapp):
         assert filled.text() == "6"
     finally:
         panel.close()
+
+
+def test_sar_matrix_dialog_groups_options(qapp) -> None:  # noqa: ARG001
+    from PyQt5.QtWidgets import QGroupBox
+
+    from molmanager.ui.dialogs.sar_matrix import SarMatrixDialog
+
+    dialog = SarMatrixDialog(
+        substituent_columns=["R1", "R2"],
+        activity_columns=["pIC50"],
+        selected_row_count=0,
+    )
+    assert [box.title() for box in dialog.findChildren(QGroupBox)] == ["Grid", "Activity"]
+    dialog.deleteLater()
