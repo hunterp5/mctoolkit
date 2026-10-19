@@ -27,6 +27,7 @@ from ..plotting.plot_marker_color import (
     DEFAULT_MARKER_SIZE_MAX_PX,
     DEFAULT_MARKER_SIZE_MIN_PX,
     attach_marker_size_legend,
+    colorbar_for_label,
     marker_sizes_from_column_values,
     resolve_plot_colorscale,
     scatter_marker_from_column_values,
@@ -155,14 +156,14 @@ def build_mmp_neighborhood_figure(
         )
         marker["size"] = sizes
         if color_label:
-            marker.setdefault("colorbar", {"title": color_label})
+            marker.setdefault("colorbar", colorbar_for_label(color_label))
             marker["showscale"] = True
     else:
         marker = {
             "size": sizes,
             "color": node_color,
             "colorscale": resolve_plot_colorscale(colorscale) if color_values else "Viridis",
-            "colorbar": {"title": activity_column},
+            "colorbar": colorbar_for_label(activity_column),
             "line": {"width": 0.8, "color": "#333"},
             "opacity": 0.92,
         }
