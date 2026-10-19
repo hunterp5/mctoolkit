@@ -14,10 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Dimred Plot Options open before the empty plot window."""
+"""Dimred setup opens before the empty plot window; plot settings are appearance only."""
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QLabel, QListWidgetItem
+from PyQt5.QtWidgets import QGroupBox, QLabel, QListWidgetItem
 
 from molmanager.analysis.dimensionality_reduction import EMBEDDING_PCA_DIM
 from molmanager.platform_support.session_log import session_log_buffer
@@ -37,7 +37,10 @@ def test_present_initial_ui_opens_options_not_plot(qapp):
         qapp.processEvents()
         assert not dlg.isVisible()
         assert panel._opts_dialog.isVisible()
-        assert panel._opts_dialog.windowTitle() == "Principal Component Analysis — Plot Options"
+        assert panel._opts_dialog.windowTitle() == "Principal Component Analysis"
+        assert not panel._appearance_dialog.isVisible()
+        assert not panel._opts_dialog.isAncestorOf(panel._titles)
+        assert not panel._opts_dialog.isAncestorOf(panel.color_combo)
     finally:
         panel._opts_dialog.hide()
         dlg.close()
@@ -78,11 +81,12 @@ def test_reveal_plot_window_hides_options(qapp):
 
 
 def _close_dimred_panel(panel, qapp) -> None:
-    opts = getattr(panel, "_opts_dialog", None)
-    if opts is not None:
-        opts.hide()
-        opts.close()
-        opts.deleteLater()
+    for name in ("_opts_dialog", "_appearance_dialog"):
+        opts = getattr(panel, name, None)
+        if opts is not None:
+            opts.hide()
+            opts.close()
+            opts.deleteLater()
     panel.close()
     panel.deleteLater()
     qapp.processEvents()
@@ -118,13 +122,17 @@ def test_embedding_pca_compress_option_defaults_on(qapp):
             assert params["pca_dim"] == 25
             assert params["pca_min_variance"] == 0.9
             assert params["pca_whiten"] is True
+            assert panel._pca_detail_host is not None
+            assert panel._pca_detail_host.isVisibleTo(panel._opts_dialog)
             cb.setChecked(False)
             assert not panel._pca_dim_spin.isEnabled()
+            assert not panel._pca_detail_host.isVisibleTo(panel._opts_dialog)
             assert panel._job_method_params()["pca_dim"] == 0
             panel._apply_pca_preprocess_param(
                 {"pca_dim": 40, "pca_components": 40, "pca_min_variance": 0.8, "pca_whiten": False}
             )
             assert cb.isChecked()
+            assert panel._pca_detail_host.isVisibleTo(panel._opts_dialog)
             assert panel._pca_dim_spin.value() == 40
             assert panel._pca_var_spin.value() == 80
             assert not panel._pca_whiten_cb.isChecked()
@@ -138,6 +146,9 @@ def test_target_dimensions_switches_pca_between_2d_and_3d(qapp):
         panel = dlg._panel
         panel.present_initial_ui()
         qapp.processEvents()
+        panel._open_plot_options()
+        qapp.processEvents()
+        assert panel._appearance_dialog.isVisible()
         assert panel.target_dimensions.currentText() == "2D"
         assert panel._job_method_params()["target_dimensions"] == 2
         assert not panel._titles.zaxis_title_edit.isVisible()
@@ -266,6 +277,87 @@ def test_dimred_summary_is_written_to_the_session_log(qapp):
     finally:
         session_log_buffer().clear()
         dlg._panel._opts_dialog.hide()
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_plot_options_split_embedding_and_appearance(qapp):
+    panel = UMAPPlotPanel(None)
+    try:
+        titles = [box.title() for box in panel._opts_dialog.findChildren(QGroupBox)]
+        assert "Features" in titles
+        assert "Scope" in titles
+        assert "Method" in titles
+        assert "Preprocess" in titles
+        assert "Points" in titles
+        assert "Appearance" not in titles
+        labels = [w.text() for w in panel._opts_dialog.findChildren(QLabel)]
+        assert "Neighbors:" in labels
+        assert "Min distance:" in labels
+        assert "n_neighbors:" not in labels
+        assert "min_dist:" not in labels
+        assert "Color by:" not in labels
+        assert not panel._opts_dialog.isAncestorOf(panel.color_combo)
+        assert not panel._opts_dialog.isAncestorOf(panel._titles)
+        panel._open_plot_options()
+        qapp.processEvents()
+        assert panel._appearance_dialog.isVisible()
+        assert not panel._opts_dialog.isVisible()
+        assert panel._appearance_dialog.windowTitle() == "UMAP Visualization — Plot Options"
+        assert panel._appearance_dialog.isAncestorOf(panel.color_combo)
+        assert panel._appearance_dialog.isAncestorOf(panel._titles)
+        assert panel._appearance_dialog.isAncestorOf(panel._hover_controls)
+        assert panel._appearance_dialog.isAncestorOf(panel.size_combo)
+        assert not panel._appearance_dialog.isAncestorOf(panel.column_list)
+        assert not panel._appearance_dialog.isAncestorOf(panel.run_btn)
+    finally:
+        _close_dimred_panel(panel, qapp)
+
+
+def test_som_method_groups(qapp):
+    panel = SOMPlotPanel(None)
+    try:
+        titles = [box.title() for box in panel._opts_dialog.findChildren(QGroupBox)]
+        assert "Map" in titles
+        assert "Training" in titles
+        assert "Points" in titles
+        labels = [w.text() for w in panel._opts_dialog.findChildren(QLabel)]
+        assert "Width:" in labels
+        assert "Height:" in labels
+        assert "Depth:" in labels
+        assert "Jitter:" in labels
+    finally:
+        _close_dimred_panel(panel, qapp)
+
+
+def test_setup_dialog_stays_free_of_appearance_after_a_result(qapp):
+    dlg = PCADialog(None)
+    try:
+        panel = dlg._panel
+        panel.apply_session_state(
+            {
+                "result": {
+                    "method": "pca",
+                    "x": [0.0],
+                    "y": [1.0],
+                    "oids": [1],
+                    "hover": ["a"],
+                    "title": "PCA",
+                    "summary": "",
+                }
+            }
+        )
+        qapp.processEvents()
+        assert not panel._opts_dialog.isAncestorOf(panel._titles)
+        assert not panel._opts_dialog.isAncestorOf(panel.color_combo)
+        panel._open_setup_dialog()
+        qapp.processEvents()
+        assert panel._opts_dialog.isVisible()
+        assert not panel._appearance_dialog.isVisible()
+    finally:
+        panel._opts_dialog.hide()
+        panel._appearance_dialog.hide()
         dlg.close()
         dlg.deleteLater()
         qapp.processEvents()
