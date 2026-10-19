@@ -258,6 +258,8 @@ def load_config() -> MolManagerConfig:
         protomer_process_workers=_env_optional_positive_int(
             "MOLMANAGER_PROTOMER_PROCESSES", lo=1, hi=8
         ),
+        # None = auto. <=0 scores in the caller. Any positive value still starts
+        # one torch process; a value above 1 only caps the RDKit conformer pool.
         pka_process_workers=_env_optional_positive_int(
             "MOLMANAGER_PKA_PROCESS_WORKERS", lo=1, hi=8
         ),
