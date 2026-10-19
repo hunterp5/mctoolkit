@@ -16,11 +16,10 @@ Needs network access to PubChem. Queries start from identifiers/SMILES/structure
 
 ## Options
 
-- **Lookup / similarity search** - PubChem query modes in the dialog.
-- **Retrieve fields** - CID, IUPAC name, Common Name, Synonyms, InChIKey, structures, physchem, and counts. Common Name is PubChem's preferred name (Title); Synonyms are the ranked synonym list.
-- **Query** - molecule or identifier fields.
-- **Results** - preview list with **Add to table** actions.
-- **Limits** - respect service rate/result caps shown in the UI.
+- **Identity / Similarity** - lookup the SMILES, or search 2D Tanimoto neighbors. Min. Tanimoto and Max. structures appear only for Similarity.
+- **Fields** - every column is listed in groups: identifiers and names, structures, physchem, and counts. CID, common name, and isomeric SMILES start checked. Common Name is PubChem's preferred name (Title); Synonyms are the ranked synonym list.
+- **Query** - SMILES box, Sketcher, or **Only Query Selected**.
+- **Results** - log of the lookup, then **Add result(s) to table**.
 
 ## Workflow
 
