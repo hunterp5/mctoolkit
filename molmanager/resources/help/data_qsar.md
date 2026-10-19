@@ -8,7 +8,7 @@ Build a predictive model from your labeled rows and write predictions back as a 
 
 ## When to use
 
-Use when you have enough labeled molecules and want in-app modeling without exporting to a separate notebook - knowing table QSAR is still a pragmatic tool.
+Open it from **Data → QSAR → Generate Model**. Use it when you have enough labeled molecules and want to choose the features and algorithm yourself.
 
 ## Inputs / scope
 
