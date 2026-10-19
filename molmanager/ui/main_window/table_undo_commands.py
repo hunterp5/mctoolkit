@@ -458,9 +458,9 @@ class UndoDeleteColumnCommand(QUndoCommand):
         self._was_pixmap = app._table_model.is_pixmap_data_column(hdr)
         self._was_logarithmic = hdr in getattr(app, "_logarithmic_columns", set())
         self._text_by_oid: dict[int, str] = {}
-        self._pixmap_by_oid: dict[int, QPixmap] = {}
+        self._png_by_oid: dict[int, bytes] = {}
         if self._was_pixmap:
-            self._pixmap_by_oid = app._table_model.column_pixmaps_by_oid(hdr)
+            self._png_by_oid = app._table_model.column_png_bytes_by_oid(hdr)
         else:
             self._text_by_oid = app._table_model.column_text_by_oid(hdr)
 
@@ -499,8 +499,9 @@ class UndoDeleteColumnCommand(QUndoCommand):
             app._table_model.insert_column_at(idx, self._hdr, copy_from_logical=None)
             if self._was_pixmap:
                 app._table_model.register_pixmap_column(self._hdr)
-                for oid, pm in self._pixmap_by_oid.items():
-                    app._table_model.set_column_pixmap(oid, self._hdr, pm)
+                app._table_model.set_column_png_bytes_batch(
+                    self._hdr, list(self._png_by_oid.items())
+                )
             else:
                 pairs = list(self._text_by_oid.items())
                 if pairs:
@@ -649,11 +650,12 @@ def _unique_copy_header(headers: list[str], src_name: str) -> str:
     return f"{src_name} (Copy {n})"
 
 
-def _snapshot_structure_column(app: AppKernel) -> tuple[dict[int, str], dict[int, QPixmap]]:
-    """Backing SMILES and 2D images for a Structure-column duplicate."""
+def _snapshot_structure_column(app: AppKernel) -> tuple[dict[int, str], dict[int, bytes]]:
+    """Backing SMILES and structure PNG bytes for a Structure-column duplicate."""
     model = app._table_model
     smiles: dict[int, str] = {}
-    pixmaps: dict[int, QPixmap] = {}
+    pngs: dict[int, bytes] = {}
+    oids: list[int] = []
     mols = getattr(app, "mols", None) or {}
     n = model.rowCount()
     for r in range(n):
@@ -670,12 +672,11 @@ def _snapshot_structure_column(app: AppKernel) -> tuple[dict[int, str], dict[int
                 smiles[oid] = mol_to_canonical_smiles(mol) or ""
             except Exception:
                 smiles[oid] = ""
-        pix = model.structure_pixmap_for_oid(oid)
-        if pix is None or pix.isNull():
-            pix = model.structure_pixmap_copy(oid)
-        if pix is not None and not pix.isNull():
-            pixmaps[oid] = QPixmap(pix)
-    return smiles, pixmaps
+        oids.append(oid)
+    for oid, raw in model.snapshot_structure_pngs(oids).items():
+        if raw:
+            pngs[int(oid)] = raw
+    return smiles, pngs
 
 
 class UndoDuplicateColumnCommand(QUndoCommand):
@@ -687,11 +688,11 @@ class UndoDuplicateColumnCommand(QUndoCommand):
         self._src_name = src_name
         self._dup_name = _unique_copy_header(list(app.headers), src_name)
         self._structure_smiles: dict[int, str] | None = None
-        self._structure_pixmaps: dict[int, QPixmap] | None = None
+        self._structure_pngs: dict[int, bytes] | None = None
         if src_name == "Structure":
-            smiles, pixmaps = _snapshot_structure_column(app)
+            smiles, pngs = _snapshot_structure_column(app)
             self._structure_smiles = smiles
-            self._structure_pixmaps = pixmaps
+            self._structure_pngs = pngs
 
     def redo(self) -> None:
         app = self._app
@@ -712,7 +713,7 @@ class UndoDuplicateColumnCommand(QUndoCommand):
                     self._dup_name,
                     src,
                     value_by_oid=self._structure_smiles,
-                    pixmap_by_oid=self._structure_pixmaps or {},
+                    png_by_oid=self._structure_pngs or {},
                     as_pixmap=True,
                 )
             else:
