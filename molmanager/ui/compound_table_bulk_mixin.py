@@ -53,6 +53,7 @@ class CompoundTableBulkMixin:
         *,
         value_by_oid: dict[int, str] | None = None,
         pixmap_by_oid: dict[int, QPixmap] | None = None,
+        png_by_oid: dict[int, bytes] | None = None,
         as_pixmap: bool = False,
     ) -> None:
         """Insert a column and bulk-copy values from *src_logical* with one model notification.
@@ -80,7 +81,11 @@ class CompoundTableBulkMixin:
             self._rebuild_column_color_cache(header_name)
         if copy_as_pixmap:
             self._pixmap_columns.add(header_name)
-            if pixmap_by_oid:
+            if png_by_oid:
+                self._extra_pixmaps.set_png_bytes_batch(
+                    header_name, [(int(oid), raw) for oid, raw in png_by_oid.items()]
+                )
+            elif pixmap_by_oid:
                 for oid, pm in pixmap_by_oid.items():
                     if pm is not None and not pm.isNull():
                         self._extra_pixmaps.set_pixmap(int(oid), header_name, pm)
