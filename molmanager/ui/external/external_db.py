@@ -142,9 +142,6 @@ class ExternalDBDialog(QDialog):
         self.btn_load = QPushButton("Load into main table")
         self.btn_load.clicked.connect(self._on_load)
         btns.addWidget(self.btn_load)
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.reject)
-        btns.addWidget(close_btn)
         root.addLayout(btns)
 
         self._sync_mode()
