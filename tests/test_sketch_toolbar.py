@@ -130,6 +130,15 @@ def test_sketcher_top_toolbar_controls(qapp) -> None:  # noqa: ARG001
     assert dict(TOOLBAR_ELEMENT_GROUPS)["Chalcogens"] == ("O", "S", "Se")
     assert dlg.tb_any_element is not None
     assert dlg.tb_wildcard is not None
+    assert dlg.tb_r1.text() == "R1"
+    assert dlg.tb_r2.text() == "R2"
+    dlg.tb_r1.setChecked(True)
+    assert dlg.canvas.place_element == "R1"
+    assert not dlg.tb_r2.isChecked()
+    assert not dlg.tb_wildcard.isChecked()
+    dlg.tb_r2.setChecked(True)
+    assert dlg.canvas.place_element == "R2"
+    assert not dlg.tb_r1.isChecked()
     assert set(dlg._ring_btn_by_key) == {k for k, *_ in TOOLBAR_RING_TEMPLATES}
 
     dlg._on_ring_tool_clicked("Benzene", True)
