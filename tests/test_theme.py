@@ -223,6 +223,34 @@ def test_both_themes_use_fusion_without_global_stylesheet(qapp, tmp_path, monkey
         assert app.styleSheet() == ""
 
 
+def test_group_boxes_follow_theme_without_global_stylesheet(qapp, tmp_path, monkeypatch):
+    _isolate_theme_settings(tmp_path, monkeypatch)
+    from PyQt5.QtWidgets import QApplication, QGroupBox
+
+    from molmanager.ui.qt_widget_utils import group_box_stylesheet_for, install_group_box_style
+    from molmanager.ui.theme import apply_application_theme
+
+    app = QApplication.instance()
+    install_group_box_style(app)
+    titled = QGroupBox("Activity")
+    untitled = QGroupBox()
+    titled.ensurePolished()
+    untitled.ensurePolished()
+    assert "QGroupBox::title" in titled.styleSheet()
+    assert titled.styleSheet() == group_box_stylesheet_for(titled)
+    assert "QGroupBox::title" not in untitled.styleSheet()
+    assert untitled.styleSheet() == group_box_stylesheet_for(untitled)
+    light = titled.styleSheet()
+    apply_application_theme(app, THEME_DARK)
+    assert app.styleSheet() == ""
+    assert titled.styleSheet() != light
+    assert titled.styleSheet() == group_box_stylesheet_for(titled)
+    assert untitled.styleSheet() == group_box_stylesheet_for(untitled)
+    apply_application_theme(app, THEME_LIGHT)
+    titled.deleteLater()
+    untitled.deleteLater()
+
+
 def test_groovy_palette_is_randomized():
     import random
 
