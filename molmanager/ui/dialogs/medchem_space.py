@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
@@ -34,13 +35,13 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
-    QTextEdit,
     QVBoxLayout,
 )
 
 from ..dockable_plot import handle_floating_plot_close_event, style_plot_footer_text_button
 from ..background_jobs import register_background_job
 from ...platform_support.config import load_config
+from ...platform_support.session_log import session_log_buffer
 from ...plotting.plot_marker_color import color_values_are_numeric, normalize_size_column
 from ...chem.molecule_conversion import mol_to_canonical_smiles
 from ...analysis.medchem_space import (
@@ -62,7 +63,7 @@ from ..chunked_table_write import ChunkedTableWriter
 from ..medchem_space_plot import build_boiled_egg_figure, build_golden_triangle_figure
 from ..plotly_interactive_view import PlotlyInteractiveView
 from ..plot_table_sync import visible_oids_for_plot
-from ..qt_widget_utils import apply_monospace_to_text_edit, make_window_minimizable
+from ..qt_widget_utils import make_window_minimizable
 from ..result_plot_panel import DockableResultPlotPanel
 from .scope import selection_scope_checked
 
@@ -109,7 +110,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             floating_dialog_cls=MedChemSpaceDialog,
             parent=None,
             opts_title=f"{window_title} — Plot Options",
-            opts_tooltip="Configure structure source, color, On Hover, and summary options.",
+            opts_tooltip="Configure structure source, color, and On Hover.",
             pair_encoding=False,
             defer_initial_reload=True,
         )
@@ -152,14 +153,6 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         options_ly.addLayout(struct_row)
         extras.addWidget(options_gb)
 
-        trail = self._trailing_opts_layout
-        self.summary_text = QTextEdit()
-        self.summary_text.setReadOnly(True)
-        self.summary_text.setMaximumHeight(52)
-        apply_monospace_to_text_edit(self.summary_text)
-        trail.addWidget(QLabel("Summary"))
-        trail.addWidget(self.summary_text)
-
         foot = self._footer_bar.layout()
         clear_idx = foot.indexOf(self._clear_sel_btn)
         insert_at = clear_idx + 1 if clear_idx >= 0 else 2
@@ -187,10 +180,8 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self._update_size_controls()
         self._finish_layout()
         self.setMinimumWidth(self.embedded_minimum_width())
-        if session_restore:
-            self.summary_text.setPlainText("")
-        else:
-            self.summary_text.setPlainText("Preparing plot…")
+        if not session_restore:
+            self._set_medchem_status(f"{self._window_title}: preparing plot…")
             QTimer.singleShot(0, self._start_refresh_job)
 
     def _medchem_dataset_to_dict(self, ds: MedChemSpaceDataset | None) -> dict | None:
@@ -236,7 +227,6 @@ class MedChemPlotPanel(DockableResultPlotPanel):
                 if self._plot_dataset is None or self._plot_dataset is self._full_dataset
                 else self._medchem_dataset_to_dict(self._plot_dataset)
             ),
-            "summary": self.summary_text.toPlainText(),
         }
 
     def apply_session_state(self, state: dict | None) -> None:
@@ -251,12 +241,9 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self._plot_dataset = self._medchem_dataset_from_dict(state.get("plot_dataset"))
         if self._plot_dataset is None:
             self._plot_dataset = self._full_dataset
-        summary = state.get("summary")
-        if isinstance(summary, str):
-            self.summary_text.setPlainText(summary)
-        elif self._full_dataset is not None:
+        if self._full_dataset is not None:
             total = len(self._full_dataset.points)
-            self.summary_text.setPlainText(
+            self._log_medchem_summary(
                 self._full_dataset.summary_text(plot_kind=self._plot_kind, total_in_scope=total)
             )
         self._update_spectrum_controls()
@@ -356,6 +343,25 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             else resolve_descriptor_column(headers, ("wlogp",))
         )
         return tpsa_col, logp_col, mw_col, wlogp_col
+
+    def _set_medchem_status(self, message: str) -> None:
+        """Show short progress on the main-window status line."""
+        app = self.parent_app
+        label = getattr(app, "status_label", None) if app is not None else None
+        if label is not None:
+            label.setText(message)
+
+    def _log_medchem_summary(self, summary: str) -> None:
+        """Write the finished plot summary to the in-app log, not the Python shell."""
+        text = (summary or "").strip()
+        if not text:
+            return
+        session_log_buffer().add(
+            levelno=logging.INFO,
+            logger_name="molmanager.ui",
+            message=f"{self._window_title}\n{text}",
+            source="ui",
+        )
 
     def _set_refresh_ui_busy(self, busy: bool) -> None:
         self._job_running = busy
@@ -563,7 +569,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         }
         self._set_refresh_ui_busy(True)
         total = self._snapshot_scope_row_count(scope_rows)
-        self.summary_text.setPlainText(f"Reading table… (0/{total:,})")
+        self._set_medchem_status(f"{self._window_title}: reading table… (0/{total:,})")
         QTimer.singleShot(0, self._snapshot_collect_step)
 
     def _snapshot_collect_step(self) -> None:
@@ -619,7 +625,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
                 )
                 end += 1
         ctx["idx"] = end
-        self.summary_text.setPlainText(f"Reading table… ({end:,}/{total:,})")
+        self._set_medchem_status(f"{self._window_title}: reading table… ({end:,}/{total:,})")
         if end < total:
             QTimer.singleShot(0, self._snapshot_collect_step)
             return
@@ -642,14 +648,8 @@ class MedChemPlotPanel(DockableResultPlotPanel):
                 f"{len(snapshots):,} compound(s)…"
             )
         if use_table:
-            self.summary_text.setPlainText(
-                f"Loading descriptors from table for {len(snapshots):,} compound(s)…"
-            )
             oid_smiles: dict[int, str] = {}
         else:
-            self.summary_text.setPlainText(
-                f"Computing descriptors for {len(snapshots):,} compound(s)…"
-            )
             oid_smiles = self._oid_smiles_from_cache(snapshots)
         self._bg_cancel_event = threading.Event()
         self._bg_job_id = f"medchem-{id(self)}"
@@ -714,7 +714,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self._full_dataset = result.full
         self._plot_dataset = result.plot
         total = len(self._full_dataset.points)
-        self.summary_text.setPlainText(
+        self._log_medchem_summary(
             self._full_dataset.summary_text(plot_kind=self._plot_kind, total_in_scope=total)
         )
         if result.table_updates:
@@ -749,7 +749,6 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self._set_refresh_ui_busy(False)
         if self.parent_app is not None:
             self.parent_app._finish_tool_progress(job_id=job_id)
-        self.summary_text.setPlainText("")
         QMessageBox.warning(self, self._window_title, message or "Plot build failed.")
 
     def _cancel_table_write_job(self) -> None:
