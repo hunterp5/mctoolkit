@@ -294,7 +294,7 @@ Most Python packages are already installed by **Step 6b**. The items below are b
 
 `pip install -r requirements.txt` installs CPU PyTorch. If you have an NVIDIA GPU, run the script in **Step 6d** (same venv) so Uni-pKa uses CUDA. With no flags it selects CUDA when `nvidia-smi` sees a GPU.
 
-If **Tools → Predict → pKa** fails with a PyTorch version error (often after installing another package that upgrades torch), run the same script again to repair the stack. Do **not** create a second environment. Pass `-Cpu` / `--cpu` to force the CPU wheel, or `-Cuda` / `--cuda` to force CUDA. The first **Predict pKa** run downloads Uni-pKa fold weights from Hugging Face (`unipka-download-model`). For offline machines, prefetch with that CLI or copy the fold into unipkainfer’s `model_dir`.
+If **Chemistry → Predict → pKa** fails with a PyTorch version error (often after installing another package that upgrades torch), run the same script again to repair the stack. Do **not** create a second environment. Pass `-Cpu` / `--cpu` to force the CPU wheel, or `-Cuda` / `--cuda` to force CUDA. The first **Predict pKa** run downloads Uni-pKa fold weights from Hugging Face (`unipka-download-model`). For offline machines, prefetch with that CLI or copy the fold into unipkainfer’s `model_dir`.
 
 ### Docking (Gnina)
 
@@ -310,13 +310,13 @@ macOS has no official Gnina binary. See **Protein → Dock Ligand** in the app a
 
 ### Systematic conformers (Open Babel)
 
-**Tools → Conformations → Generate → Systematic…** uses Open Babel Confab. Open Babel is a project dependency (`pip install openbabel`, also in `requirements-core.txt`). The dialog defaults to that wheel’s `obabel` (`site-packages/openbabel/bin/obabel`). You can still override the path, or place `obabel.exe` / `obabel` under `molmanager/resources/bin/<platform>/` to prefer a bundled copy.
+**Chemistry → Conformations → Generate → Systematic…** uses Open Babel Confab. Open Babel is a project dependency (`pip install openbabel`, also in `requirements-core.txt`). The dialog defaults to that wheel’s `obabel` (`site-packages/openbabel/bin/obabel`). You can still override the path, or place `obabel.exe` / `obabel` under `molmanager/resources/bin/<platform>/` to prefer a bundled copy.
 
-Distance-geometry ensembles remain **Tools → Conformations → Generate → Stochastic…** (RDKit ETKDG; no Open Babel).
+Distance-geometry ensembles remain **Chemistry → Conformations → Generate → Stochastic…** (RDKit ETKDG; no Open Babel).
 
 ### CONFORGE conformers (CDPKit)
 
-**Tools → Conformations → Generate → CONFORGE…** uses CONFORGE from [CDPKit](https://cdpkit.org).
+**Chemistry → Conformations → Generate → CONFORGE…** uses CONFORGE from [CDPKit](https://cdpkit.org).
 
 On **Windows with Python 3.11**, `pip install cdpkit` (and `pip install -e ".[conforge]"`) will try to compile from source and fail — PyPI has wheels for Windows 3.10/3.12/3.14, not 3.11. Install the CDPKit **MSVC** package from [GitHub Releases](https://github.com/molinfo-vienna/CDPKit/releases), then Browse to `confgen.exe` (usually `C:\Program Files\CDPKit\Bin\confgen.exe`) or add that `Bin` folder to PATH. MolManager also looks in `Program Files\CDPKit\Bin` automatically.
 
