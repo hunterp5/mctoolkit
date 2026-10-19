@@ -47,6 +47,8 @@ class SaliAnalysisWorker(QRunnable):
         min_similarity: float = 0.0,
         min_activity_difference: float = 0.0,
         max_pairs: int = 10000,
+        off_by_oid: dict[int, float] | None = None,
+        off_target_column: str = "",
         signals: WorkerSignals,
         cancel_event: threading.Event | None = None,
         progress_state=None,
@@ -59,6 +61,10 @@ class SaliAnalysisWorker(QRunnable):
         self.min_similarity = float(min_similarity)
         self.min_activity_difference = float(min_activity_difference)
         self.max_pairs = int(max_pairs)
+        self.off_by_oid = (
+            None if off_by_oid is None else {int(k): float(v) for k, v in off_by_oid.items()}
+        )
+        self.off_target_column = off_target_column or ""
         self.signals = signals
         self.cancel_event = cancel_event
         self.progress_state = progress_state
@@ -83,9 +89,16 @@ class SaliAnalysisWorker(QRunnable):
             oids: list[int] = []
             fps: list = []
             activities: list[float] = []
+            offs: list[float | None] = []
+            off_map = self.off_by_oid
             for i, (oid, mol, act) in enumerate(self.records):
                 if ev is not None and ev.is_set():
                     return
+                off_val = None
+                if off_map is not None:
+                    off_val = off_map.get(int(oid))
+                    if off_val is None:
+                        continue
                 try:
                     fp = fingerprint_bitvect_for_row(int(oid), mol, self.fp_choice)
                     if fp is None:
@@ -97,6 +110,7 @@ class SaliAnalysisWorker(QRunnable):
                 oids.append(int(oid))
                 fps.append(fp)
                 activities.append(float(act))
+                offs.append(None if off_val is None else float(off_val))
                 report_tool_progress(
                     message=label,
                     done=min(i + 1, tot),
@@ -107,9 +121,15 @@ class SaliAnalysisWorker(QRunnable):
                 )
 
             if len(fps) < 2:
-                self.signals.sali_failed.emit(
-                    "Need at least two molecules with both a structure and a fingerprint."
-                )
+                if off_map is not None:
+                    self.signals.sali_failed.emit(
+                        "Need at least two molecules with a structure, a fingerprint, "
+                        "and numeric values in both activity columns."
+                    )
+                else:
+                    self.signals.sali_failed.emit(
+                        "Need at least two molecules with both a structure and a fingerprint."
+                    )
                 return
 
             n = len(fps)
@@ -149,6 +169,8 @@ class SaliAnalysisWorker(QRunnable):
                         min_similarity=min_sim,
                         min_activity_difference=min_dact,
                         max_pairs=self.max_pairs,
+                        off_a=offs[i],
+                        off_b=offs[j],
                     )
                 now = time.monotonic()
                 if i <= 2 or i + 1 == n or (now - last_pulse) >= 0.12:
@@ -179,6 +201,7 @@ class SaliAnalysisWorker(QRunnable):
                 self.activity_column,
                 self.fp_choice,
                 self.metric,
+                self.off_target_column,
             )
         except Exception as exc:
             logger.exception("SALI analysis failed")
