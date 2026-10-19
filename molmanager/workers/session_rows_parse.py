@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -28,7 +29,10 @@ from PyQt5 import sip
 from PyQt5.QtCore import QObject, QRunnable, pyqtSignal
 from rdkit import Chem
 
+from ..table.open_messages import message_for_session_read_failure
 from ..table.session_codec import decode_mol_blob_b64, row_structure_smiles
+
+logger = logging.getLogger(__name__)
 
 _SERIAL_MOL_DECODE_MAX = 32
 _MAX_MOL_DECODE_WORKERS = 8
@@ -251,4 +255,9 @@ class CsvSessionParseWorker(QRunnable):
                 ),
             )
         except Exception as exc:
-            _safe_emit(self.signals, "failed", str(exc) or "Session CSV parse failed.")
+            logger.exception("Session CSV parse failed: %s", self.path)
+            _safe_emit(
+                self.signals,
+                "failed",
+                message_for_session_read_failure(self.path, exc),
+            )
