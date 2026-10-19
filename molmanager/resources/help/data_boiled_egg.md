@@ -20,7 +20,6 @@ Structures/properties required by the plot for rows in scope; **Selected Rows On
 - **Structure from**.
 - **Color by**, **Spectrum**, **Min** / **Max**.
 - **Size by**, marker **Min size** / **Max size** (pixels).
-- **Summary** panel.
 - **Egg** / **Yolk** region select.
 - Footer: gear (**Plot Options**), **Clear Selection**, then Add/Send glyph and **Close Plot** (pane **×** when docked).
 
@@ -28,7 +27,7 @@ Structures/properties required by the plot for rows in scope; **Selected Rows On
 
 1. Compute needed descriptors if missing.
 2. Open **Data → MedChem Plots → BOILED-Egg plot** and set structure source/color.
-3. Inspect points in white/yolk regions.
+3. Inspect points in white/yolk regions. Counts (in scope, GIA, BBB, skipped rows) are written to the in-app Log.
 4. Use region select actions to push rows back to the table selection.
 
 ## Use cases
