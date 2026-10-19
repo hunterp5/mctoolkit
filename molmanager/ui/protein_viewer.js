@@ -725,6 +725,11 @@ function molmanagerInitView() {
       }
       if (p.colorScheme === "element") {
         style.colorscheme = "default";
+      } else if (p.colorScheme === "hydrophobicity") {
+        paintPocketResidueColors(v, sel, p.residueColors || {});
+      } else if (p.colorScheme === "charge") {
+        paintPocketCharges(v, sel);
+        style.colorscheme = {prop: "partialCharge", gradient: "rwb", min: -1, max: 1};
       } else {
         style.color = p.color || "lightgray";
       }
@@ -737,11 +742,100 @@ function molmanagerInitView() {
         try { v.addSurface(types.VDW, style, sel); } catch (eVdw) {}
       }
     }
+    function paintPocketResidueColors(v, sel, colors) {
+      var atoms;
+      try { atoms = v.selectedAtoms(sel) || []; } catch (eA) { return; }
+      for (var i = 0; i < atoms.length; i++) {
+        var at = atoms[i];
+        var resn = String(at.resn || "").toUpperCase();
+        at.color = colors[resn] || "#f7f7f7";
+      }
+    }
+    function paintPocketCharges(v, sel) {
+      var atoms;
+      try { atoms = v.selectedAtoms(sel) || []; } catch (eA) { return; }
+      for (var i = 0; i < atoms.length; i++) {
+        var at = atoms[i];
+        at.properties = at.properties || {};
+        if ($3Dmol && $3Dmol.applyPartialCharges) {
+          try { $3Dmol.applyPartialCharges(at); } catch (eC) {}
+        }
+        var charge = at.properties.partialCharge;
+        if (charge == null || charge !== charge) at.properties.partialCharge = 0;
+      }
+    }
+    function applyInteractionResidues(v, bonds) {
+      var seen = {};
+      for (var i = 0; i < bonds.length; i++) {
+        var residues = (bonds[i] && bonds[i].showResidues) || [];
+        for (var j = 0; j < residues.length; j++) {
+          var spec = residues[j] || {};
+          var key = [spec.model, spec.chain, spec.resn, spec.resi, spec.icode].join("\t");
+          if (seen[key]) continue;
+          seen[key] = true;
+          var sel = viewerSel(spec);
+          if (spec.resn) sel.resn = spec.resn;
+          var found;
+          try { found = v.selectedAtoms(sel) || []; } catch (eSel) { found = []; }
+          var hSerials = [];
+          for (var k = 0; k < found.length; k++) {
+            var at = found[k];
+            at.hidden = false;
+            at.style = at.style || {};
+            at.style.hidden = false;
+            if (isHydrogenAtom(at) && at.serial != null && at.serial !== "") {
+              hSerials.push(at.serial);
+            }
+          }
+          try {
+            v.addStyle(sel, {
+              stick: {hidden: false, radius: 0.15},
+              sphere: {hidden: false, scale: 0.25}
+            });
+          } catch (eSt) {}
+          if (!hSerials.length) continue;
+          var hsel = {serial: hSerials};
+          if (spec.model != null && spec.model !== "") hsel.model = spec.model;
+          try { v.addStyle(hsel, hydrogenShowSpec()); } catch (eH) {}
+        }
+      }
+    }
+    function applyInteractionAtoms(v, bonds) {
+      for (var i = 0; i < bonds.length; i++) {
+        var atoms = (bonds[i] && bonds[i].showAtoms) || [];
+        for (var j = 0; j < atoms.length; j++) {
+          var spec = atoms[j] || {};
+          if (!spec.atom) continue;
+          var sel = viewerSel(spec);
+          var found;
+          try { found = v.selectedAtoms(sel) || []; } catch (eSel) { found = []; }
+          for (var k = 0; k < found.length; k++) {
+            var at = found[k];
+            at.hidden = false;
+            at.style = at.style || {};
+            at.style.hidden = false;
+          }
+          var hydrogen = spec.role === "hydrogen";
+          var style = {
+            stick: {hidden: false, radius: hydrogen ? 0.08 : 0.15},
+            sphere: {hidden: false, scale: hydrogen ? 0.18 : 0.28}
+          };
+          if (hydrogen) {
+            style.cartoon = {hidden: true};
+            style.stick.color = "white";
+            style.sphere.color = "white";
+          }
+          try { v.addStyle(sel, style); } catch (eAt) {}
+        }
+      }
+    }
     function applyHydrogenBonds(v) {
       v = v || window.molmanagerViewer;
       if (!v) return;
       var spec = window.molmanagerHbonds;
       if (!spec || !spec.active || !spec.bonds || !spec.bonds.length) return;
+      applyInteractionResidues(v, spec.bonds);
+      applyInteractionAtoms(v, spec.bonds);
       for (var i = 0; i < spec.bonds.length; i++) {
         var b = spec.bonds[i] || {};
         var start = b.start || {};
