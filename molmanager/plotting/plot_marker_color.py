@@ -46,6 +46,10 @@ DEFAULT_SELECTED_MARKER_SIZE_3D_PX = 9.0
 DEFAULT_MARKER_SIZE_MIN_PX = 6.0
 DEFAULT_MARKER_SIZE_MAX_PX = 18.0
 
+# A title longer than the colorbar grows the figure. Keep it beside the bar.
+COLORBAR_TITLE_MAX_CHARS = 32
+COLORBAR_THICKNESS_PX = 14
+
 # Plotly built-in continuous colorscales (numeric Color by).
 PLOT_COLORSCALE_CHOICES: tuple[str, ...] = (
     "Viridis",
@@ -228,6 +232,26 @@ def size_legend_levels(
     # High → low in the legend (match colorbar top=high).
     levels.sort(key=lambda t: -t[1])
     return levels
+
+
+def shorten_colorbar_title(label: str) -> str:
+    """Keep a colorbar title short enough to sit beside the scale."""
+    text = str(label).strip()
+    if len(text) <= COLORBAR_TITLE_MAX_CHARS:
+        return text
+    return text[: COLORBAR_TITLE_MAX_CHARS - 1].rstrip() + "…"
+
+
+def colorbar_for_label(label: str) -> dict[str, Any]:
+    """Colorbar whose title runs down the bar, first character at the top.
+
+    Plotly places ``side="right"`` beside the scale, then rotates it so the
+    name reads upward. The plot view flips that rotation after each draw.
+    """
+    return {
+        "title": {"text": shorten_colorbar_title(label), "side": "right"},
+        "thickness": COLORBAR_THICKNESS_PX,
+    }
 
 
 def _colorbar_as_dict(colorbar: Any) -> dict[str, Any]:
@@ -482,7 +506,7 @@ def scatter_marker_from_column_values(
             "cmax": hi,
         }
         if color_label:
-            marker["colorbar"] = {"title": color_label}
+            marker["colorbar"] = colorbar_for_label(color_label)
         return marker
 
     categories: list[str] = []
