@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QCloseEvent
 from PyQt5.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -37,7 +38,6 @@ from PyQt5.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QSpinBox,
     QSplitter,
     QTextEdit,
@@ -62,6 +62,10 @@ from .scope import selection_scope_checked
 if TYPE_CHECKING:
     from ..main_window import ChemistryWorkspaceWindow
 
+_FP_NONE_LABEL = "None"
+# Enough checked-column rows to scan a typical descriptor set; longer lists scroll inside the box.
+_COLUMN_LIST_ROWS = 8
+
 
 class QSARDialog(QDialog):
     """Train ML models on table activity vs descriptors or fingerprints; write predictions to the table."""
@@ -73,13 +77,12 @@ class QSARDialog(QDialog):
         self._build_qsar_ui()
         self._wire_qsar_ui()
         self._reload_columns()
-        self._on_fp_toggled()
         self._on_task_changed(self.task_combo.currentIndex())
+        self._sync_feature_controls()
+        self._fit_window_to_options()
 
     def _init_qsar_state(self, parent: ChemistryWorkspaceWindow | None) -> None:
         self.setWindowTitle("QSAR")
-        self.setMinimumSize(720, 560)
-        self.resize(900, 680)
         make_window_minimizable(self)
         n_sel = len(parent._selected_logical_rows()) if parent is not None else 0
         self._have_selection = n_sel > 0
@@ -96,29 +99,13 @@ class QSARDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 6, 8, 6)
         splitter = QSplitter(Qt.Horizontal)
+        self._splitter = splitter
         root.addWidget(splitter, 1)
 
-        left_scroll = QScrollArea()
-        left_scroll.setWidgetResizable(True)
         left_host = QWidget()
+        self._options_host = left_host
         left_lyt = QVBoxLayout(left_host)
         left_lyt.setSpacing(8)
-
-        scope = QHBoxLayout()
-        self.chk_visible = QCheckBox("Visible Rows Only")
-        self.chk_visible.setChecked(True)
-        scope.addWidget(self.chk_visible)
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
-        else:
-            self.only_selected_cb.setEnabled(False)
-        scope.addWidget(self.only_selected_cb)
-        scope.addStretch()
-        self.btn_refresh = QPushButton("Refresh columns")
-        scope.addWidget(self.btn_refresh)
-        left_lyt.addLayout(scope)
 
         data_grp = QGroupBox("Activity (Y)")
         data_form = QFormLayout(data_grp)
@@ -131,41 +118,45 @@ class QSARDialog(QDialog):
             "Auto picks classification when activity has few discrete values; otherwise regression."
         )
         data_form.addRow("Task:", self.task_combo)
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
+        else:
+            self.only_selected_cb.setEnabled(False)
+        self.only_selected_cb.setToolTip(
+            "Train and predict on the current selection. Otherwise every table row is used."
+        )
+        data_form.addRow("", self.only_selected_cb)
         left_lyt.addWidget(data_grp)
 
         feat_grp = QGroupBox("Features (X)")
         feat_lyt = QVBoxLayout(feat_grp)
-        self.include_fp_cb = QCheckBox("Include 2D fingerprints (from structure)")
-        self.include_fp_cb.setToolTip(
-            "Concatenate a full fingerprint bit vector with any selected numeric columns."
+        self.column_list = QListWidget()
+        self.column_list.setSelectionMode(QListWidget.NoSelection)
+        self.column_list.setToolTip(
+            "Checked numeric columns are model features. Activity (Y) is skipped."
         )
-        feat_lyt.addWidget(self.include_fp_cb)
+        feat_lyt.addWidget(self.column_list)
 
         fp_row = QHBoxLayout()
         fp_row.addWidget(QLabel("Fingerprint:"))
         self.fp_combo = QComboBox()
+        self.fp_combo.addItem(_FP_NONE_LABEL)
         self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
+        self.fp_combo.setToolTip(
+            "None uses the checked columns only. Otherwise concatenate this fingerprint "
+            "with those columns, or use it alone when none are checked."
+        )
         fp_row.addWidget(self.fp_combo, 1)
         feat_lyt.addLayout(fp_row)
 
         src_row = QHBoxLayout()
         src_row.addWidget(QLabel("Structure:"))
         self.struct_src_combo = QComboBox()
+        self.struct_src_combo.setToolTip("Structure column used to build the fingerprint.")
         src_row.addWidget(self.struct_src_combo, 1)
         feat_lyt.addLayout(src_row)
-
-        col_btns = QHBoxLayout()
-        self._btn_col_all = QPushButton("All")
-        self._btn_col_none = QPushButton("None")
-        col_btns.addWidget(self._btn_col_all)
-        col_btns.addWidget(self._btn_col_none)
-        col_btns.addStretch()
-        feat_lyt.addLayout(col_btns)
-
-        self.column_list = QListWidget()
-        self.column_list.setMinimumHeight(120)
-        self.column_list.setSelectionMode(QListWidget.NoSelection)
-        feat_lyt.addWidget(self.column_list)
         left_lyt.addWidget(feat_grp)
 
         model_grp = QGroupBox("Model")
@@ -204,7 +195,7 @@ class QSARDialog(QDialog):
         left_lyt.addWidget(out_grp)
 
         btn_row = QHBoxLayout()
-        self.train_btn = QPushButton("Train & evaluate")
+        self.train_btn = QPushButton("Train/Evaluate")
         btn_row.addWidget(self.train_btn)
         self.predict_btn = QPushButton("Add predictions to table")
         self.predict_btn.setEnabled(False)
@@ -213,8 +204,7 @@ class QSARDialog(QDialog):
         left_lyt.addLayout(btn_row)
         left_lyt.addStretch()
 
-        left_scroll.setWidget(left_host)
-        splitter.addWidget(left_scroll)
+        splitter.addWidget(left_host)
 
         right = QWidget()
         right_lyt = QVBoxLayout(right)
@@ -223,8 +213,9 @@ class QSARDialog(QDialog):
         self.results_text.setReadOnly(True)
         apply_monospace_to_text_edit(self.results_text)
         self.results_text.setPlaceholderText(
-            "Configure activity and features, then click Train & evaluate.\n\n"
-            "Select numeric descriptor columns (e.g. MW, LogP) and/or 2D fingerprints. "
+            "Configure activity and features, then click Train/Evaluate.\n\n"
+            "Check numeric descriptor columns (for example MW, LogP). "
+            "Choose a fingerprint to add 2D structure bits, or leave Fingerprint at None. "
             "Requires scikit-learn (included with MolManager dependencies)."
         )
         right_lyt.addWidget(self.results_text, 1)
@@ -236,13 +227,10 @@ class QSARDialog(QDialog):
         self._signals.train_finished.connect(self._on_train_finished, Qt.QueuedConnection)
         self._signals.predict_finished.connect(self._on_predict_finished, Qt.QueuedConnection)
         self._signals.failed.connect(self._on_failed, Qt.QueuedConnection)
-        self.chk_visible.stateChanged.connect(self._reload_columns)
         self.only_selected_cb.stateChanged.connect(self._reload_columns)
-        self.btn_refresh.clicked.connect(self._reload_columns)
         self.task_combo.currentIndexChanged.connect(self._on_task_changed)
-        self.include_fp_cb.stateChanged.connect(self._on_fp_toggled)
-        self._btn_col_all.clicked.connect(self._select_all_columns)
-        self._btn_col_none.clicked.connect(self._clear_column_checks)
+        self.fp_combo.currentIndexChanged.connect(self._sync_feature_controls)
+        self.column_list.itemChanged.connect(self._sync_feature_controls)
         self.model_combo.currentIndexChanged.connect(self._rebuild_model_params)
         self.train_btn.clicked.connect(self._on_train)
         self.predict_btn.clicked.connect(self._on_predict)
@@ -313,9 +301,8 @@ class QSARDialog(QDialog):
     def _scoped_dataframe_and_oids(self) -> tuple:
         app = self.parent_app
         assert app is not None
-        vis = self.chk_visible.isChecked()
         only_sel = selection_scope_checked(self)
-        df, source_rows = table_to_dataframe(app, visible_only=vis, only_selected=only_sel)
+        df, source_rows = table_to_dataframe(app, visible_only=False, only_selected=only_sel)
         oids: list[int] = []
         for r in source_rows:
             t0 = app._table_model.cell_text(r, 0)
@@ -327,6 +314,7 @@ class QSARDialog(QDialog):
         self.activity_combo.clear()
         self.column_list.clear()
         if self.parent_app is None:
+            self._size_column_list()
             return
         self.struct_src_combo.clear()
         self.struct_src_combo.addItems(self.parent_app.chemistry_tool_structure_sources())
@@ -338,6 +326,7 @@ class QSARDialog(QDialog):
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked if num.shape[1] <= 10 else Qt.Unchecked)
             self.column_list.addItem(item)
+        self._size_column_list()
         if self.activity_combo.count() <= 0:
             return
         if prev_act:
@@ -354,16 +343,12 @@ class QSARDialog(QDialog):
             if item.text() == act:
                 item.setCheckState(Qt.Unchecked)
 
-    def _select_all_columns(self) -> None:
-        act = self.activity_combo.currentText()
-        for i in range(self.column_list.count()):
-            item = self.column_list.item(i)
-            if item.text() != act:
-                item.setCheckState(Qt.Checked)
-
-    def _clear_column_checks(self) -> None:
-        for i in range(self.column_list.count()):
-            self.column_list.item(i).setCheckState(Qt.Unchecked)
+    def _size_column_list(self) -> None:
+        """Show several feature rows; extra columns scroll inside the list."""
+        row_h = self.column_list.sizeHintForRow(0) if self.column_list.count() else 0
+        if row_h <= 0:
+            row_h = 22
+        self.column_list.setFixedHeight(_COLUMN_LIST_ROWS * row_h + 8)
 
     def _selected_feature_columns(self) -> list[str]:
         act = self.activity_combo.currentText()
@@ -377,15 +362,52 @@ class QSARDialog(QDialog):
                 cols.append(name)
         return cols
 
-    def _on_fp_toggled(self, *_args) -> None:
-        use_fp = self.include_fp_cb.isChecked()
-        self.fp_combo.setEnabled(use_fp)
+    def _use_fingerprints(self) -> bool:
+        return self.fp_combo.currentText() != _FP_NONE_LABEL
+
+    def _sync_feature_controls(self, *_args) -> None:
+        use_fp = self._use_fingerprints()
         self.struct_src_combo.setEnabled(use_fp)
         if use_fp and not self._selected_feature_columns():
             self.standardize_cb.setEnabled(False)
             self.standardize_cb.setChecked(False)
         else:
             self.standardize_cb.setEnabled(True)
+
+    def _fit_window_to_options(self) -> None:
+        """Open large enough to show every control, including the tallest parameter form."""
+        self._size_column_list()
+        saved = self.model_combo.currentIndex()
+        tallest_i = saved
+        tallest_n = -1
+        for i in range(self.model_combo.count()):
+            key = self.model_combo.itemData(i)
+            n = len(param_specs_for_model(str(key))) if key else 0
+            if n > tallest_n:
+                tallest_n = n
+                tallest_i = i
+        if tallest_i != saved:
+            self.model_combo.setCurrentIndex(tallest_i)
+        host = self._options_host
+        host.ensurePolished()
+        layout = host.layout()
+        if layout is not None:
+            layout.activate()
+        content = host.sizeHint()
+        if self.model_combo.currentIndex() != saved:
+            self.model_combo.setCurrentIndex(saved)
+        margins = self.layout().contentsMargins()
+        height = content.height() + margins.top() + margins.bottom() + 16
+        width = max(1000, content.width() + 420)
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            width = min(width, max(720, avail.width() - 32))
+        host.setMinimumHeight(content.height())
+        self.setMinimumSize(width, height)
+        self.resize(width, height)
+        options_w = min(content.width() + 24, width // 2)
+        self._splitter.setSizes([options_w, max(1, width - options_w)])
 
     def _task_mode_key(self) -> str:
         t = self.task_combo.currentText().strip().lower()
@@ -416,7 +438,7 @@ class QSARDialog(QDialog):
         return app.collect_scoped_table_structure_payloads(
             self.struct_src_combo.currentText(),
             only_selected=selection_scope_checked(self),
-            only_visible=self.chk_visible.isChecked(),
+            only_visible=False,
         )
 
     def _validate_train_inputs(self) -> dict | None:
@@ -427,13 +449,13 @@ class QSARDialog(QDialog):
         if not act:
             QMessageBox.warning(self, "QSAR", "Select an activity column (Y).")
             return None
-        use_fp = self.include_fp_cb.isChecked()
+        use_fp = self._use_fingerprints()
         feature_columns = self._selected_feature_columns()
         if not use_fp and not feature_columns:
             QMessageBox.warning(
                 self,
                 "QSAR",
-                "Select at least one numeric feature column (X) and/or enable 2D fingerprints.",
+                "Select at least one numeric feature column, or choose a fingerprint.",
             )
             return None
         mol_payloads = self._collect_payloads() if use_fp else None
