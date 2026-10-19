@@ -22,7 +22,6 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
@@ -40,6 +39,7 @@ from ..qt_widget_utils import make_window_minimizable
 from .conformer_output import (
     ConformerOutputOptions,
     ConformerOutputOptionsPanel,
+    add_centered_run_button,
     conformer_options_group,
 )
 from .scope import selection_scope_checked
@@ -258,12 +258,10 @@ class GenerateConformationsDialog(QDialog):
         )
         root.addWidget(self.output_panel)
 
-        self._button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        root.addWidget(self._button_box)
+        self.run_btn = add_centered_run_button(root)
 
     def _wire_generate_conformations_ui(self) -> None:
-        self._button_box.accepted.connect(self._try_accept)
-        self._button_box.rejected.connect(self.reject)
+        self.run_btn.clicked.connect(self._try_accept)
         make_window_minimizable(self)
 
     def _try_accept(self) -> None:
