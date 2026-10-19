@@ -41,7 +41,8 @@ def test_similarity_labels_match_specs():
 def test_descriptor_categories_cover_all_specs():
     cats = descriptor_fingerprint_categories()
     assert len(cats) == len(FINGERPRINT_SPECS)
-    assert cats["Morgan (r=2, n=1024) on-bits"] == "FP_Morgan_2_1024"
+    assert cats["Morgan (r=2, n=1024)"] == "FP_Morgan_2_1024"
+    assert all(not name.endswith("on-bits") for name in cats)
 
 
 def test_gobbi_fingerprint_is_gil_heavy():
