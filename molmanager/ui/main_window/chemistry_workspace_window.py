@@ -270,6 +270,8 @@ class ChemistryWorkspaceWindow(
         self.signals.fragment_recomp_failed.connect(self.on_fragment_recomp_failed, _qc)
         self.signals.reaction_enum_finished.connect(self.on_reaction_enum_finished, _qc)
         self.signals.reaction_enum_failed.connect(self.on_reaction_enum_failed, _qc)
+        self.signals.rgroup_enum_finished.connect(self.on_rgroup_enum_finished, _qc)
+        self.signals.rgroup_enum_failed.connect(self.on_rgroup_enum_failed, _qc)
         self.signals.mmp_finished.connect(self.on_mmp_finished, _qc)
         self.signals.mmp_failed.connect(self.on_mmp_failed, _qc)
         self.signals.free_wilson_finished.connect(self.on_free_wilson_finished, _qc)
