@@ -15,7 +15,7 @@
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 """Descriptor calculation workers (CalcWorker and helpers).
 
-Fingerprint columns use RDKit implementations. The **2D pharmacophore (Gobbi)** on-bits column uses
+Fingerprint columns use RDKit implementations. The **2D pharmacophore (Gobbi)** column uses
 ``rdkit.Chem.Pharm2D`` with ``Gobbi_Pharm2D`` (Gobbi & Poppinger, *Perspect. Drug Discov. Des.* 1998).
 Drug-likeness columns that invoke ``medchem_descriptors`` / Uni-pKa cite
 ``molmanager.reference.method_citations`` and the worker module docstrings there.
@@ -224,6 +224,14 @@ def descriptor_callable_for_int_fn(i_f, smarts_cache, row_ctx=None):
     """Return ``callable(mol)`` for one internal descriptor id (shared by thread and process workers)."""
     ctx = row_ctx if row_ctx is not None else {}
     row_oid = ctx.get("oid")
+    if isinstance(i_f, str) and i_f.startswith("ALERT:"):
+        from ..chem.structural_alerts import callable_for_alert_key
+
+        return callable_for_alert_key(i_f, ctx)
+    if isinstance(i_f, str) and i_f.startswith("MURCKO_"):
+        from ..chem.murcko import murcko_callable_for_key
+
+        return murcko_callable_for_key(i_f)
     if i_f == "SMILES":
         return lambda m: mol_to_canonical_smiles(m) if m is not None else ""
     if i_f == "INCHIKEY":
@@ -448,6 +456,7 @@ class CalcDescriptorsRequest:
     confs_by_idx: dict | None = None
     confs_col_by_idx: dict | None = None
     ensemble_db: str | None = None
+    progress_label: str = "Calculate descriptors"
 
 
 class CalcWorker(QRunnable):
@@ -470,6 +479,12 @@ class CalcWorker(QRunnable):
         self.confs_by_idx = request.confs_by_idx or {}
         self.confs_col_by_idx = request.confs_col_by_idx or {}
         self.ensemble_db = request.ensemble_db
+        self.progress_label = request.progress_label or "Calculate descriptors"
+
+    def _prep_progress_message(self) -> str:
+        if self.progress_label == "Calculate descriptors":
+            return "Preparing descriptors…"
+        return f"Preparing {self.progress_label.lower()}…"
 
     def run(self):
         smarts_cache = {}
@@ -487,7 +502,7 @@ class CalcWorker(QRunnable):
             if force or done_count >= nrows or (now - prep_last_emit) >= 0.2:
                 prep_last_emit = now
                 report_tool_progress(
-                    message="Preparing descriptors…",
+                    message=self._prep_progress_message(),
                     done=done_count,
                     total=tot,
                     progress_state=self.progress_state,
@@ -555,7 +570,7 @@ class CalcWorker(QRunnable):
                 prog_last_emit = now
                 prog_last_done = done_count
             report_tool_progress(
-                message="Calculate descriptors",
+                message=self.progress_label,
                 done=done_count,
                 total=tot,
                 progress_state=self.progress_state,
@@ -571,14 +586,14 @@ class CalcWorker(QRunnable):
                 cancel_event=self.cancel_event,
                 progress_state=self.progress_state,
                 signals=self.signals,
-                progress_message="Calculate descriptors",
+                progress_message=self.progress_label,
                 progress_total=tot,
             )
             pka_cache_used = True
             from ..platform_support.tool_progress import report_tool_progress
 
             report_tool_progress(
-                message="Calculate descriptors",
+                message=self.progress_label,
                 done=0,
                 total=tot,
                 progress_state=self.progress_state,
@@ -732,6 +747,11 @@ class CalcWorker(QRunnable):
         pka_cache_used,
         tot,
     ) -> None:
+        from ..chem.murcko import apply_murcko_scaffold_counts
+
+        results = apply_murcko_scaffold_counts(
+            results, prepared, self.disp_headers, self.int_fns
+        )
         results, cancelled = _attach_name_lookup_columns(
             results,
             prepared=prepared,
@@ -743,7 +763,7 @@ class CalcWorker(QRunnable):
             signals=self.signals,
         )
         emit_partial_results_if_cancelled(
-            self.signals, "Calculate descriptors", len(results), tot, cancelled
+            self.signals, self.progress_label, len(results), tot, cancelled
         )
         self.signals.calculated.emit(
             results, _descriptor_output_headers(self.disp_headers, pka_cache_used)
