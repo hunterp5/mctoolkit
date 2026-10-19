@@ -53,6 +53,48 @@ def test_hover_controls_default_to_structure_only(qapp):  # noqa: ARG001
     controls._hover_combos[0].setCurrentText("SMILES")
     controls.reload_columns(["ID_HIDDEN", "Structure", "SMILES", "Name", "MW", "LogP"])
     assert controls.selected_columns() == ["SMILES"]
+    assert controls.apply_all_btn.text() == "Apply to All Plots"
+
+
+def test_apply_hover_to_all_plots(qapp):  # noqa: ARG001
+    from PyQt5.QtWidgets import QWidget
+
+    from molmanager.ui.plot_on_hover_controls import PlotOnHoverControls
+
+    headers = ["ID_HIDDEN", "Structure", "SMILES", "Name", "MW"]
+
+    class _Host(QWidget):
+        def __init__(self) -> None:
+            super().__init__()
+            self._hover_controls = PlotOnHoverControls(self)
+            self._plot_view = None
+            self._hover_controls.reload_columns(headers)
+
+    class _App:
+        def __init__(self, hosts: list[_Host]) -> None:
+            self._hosts = hosts
+
+        def _iter_active_plot_hosts(self) -> list[_Host]:
+            return list(self._hosts)
+
+    source = _Host()
+    other = _Host()
+    untouched = PlotOnHoverControls()
+    untouched.reload_columns(headers)
+    app = _App([source, other])
+    source.parent_app = app
+
+    source._hover_controls.hover_structure_cb.setChecked(False)
+    source._hover_controls.hover_persist_cb.setChecked(True)
+    source._hover_controls._hover_combos[0].setCurrentText("Name")
+    source._hover_controls._hover_combos[1].setCurrentText("MW")
+    source._hover_controls.apply_all_btn.click()
+
+    assert other._hover_controls.show_structure() is False
+    assert other._hover_controls.persist_on_select() is True
+    assert other._hover_controls.selected_columns() == ["Name", "MW"]
+    assert untouched.show_structure() is True
+    assert untouched.selected_columns() == []
 
 
 def test_hover_lines_and_structure_png(qapp):  # noqa: ARG001
