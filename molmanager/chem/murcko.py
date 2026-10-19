@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Bemis–Murcko scaffold columns for Calculate Descriptors.
+"""Bemis–Murcko scaffold columns for Chemistry → Substructure → Bemis–Murcko.
 
 The scaffold keeps rings and the linker atoms between them. The framework is
 that skeleton drawn as carbon with single bonds. Ring systems drop the linker
