@@ -1,0 +1,15 @@
+---
+description: Split mixed functional changes into per-file commits
+alwaysApply: true
+---
+
+# Per-file commits for mixed changes
+
+When the working tree contains more than one functional change, commit files separately when one message would describe unrelated work.
+
+- One functional change may stay in one commit when every file in that commit belongs to that change.
+- If a file belongs to a different change, give it its own commit: an imperative subject, then a short paragraph on why.
+- Do not bundle unrelated edits, such as potency, clustering, the sketcher, and theme work, into one commit because they are all uncommitted.
+- A file that itself mixes two changes still gets one commit, and that message covers both reasons for the file.
+- Leave out editor settings, temporary probes, and large sample data unless those paths were named.
+- Do not add `Co-authored-by` or any other agent attribution.
