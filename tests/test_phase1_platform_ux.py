@@ -56,7 +56,7 @@ def test_search_criterion_row_parents_controls(qapp) -> None:  # noqa: ARG001
     assert row.query_edit.parent() is row
     assert row.partial_cb.parent() is row
     assert row.case_cb.parent() is row
-    assert row.substructure_cb.parent() is row
+    assert not hasattr(row, "substructure_cb")
     not_idx = row.glue_combo.findData("not")
     assert not_idx >= 0
     row.glue_combo.setCurrentIndex(not_idx)
