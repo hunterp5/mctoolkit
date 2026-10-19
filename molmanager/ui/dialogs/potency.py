@@ -32,11 +32,12 @@ from PyQt5.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ...chem.potency import CONCENTRATION_UNITS, MEASURES, parse_concentration
+from ...chem.potency import CONCENTRATION_UNITS, DESIRED_UNITS, MEASURES, parse_concentration
 from ..qt_widget_utils import make_window_minimizable
 from ..strings import TOOL_POTENCY
 from .scope import selection_scope_checked
@@ -46,34 +47,78 @@ _SOURCE_COLUMN = "column"
 
 
 @dataclass(frozen=True)
+class AssayConcentration:
+    """One Cheng–Prusoff term: an assay concentration divided by Km or Kd."""
+
+    conc_constant: float | None
+    conc_column: str | None
+    conc_unit: str
+    ref_constant: float | None
+    ref_column: str | None
+    ref_unit: str
+
+
+@dataclass(frozen=True)
 class PotencyRequest:
-    """One apply pass: which column, which unit, and which columns to write."""
+    """One apply pass: source columns, desired unit, and optional Ki terms."""
 
     column: str
-    unit: str
+    unit_column: str
     measure: str
-    write_molar: bool
+    desired_unit: str
     write_p: bool
     write_ki: bool
-    substrate_unit: str
-    km_unit: str
-    substrate_constant: float | None
-    substrate_column: str | None
-    km_constant: float | None
-    km_column: str | None
+    assay_concentrations: tuple[AssayConcentration, ...]
+    mw_column: str | None
+
+
+class _AssayRow:
+    """Widgets for one assay concentration and its Km or Kd."""
+
+    def __init__(
+        self,
+        host: QWidget,
+        title: QLabel,
+        conc_mode: QComboBox,
+        conc_value: QLineEdit,
+        conc_column: QComboBox,
+        conc_unit: QComboBox,
+        ref_mode: QComboBox,
+        ref_value: QLineEdit,
+        ref_column: QComboBox,
+        ref_unit: QComboBox,
+    ):
+        self.host = host
+        self.title = title
+        self.conc_mode = conc_mode
+        self.conc_value = conc_value
+        self.conc_column = conc_column
+        self.conc_unit = conc_unit
+        self.ref_mode = ref_mode
+        self.ref_value = ref_value
+        self.ref_column = ref_column
+        self.ref_unit = ref_unit
 
 
 class PotencyStandardizationDialog(QDialog):
-    """Convert an activity column to molar and pActivity, optionally to Ki."""
+    """Convert an activity column to nM or uM and pActivity, optionally to Ki."""
 
     apply_requested = pyqtSignal()
 
-    def __init__(self, numeric_columns: list[str], selected_row_count: int = 0, parent=None):
+    def __init__(
+        self,
+        numeric_columns: list[str],
+        selected_row_count: int = 0,
+        parent=None,
+        unit_columns: list[str] | None = None,
+    ):
         super().__init__(parent)
         self.setWindowTitle(TOOL_POTENCY)
-        self.resize(520, 560)
+        self.resize(540, 480)
         self._have_selection = selected_row_count > 0
         self._columns = list(numeric_columns)
+        self._unit_columns = list(self._columns if unit_columns is None else unit_columns)
+        self._assay_rows: list[_AssayRow] = []
         self.pending_request: PotencyRequest | None = None
         root = QVBoxLayout(self)
         root.setSpacing(10)
@@ -81,13 +126,41 @@ class PotencyStandardizationDialog(QDialog):
         source = QGroupBox("Activity")
         form = QFormLayout(source)
         self.column_combo = QComboBox()
+        self.column_combo.setToolTip("Numeric activity values.")
         self.column_combo.addItems(self._columns)
         if not self._columns:
             self.column_combo.addItem("No numeric columns")
             self.column_combo.setEnabled(False)
-        form.addRow("Column:", self.column_combo)
-        self.unit_combo = _unit_combo("nM")
-        form.addRow("Unit:", self.unit_combo)
+        form.addRow("Data Column:", self.column_combo)
+        self.unit_column_combo = QComboBox()
+        self.unit_column_combo.setToolTip(
+            "Per-row unit. Amount units such as nM, uM, and mol/L convert directly. "
+            "Mass/volume units such as mg/mL, g/L, and kg/m^3 use molecular weight."
+        )
+        self.unit_column_combo.addItems(self._unit_columns)
+        if not self._unit_columns:
+            self.unit_column_combo.addItem("No columns")
+            self.unit_column_combo.setEnabled(False)
+        elif (
+            self.unit_column_combo.count() > 1
+            and self.unit_column_combo.currentText() == self.column_combo.currentText()
+        ):
+            self.unit_column_combo.setCurrentIndex(1)
+        form.addRow("Unit Column:", self.unit_column_combo)
+        self.mw_combo = QComboBox()
+        self.mw_combo.addItem("From structure", "")
+        for name in self._columns:
+            self.mw_combo.addItem(name, name)
+        preferred_mw = _preferred_mw_column(self._columns)
+        if preferred_mw:
+            index = self.mw_combo.findData(preferred_mw)
+            if index >= 0:
+                self.mw_combo.setCurrentIndex(index)
+        self.mw_combo.setToolTip(
+            "g/mol. Used when a row's unit is mass/volume. "
+            "From structure is the RDKit average molecular weight."
+        )
+        form.addRow("Molecular Weight:", self.mw_combo)
         self.measure_combo = QComboBox()
         for measure in MEASURES:
             self.measure_combo.addItem(measure, measure)
@@ -100,31 +173,44 @@ class PotencyStandardizationDialog(QDialog):
 
         outputs = QGroupBox("Write")
         out_layout = QVBoxLayout(outputs)
-        self.chk_molar = QCheckBox("Molar activity")
-        self.chk_molar.setChecked(True)
-        self.chk_molar.setToolTip("Activity in mol/L, for example IC50 (M).")
+        out_form = QFormLayout()
+        out_form.setContentsMargins(0, 0, 0, 0)
+        self.desired_unit = QComboBox()
+        for unit in DESIRED_UNITS:
+            self.desired_unit.addItem(unit, unit)
+        self.desired_unit.setToolTip(
+            "Activity is written in this unit. pActivity is still −log10 of the molar value."
+        )
+        out_form.addRow("Desired Unit:", self.desired_unit)
+        out_layout.addLayout(out_form)
         self.chk_p = QCheckBox("pActivity")
         self.chk_p.setChecked(True)
         self.chk_p.setToolTip("−log10 of the molar value, for example pIC50.")
-        out_layout.addWidget(self.chk_molar)
         out_layout.addWidget(self.chk_p)
         root.addWidget(outputs)
 
         self.cheng_box = QGroupBox("Cheng–Prusoff")
         cheng = QVBoxLayout(self.cheng_box)
         self.chk_cheng = QCheckBox("Convert IC50 to Ki")
-        self.chk_cheng.setToolTip("Ki = IC50 / (1 + [S]/Km), for competitive inhibition.")
+        self.chk_cheng.setToolTip(
+            "Ki = IC50 / (1 + Σ concentration / reference). "
+            "Add each assay concentration with its Km or Kd."
+        )
         self.chk_cheng.toggled.connect(self._sync_cheng_fields)
         cheng.addWidget(self.chk_cheng)
         self._cheng_fields = QWidget(self.cheng_box)
-        fields = QFormLayout(self._cheng_fields)
+        fields = QVBoxLayout(self._cheng_fields)
         fields.setContentsMargins(0, 0, 0, 0)
-        self.substrate_mode, self.substrate_value, self.substrate_column, self.substrate_unit = (
-            self._concentration_row(fields, "Substrate [S]:", allow_zero=True)
+        self._add_assay_btn = QPushButton("Add assay concentration")
+        self._add_assay_btn.setAutoDefault(False)
+        self._add_assay_btn.setToolTip(
+            "Add a concentration and its Km or Kd. Every pair is included in the Ki correction."
         )
-        self.km_mode, self.km_value, self.km_column, self.km_unit = self._concentration_row(
-            fields, "Km:", allow_zero=False
-        )
+        self._add_assay_btn.clicked.connect(self._add_assay_row)
+        fields.addWidget(self._add_assay_btn)
+        self._assay_layout = QVBoxLayout()
+        self._assay_layout.setContentsMargins(0, 0, 0, 0)
+        fields.addLayout(self._assay_layout)
         cheng.addWidget(self._cheng_fields)
         self._cheng_fields.setVisible(False)
         root.addWidget(self.cheng_box)
@@ -143,12 +229,6 @@ class PotencyStandardizationDialog(QDialog):
         scope_layout.addWidget(self.only_selected_cb)
         root.addWidget(scope_box)
 
-        note = QLabel(
-            "Values with <, >, or ~ are left blank. Zero and negative activities are left blank."
-        )
-        note.setWordWrap(True)
-        root.addWidget(note)
-
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         apply_btn = buttons.button(QDialogButtonBox.Ok)
         apply_btn.setText("Apply to Table")
@@ -165,48 +245,90 @@ class PotencyStandardizationDialog(QDialog):
         if not self._columns:
             QMessageBox.warning(self, TOOL_POTENCY, "Add a numeric activity column first.")
             return None
+        if not self._unit_columns:
+            QMessageBox.warning(
+                self, TOOL_POTENCY, "Add a column that contains the activity unit for each row."
+            )
+            return None
+        data_column = self.column_combo.currentText()
+        unit_column = self.unit_column_combo.currentText()
+        if data_column == unit_column:
+            QMessageBox.warning(
+                self, TOOL_POTENCY, "Choose a Unit Column that is not the Data Column."
+            )
+            return None
         measure = str(self.measure_combo.currentData())
         write_ki = self.chk_cheng.isChecked() and measure == "IC50"
-        if not self.chk_molar.isChecked() and not self.chk_p.isChecked() and not write_ki:
-            QMessageBox.warning(self, TOOL_POTENCY, "Choose at least one column to write.")
-            return None
-        substrate_constant = None
-        substrate_column = None
-        km_constant = None
-        km_column = None
+        assay_concentrations: tuple[AssayConcentration, ...] = ()
         if write_ki:
-            substrate_constant, substrate_column = self._read_concentration(
-                "Substrate concentration",
-                self.substrate_mode,
-                self.substrate_value,
-                self.substrate_column,
-                allow_zero=True,
-            )
-            if substrate_constant is None and substrate_column is None:
+            read = self._read_assay_rows()
+            if read is None:
                 return None
-            km_constant, km_column = self._read_concentration(
-                "Km",
-                self.km_mode,
-                self.km_value,
-                self.km_column,
-                allow_zero=False,
-            )
-            if km_constant is None and km_column is None:
-                return None
+            assay_concentrations = read
         return PotencyRequest(
-            column=self.column_combo.currentText(),
-            unit=str(self.unit_combo.currentData()),
+            column=data_column,
+            unit_column=unit_column,
             measure=measure,
-            write_molar=self.chk_molar.isChecked(),
+            desired_unit=str(self.desired_unit.currentData()),
             write_p=self.chk_p.isChecked(),
             write_ki=write_ki,
-            substrate_unit=str(self.substrate_unit.currentData()),
-            km_unit=str(self.km_unit.currentData()),
-            substrate_constant=substrate_constant,
-            substrate_column=substrate_column,
-            km_constant=km_constant,
-            km_column=km_column,
+            assay_concentrations=assay_concentrations,
+            mw_column=_mw_column(self.mw_combo.currentData()),
         )
+
+    def _add_assay_row(self) -> None:
+        host = QWidget(self._cheng_fields)
+        outer = QVBoxLayout(host)
+        outer.setContentsMargins(0, 8, 0, 0)
+        header = QHBoxLayout()
+        title = QLabel(host)
+        remove = QPushButton("Remove", host)
+        remove.setAutoDefault(False)
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(remove)
+        outer.addLayout(header)
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        conc_mode, conc_value, conc_column, conc_unit = self._concentration_row(
+            form,
+            "Concentration:",
+            allow_zero=True,
+        )
+        ref_mode, ref_value, ref_column, ref_unit = self._concentration_row(
+            form,
+            "Km or Kd:",
+            allow_zero=False,
+        )
+        outer.addLayout(form)
+        row = _AssayRow(
+            host,
+            title,
+            conc_mode,
+            conc_value,
+            conc_column,
+            conc_unit,
+            ref_mode,
+            ref_value,
+            ref_column,
+            ref_unit,
+        )
+        remove.clicked.connect(lambda _checked=False, row=row: self._remove_assay_row(row))
+        self._assay_rows.append(row)
+        self._assay_layout.addWidget(host)
+        self._renumber_assay_rows()
+
+    def _remove_assay_row(self, row: _AssayRow) -> None:
+        if row not in self._assay_rows:
+            return
+        self._assay_rows.remove(row)
+        self._assay_layout.removeWidget(row.host)
+        row.host.deleteLater()
+        self._renumber_assay_rows()
+
+    def _renumber_assay_rows(self) -> None:
+        for index, row in enumerate(self._assay_rows, start=1):
+            row.title.setText(f"Assay concentration {index}")
 
     def _concentration_row(
         self,
@@ -239,6 +361,46 @@ class PotencyStandardizationDialog(QDialog):
         form.addRow(label, row)
         return mode, value, column, unit
 
+    def _read_assay_rows(self) -> tuple[AssayConcentration, ...] | None:
+        if not self._assay_rows:
+            QMessageBox.warning(
+                self,
+                TOOL_POTENCY,
+                "Add an assay concentration and its Km or Kd.",
+            )
+            return None
+        terms: list[AssayConcentration] = []
+        for index, row in enumerate(self._assay_rows, start=1):
+            conc_constant, conc_column = self._read_concentration(
+                f"assay concentration {index}",
+                row.conc_mode,
+                row.conc_value,
+                row.conc_column,
+                allow_zero=True,
+            )
+            if conc_constant is None and conc_column is None:
+                return None
+            ref_constant, ref_column = self._read_concentration(
+                f"Km or Kd {index}",
+                row.ref_mode,
+                row.ref_value,
+                row.ref_column,
+                allow_zero=False,
+            )
+            if ref_constant is None and ref_column is None:
+                return None
+            terms.append(
+                AssayConcentration(
+                    conc_constant=conc_constant,
+                    conc_column=conc_column,
+                    conc_unit=str(row.conc_unit.currentData()),
+                    ref_constant=ref_constant,
+                    ref_column=ref_column,
+                    ref_unit=str(row.ref_unit.currentData()),
+                )
+            )
+        return tuple(terms)
+
     def _read_concentration(
         self,
         label: str,
@@ -269,12 +431,29 @@ class PotencyStandardizationDialog(QDialog):
         self._sync_cheng_fields()
 
     def _sync_cheng_fields(self) -> None:
-        self._cheng_fields.setVisible(self.chk_cheng.isChecked() and self.cheng_box.isEnabled())
+        visible = self.chk_cheng.isChecked() and self.cheng_box.isEnabled()
+        if visible and not self._assay_rows:
+            self._add_assay_row()
+        self._cheng_fields.setVisible(visible)
 
     def _on_apply_clicked(self) -> None:
         self.pending_request = self.request()
         if self.pending_request is not None:
             self.apply_requested.emit()
+
+
+def _preferred_mw_column(columns: list[str]) -> str | None:
+    aliases = {"mw", "molwt", "molweight", "molecularweight", "molecularwt", "exactmass"}
+    for name in columns:
+        key = "".join(char for char in name.lower() if char.isalnum())
+        if key in aliases:
+            return name
+    return None
+
+
+def _mw_column(value) -> str | None:
+    text = "" if value is None else str(value).strip()
+    return text or None
 
 
 def _unit_combo(default: str) -> QComboBox:
