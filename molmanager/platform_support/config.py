@@ -291,7 +291,11 @@ def load_config() -> MolManagerConfig:
         ingest_silent_model_append=_env_bool("MOLMANAGER_INGEST_SILENT_MODEL_APPEND", True),
         ingest_sqlite_incremental=_env_bool("MOLMANAGER_INGEST_SQLITE_INCREMENTAL", True),
         structure_render_lazy_after_ingest_min_rows=_env_int(
-            "MOLMANAGER_STRUCTURE_RENDER_LAZY_AFTER_INGEST", 200, lo=0, hi=10_000_000
+            # 0 = structure-column renders always go to the PNG store (decoded LRU stays capped).
+            "MOLMANAGER_STRUCTURE_RENDER_LAZY_AFTER_INGEST",
+            0,
+            lo=0,
+            hi=10_000_000,
         ),
         perf_metrics_enabled=_env_truthy("MOLMANAGER_PERF_METRICS"),
         perf_log_every=_env_int("MOLMANAGER_PERF_LOG_EVERY", 25, lo=1, hi=10_000),
@@ -302,7 +306,11 @@ def load_config() -> MolManagerConfig:
             "MOLMANAGER_AUTO_RENDER_2D_MAX_ROWS", 25_000, lo=0, hi=10_000_000
         ),
         structure_render_lazy_min_rows=_env_int(
-            "MOLMANAGER_STRUCTURE_RENDER_LAZY_MIN_ROWS", 5_000, lo=500, hi=10_000_000
+            # 0 = same PNG store for Chemistry → Render 2D, not one decoded QPixmap per row.
+            "MOLMANAGER_STRUCTURE_RENDER_LAZY_MIN_ROWS",
+            0,
+            lo=0,
+            hi=10_000_000,
         ),
         structure_render_pixmap_lru=_env_int(
             "MOLMANAGER_STRUCTURE_RENDER_PIXMAP_LRU", 384, lo=32, hi=4096
