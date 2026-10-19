@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Tools → Calculate Descriptors."""
+"""Chemistry → Calculate Descriptors."""
 
 from __future__ import annotations
 
@@ -56,8 +56,6 @@ class PropertyDialog(QDialog):
         self._have_selection = selected_row_count > 0
         self._alert_catalogs = ()
         self._alert_checks = {}
-        self._scaffold_columns = ()
-        self._scaffold_checks = {}
 
     def _build_property_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -79,8 +77,10 @@ class PropertyDialog(QDialog):
         root.addLayout(target_row)
 
         self.tabs = QTabWidget()
-        self.tabs.tabBar().setUsesScrollButtons(False)
-        self.tabs.tabBar().setExpanding(True)
+        bar = self.tabs.tabBar()
+        bar.setUsesScrollButtons(True)
+        bar.setExpanding(False)
+        bar.setDrawBase(True)
 
         self.cbs = {}
         for cat_name, items in iter_descriptor_tab_items():
@@ -99,7 +99,6 @@ class PropertyDialog(QDialog):
             scroll.setWidget(tab)
             self.tabs.addTab(scroll, cat_name)
         self._add_structural_alerts_tab()
-        self._add_scaffolds_tab()
 
         root.addWidget(self.tabs, 1)
         self._button_box = QDialogButtonBox(QDialogButtonBox.Ok)
@@ -146,29 +145,6 @@ class PropertyDialog(QDialog):
                 break
         self.tabs.insertTab(insert_at, scroll, "Structural Alerts")
 
-    def _add_scaffolds_tab(self) -> None:
-        """Bemis–Murcko scaffold, framework, ring systems, and a per-run count."""
-        from ...chem.murcko import SCAFFOLD_COLUMNS
-
-        self._scaffold_columns = SCAFFOLD_COLUMNS
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        tab = QWidget()
-        tab_lyt = QVBoxLayout(tab)
-        for header, _internal, tip in SCAFFOLD_COLUMNS:
-            cb = QCheckBox(header)
-            cb.setToolTip(tip)
-            tab_lyt.addWidget(cb)
-            self._scaffold_checks[header] = cb
-        tab_lyt.addStretch()
-        scroll.setWidget(tab)
-        insert_at = self.tabs.count()
-        for index in range(self.tabs.count()):
-            if self.tabs.tabText(index) == "Structural Alerts":
-                insert_at = index + 1
-                break
-        self.tabs.insertTab(insert_at, scroll, "Scaffolds")
-
     def get_selected(self):
         sel_disp, sel_int = [], []
         for d, (cb, i) in self.cbs.items():
@@ -180,10 +156,6 @@ class PropertyDialog(QDialog):
                 for header, internal in spec.column_pairs():
                     sel_disp.append(header)
                     sel_int.append(internal)
-        for header, internal, _tip in self._scaffold_columns:
-            if self._scaffold_checks[header].isChecked():
-                sel_disp.append(header)
-                sel_int.append(internal)
         return sel_disp, sel_int
 
     def only_selected_rows(self) -> bool:
