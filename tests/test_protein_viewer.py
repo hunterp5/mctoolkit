@@ -503,6 +503,13 @@ def test_build_protein_viewer_html_has_setters():
     assert "molmanagerDeleteComponents" in html
     assert "molmanagerZoomToComponents" in html
     assert "molmanagerSetResidueHighlight" in html
+    highlight_fn = html.split("window.molmanagerSetResidueHighlight", 1)[1].split(
+        "window.molmanagerSetPocket", 1
+    )[0]
+    assert "applySelectionFast" in highlight_fn
+    assert "applyAll" not in highlight_fn
+    assert "function applySelectionFast" in html
+    assert "molmanagerPrevHighlightSels" in html
     assert "molmanagerSetPocket" in html
     assert "molmanagerSetPocketSurface" in html
     assert "applyPocketSurface" in html
@@ -1020,6 +1027,83 @@ def test_manager_hide_select_delete(qapp, tmp_path, monkeypatch):  # noqa: ARG00
     ligand_item.setSelected(True)
     dlg.delete_selected()
     assert ligand_id not in {r.spec.component_id for r in dlg._rows}
+    dlg.close()
+
+
+def test_atom_pick_updates_highlight_without_restyling(qapp, tmp_path):  # noqa: ARG001
+    from molmanager.ui.protein_viewer import ProteinViewerDialog
+
+    path = tmp_path / "mini.pdb"
+    path.write_text(_MINI_PDB, encoding="utf-8")
+    dlg = ProteinViewerDialog()
+    dlg.load_structure_path(path)
+    calls: list[str] = []
+    dlg.viewer.apply_component_states = lambda *_a, **_k: calls.append("states")
+    dlg.viewer.set_hbonds = lambda *_a, **_k: calls.append("hbonds")
+
+    def _highlight(payload):
+        calls.append("highlight")
+        assert payload["sels"][0]["atom"] == "CA"
+        assert payload["selectedIds"]
+
+    dlg.viewer.set_residue_highlight = _highlight
+    dlg._on_atom_picked(
+        '{"chain":"A","resn":"MET","resi":"1","atom":"CA","elem":"C","serial":2,"model":0}'
+    )
+    assert calls == ["highlight"]
+    assert dlg._residue_highlight[0]["atom"] == "CA"
+    assert dlg._act_undo.isEnabled() is False
+    dlg.viewer.set_residue_highlight = lambda payload: calls.append("residue")
+    dlg._on_atom_picked(
+        '{"chain":"A","resn":"MET","resi":"1","atom":"N","elem":"N","serial":1,'
+        '"doubleClick":true,"model":0}'
+    )
+    assert "states" not in calls
+    assert dlg._residue_highlight[0].get("atom") in (None, "")
+    dlg.close()
+
+
+def test_render_changes_undo_and_redo(qapp, tmp_path):  # noqa: ARG001
+    from molmanager.ui.protein_viewer import ProteinViewerDialog
+
+    path = tmp_path / "mini.pdb"
+    path.write_text(_MINI_PDB, encoding="utf-8")
+    dlg = ProteinViewerDialog()
+    dlg.load_structure_path(path)
+    assert dlg._act_undo.isEnabled() is False
+    dlg._on_render_style_chosen("polymer", "stick")
+    dlg._on_render_color_chosen("polymer", "cyan")
+    dlg._set_hydrogen_mode("none", record=True)
+    polymer = next(r for r in dlg._rows if r.spec.kind == "polymer")
+    assert polymer.style == "stick"
+    assert polymer.color_scheme == "cyan"
+    assert dlg._hydrogen_mode() == "none"
+    assert dlg._act_undo.isEnabled() is True
+
+    dlg.undo_manager_delete()
+    assert dlg._hydrogen_mode() == "polar"
+    assert next(r for r in dlg._rows if r.spec.kind == "polymer").color_scheme == "cyan"
+    dlg.undo_manager_delete()
+    assert next(r for r in dlg._rows if r.spec.kind == "polymer").color_scheme == "default"
+    assert next(r for r in dlg._rows if r.spec.kind == "polymer").style == "stick"
+    dlg.undo_manager_delete()
+    assert next(r for r in dlg._rows if r.spec.kind == "polymer").style == "cartoon"
+    assert dlg._act_undo.isEnabled() is False
+    assert dlg._act_redo.isEnabled() is True
+    assert dlg._protein_style_actions["cartoon"].isChecked()
+
+    dlg.redo_manager_delete()
+    assert next(r for r in dlg._rows if r.spec.kind == "polymer").style == "stick"
+    dlg.redo_manager_delete()
+    assert next(r for r in dlg._rows if r.spec.kind == "polymer").color_scheme == "cyan"
+    dlg.redo_manager_delete()
+    assert dlg._hydrogen_mode() == "none"
+    ligand_id = next(r.spec.component_id for r in dlg._rows if r.spec.kind == "ligand")
+    dlg._on_manager_selection([ligand_id])
+    dlg._set_selected_visible(False)
+    assert next(r for r in dlg._rows if r.spec.component_id == ligand_id).visible is False
+    dlg.undo_manager_delete()
+    assert next(r for r in dlg._rows if r.spec.component_id == ligand_id).visible is True
     dlg.close()
 
 
