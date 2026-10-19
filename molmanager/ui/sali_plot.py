@@ -53,8 +53,15 @@ def build_sali_figure(
     plot_title: str = "",
     xaxis_title: str = "",
     yaxis_title: str = "",
+    selectivity: bool = False,
 ) -> go.Figure:
     """Scatter of fingerprint similarity vs ``|Δactivity|``, colored by SALI by default."""
+    if selectivity:
+        default_y = "|Δselectivity|"
+    elif activity_column:
+        default_y = f"|Δ{activity_column}|"
+    else:
+        default_y = "|Δactivity|"
     xs = [float(p.similarity) for p in points]
     ys = [float(p.abs_delta) for p in points]
     custom = [[int(p.oid_a), int(p.oid_b), int(p.pair_index)] for p in points]
@@ -112,7 +119,7 @@ def build_sali_figure(
     fig.update_layout(
         title=resolve_plot_title_text(plot_title, ""),
         xaxis_title=resolve_plot_title_text(xaxis_title, ""),
-        yaxis_title=resolve_plot_title_text(yaxis_title, ""),
+        yaxis_title=resolve_plot_title_text(yaxis_title, default_y),
         template="plotly_white",
         dragmode="lasso",
         clickmode="event+select",
