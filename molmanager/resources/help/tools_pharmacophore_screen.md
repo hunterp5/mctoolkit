@@ -11,7 +11,7 @@ Given a pharmacophore (donors, acceptors, aromatic centroids, …) from Protein 
 Use after you have:
 
 1. A pharmacophore JSON from **Protein Viewer → Tools → Pharmacophore → Editor** (**From ligand** or placed sites, then **Save…**).
-2. Packed 3D ensembles on the table (**Tools → Conformations → Generate**, or `superpose` / `poses`).
+2. Packed 3D ensembles on the table (**Chemistry → Conformations → Generate**, or `superpose` / `poses`).
 
 This is not Gobbi 2D pharmacophore fingerprints (those ignore ensembles and the crystal JSON). **Exclusion** volumes are protein-frame and are skipped here.
 
@@ -36,7 +36,7 @@ Non-hits stay in the table (`Match` = 0). Rows with no 3D ensemble are `N/A`. Fi
 
 1. In Protein Viewer **Tools → Pharmacophore → Editor**, **From ligand** (or place sites) on the crystal ligand; **Save…** the pharmacophore.
 2. Generate conformers for the compound table.
-3. **Tools → Conformations → Screen Pharmacophore…** (or **Pharmacophore → Screen Table…**).
+3. **Chemistry → Conformations → Screen Pharmacophore…** (or **Pharmacophore → Screen Table…**).
 4. Sort or filter on `pharmaMatch` / `pharmaScore`. Inspect `pharmaConf` in the packed ensemble viewer.
 
 ## Use cases
