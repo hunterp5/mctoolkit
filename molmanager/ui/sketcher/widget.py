@@ -84,6 +84,7 @@ from .sketch_reactions import (
     plus_sign_positions,
     snap_arrow_end,
 )
+from .rgroups import is_rgroup_node, rgroup_element, rgroup_label_from_element
 from .wildcards import (
     WildcardElementsDialog,
     _is_wildcard_node,
@@ -584,6 +585,8 @@ class SketchWidget(
         ab_cap = contracted_max_bonds(n.get("abbrev"))
         if ab_cap is not None:
             return int(ab_cap)
+        if is_rgroup_node(n):
+            return 1
         if _is_wildcard_node(n):
             els = _normalize_wildcard_elements(n)
             return max(self._max_bond_order_sum(el, fc) for el in els)
@@ -877,6 +880,8 @@ class SketchWidget(
     # ---------- Valence checks ----------
     def _valence_list_for_element(self, element: str) -> list[int]:
         """RDKit allowed valences for *element* (ascending), or empty if unknown."""
+        if rgroup_label_from_element(element) is not None:
+            return []
         if element in ("H", "D", "T"):
             return [1]
         try:
@@ -890,6 +895,8 @@ class SketchWidget(
 
     def _default_valence(self, element: str) -> int:
         """Common / lowest preferred valence (e.g. S=2), not the hypervalent maximum."""
+        if rgroup_label_from_element(element) is not None:
+            return 0
         if element in ("H", "D", "T"):
             return 1
         try:
@@ -920,6 +927,8 @@ class SketchWidget(
         phosphates (P=5/7) are legal. Do **not** use this for implicit-H counts —
         see ``_target_valence_for_implicit_h``.
         """
+        if rgroup_label_from_element(element) is not None:
+            return 1
         if element in ("H", "D", "T"):
             return 1
         vlist = self._valence_list_for_element(element)
@@ -1824,7 +1833,7 @@ class SketchWidget(
         txt, ok = QInputDialog.getText(
             self,
             "Edit Atom",
-            "Element, contracted group, or * (e.g. C, N, CF3, CF2H, SO2, Ph, OMe, *):",
+            "Element, contracted group, R-group, or * (e.g. C, N, CF3, Ph, R1, R2, *):",
             text=hint,
         )
         if not ok:
@@ -1834,7 +1843,7 @@ class SketchWidget(
             QMessageBox.warning(
                 self,
                 "Edit Atom",
-                "Unknown symbol. Use an element, a contracted label (CF3, Ph, OMe, …), or * for wildcard.",
+                "Unknown symbol. Use an element, a contracted label (CF3, Ph, OMe, …), R1, R2, or *.",
             )
             return
         new_el, wels, abbrev = parsed
@@ -2839,3 +2848,47 @@ class SketchWidget(
         self.nodes.append(node)
         self.bonds.append(_bond_make(atom_id, nid, order, pst))
         self.update()
+
+    def place_rgroup_on(self, atom_id: int, element: str) -> None:
+        """Attach ``R1`` or ``R2`` to *atom_id*, or renumber an R atom that was clicked."""
+        label = rgroup_label_from_element(element)
+        if label is None:
+            return
+        element = rgroup_element(label)
+        base = next((n for n in self.nodes if n["id"] == atom_id), None)
+        if base is None:
+            return
+        if is_rgroup_node(base):
+            self._mutate_atom_element(base, element, None)
+            return
+        for bond in self.bonds:
+            a, b, _order, _stereo = _bond_unpack(bond)
+            other_id = b if a == atom_id else a if b == atom_id else None
+            if other_id is None:
+                continue
+            other = next((n for n in self.nodes if n["id"] == other_id), None)
+            if (
+                other is not None
+                and rgroup_label_from_element(str(other.get("element") or "")) == label
+            ):
+                return
+        bx, by = base["pos"].x(), base["pos"].y()
+        ux, uy = self._compute_extension_vector(
+            atom_id,
+            snap=bool(getattr(self, "snap_geometry", True)),
+            new_bond_order=1,
+        )
+        med = float(getattr(self, "_median_bond_length_px", None) or SKETCH_MEDIAN_BOND_PX)
+        bond_length = max(int(round(med)), 20)
+        nid = self.next_id
+        self.next_id += 1
+        node = {
+            "id": nid,
+            "pos": QPoint(int(bx + ux * bond_length), int(by + uy * bond_length)),
+            "element": element,
+        }
+        bond = _bond_make(atom_id, nid, 1, 0)
+        self.nodes.append(node)
+        self.bonds.append(bond)
+        self._push_undo("add_bonded_node", (node, bond))
+        self._after_sketch_edit()
