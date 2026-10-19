@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
     QFormLayout,
+    QGroupBox,
     QSpinBox,
     QVBoxLayout,
 )
@@ -35,6 +36,41 @@ from .dimred_panel import DimensionReductionPanel
 
 if TYPE_CHECKING:
     from ..main_window import ChemistryWorkspaceWindow
+
+
+def _plain_form() -> QFormLayout:
+    """Form whose margins come from the group box around it."""
+    form = QFormLayout()
+    form.setContentsMargins(0, 0, 0, 0)
+    return form
+
+
+def _max_points_spin() -> QSpinBox:
+    """Row cap shared by t-SNE, UMAP, and SOM."""
+    from ...platform_support.config import load_config
+
+    spin = QSpinBox()
+    cap = int(load_config().memory_guard_dimred_max_points)
+    spin.setRange(100, cap)
+    spin.setValue(min(2500, cap))
+    spin.setToolTip("Subsample to this many rows when the table is larger (cap 25,000).")
+    return spin
+
+
+def _seed_spin() -> QSpinBox:
+    spin = QSpinBox()
+    spin.setRange(0, 999_999)
+    spin.setValue(42)
+    return spin
+
+
+def _points_group(*rows: tuple[str, QSpinBox | QDoubleSpinBox]) -> QGroupBox:
+    """Sampling and draw knobs that are not the embedding algorithm itself."""
+    box = QGroupBox("Points")
+    form = QFormLayout(box)
+    for label, widget in rows:
+        form.addRow(label, widget)
+    return box
 
 
 class DimensionReductionDialog(QDialog):
@@ -77,7 +113,8 @@ class PCAPlotPanel(DimensionReductionPanel):
     def __init__(self, parent: ChemistryWorkspaceWindow | None = None):
         super().__init__(parent, window_title="Principal Component Analysis", method="pca")
 
-    def _build_method_options(self, form: QFormLayout) -> None:
+    def _build_method_options(self, layout: QVBoxLayout) -> None:
+        form = _plain_form()
         self.pca_components = QSpinBox()
         self.pca_components.setRange(2, 50)
         self.pca_components.setValue(2)
@@ -86,6 +123,7 @@ class PCAPlotPanel(DimensionReductionPanel):
             "depending on Target Dimensions."
         )
         form.addRow("Components:", self.pca_components)
+        layout.addLayout(form)
 
     def _on_target_dimensions_changed(self, is_3d: bool) -> None:
         self.pca_components.setMinimum(3 if is_3d else 2)
@@ -119,7 +157,8 @@ class TSNEPlotPanel(DimensionReductionPanel):
     def __init__(self, parent: ChemistryWorkspaceWindow | None = None):
         super().__init__(parent, window_title="t-SNE Visualization", method="tsne")
 
-    def _build_method_options(self, form: QFormLayout) -> None:
+    def _build_method_options(self, layout: QVBoxLayout) -> None:
+        form = _plain_form()
         self.tsne_perplexity = QDoubleSpinBox()
         self.tsne_perplexity.setRange(5.0, 500.0)
         self.tsne_perplexity.setDecimals(1)
@@ -137,22 +176,16 @@ class TSNEPlotPanel(DimensionReductionPanel):
         self.tsne_max_iter.setSingleStep(250)
         self.tsne_max_iter.setValue(1000)
         form.addRow("Max iterations:", self.tsne_max_iter)
+        layout.addLayout(form)
 
-        self.tsne_max_points = QSpinBox()
-        from ...platform_support.config import load_config
-
-        dimred_cap = int(load_config().memory_guard_dimred_max_points)
-        self.tsne_max_points.setRange(100, dimred_cap)
-        self.tsne_max_points.setValue(min(2500, dimred_cap))
-        self.tsne_max_points.setToolTip(
-            "Subsample to this many rows when the table is larger (cap 25,000)."
+        self.tsne_max_points = _max_points_spin()
+        self.tsne_seed = _seed_spin()
+        layout.addWidget(
+            _points_group(
+                ("Max points:", self.tsne_max_points),
+                ("Random seed:", self.tsne_seed),
+            )
         )
-        form.addRow("Max points:", self.tsne_max_points)
-
-        self.tsne_seed = QSpinBox()
-        self.tsne_seed.setRange(0, 999_999)
-        self.tsne_seed.setValue(42)
-        form.addRow("Random seed:", self.tsne_seed)
 
     def _method_params(self) -> dict:
         return {
@@ -194,14 +227,15 @@ class UMAPPlotPanel(DimensionReductionPanel):
     def __init__(self, parent: ChemistryWorkspaceWindow | None = None):
         super().__init__(parent, window_title="UMAP Visualization", method="umap")
 
-    def _build_method_options(self, form: QFormLayout) -> None:
+    def _build_method_options(self, layout: QVBoxLayout) -> None:
+        form = _plain_form()
         self.umap_neighbors = QSpinBox()
         self.umap_neighbors.setRange(2, 200)
         self.umap_neighbors.setValue(15)
         self.umap_neighbors.setToolTip(
             "Local neighborhood size; lower values emphasize fine structure, higher values global layout."
         )
-        form.addRow("n_neighbors:", self.umap_neighbors)
+        form.addRow("Neighbors:", self.umap_neighbors)
 
         self.umap_min_dist = QDoubleSpinBox()
         self.umap_min_dist.setRange(0.0, 0.99)
@@ -211,23 +245,17 @@ class UMAPPlotPanel(DimensionReductionPanel):
         self.umap_min_dist.setToolTip(
             "Minimum spacing between embedded points (0 = tight clusters, ~1 = spread out)."
         )
-        form.addRow("min_dist:", self.umap_min_dist)
+        form.addRow("Min distance:", self.umap_min_dist)
+        layout.addLayout(form)
 
-        self.umap_max_points = QSpinBox()
-        from ...platform_support.config import load_config
-
-        dimred_cap = int(load_config().memory_guard_dimred_max_points)
-        self.umap_max_points.setRange(100, dimred_cap)
-        self.umap_max_points.setValue(min(2500, dimred_cap))
-        self.umap_max_points.setToolTip(
-            "Subsample to this many rows when the table is larger (cap 25,000)."
+        self.umap_max_points = _max_points_spin()
+        self.umap_seed = _seed_spin()
+        layout.addWidget(
+            _points_group(
+                ("Max points:", self.umap_max_points),
+                ("Random seed:", self.umap_seed),
+            )
         )
-        form.addRow("Max points:", self.umap_max_points)
-
-        self.umap_seed = QSpinBox()
-        self.umap_seed.setRange(0, 999_999)
-        self.umap_seed.setValue(42)
-        form.addRow("Random seed:", self.umap_seed)
 
     def _method_params(self) -> dict:
         return {
@@ -266,18 +294,16 @@ class SOMPlotPanel(DimensionReductionPanel):
     def __init__(self, parent: ChemistryWorkspaceWindow | None = None):
         super().__init__(parent, window_title="Self-Organizing Map", method="som")
 
-    def _build_method_options(self, form: QFormLayout) -> None:
+    def _build_method_options(self, layout: QVBoxLayout) -> None:
         self.som_grid_w = QSpinBox()
         self.som_grid_w.setRange(2, 40)
         self.som_grid_w.setValue(10)
         self.som_grid_w.setToolTip("Number of map columns (X). Nodes = width × height (max 2,500).")
-        form.addRow("Map width:", self.som_grid_w)
 
         self.som_grid_h = QSpinBox()
         self.som_grid_h.setRange(2, 40)
         self.som_grid_h.setValue(10)
         self.som_grid_h.setToolTip("Number of map rows (Y). Nodes = width × height (max 2,500).")
-        form.addRow("Map height:", self.som_grid_h)
 
         self.som_grid_d = QSpinBox()
         self.som_grid_d.setRange(2, 20)
@@ -286,13 +312,18 @@ class SOMPlotPanel(DimensionReductionPanel):
             "Number of map layers (Z) when Target Dimensions is 3D. "
             "Nodes = width × height × depth (max 2,500)."
         )
-        form.addRow("Map depth:", self.som_grid_d)
+
+        map_box = QGroupBox("Map")
+        map_form = QFormLayout(map_box)
+        map_form.addRow("Width:", self.som_grid_w)
+        map_form.addRow("Height:", self.som_grid_h)
+        map_form.addRow("Depth:", self.som_grid_d)
+        layout.addWidget(map_box)
 
         self.som_epochs = QSpinBox()
         self.som_epochs.setRange(5, 500)
         self.som_epochs.setValue(50)
         self.som_epochs.setToolTip("Training epochs; each epoch presents every sample once.")
-        form.addRow("Epochs:", self.som_epochs)
 
         self.som_lr = QDoubleSpinBox()
         self.som_lr.setRange(0.01, 1.0)
@@ -300,7 +331,6 @@ class SOMPlotPanel(DimensionReductionPanel):
         self.som_lr.setSingleStep(0.05)
         self.som_lr.setValue(0.5)
         self.som_lr.setToolTip("Initial learning rate (decays linearly to near zero).")
-        form.addRow("Learning rate:", self.som_lr)
 
         self.som_sigma = QDoubleSpinBox()
         self.som_sigma.setRange(0.0, 40.0)
@@ -311,7 +341,13 @@ class SOMPlotPanel(DimensionReductionPanel):
         self.som_sigma.setToolTip(
             "Initial neighborhood radius in node units. 0 = half the longer map side."
         )
-        form.addRow("Sigma:", self.som_sigma)
+
+        training = QGroupBox("Training")
+        training_form = QFormLayout(training)
+        training_form.addRow("Epochs:", self.som_epochs)
+        training_form.addRow("Learning rate:", self.som_lr)
+        training_form.addRow("Sigma:", self.som_sigma)
+        layout.addWidget(training)
 
         self.som_jitter = QDoubleSpinBox()
         self.som_jitter.setRange(0.0, 0.5)
@@ -321,23 +357,15 @@ class SOMPlotPanel(DimensionReductionPanel):
         self.som_jitter.setToolTip(
             "Jitter BMU coordinates so compounds on the same node do not stack exactly."
         )
-        form.addRow("Point jitter:", self.som_jitter)
-
-        self.som_max_points = QSpinBox()
-        from ...platform_support.config import load_config
-
-        dimred_cap = int(load_config().memory_guard_dimred_max_points)
-        self.som_max_points.setRange(100, dimred_cap)
-        self.som_max_points.setValue(min(2500, dimred_cap))
-        self.som_max_points.setToolTip(
-            "Subsample to this many rows when the table is larger (cap 25,000)."
+        self.som_max_points = _max_points_spin()
+        self.som_seed = _seed_spin()
+        layout.addWidget(
+            _points_group(
+                ("Jitter:", self.som_jitter),
+                ("Max points:", self.som_max_points),
+                ("Random seed:", self.som_seed),
+            )
         )
-        form.addRow("Max points:", self.som_max_points)
-
-        self.som_seed = QSpinBox()
-        self.som_seed.setRange(0, 999_999)
-        self.som_seed.setValue(42)
-        form.addRow("Random seed:", self.som_seed)
 
     def _on_target_dimensions_changed(self, is_3d: bool) -> None:
         self.som_grid_d.setEnabled(is_3d)
