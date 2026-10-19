@@ -282,7 +282,10 @@ def test_qsar_menu_action_opens_with_triggered_bool(qapp) -> None:  # noqa: ARG0
         assert w._qsar_dialog is not None
         mb = w.menuBar()
         data = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Data")
-        act = next(a for a in data.actions() if a.text().replace("&", "").startswith("QSAR"))
+        qsar = next(a.menu() for a in data.actions() if a.text().replace("&", "") == "QSAR")
+        act = next(
+            a for a in qsar.actions() if a.text().replace("&", "").startswith("Generate Model")
+        )
         act.trigger()
         assert w._qsar_dialog is not None
     finally:
