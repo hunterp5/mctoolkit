@@ -69,6 +69,8 @@ class WorkerSignals(QObject):
     superpose_structures_finished = pyqtSignal(object)
     custom_calc = pyqtSignal(list)
     export_finished = pyqtSignal(str)
+    # Common core: user-facing failure message. Success uses ``calculated``.
+    common_core_failed = pyqtSignal(str)
     # Core-based decomposition: list of (oid, {header: value}), then ordered new column names
     rgroup_decomp_finished = pyqtSignal(list, list)
     rgroup_decomp_failed = pyqtSignal(str)
