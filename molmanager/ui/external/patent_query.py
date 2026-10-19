@@ -174,9 +174,6 @@ class PatentQueryDialog(QDialog):
         self.btn_cancel.clicked.connect(self._cancel_query)
         bottom.addWidget(self.btn_cancel)
         bottom.addStretch()
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.reject)
-        bottom.addWidget(close_btn)
         root.addLayout(bottom)
 
         self._signals.finished.connect(self._on_finished)
