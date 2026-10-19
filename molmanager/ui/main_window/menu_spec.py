@@ -615,6 +615,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             ),
             tooltips_visible=True,
         ),
+        action(
+            "Interaction Fingerprint…",
+            "open_interaction_fingerprint",
+            tooltip=(
+                "Type residue contacts for each stored pose and write an interaction "
+                "fingerprint plus the contacted residue list."
+            ),
+        ),
         tooltips_visible=True,
     ),
     submenu(
@@ -651,31 +659,43 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 tooltips_visible=True,
             ),
             action("Statistics…", "open_data_analysis", hotkey="data.analyze_table"),
-            submenu(
-                "&Lists",
-                action(
-                    "Add Selected to List…",
-                    "add_selected_to_list",
-                    tooltip="Save the selected rows as a named list. An existing name adds to that list.",
-                    attr="_act_add_selected_to_list",
-                ),
-                MenuItem(kind=KIND_SEPARATOR, attr="_act_lists_footer_separator"),
-                action(
-                    "Manage Lists…",
-                    "manage_row_lists",
-                    tooltip="Delete named row lists.",
-                    attr="_act_manage_lists",
-                ),
-                attr="_lists_menu",
-                about_to_show="_rebuild_lists_menu",
-                tooltips_visible=True,
+        ),
+        submenu(
+            "&Lists",
+            action(
+                "Add Selected to List…",
+                "add_selected_to_list",
+                hotkey="data.add_to_list",
+                tooltip="Save the selected rows as a named list (Ctrl+L). An existing name adds to that list.",
+                attr="_act_add_selected_to_list",
             ),
+            MenuItem(kind=KIND_SEPARATOR, attr="_act_lists_footer_separator"),
+            action(
+                "Manage Lists…",
+                "manage_row_lists",
+                tooltip="Delete named row lists.",
+                attr="_act_manage_lists",
+            ),
+            attr="_lists_menu",
+            about_to_show="_rebuild_lists_menu",
+            tooltips_visible=True,
         ),
         SEPARATOR,
-        action(
-            "QSAR…",
-            "open_qsar_dialog",
-            tooltip="Train regression or classification models on activity vs descriptors or fingerprints.",
+        submenu(
+            "&QSAR",
+            action(
+                "Generate Model…",
+                "open_qsar_dialog",
+                tooltip="Train regression or classification models on activity vs descriptors or fingerprints.",
+            ),
+            action(
+                "AutoQSAR…",
+                "open_auto_qsar_dialog",
+                tooltip=(
+                    "Search descriptors and models for an activity column, then write predictions."
+                ),
+            ),
+            tooltips_visible=True,
         ),
         action(
             "MPO Scoring…",
@@ -699,8 +719,9 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             "SALI…",
             "open_sali_dialog",
             tooltip=(
-                "Plot fingerprint similarity vs |Δactivity| colored by SALI "
-                "(|Δ| / (1 − similarity)). Click a point to select the pair."
+                "Plot fingerprint similarity vs |Δactivity| or |Δselectivity| colored by SALI "
+                "(|Δ| / (1 − similarity)). Selectivity is on-target minus off-target "
+                "on a pIC50 or pKi scale."
             ),
         ),
         action(
@@ -711,14 +732,22 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "ranked by support and activity effect."
             ),
         ),
-        action(
-            "Free-&Wilson…",
-            "open_free_wilson_dialog",
-            tooltip=(
-                "Fit an additive Free-Wilson model on a shared core and list predicted "
-                "activities for missing substituent combinations."
+            action(
+                "Free-&Wilson…",
+                "open_free_wilson_dialog",
+                tooltip=(
+                    "Fit an additive Free-Wilson model on a shared core and list predicted "
+                    "activities for missing substituent combinations."
+                ),
             ),
-        ),
+            action(
+                "SAR Matrix…",
+                "open_sar_matrix_dialog",
+                tooltip=(
+                    "Pivot R-group columns into an R1 × R2 grid colored by activity. "
+                    "A third substituent becomes pages. Click a cell to select its rows."
+                ),
+            ),
         SEPARATOR,
         submenu(
             "&MedChem Plots",
