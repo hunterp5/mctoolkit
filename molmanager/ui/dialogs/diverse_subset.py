@@ -34,7 +34,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-from ...chem.rdkit_fingerprints import SIMILARITY_FP_TYPE_LABELS, descriptor_onbits_column_name
+from ...chem.rdkit_fingerprints import SIMILARITY_FP_TYPE_LABELS, descriptor_onbits_column_aliases
 from ...chem.structure_payload import mols_from_payloads
 from ...platform_support.config import load_config
 from ...platform_support.memory_guards import check_diverse_subset_workload
@@ -157,8 +157,11 @@ class DiverseSubsetDialog(QDialog):
         app = self.parent_app
         if app is None:
             return None
-        col = descriptor_onbits_column_name(fp_choice)
-        return col if col in app.headers else None
+        headers = app.headers
+        for col in descriptor_onbits_column_aliases(fp_choice):
+            if col in headers:
+                return col
+        return None
 
     def _unique_column_name(self, base: str) -> str:
         name = (base or "").strip() or _DEFAULT_COLUMN
