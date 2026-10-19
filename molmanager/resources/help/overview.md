@@ -21,10 +21,10 @@ Works on the current session table (structures plus property columns). Most tool
 - **Tools** - prepare structures, fingerprints, docking helpers, design tools, predictors (pKa, permeability, SOM), random generators, and **Query Database** (SQL, PubChem, ChEMBL, patents).
 - **Protein** - 3D structure viewer for PDB, mmCIF, and related crystallographic files, plus **Sequence** for MAFFT multiple-sequence alignment.
 - **Data** - statistics, plotter, MedChem plots, dimensionality reduction, QSAR, MPO, filters, and table search.
-- **Settings** - theme, fonts, hotkeys, WSL executable for Linux-only tools.
+- **Settings** - theme, fonts, hotkeys, WSL executable for Linux-only tools, and **Help**.
 - **Layout** - rearrange or restore workspace panes.
 - **Log** - inspect running/queued background jobs and the session log (tool output, status history, warnings).
-- **Help** - User Guide and Citations. F1 also opens the guide.
+- **Settings → Help** - User Guide and Citations. F1 also opens the guide.
 
 ## Workflow
 
