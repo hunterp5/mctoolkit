@@ -27,16 +27,6 @@ from ..chem.structure_2d_depiction import render_molecule_png
 HOVER_THUMB_WIDTH = 140
 HOVER_THUMB_HEIGHT = 116
 
-_DEFAULT_HOVER_COLUMNS = (
-    ("SMILES", "Name", "CompoundName", "ID"),
-    ("Name", "CompoundName", "CAS", "InChIKey"),
-    ("MW", "MolWt", "cLogP", "LogP", "TPSA"),
-)
-
-
-def default_hover_column_preferences() -> tuple[tuple[str, ...], ...]:
-    return _DEFAULT_HOVER_COLUMNS
-
 
 def hover_column_choices(headers: list[str] | None) -> list[str]:
     """Data columns suitable for hover labels (exclude id/structure)."""
@@ -49,23 +39,9 @@ def hover_column_choices(headers: list[str] | None) -> list[str]:
 
 
 def resolve_default_hover_columns(headers: list[str] | None, *, count: int = 3) -> list[str]:
-    """Pick up to *count* default hover columns from table headers using preferences."""
-    choices = hover_column_choices(headers)
-    if not choices:
-        return []
-    chosen: list[str] = []
-    used: set[str] = set()
-    prefs = default_hover_column_preferences()
-    for i in range(max(0, int(count))):
-        prefer = prefs[i] if i < len(prefs) else ()
-        pick = next((h for h in prefer if h in choices and h not in used), None)
-        if pick is None:
-            pick = next((h for h in choices if h not in used), None)
-        if pick is None:
-            break
-        chosen.append(pick)
-        used.add(pick)
-    return chosen
+    """No columns are selected by default, so the hover card shows the structure only."""
+    del headers, count
+    return []
 
 
 def cell_text_for_oid(app: Any, oid: int, header: str) -> str:
