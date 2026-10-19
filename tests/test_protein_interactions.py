@@ -208,9 +208,7 @@ def test_contacts_from_ifp_picks_shortest_and_skips_vdw() -> None:
     assert set(shown) == {"donor"}
     assert shown["donor"]["atom"] == "N1"
     assert shown["donor"]["resn"] == "LIG"
-    assert payload["showResidues"] == [
-        {"chain": "A", "resn": "ASP", "resi": "10", "icode": ""}
-    ]
+    assert payload["showResidues"] == [{"chain": "A", "resn": "ASP", "resi": "10", "icode": ""}]
 
 
 def test_hbond_show_atoms_follow_donor_side() -> None:
