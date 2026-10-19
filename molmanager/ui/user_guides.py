@@ -409,6 +409,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Search descriptors and models for an activity column (Data → QSAR).",
             ),
             _e(
+                "data_comsia",
+                "CoMSIA",
+                "CoMSIA",
+                "Gaussian 3D fields and PLS on aligned poses (Data → QSAR).",
+            ),
+            _e(
                 "data_free_wilson",
                 "Free-Wilson",
                 "Free-Wilson",

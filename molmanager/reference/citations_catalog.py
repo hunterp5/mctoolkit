@@ -825,6 +825,28 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                     "occurrence-weighted coefficients sum to zero. Implemented in MolManager."
                 ),
             ),
+            _t(
+                "comsia",
+                "CoMSIA",
+                "Data → QSAR → CoMSIA (Gaussian fields and PLS on aligned poses).",
+                (
+                    (
+                        "Klebe, G.; Abraham, U.; Mietzner, T. Molecular Similarity Indices in a "
+                        "Comparative Analysis (CoMSIA) of Drug Molecules to Correlate and Predict "
+                        "Their Biological Activity. J. Med. Chem. 1994, 37, 4130–4146.",
+                        "https://doi.org/10.1021/jm00050a010",
+                    ),
+                ),
+                LIC_GPL3,
+                notes=(
+                    "Implemented in MolManager. Steric weights are the cube of the van der Waals "
+                    "radius, electrostatic weights are Gasteiger charges, and hydrophobic weights "
+                    "are Crippen atomic logP. Donor and acceptor probes sit 1.9 Å from the heteroatom "
+                    "along the hydrogen or lone-pair direction. Attenuation is 0.3 Å⁻². "
+                    "Leave-one-out q² refits the flat-point filter inside each fold, and the "
+                    "saved PLS model is fit on every training row."
+                ),
+            ),
         ),
     ),
     CitationSection(

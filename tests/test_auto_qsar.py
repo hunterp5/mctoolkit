@@ -233,7 +233,7 @@ def test_menu_and_help_topic_are_registered():
 
     data = find_submenu(MAIN_WINDOW_MENUS, "Data")
     qsar = find_submenu(data.items, "QSAR")
-    assert [item.title for item in qsar.items] == ["Generate Model…", "AutoQSAR…"]
+    assert [item.title for item in qsar.items] == ["Generate Model…", "AutoQSAR…", "CoMSIA…"]
     assert qsar.items[0].slot == "open_qsar_dialog"
     assert qsar.items[1].slot == "open_auto_qsar_dialog"
     text = load_help_markdown("data_auto_qsar")

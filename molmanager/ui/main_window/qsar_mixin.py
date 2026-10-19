@@ -70,3 +70,27 @@ class QsarMixin:
             _factory,
             on_reused_visible=lambda dlg: self._sync_dialog_only_selected_scope(dlg),
         )
+
+    def open_comsia_dialog(self) -> None:
+        if not self.headers or self._table_model.rowCount() == 0:
+            QMessageBox.information(
+                self,
+                "CoMSIA",
+                "Open a file or add rows with activity data and aligned 3D poses first.",
+            )
+            return
+        from ..dialogs.comsia import ComsiaDialog
+        from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
+
+        def _factory():
+            dialog = ComsiaDialog(self)
+            self._prepare_tool_dialog(dialog)
+            dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+            return dialog
+
+        reuse_or_show_modeless_singleton(
+            self,
+            "_comsia_dialog",
+            _factory,
+            on_reused_visible=lambda dlg: self._sync_dialog_only_selected_scope(dlg),
+        )

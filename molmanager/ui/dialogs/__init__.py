@@ -78,6 +78,7 @@ _EXPORTS: dict[str, str] = {
     "ProtomerGeneratorDialog": ".protomer",
     "ProtonateDialog": ".protonate",
     "AutoQSARDialog": ".auto_qsar",
+    "ComsiaDialog": ".comsia",
     "QSARDialog": ".qsar",
     "RandomMoleculeDialog": ".random_molecule",
     "RandomMoleculeDialogParams": ".random_molecule",

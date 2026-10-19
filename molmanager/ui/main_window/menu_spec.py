@@ -692,6 +692,13 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                     "Search descriptors and models for an activity column, then write predictions."
                 ),
             ),
+            action(
+                "CoMSIA…",
+                "open_comsia_dialog",
+                tooltip=(
+                    "Fit a 3D CoMSIA model on aligned poses and write predicted activities."
+                ),
+            ),
             tooltips_visible=True,
         ),
         action(
