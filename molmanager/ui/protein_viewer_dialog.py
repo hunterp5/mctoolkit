@@ -84,6 +84,21 @@ class ProteinViewerDialog(
         self._init_viewer_state(parent)
         self._build_viewer_ui()
 
+    def open_dock_ligand(self) -> None:
+        """Open the main window's Gnina docking dialog."""
+        host = self.parent()
+        opener = getattr(host, "open_gnina_dock", None)
+        if not callable(opener):
+            from PyQt5.QtWidgets import QMessageBox
+
+            QMessageBox.information(
+                self,
+                "Dock Ligand",
+                "Gnina docking is available from the main MolManager window.",
+            )
+            return
+        opener()
+
     def _init_viewer_state(self, parent) -> None:
         self.setWindowTitle("Protein Viewer")
         self.resize(1180, 760)
@@ -257,6 +272,10 @@ class ProteinViewerDialog(
             "ligand is kept for internal validation)."
         )
         prepare_menu.addAction(act_dock_file)
+        self._act_dock_ligand = QAction("Dock &Ligand…", self)
+        self._act_dock_ligand.setToolTip("Open the Gnina docking dialog.")
+        self._act_dock_ligand.triggered.connect(self.open_dock_ligand)
+        tools_menu.addAction(self._act_dock_ligand)
         pharma_menu = tools_menu.addMenu("&Pharmacophore")
         pharma_menu.setToolTipsVisible(True)
         act_pharma_edit = QAction("&Editor", self, triggered=self.open_pharmacophore_dialog)
@@ -364,7 +383,8 @@ class ProteinViewerDialog(
         self._act_interact_halogen.toggled.connect(self._on_hbond_toggles)
         self._act_pocket_surface = QAction("Pocket &Surface…", self)
         self._act_pocket_surface.setToolTip(
-            "Open options for a molecular surface on protein residues within 4.5 Å of the ligand."
+            "Choose options for a molecular surface on protein residues within 4.5 Å of the ligand. "
+            "OK in that window draws the surface."
         )
         self._act_pocket_surface.triggered.connect(self.open_pocket_surface_dialog)
         render_menu.addAction(self._act_pocket_surface)
