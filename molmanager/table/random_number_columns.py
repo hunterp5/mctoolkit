@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Generate random numbers for table columns (Tools → Utilities → Random → Number)."""
+"""Generate random numbers for table columns (Tools → Random → Number)."""
 
 from __future__ import annotations
 
