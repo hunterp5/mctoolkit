@@ -227,3 +227,36 @@ def test_cluster_dialog_disables_tanimoto_without_a_fingerprint(qapp):
         assert abs(dlg.dbscan_eps.value() - 1.5) < 1e-9
     finally:
         dlg.close()
+
+
+def test_method_box_shrinks_to_the_selected_method(qapp):
+    from PyQt5.QtGui import QColor, QPalette
+
+    from molmanager.ui.dialogs.cluster import ClusterDialog
+    from molmanager.ui.qt_widget_utils import group_box_stylesheet
+
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor("#f0f0f0"))
+    palette.setColor(QPalette.Mid, QColor("#777777"))
+    sheet = group_box_stylesheet(palette)
+    assert "transparent" not in sheet
+    assert "#fff0f0f0" not in sheet.split("QGroupBox::title")[0]
+    dlg = ClusterDialog(None)
+    dlg.show()
+    qapp.processEvents()
+    try:
+        keys = [dlg.method_combo.itemData(i) for i in range(dlg.method_combo.count())]
+        dlg.method_combo.setCurrentIndex(keys.index("kmeans"))
+        qapp.processEvents()
+        kmeans_page = dlg._opt_stack.sizeHint().height()
+        kmeans_window = dlg.height()
+        dlg.method_combo.setCurrentIndex(keys.index("jarvis_patrick"))
+        qapp.processEvents()
+        assert dlg._opt_stack.sizeHint().height() > kmeans_page
+        assert dlg.height() > kmeans_window
+        dlg.method_combo.setCurrentIndex(keys.index("kmeans"))
+        qapp.processEvents()
+        assert dlg._opt_stack.sizeHint().height() == kmeans_page
+        assert dlg.height() == kmeans_window
+    finally:
+        dlg.close()
