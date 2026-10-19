@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Tools → Conformations → Generate → CONFORGE…"""
+"""Chemistry → Conformations → Generate → CONFORGE…"""
 
 from __future__ import annotations
 
