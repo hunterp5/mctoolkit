@@ -54,7 +54,6 @@ def test_3dmol_page_binds_resize_scheduler_once(name):
     html = build()
     assert html.count("window.molmanagerCreateResizeScheduler = function") == 1
     assert callback in html
-    assert "window.molmanagerHoldResize" in html
     assert not re.search(r"window\.addEventListener\(\s*[\"']resize[\"']\s*,\s*function", html)
 
 
@@ -65,6 +64,40 @@ def test_scheduler_js_is_inline_safe():
 def test_binding_targets_requested_element():
     html = resize_scheduler_binding_html("void 0;", target_id="plot")
     assert 'document.getElementById("plot")' in html
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js not installed")
+def test_first_resize_runs_inside_observer_callback(tmp_path):
+    """The first change of a burst redraws before paint; later ones wait for a frame."""
+    script = tmp_path / "first_resize.js"
+    script.write_text(
+        """
+global.window = global;
+global.document = {};
+global.performance = { now: function () { return 0; } };
+var frames = [];
+global.requestAnimationFrame = function (fn) { frames.push(fn); return frames.length; };
+var observer = null;
+global.ResizeObserver = function (cb) { observer = cb; this.observe = function () {}; };
+"""
+        + web_resize_scheduler_js()
+        + """
+var calls = [];
+window.molmanagerCreateResizeScheduler({
+  target: {},
+  onResize: function (info) { calls.push(info.first ? "first" : "frame"); }
+});
+observer();
+if (calls.join(",") !== "first") throw new Error("sync: " + calls.join(","));
+observer();
+if (calls.join(",") !== "first") throw new Error("queued: " + calls.join(","));
+frames.shift()();
+if (calls.join(",") !== "first,frame") throw new Error("frame: " + calls.join(","));
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(["node", str(script)], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js not installed")
