@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Clustering dialog (Chemistry → Fingerprints → Cluster)."""
+"""Clustering dialog (Data → Cluster)."""
 
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ from PyQt5.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QStackedWidget,
     QTableWidget,
@@ -63,6 +64,26 @@ from .scope import selection_scope_checked
 _FP_NONE_LABEL = "None"
 
 
+class _CurrentPageStack(QStackedWidget):
+    """Report the visible page's size so a short method does not keep a tall blank."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+
+    def sizeHint(self):
+        page = self.currentWidget()
+        if page is None:
+            return super().sizeHint()
+        return page.sizeHint()
+
+    def minimumSizeHint(self):
+        page = self.currentWidget()
+        if page is None:
+            return super().minimumSizeHint()
+        return page.minimumSizeHint()
+
+
 class ClusterDialog(QDialog):
     """Cluster compounds by fingerprint, numeric columns, or both."""
 
@@ -78,8 +99,7 @@ class ClusterDialog(QDialog):
 
     def _init_cluster_state(self, parent) -> None:
         self.setWindowTitle("Cluster")
-        self.setMinimumWidth(520)
-        self.resize(580, 760)
+        self.setMinimumWidth(480)
         n_sel = len(parent._selected_logical_rows()) if parent is not None else 0
         self._have_selection = n_sel > 0
         self._initial_selected_row_count = n_sel
@@ -88,7 +108,7 @@ class ClusterDialog(QDialog):
     def _build_cluster_ui(self) -> None:
         n_sel = self._initial_selected_row_count
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 6, 8, 6)
+        root.setContentsMargins(8, 4, 8, 6)
         root.setSpacing(4)
 
         src_row = QHBoxLayout()
@@ -98,18 +118,18 @@ class ClusterDialog(QDialog):
         self.src_combo.setMinimumWidth(180)
         self.src_combo.setToolTip("Structure column used to build fingerprints.")
         src_row.addWidget(self.src_combo, 1)
-        root.addLayout(src_row)
-
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
         if self._have_selection:
             self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
         else:
             self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
+        src_row.addWidget(self.only_selected_cb)
+        root.addLayout(src_row)
 
         feat = QGroupBox("Features")
         feat_lyt = QVBoxLayout(feat)
+        feat_lyt.setContentsMargins(8, 6, 8, 6)
         feat_lyt.setSpacing(4)
         fp_row = QHBoxLayout()
         fp_row.setSpacing(6)
@@ -126,24 +146,10 @@ class ClusterDialog(QDialog):
         fp_row.addWidget(self.fp_combo, 1)
         feat_lyt.addLayout(fp_row)
 
-        self.standardize_cb = QCheckBox("Standardize numeric columns")
-        self.standardize_cb.setChecked(True)
-        self.standardize_cb.setToolTip(
-            "Zero mean and unit variance on the checked columns. Fingerprint bits are not standardized."
-        )
-        feat_lyt.addWidget(self.standardize_cb)
-
-        col_btns = QHBoxLayout()
-        col_btns.addWidget(QLabel("Numeric columns:"))
-        self._btn_cols_all = QPushButton("All")
-        self._btn_cols_none = QPushButton("None")
-        col_btns.addWidget(self._btn_cols_all)
-        col_btns.addWidget(self._btn_cols_none)
-        col_btns.addStretch()
-        feat_lyt.addLayout(col_btns)
+        feat_lyt.addWidget(QLabel("Numeric columns:"))
         self.column_list = QListWidget()
-        self.column_list.setMinimumHeight(88)
-        self.column_list.setMaximumHeight(140)
+        self.column_list.setMinimumHeight(72)
+        self.column_list.setMaximumHeight(108)
         self.column_list.setSelectionMode(QAbstractItemView.NoSelection)
         self.column_list.setToolTip(
             "Checked columns are clustered with K-Means, Agglomerative, or DBSCAN. "
@@ -151,13 +157,18 @@ class ClusterDialog(QDialog):
             "Butina, sphere exclusion, and Jarvis-Patrick stay fingerprint-only."
         )
         feat_lyt.addWidget(self.column_list)
+        self.standardize_cb = QCheckBox("Standardize Numeric Columns")
+        self.standardize_cb.setChecked(True)
+        self.standardize_cb.setToolTip(
+            "Zero mean and unit variance on the checked columns. Fingerprint bits are not standardized."
+        )
+        feat_lyt.addWidget(self.standardize_cb)
         root.addWidget(feat)
 
-        self.exploratory_cb = QCheckBox("Exploratory mode (sample many parameter sets)")
-        self.exploratory_cb.setToolTip(
-            "Runs a bounded grid of methods and settings; review metrics, then apply a trial to add a cluster column."
-        )
-        root.addWidget(self.exploratory_cb)
+        method_box = QGroupBox("Method")
+        method_lyt = QVBoxLayout(method_box)
+        method_lyt.setContentsMargins(8, 6, 8, 6)
+        method_lyt.setSpacing(4)
 
         self._explore_panel = QWidget()
         ex_outer = QVBoxLayout(self._explore_panel)
@@ -175,8 +186,12 @@ class ClusterDialog(QDialog):
         mr.addStretch()
         ex_outer.addLayout(mr)
 
-        grp = QGroupBox("Methods to sample")
+        grp = QWidget()
         gg = QGridLayout(grp)
+        gg.setContentsMargins(0, 0, 0, 0)
+        gg.setHorizontalSpacing(12)
+        gg.setVerticalSpacing(2)
+        ex_outer.addWidget(QLabel("Methods to sample:"))
         self._ex_kmeans = QCheckBox("K-Means")
         self._ex_kmeans.setChecked(True)
         self._ex_agglomerative = QCheckBox("Agglomerative")
@@ -196,8 +211,6 @@ class ClusterDialog(QDialog):
         gg.addWidget(self._ex_sphere, 2, 0)
         gg.addWidget(self._ex_jp, 2, 1)
         ex_outer.addWidget(grp)
-        root.addWidget(self._explore_panel)
-        self._explore_panel.setVisible(False)
 
         self._single_method_widget = QWidget()
         sm_lyt = QVBoxLayout(self._single_method_widget)
@@ -213,10 +226,12 @@ class ClusterDialog(QDialog):
         alg_row.addWidget(self.method_combo, 1)
         sm_lyt.addLayout(alg_row)
 
-        self._opt_stack = QStackedWidget()
+        self._opt_stack = _CurrentPageStack()
         self._method_pages: dict[str, int] = {}
         km = QWidget()
         km_lyt = QFormLayout(km)
+        km_lyt.setContentsMargins(0, 0, 0, 0)
+        km_lyt.setSpacing(4)
         self.kmeans_k = QSpinBox()
         self.kmeans_k.setRange(2, 500)
         self.kmeans_k.setValue(8)
@@ -226,6 +241,8 @@ class ClusterDialog(QDialog):
 
         ag = QWidget()
         ag_lyt = QFormLayout(ag)
+        ag_lyt.setContentsMargins(0, 0, 0, 0)
+        ag_lyt.setSpacing(4)
         self.agglom_k = QSpinBox()
         self.agglom_k.setRange(2, 500)
         self.agglom_k.setValue(8)
@@ -239,6 +256,8 @@ class ClusterDialog(QDialog):
 
         db = QWidget()
         db_lyt = QFormLayout(db)
+        db_lyt.setContentsMargins(0, 0, 0, 0)
+        db_lyt.setSpacing(4)
         self.dbscan_eps = QDoubleSpinBox()
         self.dbscan_eps.setRange(0.05, 10.0)
         self.dbscan_eps.setDecimals(3)
@@ -257,6 +276,8 @@ class ClusterDialog(QDialog):
 
         bu = QWidget()
         bu_lyt = QFormLayout(bu)
+        bu_lyt.setContentsMargins(0, 0, 0, 0)
+        bu_lyt.setSpacing(4)
         self.butina_cutoff = QDoubleSpinBox()
         self.butina_cutoff.setRange(0.01, 0.95)
         self.butina_cutoff.setDecimals(3)
@@ -272,6 +293,8 @@ class ClusterDialog(QDialog):
 
         se = QWidget()
         se_lyt = QFormLayout(se)
+        se_lyt.setContentsMargins(0, 0, 0, 0)
+        se_lyt.setSpacing(4)
         self.sphere_cutoff = QDoubleSpinBox()
         self.sphere_cutoff.setRange(0.01, 0.95)
         self.sphere_cutoff.setDecimals(3)
@@ -286,6 +309,8 @@ class ClusterDialog(QDialog):
 
         jp = QWidget()
         jp_lyt = QFormLayout(jp)
+        jp_lyt.setContentsMargins(0, 0, 0, 0)
+        jp_lyt.setSpacing(4)
         self.jp_nn = QSpinBox()
         self.jp_nn.setRange(2, 128)
         self.jp_nn.setValue(16)
@@ -303,7 +328,15 @@ class ClusterDialog(QDialog):
         self._method_pages["jarvis_patrick"] = self._opt_stack.addWidget(jp)
 
         sm_lyt.addWidget(self._opt_stack)
-        root.addWidget(self._single_method_widget)
+        method_lyt.addWidget(self._single_method_widget)
+        self.exploratory_cb = QCheckBox("Exploratory Mode")
+        self.exploratory_cb.setToolTip(
+            "Runs a bounded grid of methods and settings; review metrics, then apply a trial to add a cluster column."
+        )
+        method_lyt.addWidget(self.exploratory_cb)
+        method_lyt.addWidget(self._explore_panel)
+        self._explore_panel.setVisible(False)
+        root.addWidget(method_box)
 
         self.explore_table = QTableWidget(0, 7)
         self.explore_table.setHorizontalHeaderLabels(
@@ -311,12 +344,16 @@ class ClusterDialog(QDialog):
         )
         self.explore_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.explore_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.explore_table.setMaximumHeight(220)
+        self.explore_table.setMaximumHeight(140)
         self.explore_table.setVisible(False)
         root.addWidget(self.explore_table)
 
         btn_row = QHBoxLayout()
-        self.run_btn = QPushButton("Run clustering")
+        btn_row.setContentsMargins(0, 6, 0, 0)
+        btn_row.addStretch()
+        self.run_btn = QPushButton("Run Clustering")
+        self.run_btn.setMinimumWidth(160)
+        self.run_btn.setStyleSheet("QPushButton { padding: 8px 28px; }")
         btn_row.addWidget(self.run_btn)
         self.apply_explore_btn = QPushButton("Apply selected trial")
         self.apply_explore_btn.setToolTip(
@@ -334,8 +371,6 @@ class ClusterDialog(QDialog):
         self.fp_combo.currentIndexChanged.connect(self._sync_feature_controls)
         self.column_list.itemChanged.connect(self._sync_feature_controls)
         self.only_selected_cb.stateChanged.connect(self._on_scope_changed)
-        self._btn_cols_all.clicked.connect(self._check_all_columns)
-        self._btn_cols_none.clicked.connect(self._clear_columns)
         self.explore_table.itemDoubleClicked.connect(self._on_explore_item_double_clicked)
         self.run_btn.clicked.connect(self._on_run)
         self.apply_explore_btn.clicked.connect(self._on_apply_explore_trial)
@@ -362,6 +397,20 @@ class ClusterDialog(QDialog):
     def _on_method_changed(self, _idx: int = 0) -> None:
         key = str(self.method_combo.currentData() or "")
         self._opt_stack.setCurrentIndex(self._method_pages.get(key, 0))
+        self._opt_stack.updateGeometry()
+        self._fit_dialog_to_contents()
+
+    def _fit_dialog_to_contents(self) -> None:
+        """Grow or shrink the window to the controls that are visible now."""
+        layout = self.layout()
+        if layout is not None:
+            layout.invalidate()
+            layout.activate()
+        hint = self.sizeHint()
+        if not self.isVisible():
+            self.resize(hint)
+            return
+        self.resize(max(self.width(), hint.width()), hint.height())
 
     def _on_exploratory_toggled(self, state: int) -> None:
         ex = state == int(Qt.Checked)
@@ -373,12 +422,14 @@ class ClusterDialog(QDialog):
         if not ex:
             self.explore_table.setRowCount(0)
             self.apply_explore_btn.setEnabled(False)
+        self._fit_dialog_to_contents()
 
     def fill_explore_results(self, rows: list) -> None:
         self.explore_table.setRowCount(0)
         if not rows:
             self.explore_table.setVisible(self.exploratory_cb.isChecked())
             self._sync_apply_explore_enabled()
+            self._fit_dialog_to_contents()
             return
         self.explore_table.setVisible(True)
         for r, row in enumerate(rows):
@@ -403,6 +454,7 @@ class ClusterDialog(QDialog):
             self.explore_table.setItem(r, 6, QTableWidgetItem(str(row.get("notes", ""))))
         self.explore_table.resizeColumnsToContents()
         self._sync_apply_explore_enabled()
+        self._fit_dialog_to_contents()
 
     def _sync_apply_explore_enabled(self) -> None:
         if not self.exploratory_cb.isChecked():
@@ -493,23 +545,6 @@ class ClusterDialog(QDialog):
         finally:
             self.column_list.blockSignals(False)
         self._sync_feature_controls()
-
-    def _set_column_checks(self, state: Qt.CheckState) -> None:
-        self.column_list.blockSignals(True)
-        try:
-            for i in range(self.column_list.count()):
-                item = self.column_list.item(i)
-                if item is not None:
-                    item.setCheckState(state)
-        finally:
-            self.column_list.blockSignals(False)
-        self._sync_feature_controls()
-
-    def _check_all_columns(self) -> None:
-        self._set_column_checks(Qt.Checked)
-
-    def _clear_columns(self) -> None:
-        self._set_column_checks(Qt.Unchecked)
 
     def _sync_feature_controls(self, *_args) -> None:
         """Enable Tanimoto methods only for fingerprint-only clustering."""
