@@ -28,6 +28,7 @@ from molmanager.analysis.medchem_space import (
     build_medchem_space_from_snapshots,
     classify_boiled_egg,
     in_golden_triangle,
+    medchem_plot_max_points,
     oids_in_egg_gia,
     oids_in_egg_yolk,
     oids_in_golden_triangle_region,
@@ -37,7 +38,11 @@ from molmanager.analysis.medchem_space import (
     snapshot_table_values_complete,
     subsample_dataset,
 )
-from molmanager.ui.medchem_space_plot import build_boiled_egg_figure, build_golden_triangle_figure
+from molmanager.ui.medchem_space_plot import (
+    build_boiled_egg_figure,
+    build_golden_triangle_figure,
+    marker_opacity_for_point_count,
+)
 
 
 def test_snapshot_scope_row_indices():
@@ -207,3 +212,44 @@ def test_medchem_dataset_subset_oids():
     sub = ds.subset_oids(frozenset({2}))
     assert sub.oids == [2]
     assert len(sub.points) == 1
+
+
+def _cloud(n: int) -> MedChemSpaceDataset:
+    points = tuple(
+        MedChemSpacePoint(
+            oid=i,
+            tpsa=40.0,
+            wlogp=1.0,
+            mw=300.0,
+            logp=2.0,
+            hover="",
+            gia=True,
+            bbb=False,
+            golden_triangle=True,
+        )
+        for i in range(n)
+    )
+    return MedChemSpaceDataset(points=points, skipped=0, gia_count=n, golden_triangle_count=n)
+
+
+def test_medchem_plot_draws_every_point_unless_capped(monkeypatch):
+    monkeypatch.delenv("MOLMANAGER_MEDCHEM_PLOT_MAX_POINTS", raising=False)
+    cloud = _cloud(6_000)
+    assert medchem_plot_max_points() is None
+    assert subsample_dataset(cloud) is cloud
+
+    monkeypatch.setenv("MOLMANAGER_MEDCHEM_PLOT_MAX_POINTS", "1000")
+    capped = subsample_dataset(cloud, random_state=0)
+    assert len(capped.points) == 1000
+    assert "6,000" in capped.subsample_note
+
+
+def test_large_medchem_cloud_fades_markers():
+    assert marker_opacity_for_point_count(100) == 0.88
+    assert marker_opacity_for_point_count(5_000) == 0.88
+    faded = marker_opacity_for_point_count(106_000)
+    assert 0.08 < faded < 0.25
+    fig = build_boiled_egg_figure(_cloud(8_000))
+    rest = float(fig.data[0].marker.opacity)
+    assert rest < 0.88
+    assert float(fig.data[0].unselected.marker.opacity) < rest
