@@ -664,11 +664,12 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 LIC_APACHE2,
                 homepage="https://github.com/chemosim-lab/ProLIF",
                 notes=(
-                    "Optional docking extra (`pip install prolif`). Intramolecular protein and "
-                    "ligand hydrogen bonds still use MolManager's geometric detector. "
-                    "Protein–ligand H-bonds fall back to that detector when ProLIF is missing "
-                    "or hydrogens are absent. Pose Browser overlays recompute ProLIF against "
-                    "the receptor only (cached protein molecule; crystal ligand ignored)."
+                    "Optional docking extra (`pip install prolif`). Protein → Interaction Fingerprint "
+                    "writes an IFP column and a residue list from the first stored pose. "
+                    "Intramolecular protein and ligand hydrogen bonds still use MolManager's "
+                    "geometric detector. Protein–ligand H-bonds fall back to that detector when "
+                    "ProLIF is missing or hydrogens are absent. Pose Browser overlays recompute "
+                    "ProLIF against the receptor only (cached protein molecule; crystal ligand ignored)."
                 ),
             ),
         ),
