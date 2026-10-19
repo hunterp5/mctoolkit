@@ -41,6 +41,49 @@ def test_sphere_exclusion_high_cutoff_yields_many_clusters():
     assert len(set(int(x) for x in labels)) == 4
 
 
+def test_butina_labels_match_rdkit_clusterdata():
+    import numpy as np
+    from rdkit import DataStructs
+    from rdkit.ML.Cluster import Butina
+
+    from molmanager.workers.cluster_worker import cluster_butina
+
+    smis = ["CCO", "CCO", "CCCO", "CCCCO", "c1ccccc1", "Cc1ccccc1", "CC(=O)O", "CC(=O)OC"]
+    fps = [AllChem.GetMorganFingerprintAsBitVect(Chem.MolFromSmiles(s), 2, 2048) for s in smis]
+    n = len(fps)
+    dists: list[float] = []
+    for i in range(n):
+        sims = DataStructs.BulkTanimotoSimilarity(fps[i], fps[:i])
+        dists.extend(1.0 - float(sim) for sim in sims)
+    for cutoff in (0.15, 0.4, 0.7):
+        for reordering in (False, True):
+            labels = cluster_butina(fps, cutoff, reordering=reordering)
+            clusters = Butina.ClusterData(
+                dists, nPts=n, distThresh=cutoff, isDistData=True, reordering=reordering
+            )
+            expected = np.full(n, -1, dtype=np.int32)
+            for cid, group in enumerate(clusters):
+                for idx in group:
+                    expected[int(idx)] = int(cid)
+            assert labels is not None
+            assert list(labels) == list(expected)
+
+
+def test_dense_fingerprint_matrix_stays_uint8():
+    import numpy as np
+
+    from molmanager.workers.cluster_worker import _dense_fingerprint_matrix
+
+    fps = [
+        AllChem.GetMorganFingerprintAsBitVect(Chem.MolFromSmiles(s), 2, 128)
+        for s in ("CCO", "c1ccccc1")
+    ]
+    matrix = _dense_fingerprint_matrix(fps)
+    assert matrix.dtype == np.uint8
+    assert matrix.shape == (2, 128)
+    assert set(np.unique(matrix)).issubset({0, 1})
+
+
 def test_butina_and_jarvis_patrick_do_not_need_dense_matrix():
     from molmanager.workers.cluster_worker import (
         _method_needs_dense_matrix,
