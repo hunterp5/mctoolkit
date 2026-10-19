@@ -20,7 +20,6 @@ Requires the property/structure inputs the plot expects; scope via **Selected Ro
 - **Structure from**.
 - **Color by**, **Spectrum**, **Min** / **Max**.
 - **Size by**, marker **Min size** / **Max size** (pixels).
-- **Summary**.
 - **Triangle** region select.
 - Footer: gear (**Plot Options**), **Clear Selection**, then Add/Send glyph and **Close Plot** (pane **×** when docked).
 
@@ -28,7 +27,7 @@ Requires the property/structure inputs the plot expects; scope via **Selected Ro
 
 1. Ensure descriptor columns used by the triangle exist.
 2. Open **Data → MedChem Plots → Golden Triangle plot** and configure source/color.
-3. Review in-triangle vs outside compounds.
+3. Review in-triangle vs outside compounds. The in-scope and in-triangle counts are written to the in-app Log.
 4. Use **Triangle** to focus follow-up tools.
 
 ## Use cases
