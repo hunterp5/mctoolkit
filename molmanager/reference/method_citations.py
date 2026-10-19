@@ -54,7 +54,7 @@ LOGD_LOGS_ION = (
     "LogD 7.4 and LogS 7.4 at pH 7.4: RDKit Wildman–Crippen log P (rdkit.Chem.Crippen.MolLogP) "
     "combined with the mole fraction of net-neutral protomer states at pH 7.4 from Uni-pKa "
     "ensemble Boltzmann populations (Luo et al., JACS Au 2024), the same weights as "
-    "Tools → Prepare Structures → Protonate → Generate Protomers. "
+    "Chemistry → Prepare Structures → Protonate → Generate Protomers. "
     "log D = clogP + log10(f_neutral). Re-running after the Uni-pKa switch is a new method, "
     "not a refresh of previous pkasolver values."
 )
@@ -222,7 +222,7 @@ def descriptor_dialog_footer_html() -> str:
         '(<a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3368654/">PMC3368654</a>).<br>'
         "<b>LogD / LogS at pH 7.4:</b> RDKit <code>Crippen.MolLogP</code> + neutral protomer fractions "
         "from Uni-pKa Boltzmann populations at pH 7.4 (same ensemble as "
-        "<i>Tools → Prepare Structures → Protonate → Generate Protomers</i>). "
+        "<i>Chemistry → Prepare Structures → Protonate → Generate Protomers</i>). "
         "Re-running these columns after switching from pkasolver is a new method, not a refresh.<br>"
         "<b>QED:</b> "
         '<a href="https://doi.org/10.1038/nchem.1243">Bickerton et al., Nat. Chem. 2012</a> (RDKit QED).<br>'
@@ -298,7 +298,7 @@ def permeability_dialog_footer_html() -> str:
 
 
 def stochastic_conformations_dialog_footer_html() -> str:
-    """Rich text for Tools → Conformations → Generate → Stochastic…."""
+    """Rich text for Chemistry → Conformations → Generate → Stochastic…."""
     return (
         "<small><b>Method</b>: RDKit <b>ETKDG</b> (experimental-torsion-knowledge distance geometry) — "
         '<a href="https://doi.org/10.1021/acs.jcim.5b00654">Riniker &amp; Landrum, J. Chem. Inf. Model. 2015</a>. '
@@ -311,7 +311,7 @@ def stochastic_conformations_dialog_footer_html() -> str:
 
 
 def systematic_conformations_dialog_footer_html() -> str:
-    """Rich text for Tools → Conformations → Generate → Systematic…."""
+    """Rich text for Chemistry → Conformations → Generate → Systematic…."""
     return (
         "<small><b>Method</b>: Open Babel <b>Confab</b> — "
         '<a href="https://doi.org/10.1186/1758-2946-3-8">O\'Boyle et al., J. Cheminform. 2011</a>. '
@@ -323,7 +323,7 @@ def systematic_conformations_dialog_footer_html() -> str:
 
 
 def conforge_conformations_dialog_footer_html() -> str:
-    """Rich text for Tools → Conformations → Generate → CONFORGE…."""
+    """Rich text for Chemistry → Conformations → Generate → CONFORGE…."""
     return (
         "<small><b>Method</b>: <b>CONFORGE</b> (CDPKit) — "
         '<a href="https://doi.org/10.1021/acs.jcim.3c00563">Seidel et al., J. Chem. Inf. Model. 2023</a>. '
