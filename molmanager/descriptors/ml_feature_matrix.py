@@ -142,20 +142,19 @@ def build_combined_feature_matrix(
             f"Need at least {min_rows} rows with {need} in the current scope (found {len(common)})."
         )
 
-    rows: list[np.ndarray] = []
     feat_names: list[str] = list(cols)
     if use_fp:
         feat_names.extend(f"FP_bit_{i}" for i in range(n_fp_bits))
 
-    for oid in common:
-        parts: list[np.ndarray] = []
-        if cols:
-            parts.append(numeric_by_oid[oid])
-        if use_fp:
-            parts.append(fp_by_oid[oid])
-        rows.append(np.concatenate(parts))
-
-    X = np.vstack(rows)
+    if cols and use_fp:
+        # Numeric columns are few. Bits stay float32 here so the join does not promote to float64.
+        numeric = np.vstack([numeric_by_oid[oid] for oid in common]).astype(np.float32, copy=False)
+        bits = np.vstack([fp_by_oid[oid] for oid in common]).astype(np.float32, copy=False)
+        X = np.hstack([numeric, bits])
+    elif use_fp:
+        X = np.vstack([fp_by_oid[oid] for oid in common])
+    else:
+        X = np.vstack([numeric_by_oid[oid] for oid in common])
     df_positions = [position_by_oid[oid] for oid in common]
 
     summary_parts: list[str] = []
