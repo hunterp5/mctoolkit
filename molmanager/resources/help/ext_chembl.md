@@ -16,10 +16,11 @@ Network access to ChEMBL; queries depend on the dialog (IDs, searches, random fe
 
 ## Options
 
-- **Query / search** - ChEMBL lookup controls.
-- **Results** - molecule and activity views as provided.
-- **Add to table** - write selected results into the session.
-- **Source columns** - attribution fields when written.
+- **Identity / Similarity** - lookup the SMILES, or search 2D Tanimoto neighbors. Min. Tanimoto and Max. structures appear only for Similarity.
+- **Fields** - Identity, Structures, and the Properties box are always listed. Identity and Structures start checked.
+- **Activities and targets** - its own box, with the include checkbox and the per-molecule limits. Activities and Targets tabs appear after a query that asked for them.
+- **Results** - one pane with the per-molecule summary and the query log.
+- **Add to table** - write the returned rows into the session.
 
 ## Workflow
 
