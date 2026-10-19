@@ -266,9 +266,10 @@ def bootstrap_application_gui(app: QApplication | None = None) -> None:
         return
     ensure_fusion_style(app)
     apply_application_font_pt(load_saved_app_font_pt())
-    from .qt_widget_utils import install_unfocused_wheel_passthrough
+    from .qt_widget_utils import install_group_box_style, install_unfocused_wheel_passthrough
 
     install_unfocused_wheel_passthrough(app)
+    install_group_box_style(app)
 
 
 def is_custom_theme_id(theme: str | None) -> bool:
@@ -802,6 +803,10 @@ def refresh_open_windows_theme(app: QApplication | None = None) -> None:
         except RuntimeError:
             # Widget deleted between listing and update.
             continue
+    from .qt_widget_utils import install_group_box_style, restyle_application_group_boxes
+
+    install_group_box_style(app)
+    restyle_application_group_boxes(app)
 
 
 def apply_application_theme(app: QApplication | None, theme: str) -> str:
