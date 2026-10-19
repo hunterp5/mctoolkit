@@ -102,6 +102,26 @@ SEPARATOR = MenuItem(kind=KIND_SEPARATOR)
 UNDO = MenuItem(kind=KIND_UNDO, hotkey="edit.undo", add_to_window=True)
 REDO = MenuItem(kind=KIND_REDO, hotkey="edit.redo", add_to_window=True)
 SETTINGS = MenuItem(kind=KIND_SETTINGS)
+HELP_MENU = submenu(
+    "&Help",
+    action(
+        "&User Guide",
+        call_with_window="user_guide",
+        hotkey="help.user_guides",
+        attr="_act_user_guide",
+        add_to_window=True,
+        tooltip="Open MolManager help (F1).",
+    ),
+    action(
+        "&Citations",
+        call_with_window="citations",
+        hotkey="help.citations",
+        attr="_act_citations",
+        add_to_window=True,
+        tooltip="Open papers and licenses for tools used in MolManager.",
+    ),
+    attr="_help_menu",
+)
 
 
 def _plain(title: str) -> str:
@@ -161,30 +181,34 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
         SEPARATOR,
         action("&Copy", "edit_copy", hotkey="edit.copy"),
         action("&Paste", "edit_paste", hotkey="edit.paste"),
-        action(
-            "Delete &Selection",
-            "edit_delete_selection",
-            hotkey="edit.delete_selection",
-            tooltip=(
-                "Delete selected rows, selected columns, or cell values, depending on the "
-                "selection. When both rows and columns are selected, you choose which to delete."
-            ),
-        ),
         SEPARATOR,
-        action(
-            "Invert Selection",
-            "invert_table_selection",
-            hotkey="edit.invert_selection",
-            tooltip=(
-                "Select all rows that are not currently selected "
-                "(entire table, including rows hidden by filters)."
+        submenu(
+            "&Selection",
+            action(
+                "Invert Selection",
+                "invert_table_selection",
+                hotkey="edit.invert_selection",
+                tooltip=(
+                    "Select all rows that are not currently selected "
+                    "(entire table, including rows hidden by filters)."
+                ),
             ),
-        ),
-        action(
-            "Clear Selection",
-            "clear_table_selection",
-            hotkey="edit.clear_selection",
-            tooltip="Clear the current cell/row selection (Ctrl+Shift+D).",
+            action(
+                "Clear Selection",
+                "clear_table_selection",
+                hotkey="edit.clear_selection",
+                tooltip="Clear the current cell/row selection (Ctrl+Shift+D).",
+            ),
+            action(
+                "Delete &Selection",
+                "edit_delete_selection",
+                hotkey="edit.delete_selection",
+                tooltip=(
+                    "Delete selected rows, selected columns, or cell values, depending on the "
+                    "selection. When both rows and columns are selected, you choose which to delete."
+                ),
+            ),
+            tooltips_visible=True,
         ),
     ),
     submenu(
@@ -194,8 +218,9 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             "open_calc",
             hotkey="tools.calculate_descriptors",
             tooltip=(
-                "Compute RDKit molecular descriptors (including 3D shape/SASA from confs) "
-                "and append them as columns (selected or visible rows)."
+                "Compute RDKit molecular descriptors, structural-alert catalogs, and "
+                "Bemis–Murcko scaffolds, and append them as columns "
+                "(selected or visible rows)."
             ),
         ),
         SEPARATOR,
@@ -732,24 +757,4 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
         tooltips_visible=True,
     ),
     SETTINGS,
-    submenu(
-        "&Help",
-        action(
-            "&User Guide",
-            call_with_window="user_guide",
-            hotkey="help.user_guides",
-            attr="_act_user_guide",
-            add_to_window=True,
-            tooltip="Open MolManager help (F1).",
-        ),
-        action(
-            "&Citations",
-            call_with_window="citations",
-            hotkey="help.citations",
-            attr="_act_citations",
-            add_to_window=True,
-            tooltip="Open papers and licenses for tools used in MolManager.",
-        ),
-        attr="_help_menu",
-    ),
 )
