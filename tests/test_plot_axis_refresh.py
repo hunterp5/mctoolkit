@@ -70,3 +70,20 @@ def test_set_axis_combo_items_optional_none(qapp):
     combo = QComboBox()
     PlotWidget._set_axis_combo_items(combo, ["MW", "LogP"], previous=AXIS_NONE, allow_none=True)
     assert normalize_axis_name(combo.currentText()) is None
+
+
+def test_plotter_markers_box_is_shared(qapp):
+    from molmanager.ui.plot_markers_controls import PlotMarkersControls
+
+    plot = PlotWidget(None)
+    try:
+        markers = plot._markers_group
+        assert isinstance(markers, PlotMarkersControls)
+        assert markers.title() == "Markers"
+        assert markers.isAncestorOf(plot.color_combo)
+        assert markers.isAncestorOf(plot.size_combo)
+        assert not plot._axes_group.isAncestorOf(plot.color_combo)
+        assert not plot._axes_group.isAncestorOf(plot.size_combo)
+    finally:
+        plot.deleteLater()
+        qapp.processEvents()
