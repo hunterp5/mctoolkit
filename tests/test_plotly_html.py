@@ -115,4 +115,5 @@ def test_write_self_contained_plotly_html_includes_plotly(tmp_path: Path):
     write_self_contained_plotly_html(fig, path)
     text = path.read_text(encoding="utf-8")
     assert "Plotly.newPlot" in text
+    assert 'replace("rotate(-90", "rotate(90")' in text
     assert 'src="https://cdn.plot.ly' not in text
