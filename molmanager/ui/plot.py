@@ -89,7 +89,6 @@ from .dockable_plot import (
     show_plot_options_dialog,
     sync_footer_on_parent_change,
 )
-from ..plotting.plot_marker_color import PLOT_COLORSCALE_CHOICES
 from ..plotting.plot_radar import (
     MAX_RADAR_DISPLAY_ENTRIES,
     MAX_RADAR_TRACES,
@@ -100,14 +99,13 @@ from ..plotting.plot_radar import (
 from .plot_axis_mixin import PlotAxisMixin
 from .plot_bridge import PlotBridge
 from .plot_collect_mixin import PlotCollectMixin
-from .plot_color_range_controls import PlotColorRangeControls
 from .plot_dialog import PlotDialog
+from .plot_markers_controls import PlotMarkersControls
 from .plot_on_hover_controls import PlotOnHoverControls
 from .plot_radar_mixin import PlotRadarMixin
 from .plot_render_mixin import PlotRenderMixin
 from .plot_session_mixin import PlotSessionMixin
 from .plot_shell_mixin import PlotShellMixin
-from .plot_size_controls import PlotSizeRangeControls
 from .plot_statistics_panel import PlotStatisticsPanel
 from .plot_style_mixin import PlotStyleMixin
 from .plot_web_surface import build_plot_web_view, no_web_surface
@@ -278,48 +276,25 @@ class PlotWidget(
         self._hover_controls.persist_changed.connect(self._on_hover_persist_changed)
         ctrl_root.addWidget(self._hover_controls)
 
-        color_row = QHBoxLayout()
-        color_row.setSpacing(6)
-        self._color_by_label = QLabel("Color by:")
-        color_row.addWidget(self._color_by_label)
-        self.color_combo = QComboBox()
-        self.color_combo.setMinimumWidth(100)
-        self.color_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.color_combo.setToolTip(
-            "Color scatter and line points by a table column (numeric or categorical)."
+        self._markers_group = PlotMarkersControls(
+            color_tooltip=(
+                "Color scatter and line points by a table column (numeric or categorical)."
+            ),
+            size_tooltip=(
+                "Size scatter and line points by a table column (numeric or categorical)."
+            ),
         )
-        self.color_combo.currentIndexChanged.connect(self._on_color_column_changed)
-        color_row.addWidget(self.color_combo, 1)
-        self._spectrum_label = QLabel("Spectrum:")
-        color_row.addWidget(self._spectrum_label)
-        self.colorscale_combo = QComboBox()
-        self.colorscale_combo.setMinimumWidth(90)
-        self.colorscale_combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.colorscale_combo.addItems(PLOT_COLORSCALE_CHOICES)
-        self.colorscale_combo.setToolTip("Continuous colorscale for numeric Color by columns.")
-        self.colorscale_combo.currentIndexChanged.connect(self._schedule_plot)
-        color_row.addWidget(self.colorscale_combo)
-        self.color_range = PlotColorRangeControls()
-        self.color_range.connect_changed(self._schedule_plot)
-        color_row.addWidget(self.color_range, 0)
-        axes_l.addLayout(color_row)
-
-        size_row = QHBoxLayout()
-        size_row.setSpacing(6)
-        self._size_by_label = QLabel("Size by:")
-        size_row.addWidget(self._size_by_label)
-        self.size_combo = QComboBox()
-        self.size_combo.setMinimumWidth(100)
-        self.size_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.size_combo.setToolTip(
-            "Size scatter and line points by a table column (numeric or categorical)."
-        )
-        self.size_combo.currentIndexChanged.connect(self._on_size_column_changed)
-        size_row.addWidget(self.size_combo, 1)
-        self.size_range = PlotSizeRangeControls()
-        self.size_range.connect_changed(self._schedule_plot)
-        size_row.addWidget(self.size_range, 0)
-        axes_l.addLayout(size_row)
+        self._markers_group.color_changed.connect(self._on_color_column_changed)
+        self._markers_group.size_changed.connect(self._on_size_column_changed)
+        self._color_by_label = self._markers_group._color_by_label
+        self.color_combo = self._markers_group.color_combo
+        self._spectrum_label = self._markers_group._spectrum_label
+        self.colorscale_combo = self._markers_group.colorscale_combo
+        self.color_range = self._markers_group.color_range
+        self._size_by_label = self._markers_group._size_by_label
+        self.size_combo = self._markers_group.size_combo
+        self.size_range = self._markers_group.size_range
+        ctrl_root.addWidget(self._markers_group)
 
         analysis_row = QHBoxLayout()
         analysis_row.setSpacing(6)
