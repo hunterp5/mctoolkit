@@ -17,7 +17,7 @@ Structure column rows in scope (all or **Selected Rows Only** when offered).
 ## Options
 
 - Structure source / target as presented in the tool.
-- **Neutralize** - off by default; when checked, RDKit Uncharger zeros net formal charge on the largest fragment (same method as Tools → Prepare Structures → Protonate → Neutralize).
+- **Neutralize** - off by default; when checked, RDKit Uncharger zeros net formal charge on the largest fragment (same method as Chemistry → Prepare Structures → Protonate → Neutralize).
 - **Selected Rows Only** when available.
 - Combined cleanup actions: keep largest fragment, redraw 2D.
 - Run control to start the background job.
