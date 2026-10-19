@@ -309,6 +309,13 @@ def test_plot_options_split_embedding_and_appearance(qapp):
         assert panel._appearance_dialog.isAncestorOf(panel._titles)
         assert panel._appearance_dialog.isAncestorOf(panel._hover_controls)
         assert panel._appearance_dialog.isAncestorOf(panel.size_combo)
+        markers = panel._markers_group
+        assert isinstance(markers, QGroupBox)
+        assert markers.title() == "Markers"
+        assert markers.isAncestorOf(panel.color_combo)
+        assert markers.isAncestorOf(panel.size_combo)
+        assert not panel._titles.isAncestorOf(panel.color_combo)
+        assert not panel._hover_controls.isAncestorOf(panel.size_combo)
         assert not panel._appearance_dialog.isAncestorOf(panel.column_list)
         assert not panel._appearance_dialog.isAncestorOf(panel.run_btn)
     finally:
