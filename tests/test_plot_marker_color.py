@@ -161,6 +161,49 @@ def test_attach_marker_size_legend_adds_right_scale():
     assert len(size_traces) == 5
 
 
+def test_marker_shape_and_opacity():
+    from molmanager.plotting.plot_marker_color import (
+        clamp_marker_opacity,
+        resolve_marker_symbol,
+        unselected_marker_opacity,
+    )
+
+    marker = scatter_marker_from_column_values(
+        [1.0, 2.0],
+        opacity=0.4,
+        symbol="diamond",
+    )
+    assert marker["opacity"] == 0.4
+    assert marker["symbol"] == "diamond"
+    assert resolve_marker_symbol("star", scatter3d=True) == "circle"
+    assert resolve_marker_symbol("square-open", scatter3d=True) == "square-open"
+    assert resolve_marker_symbol("not-a-shape") == "circle"
+    assert clamp_marker_opacity(1.4) == 1.0
+    assert clamp_marker_opacity(-0.2) == 0.0
+    assert unselected_marker_opacity(0.85) == 0.35
+    assert unselected_marker_opacity(0.4) < 0.35
+
+
+def test_selection_opacity_meta_reads_marker_trace():
+    from plotly import graph_objects as go
+
+    from molmanager.plotting.plot_marker_color import marker_selection_opacities
+
+    fig = go.Figure(
+        data=[
+            go.Scatter(x=[0, 1], y=[0, 1], mode="lines"),
+            go.Scatter(
+                x=[0, 1],
+                y=[0, 1],
+                mode="markers",
+                marker={"opacity": 0.5, "symbol": "square"},
+                unselected={"marker": {"opacity": 0.2}},
+            ),
+        ]
+    )
+    assert marker_selection_opacities(fig) == (0.5, 0.2)
+
+
 def test_attach_marker_size_legend_with_colorbar():
     from plotly import graph_objects as go
 
@@ -186,3 +229,20 @@ def test_attach_marker_size_legend_with_colorbar():
     assert fig.layout.showlegend is True
     assert any(getattr(tr, "legendgroup", None) == "molmanager_size" for tr in fig.data)
     assert fig.data[0].marker.showscale is True
+
+
+def test_resolve_plot_colorscale_invert():
+    from molmanager.plotting.plot_marker_color import resolve_plot_colorscale
+
+    assert resolve_plot_colorscale("Plasma") == "Plasma"
+    assert resolve_plot_colorscale("Plasma", invert=True) == "Plasma_r"
+    assert resolve_plot_colorscale("Plasma_r") == "Plasma_r"
+    assert resolve_plot_colorscale("Plasma_r", invert=True) == "Plasma_r"
+    assert resolve_plot_colorscale("not-a-scale", invert=True) == "Viridis_r"
+    assert resolve_plot_colorscale(None) == "Viridis"
+
+    marker = scatter_marker_from_column_values([1.0, 2.0], colorscale="Viridis_r")
+    assert marker["colorscale"] == "Viridis_r"
+    from plotly import graph_objects as go
+
+    go.Figure(data=[go.Scatter(x=[1, 2], y=[1, 2], marker=marker)])

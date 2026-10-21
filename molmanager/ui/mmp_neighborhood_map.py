@@ -35,7 +35,7 @@ from PyQt5.QtWidgets import (
 from ..analysis.mmp_analysis import MmpPair, pairs_involving_oid
 from ..analysis.mmp_neighborhood_analysis import MmpNetworkGraph, build_mmp_network_graph
 from .dockable_plot import style_plot_footer_text_button
-from .mmp_neighborhood_plot import build_mmp_neighborhood_figure
+from .mmp_neighborhood_plot import _MMP_MARKER_OPACITY, build_mmp_neighborhood_figure
 from .plotly_interactive_view import PlotlyInteractiveView
 from .qt_widget_utils import make_window_minimizable
 from .result_plot_panel import DockableResultPlotPanel
@@ -107,6 +107,7 @@ class MmpNeighborhoodMapPanel(DockableResultPlotPanel):
             floating_dialog_cls=MmpNeighborhoodMapDialog,
             default_color_hint=activity_column or "activity",
             parent=parent,
+            default_marker_opacity=_MMP_MARKER_OPACITY,
         )
         self._pairs: list[MmpPair] = []
         self._graph: MmpNetworkGraph | None = None

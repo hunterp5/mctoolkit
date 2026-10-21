@@ -286,10 +286,12 @@ class PlotWidget(
         )
         self._markers_group.color_changed.connect(self._on_color_column_changed)
         self._markers_group.size_changed.connect(self._on_size_column_changed)
+        self._markers_group.style_changed.connect(self._schedule_plot)
         self._color_by_label = self._markers_group._color_by_label
         self.color_combo = self._markers_group.color_combo
         self._spectrum_label = self._markers_group._spectrum_label
         self.colorscale_combo = self._markers_group.colorscale_combo
+        self.invert_spectrum_cb = self._markers_group.invert_spectrum_cb
         self.color_range = self._markers_group.color_range
         self._size_by_label = self._markers_group._size_by_label
         self.size_combo = self._markers_group.size_combo

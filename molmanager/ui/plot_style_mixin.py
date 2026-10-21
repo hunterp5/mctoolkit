@@ -41,11 +41,14 @@ from ..plotting.plot_axes import (
     PLOT_TYPE_VIOLIN,
 )
 from ..plotting.plot_marker_color import (
+    DEFAULT_MARKER_OPACITY,
     DEFAULT_MARKER_SIZE_PX,
+    DEFAULT_MARKER_SYMBOL,
     attach_marker_size_legend,
     color_values_are_numeric,
     normalize_color_column,
     normalize_size_column,
+    resolve_marker_symbol,
     resolve_plot_colorscale,
     scatter_marker_from_column_values,
 )
@@ -201,8 +204,32 @@ class PlotStyleMixin:
             return None, None
         return self._column_values_for_oids(oids, size_col), size_col
 
+    def _marker_opacity(self) -> float:
+        group = getattr(self, "_markers_group", None)
+        if group is None:
+            return DEFAULT_MARKER_OPACITY
+        return float(group.marker_opacity())
+
+    def _marker_symbol(self, *, scatter3d: bool = False) -> str:
+        group = getattr(self, "_markers_group", None)
+        raw = DEFAULT_MARKER_SYMBOL if group is None else group.marker_symbol()
+        return resolve_marker_symbol(raw, scatter3d=scatter3d)
+
+    def _marker_style_supported(self) -> bool:
+        """True when the current plot type draws point markers."""
+        ptype = self._current_plot_type()
+        if ptype in (PLOT_TYPE_LINE_2D, PLOT_TYPE_BOX, PLOT_TYPE_VIOLIN):
+            return True
+        if ptype == PLOT_TYPE_SCATTER:
+            return self._effective_plot_mode() in ("2D", "3D")
+        return False
+
     def _scatter_marker_for_oids(
-        self, oids: list[int], *, point_size: float = DEFAULT_MARKER_SIZE_PX
+        self,
+        oids: list[int],
+        *,
+        point_size: float = DEFAULT_MARKER_SIZE_PX,
+        scatter3d: bool = False,
     ) -> dict:
         color_vals, color_label = self._color_values_for_oids(oids)
         color_vals, color_label = normalize_color_column(color_vals, color_label)
@@ -213,13 +240,16 @@ class PlotStyleMixin:
         return scatter_marker_from_column_values(
             color_vals,
             color_label=color_label,
-            colorscale=resolve_plot_colorscale(self.colorscale_combo.currentText()),
+            colorscale=self._current_colorscale(),
             color_min=color_min,
             color_max=color_max,
             size_values=size_vals,
             size_min_px=size_min_px,
             size_max_px=size_max_px,
             point_size=point_size,
+            opacity=self._marker_opacity(),
+            symbol=self._marker_symbol(scatter3d=scatter3d),
+            scatter3d=scatter3d,
         )
 
     def _attach_size_legend_for_oids(self, fig: go.Figure, oids: list[int]) -> None:
@@ -441,12 +471,22 @@ class PlotStyleMixin:
         spectrum_on = heatmap or (supported and self._current_color_column() is not None)
         self._spectrum_label.setEnabled(spectrum_on)
         self.colorscale_combo.setEnabled(spectrum_on)
+        self.invert_spectrum_cb.setEnabled(spectrum_on)
         numeric = (
             not heatmap and spectrum_on and color_values_are_numeric(self._probe_color_values())
         )
         self.color_range.set_enabled(numeric)
         self._update_size_controls()
+        markers = getattr(self, "_markers_group", None)
+        if markers is not None:
+            markers.set_style_enabled(self._marker_style_supported())
         self._update_analysis_controls()
+
+    def _current_colorscale(self) -> str:
+        return resolve_plot_colorscale(
+            self.colorscale_combo.currentText(),
+            invert=self.invert_spectrum_cb.isChecked(),
+        )
 
     def _update_size_controls(self) -> None:
         supported = self._color_by_supported()

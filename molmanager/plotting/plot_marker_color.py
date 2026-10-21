@@ -45,6 +45,41 @@ DEFAULT_SELECTED_MARKER_SIZE_PX = 11.0
 DEFAULT_SELECTED_MARKER_SIZE_3D_PX = 9.0
 DEFAULT_MARKER_SIZE_MIN_PX = 6.0
 DEFAULT_MARKER_SIZE_MAX_PX = 18.0
+DEFAULT_MARKER_OPACITY = 0.85
+DEFAULT_UNSELECTED_MARKER_OPACITY = 0.35
+DEFAULT_MARKER_SYMBOL = "circle"
+
+# Labels shown in plot settings, and the Plotly ``marker.symbol`` each one sets.
+# 3D scatter only draws the subset in ``_SCATTER3D_SYMBOLS``; other shapes fall back.
+PLOT_MARKER_SHAPES: tuple[tuple[str, str], ...] = (
+    ("Circle", "circle"),
+    ("Circle (open)", "circle-open"),
+    ("Square", "square"),
+    ("Square (open)", "square-open"),
+    ("Diamond", "diamond"),
+    ("Diamond (open)", "diamond-open"),
+    ("Triangle", "triangle-up"),
+    ("Triangle (open)", "triangle-up-open"),
+    ("Cross", "cross"),
+    ("X", "x"),
+    ("Star", "star"),
+    ("Pentagon", "pentagon"),
+    ("Hexagon", "hexagon"),
+)
+
+_MARKER_SYMBOLS = frozenset(symbol for _label, symbol in PLOT_MARKER_SHAPES)
+_SCATTER3D_SYMBOLS = frozenset(
+    {
+        "circle",
+        "circle-open",
+        "square",
+        "square-open",
+        "diamond",
+        "diamond-open",
+        "cross",
+        "x",
+    }
+)
 
 # A title longer than the colorbar grows the figure. Keep it beside the bar.
 COLORBAR_TITLE_MAX_CHARS = 32
@@ -69,11 +104,27 @@ PLOT_COLORSCALE_CHOICES: tuple[str, ...] = (
 )
 
 
-def resolve_plot_colorscale(name: str | None) -> str:
-    """Return a valid Plotly colorscale name."""
-    if name and name in PLOT_COLORSCALE_CHOICES:
-        return name
-    return DEFAULT_PLOT_COLORSCALE
+def colorscale_is_reversed(name: str | None) -> bool:
+    """True when ``name`` is a reversed Plotly colorscale (``Viridis_r``)."""
+    return bool(name) and str(name).strip().endswith("_r")
+
+
+def resolve_plot_colorscale(name: str | None, *, invert: bool = False) -> str:
+    """Return a valid Plotly colorscale name.
+
+    ``invert`` reverses the scale (``Viridis`` becomes ``Viridis_r``). A name
+    that already ends in ``_r`` stays reversed, so a resolved scale can be
+    passed through again without flipping back.
+    """
+    raw = (name or "").strip()
+    reversed_already = colorscale_is_reversed(raw)
+    base = raw[:-2] if reversed_already else raw
+    if base not in PLOT_COLORSCALE_CHOICES:
+        base = DEFAULT_PLOT_COLORSCALE
+        reversed_already = False
+    if invert or reversed_already:
+        return f"{base}_r"
+    return base
 
 
 def parse_color_range_bounds(
@@ -140,6 +191,91 @@ def normalize_size_column(
 ) -> tuple[list[Any] | None, str | None]:
     """Return ``(None, None)`` when Size by has no usable values."""
     return normalize_color_column(size_values, size_label)
+
+
+def clamp_marker_opacity(opacity: float) -> float:
+    """Clamp a marker opacity into the Plotly range ``[0, 1]``."""
+    try:
+        value = float(opacity)
+    except (TypeError, ValueError):
+        return DEFAULT_MARKER_OPACITY
+    if value != value:  # NaN
+        return DEFAULT_MARKER_OPACITY
+    return max(0.0, min(1.0, value))
+
+
+def resolve_marker_symbol(symbol: str | None, *, scatter3d: bool = False) -> str:
+    """Return a Plotly marker symbol, falling back to a circle when needed.
+
+    Scatter3d only draws circle, square, diamond, cross, and x (filled or open).
+    """
+    raw = str(symbol or "").strip()
+    if raw not in _MARKER_SYMBOLS:
+        raw = DEFAULT_MARKER_SYMBOL
+    if scatter3d and raw not in _SCATTER3D_SYMBOLS:
+        return "circle-open" if raw.endswith("-open") else "circle"
+    return raw
+
+
+def unselected_marker_opacity(
+    opacity: float,
+    *,
+    rest: float = DEFAULT_MARKER_OPACITY,
+    dim: float = DEFAULT_UNSELECTED_MARKER_OPACITY,
+) -> float:
+    """Dim unselected points in proportion to the chosen marker opacity.
+
+    At ``opacity == rest`` the result is ``dim``, so the historical look is kept
+    when the user has not changed the control.
+    """
+    chosen = clamp_marker_opacity(opacity)
+    rest_v = clamp_marker_opacity(rest)
+    dim_v = clamp_marker_opacity(dim)
+    if rest_v <= 1e-9:
+        return min(chosen, dim_v)
+    scaled = chosen * (dim_v / rest_v)
+    return max(0.02, min(chosen, scaled))
+
+
+def apply_marker_appearance(
+    marker: dict,
+    *,
+    opacity: float | None = None,
+    symbol: str | None = None,
+    scatter3d: bool = False,
+) -> dict:
+    """Set opacity and symbol on an existing Plotly marker dict."""
+    if opacity is not None:
+        marker["opacity"] = clamp_marker_opacity(opacity)
+    if symbol is not None:
+        marker["symbol"] = resolve_marker_symbol(symbol, scatter3d=scatter3d)
+    return marker
+
+
+def marker_selection_opacities(fig: Any) -> tuple[float | None, float | None]:
+    """Return ``(rest, unselected)`` opacity from the first marker trace.
+
+    The plot shell uses these when a selection restyles unselected points, so a
+    custom opacity is not replaced by the historical 0.85 / 0.35 pair.
+    """
+    for trace in getattr(fig, "data", None) or []:
+        mode = str(getattr(trace, "mode", "") or "")
+        if "markers" not in mode:
+            continue
+        marker = getattr(trace, "marker", None)
+        if marker is None:
+            continue
+        opacity = getattr(marker, "opacity", None)
+        if not isinstance(opacity, (int, float)):
+            continue
+        dim: float | None = None
+        unselected = getattr(trace, "unselected", None)
+        umarker = getattr(unselected, "marker", None) if unselected is not None else None
+        raw_dim = getattr(umarker, "opacity", None) if umarker is not None else None
+        if isinstance(raw_dim, (int, float)):
+            dim = float(raw_dim)
+        return float(opacity), dim
+    return None, None
 
 
 def clamp_marker_size_bounds(
@@ -453,7 +589,9 @@ def scatter_marker_from_column_values(
     size_max_px: float = DEFAULT_MARKER_SIZE_MAX_PX,
     default_color: str = "#2a74d6",
     point_size: float = DEFAULT_MARKER_SIZE_PX,
-    opacity: float = 0.85,
+    opacity: float = DEFAULT_MARKER_OPACITY,
+    symbol: str | None = None,
+    scatter3d: bool = False,
 ) -> dict:
     """
     Build a Plotly ``marker`` dict for scatter traces from per-point column values.
@@ -462,6 +600,7 @@ def scatter_marker_from_column_values(
     Text/category columns use a fixed discrete palette.
     Optional ``size_values`` map a second column onto marker size between
     ``size_min_px`` and ``size_max_px``.
+    ``symbol`` is a Plotly marker symbol (see ``PLOT_MARKER_SHAPES``).
     """
     size = marker_sizes_from_column_values(
         size_values,
@@ -469,9 +608,15 @@ def scatter_marker_from_column_values(
         size_max_px=size_max_px,
         default_size=point_size,
     )
+    opacity = clamp_marker_opacity(opacity)
+    resolved_symbol = resolve_marker_symbol(symbol, scatter3d=scatter3d)
+
+    def _done(marker: dict) -> dict:
+        marker["symbol"] = resolved_symbol
+        return marker
 
     if not raw_values or not column_values_have_color_data(raw_values):
-        return {"size": size, "opacity": opacity, "color": default_color}
+        return _done({"size": size, "opacity": opacity, "color": default_color})
 
     numeric: list[float] = []
     for value in raw_values:
@@ -485,7 +630,7 @@ def scatter_marker_from_column_values(
         plot_colors = [float(v) if v == v else float("nan") for v in numeric]
         finite = [v for v in plot_colors if v == v]
         if not finite:
-            return {"size": size, "opacity": opacity, "color": default_color}
+            return _done({"size": size, "opacity": opacity, "color": default_color})
         lo, hi = min(finite), max(finite)
         if color_min is not None:
             lo = float(color_min)
@@ -507,7 +652,7 @@ def scatter_marker_from_column_values(
         }
         if color_label:
             marker["colorbar"] = colorbar_for_label(color_label)
-        return marker
+        return _done(marker)
 
     categories: list[str] = []
     for value in raw_values:
@@ -521,8 +666,10 @@ def scatter_marker_from_column_values(
         cat: _CATEGORICAL_PALETTE[i % len(_CATEGORICAL_PALETTE)] for i, cat in enumerate(uniq)
     }
     point_colors = [color_map[c] for c in categories]
-    return {
-        "size": size,
-        "opacity": opacity,
-        "color": point_colors,
-    }
+    return _done(
+        {
+            "size": size,
+            "opacity": opacity,
+            "color": point_colors,
+        }
+    )

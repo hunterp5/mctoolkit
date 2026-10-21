@@ -648,6 +648,7 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         enabled = self.color_combo.currentText() != "(none)"
         self._spectrum_label.setEnabled(enabled)
         self.colorscale_combo.setEnabled(enabled)
+        self.invert_spectrum_cb.setEnabled(enabled)
         numeric = False
         if enabled and self._last_result is not None:
             color_col = self.color_combo.currentText()
@@ -710,6 +711,8 @@ class DimensionReductionPanel(DockableResultPlotPanel):
                 size_label=size_label,
                 size_min_px=size_min_px,
                 size_max_px=size_max_px,
+                marker_opacity=self._markers_group.marker_opacity(),
+                marker_symbol=self._markers_group.marker_symbol(),
                 **self._titles.title_overrides(),
             )
             self._plot_view.push_figure(fig, list(updated.oids))

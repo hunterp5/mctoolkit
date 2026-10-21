@@ -25,11 +25,13 @@ from plotly import graph_objects as go
 
 from ..analysis.dimensionality_reduction import DimensionReductionResult
 from ..plotting.plot_marker_color import (
+    DEFAULT_MARKER_OPACITY,
     DEFAULT_MARKER_SIZE_3D_PX,
     DEFAULT_PLOT_COLORSCALE,
     DEFAULT_SELECTED_MARKER_SIZE_PX,
     attach_marker_size_legend,
     scatter_marker_from_column_values,
+    unselected_marker_opacity,
 )
 from ..ui.plotly_html import finalize_plot_legend
 from .dockable_plot import resolve_plot_title_text
@@ -85,6 +87,8 @@ def build_dimension_reduction_figure(
     xaxis_title: str = "",
     yaxis_title: str = "",
     zaxis_title: str = "",
+    marker_opacity: float | None = None,
+    marker_symbol: str | None = None,
 ) -> go.Figure:
     is_3d = _result_is_3d(result)
     x_label, y_label, z_label = _axis_labels(result.method)
@@ -103,8 +107,13 @@ def build_dimension_reduction_figure(
         marker_kwargs["size_min_px"] = size_min_px
     if size_max_px is not None:
         marker_kwargs["size_max_px"] = size_max_px
+    if marker_opacity is not None:
+        marker_kwargs["opacity"] = marker_opacity
+    if marker_symbol is not None:
+        marker_kwargs["symbol"] = marker_symbol
     if is_3d:
         marker_kwargs["point_size"] = DEFAULT_MARKER_SIZE_3D_PX
+        marker_kwargs["scatter3d"] = True
     marker = scatter_marker_from_column_values(
         result.color_values,
         **marker_kwargs,
@@ -130,7 +139,13 @@ def build_dimension_reduction_figure(
             hoverinfo="none",
             marker=marker,
             showlegend=False,
-            unselected={"marker": {"opacity": 0.35}},
+            unselected={
+                "marker": {
+                    "opacity": unselected_marker_opacity(
+                        float(marker.get("opacity") or DEFAULT_MARKER_OPACITY)
+                    )
+                }
+            },
             selected={
                 "marker": {
                     "size": DEFAULT_SELECTED_MARKER_SIZE_PX,

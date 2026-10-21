@@ -29,6 +29,7 @@ from PyQt5.QtWebChannel import QWebChannel
 from PyQt5.QtWidgets import QVBoxLayout, QWidget
 from plotly import graph_objects as go
 
+from ..plotting.plot_marker_color import marker_selection_opacities
 from .layout_perf import perf_span
 from .plot_hover import hover_cards_payload, resolve_default_hover_columns
 from .plot_table_sync import (
@@ -164,6 +165,11 @@ class PlotlyInteractiveView(QWidget):
             if indices:
                 meta["molmanager_selection_traces"] = indices
         meta["molmanager_hover_persist"] = bool(self._hover_persist)
+        rest_opacity, dim_opacity = marker_selection_opacities(fig)
+        if rest_opacity is not None:
+            meta["molmanager_marker_opacity"] = rest_opacity
+        if dim_opacity is not None:
+            meta["molmanager_unselected_opacity"] = dim_opacity
         has_3d = any(getattr(tr, "type", None) == "scatter3d" for tr in fig.data)
         layout_updates = {"meta": meta, "clickmode": "event+select"}
         # Lasso is a 2D drag mode. 3D scenes keep orbit/turntable so the plot can rotate.
@@ -397,9 +403,10 @@ class PlotlyInteractiveView(QWidget):
             point_indices,
             partner_oids=self._partner_oids,
         )
-        # Avoid focus-stealing into the main table (breaks Shift+select in floating plots).
+        # Center the first selected row. Leave keyboard focus in the plot so Shift+select
+        # keeps adding points.
         apply_table_selection_for_source_rows(
-            self.parent_app, source_rows, scroll=False, origin=self
+            self.parent_app, source_rows, scroll=True, focus=False, origin=self
         )
 
     def _on_plot_point_clicked(self, point_index: int, *, additive: bool = False) -> None:

@@ -30,6 +30,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ..plotting.plot_marker_color import (
+    DEFAULT_MARKER_OPACITY,
     color_values_are_numeric,
     normalize_color_column,
     normalize_size_column,
@@ -77,6 +78,7 @@ class DockableResultPlotPanel(QWidget):
         opts_tooltip: str | None = None,
         pair_encoding: bool = True,
         defer_initial_reload: bool = False,
+        default_marker_opacity: float = DEFAULT_MARKER_OPACITY,
     ):
         super().__init__(parent)
         self.parent_app = parent_app
@@ -112,9 +114,11 @@ class DockableResultPlotPanel(QWidget):
                 + pair_note
             ),
             size_tooltip="Size markers by a table column (numeric or categorical)." + size_note,
+            default_opacity=default_marker_opacity,
         )
         self._markers_group.color_changed.connect(self._on_color_column_changed)
         self._markers_group.size_changed.connect(self._on_size_column_changed)
+        self._markers_group.style_changed.connect(self._rebuild_figure)
         self._bind_marker_controls(self._markers_group)
         opts.addWidget(self._markers_group)
 
@@ -195,10 +199,13 @@ class DockableResultPlotPanel(QWidget):
         self.color_combo = markers.color_combo
         self._spectrum_label = markers._spectrum_label
         self.colorscale_combo = markers.colorscale_combo
+        self.invert_spectrum_cb = markers.invert_spectrum_cb
         self.color_range = markers.color_range
         self._size_by_label = markers._size_by_label
         self.size_combo = markers.size_combo
         self.size_range = markers.size_range
+        self.shape_combo = markers.shape_combo
+        self.opacity_spin = markers.opacity_spin
 
     def _finish_layout(self) -> None:
         """Call after subclass adds content widgets to ``self._root``."""
@@ -325,6 +332,9 @@ class DockableResultPlotPanel(QWidget):
         enabled = self.color_combo.currentText() != "(none)"
         self._spectrum_label.setEnabled(enabled)
         self.colorscale_combo.setEnabled(enabled)
+        # Default continuous colorings (SALI, cliffs, MMP) stay invertible
+        # while Color by is (none) and the spectrum picker is off.
+        self.invert_spectrum_cb.setEnabled(enabled or bool(self._default_color_hint))
         numeric = False
         if enabled:
             # Probe with empty list → disable range until figure has points.
@@ -347,7 +357,10 @@ class DockableResultPlotPanel(QWidget):
         return self.size_range.parse_bounds()
 
     def _current_colorscale(self) -> str:
-        return resolve_plot_colorscale(self.colorscale_combo.currentText())
+        return resolve_plot_colorscale(
+            self.colorscale_combo.currentText(),
+            invert=self.invert_spectrum_cb.isChecked(),
+        )
 
     def _on_color_column_changed(self, _index: int = 0) -> None:
         self._update_spectrum_controls()
@@ -437,6 +450,8 @@ class DockableResultPlotPanel(QWidget):
             "size_label": size_col,
             "size_min_px": size_min_px,
             "size_max_px": size_max_px,
+            "marker_opacity": self._markers_group.marker_opacity(),
+            "marker_symbol": self._markers_group.marker_symbol(),
             **self._titles.title_overrides(),
         }
 
@@ -456,11 +471,14 @@ class DockableResultPlotPanel(QWidget):
         return {
             "color": self.color_combo.currentText(),
             "colorscale": self.colorscale_combo.currentText(),
+            "invert_spectrum": bool(self.invert_spectrum_cb.isChecked()),
             "color_min": self.color_range.color_min.text(),
             "color_max": self.color_range.color_max.text(),
             "size": self.size_combo.currentText(),
             "size_min": float(self.size_range.size_min.value()),
             "size_max": float(self.size_range.size_max.value()),
+            "marker_opacity": self._markers_group.marker_opacity(),
+            "marker_symbol": self._markers_group.marker_symbol(),
             **self._titles.title_overrides(),
             **self._hover_controls.collect_state(),
         }
@@ -477,6 +495,10 @@ class DockableResultPlotPanel(QWidget):
         finally:
             self.color_combo.blockSignals(False)
             self.size_combo.blockSignals(False)
+        if "invert_spectrum" in state:
+            self.invert_spectrum_cb.blockSignals(True)
+            self.invert_spectrum_cb.setChecked(bool(state.get("invert_spectrum")))
+            self.invert_spectrum_cb.blockSignals(False)
         cmin, cmax = state.get("color_min"), state.get("color_max")
         if isinstance(cmin, str):
             self.color_range.color_min.setText(cmin)
@@ -489,6 +511,12 @@ class DockableResultPlotPanel(QWidget):
                 self.size_range.size_max.setValue(float(state["size_max"]))
         except (TypeError, ValueError):
             pass
+        self._markers_group.apply_style(
+            opacity=state.get("marker_opacity"),
+            symbol=state.get("marker_symbol")
+            if isinstance(state.get("marker_symbol"), str)
+            else None,
+        )
         for edit, key in (
             (self._titles.plot_title_edit, "plot_title"),
             (self._titles.xaxis_title_edit, "xaxis_title"),

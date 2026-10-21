@@ -60,7 +60,11 @@ from ...analysis.medchem_space import (
 from ...workers.medchem_space_worker import MedChemSpaceSignals, MedChemSpaceWorker
 from ..table_dataframe import numeric_subset, table_to_dataframe
 from ..chunked_table_write import ChunkedTableWriter
-from ..medchem_space_plot import build_boiled_egg_figure, build_golden_triangle_figure
+from ..medchem_space_plot import (
+    _MARKER_OPACITY,
+    build_boiled_egg_figure,
+    build_golden_triangle_figure,
+)
 from ..plotly_interactive_view import PlotlyInteractiveView
 from ..plot_table_sync import visible_oids_for_plot
 from ..qt_widget_utils import make_window_minimizable
@@ -113,6 +117,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             opts_tooltip="Configure structure source, color, and On Hover.",
             pair_encoding=False,
             defer_initial_reload=True,
+            default_marker_opacity=_MARKER_OPACITY,
         )
         self._medchem_signals = MedChemSpaceSignals(self)
         self._medchem_signals.finished.connect(self._on_build_finished, Qt.QueuedConnection)
@@ -320,6 +325,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         enabled = self.color_combo.currentText() != "(none)"
         self._spectrum_label.setEnabled(enabled)
         self.colorscale_combo.setEnabled(enabled)
+        self.invert_spectrum_cb.setEnabled(enabled)
         numeric = False
         if enabled and self._plot_dataset is not None:
             color_col = self.color_combo.currentText()
@@ -851,6 +857,8 @@ class MedChemPlotPanel(DockableResultPlotPanel):
                     size_label=size_label,
                     size_min_px=size_min_px,
                     size_max_px=size_max_px,
+                    marker_opacity=self._markers_group.marker_opacity(),
+                    marker_symbol=self._markers_group.marker_symbol(),
                     **self._titles.title_overrides(),
                 )
             else:
@@ -865,6 +873,8 @@ class MedChemPlotPanel(DockableResultPlotPanel):
                     size_label=size_label,
                     size_min_px=size_min_px,
                     size_max_px=size_max_px,
+                    marker_opacity=self._markers_group.marker_opacity(),
+                    marker_symbol=self._markers_group.marker_symbol(),
                     **self._titles.title_overrides(),
                 )
             self._plot_view.push_figure(fig, dataset.oids)

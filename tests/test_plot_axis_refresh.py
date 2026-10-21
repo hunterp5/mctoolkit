@@ -82,6 +82,24 @@ def test_plotter_markers_box_is_shared(qapp):
         assert markers.title() == "Markers"
         assert markers.isAncestorOf(plot.color_combo)
         assert markers.isAncestorOf(plot.size_combo)
+        assert markers.isAncestorOf(plot.invert_spectrum_cb)
+        assert plot.invert_spectrum_cb.text() == "Invert"
+        color_row = markers.layout().itemAt(0).layout()
+        row_widgets = [color_row.itemAt(i).widget() for i in range(color_row.count())]
+        assert plot._color_by_label in row_widgets
+        assert plot.invert_spectrum_cb in row_widgets
+        assert (
+            row_widgets.index(plot.invert_spectrum_cb)
+            == row_widgets.index(plot.colorscale_combo) + 1
+        )
+        plot.invert_spectrum_cb.setChecked(True)
+        assert plot._current_colorscale() == "Viridis_r"
+        state = plot.collect_session_state()
+        assert state["invert_spectrum"] is True
+        plot.invert_spectrum_cb.setChecked(False)
+        plot.apply_session_state(state)
+        assert plot.invert_spectrum_cb.isChecked()
+        assert plot._current_colorscale() == "Viridis_r"
         assert not plot._axes_group.isAncestorOf(plot.color_combo)
         assert not plot._axes_group.isAncestorOf(plot.size_combo)
     finally:

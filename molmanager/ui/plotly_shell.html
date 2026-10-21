@@ -1060,6 +1060,19 @@
         if (!Number.isFinite(ti) || ti < 0 || !gd.data || ti >= gd.data.length) ti = 0;
         return { ti: ti, main: (gd.data && gd.data[ti]) || null, selTraces: selTraces };
       }
+      function selectionMarkerOpacities() {
+        var meta = (gd.layout && gd.layout.meta) || {};
+        var rest = (typeof meta.molmanager_marker_opacity === "number")
+          ? meta.molmanager_marker_opacity : 0.85;
+        var dim = (typeof meta.molmanager_unselected_opacity === "number")
+          ? meta.molmanager_unselected_opacity : 0.35;
+        return {rest: rest, dim: dim};
+      }
+      function markerSymbolFromTrace(trace) {
+        var sym = trace && trace.marker && trace.marker.symbol;
+        if (typeof sym === "string" && sym) return sym;
+        return "circle";
+      }
       function applySelectionIndices(indicesJson, queuedAt) {
         var perf = {start: perfNow(), queuedAt: queuedAt || 0, opDoneAt: 0, points: 0};
         var finalOp = null;
@@ -1074,6 +1087,7 @@
             return finalOp;
           }
           var idxs = parseSelectionIndices(indicesJson);
+          var opac = selectionMarkerOpacities();
           perf.points = idxs.length;
           if (!gd || !gd.data || !gd.data.length) return;
           var resolved = primarySelectionTraceInfo();
@@ -1099,14 +1113,20 @@
             }
             if (overlay3dIdx >= 0) {
               if (sx.length) {
-                keepView(Plotly.restyle(gd, {x: [sx], y: [sy], z: [sz]}, [overlay3dIdx]));
+                keepView(Plotly.restyle(gd, {
+                  x: [sx], y: [sy], z: [sz],
+                  "marker.symbol": [markerSymbolFromTrace(main)]
+                }, [overlay3dIdx]));
               } else {
                 keepView(Plotly.deleteTraces(gd, [overlay3dIdx]));
               }
             } else if (sx.length) {
               keepView(Plotly.addTraces(gd, {
                 type: "scatter3d", x: sx, y: sy, z: sz, mode: "markers",
-                marker: {size: 7, opacity: 1.0, color: "#d62828"},
+                marker: {
+                  size: 7, opacity: 1.0, color: "#d62828",
+                  symbol: markerSymbolFromTrace(main)
+                },
                 name: "Selected", showlegend: false, hoverinfo: "skip"
               }));
             }
@@ -1137,17 +1157,24 @@
                 x: sx,
                 y: sy,
                 mode: "markers",
-                marker: {size: 10, color: "#d62828", opacity: 1.0, line: {width: 1, color: "#8b0000"}},
+                marker: {
+                  size: 10, color: "#d62828", opacity: 1.0,
+                  symbol: markerSymbolFromTrace(main),
+                  line: {width: 1, color: "#8b0000"}
+                },
                 name: "Selected",
                 showlegend: false,
                 hoverinfo: "skip",
               };
               var overlayOp = (overlayIdx >= 0)
-                ? Plotly.restyle(gd, {x: [sx], y: [sy]}, [overlayIdx])
+                ? Plotly.restyle(gd, {
+                    x: [sx], y: [sy],
+                    "marker.symbol": [markerSymbolFromTrace(main)]
+                  }, [overlayIdx])
                 : Plotly.addTraces(gd, overlay);
               var dimPatch = {"unselected.marker.opacity": [], selectedpoints: []};
               for (var di = 0; di < selTraces.length; di++) {
-                dimPatch["unselected.marker.opacity"].push(0.35);
+                dimPatch["unselected.marker.opacity"].push(opac.dim);
                 dimPatch.selectedpoints.push([]);
               }
               keepView(Promise.resolve(overlayOp).then(function() {
@@ -1162,7 +1189,7 @@
                 var clearPatchSc = {selectedpoints: [], "unselected.marker.opacity": []};
                 for (var ciSc = 0; ciSc < selTraces.length; ciSc++) {
                   clearPatchSc.selectedpoints.push(null);
-                  clearPatchSc["unselected.marker.opacity"].push(0.85);
+                  clearPatchSc["unselected.marker.opacity"].push(opac.rest);
                 }
                 keepView(Promise.resolve(scatterOp).then(function() {
                   return Plotly.restyle(gd, clearPatchSc, selTraces);
@@ -1171,7 +1198,7 @@
                 var selPatchSc = {selectedpoints: [], "unselected.marker.opacity": []};
                 for (var siSc = 0; siSc < selTraces.length; siSc++) {
                   selPatchSc.selectedpoints.push(idxs);
-                  selPatchSc["unselected.marker.opacity"].push(0.35);
+                  selPatchSc["unselected.marker.opacity"].push(opac.dim);
                 }
                 keepView(Promise.resolve(scatterOp).then(function() {
                   return Plotly.restyle(gd, selPatchSc, selTraces);
@@ -1184,7 +1211,7 @@
             var clearPatch = {selectedpoints: [], "unselected.marker.opacity": []};
             for (var ci = 0; ci < selTraces.length; ci++) {
               clearPatch.selectedpoints.push(null);
-              clearPatch["unselected.marker.opacity"].push(0.85);
+              clearPatch["unselected.marker.opacity"].push(opac.rest);
             }
             keepView(Plotly.restyle(gd, clearPatch, selTraces));
             return;
@@ -1192,7 +1219,7 @@
           var selPatch = {selectedpoints: [], "unselected.marker.opacity": []};
           for (var si = 0; si < selTraces.length; si++) {
             selPatch.selectedpoints.push(idxs);
-            selPatch["unselected.marker.opacity"].push(0.35);
+            selPatch["unselected.marker.opacity"].push(opac.dim);
           }
           keepView(Plotly.restyle(gd, selPatch, selTraces));
         } catch (_selVis) {

@@ -52,11 +52,14 @@ class PlotSessionMixin:
             "heatmap_y_bin_width": self.heatmap_y_bin_width.text(),
             "color": self.color_combo.currentText(),
             "colorscale": self.colorscale_combo.currentText(),
+            "invert_spectrum": bool(self.invert_spectrum_cb.isChecked()),
             "color_min": self.color_range.color_min.text(),
             "color_max": self.color_range.color_max.text(),
             "size": self.size_combo.currentText(),
             "size_min": float(self.size_range.size_min.value()),
             "size_max": float(self.size_range.size_max.value()),
+            "marker_opacity": self._markers_group.marker_opacity(),
+            "marker_symbol": self._markers_group.marker_symbol(),
             "fit": fit_key if isinstance(fit_key, str) else "",
             "show_fit_formula": bool(self.show_fit_formula_cb.isChecked()),
             "fit_trunc_lower": self.fit_trunc_lower.text(),
@@ -129,6 +132,10 @@ class PlotSessionMixin:
         self._set_combo_text(self.color_combo, state.get("color"))
         self._set_combo_text(self.colorscale_combo, state.get("colorscale"))
         self._set_combo_text(self.size_combo, state.get("size"))
+        if "invert_spectrum" in state:
+            self.invert_spectrum_cb.blockSignals(True)
+            self.invert_spectrum_cb.setChecked(bool(state.get("invert_spectrum")))
+            self.invert_spectrum_cb.blockSignals(False)
         cmin, cmax = state.get("color_min"), state.get("color_max")
         if isinstance(cmin, str):
             self.color_range.color_min.setText(cmin)
@@ -141,6 +148,12 @@ class PlotSessionMixin:
                 self.size_range.size_max.setValue(float(state["size_max"]))
         except (TypeError, ValueError):
             pass
+        self._markers_group.apply_style(
+            opacity=state.get("marker_opacity"),
+            symbol=state.get("marker_symbol")
+            if isinstance(state.get("marker_symbol"), str)
+            else None,
+        )
         fit_key = state.get("fit")
         if isinstance(fit_key, str) and fit_key:
             fidx = self.fit_combo.findData(fit_key)

@@ -44,13 +44,20 @@ _OPACITY_FLOOR = 0.08
 _UNSELECTED_OPACITY_RATIO = 0.35 / _MARKER_OPACITY
 
 
-def marker_opacity_for_point_count(n_points: int) -> float:
-    """Fade markers as the cloud grows so overlap shows density instead of a solid fill."""
+def marker_opacity_for_point_count(n_points: int, *, base: float | None = None) -> float:
+    """Fade markers as the cloud grows so overlap shows density instead of a solid fill.
+
+    ``base`` is the opacity used up to 5,000 points. Larger clouds fade from that value.
+    """
+    from ..plotting.plot_marker_color import clamp_marker_opacity
+
+    solid = _MARKER_OPACITY if base is None else clamp_marker_opacity(base)
     count = max(0, int(n_points))
     if count <= _OPACITY_REFERENCE_POINTS:
-        return _MARKER_OPACITY
-    scaled = _MARKER_OPACITY * (_OPACITY_REFERENCE_POINTS / count) ** 0.5
-    return max(_OPACITY_FLOOR, min(_MARKER_OPACITY, scaled))
+        return solid
+    scaled = solid * (_OPACITY_REFERENCE_POINTS / count) ** 0.5
+    floor = min(_OPACITY_FLOOR, solid)
+    return max(floor, min(solid, scaled))
 
 
 def _unselected_marker_opacity(rest_opacity: float) -> float:
@@ -89,6 +96,8 @@ def _scatter_marker(
     size_min_px: float | None = None,
     size_max_px: float | None = None,
     n_points: int = 0,
+    marker_opacity: float | None = None,
+    marker_symbol: str | None = None,
 ) -> dict:
     from ..plotting.plot_marker_color import scatter_marker_from_column_values
 
@@ -99,7 +108,8 @@ def _scatter_marker(
         "color_max": color_max,
         "size_values": size_values,
         "point_size": DEFAULT_MARKER_SIZE_PX,
-        "opacity": marker_opacity_for_point_count(n_points),
+        "opacity": marker_opacity_for_point_count(n_points, base=marker_opacity),
+        "symbol": marker_symbol,
     }
     if size_min_px is not None:
         kwargs["size_min_px"] = size_min_px
@@ -146,6 +156,8 @@ def build_boiled_egg_figure(
     plot_title: str = "",
     xaxis_title: str = "",
     yaxis_title: str = "",
+    marker_opacity: float | None = None,
+    marker_symbol: str | None = None,
 ) -> go.Figure:
     """TPSA vs LogP with GIA (white) and BBB (yellow) regions."""
     pts = dataset.points
@@ -159,6 +171,8 @@ def build_boiled_egg_figure(
         size_min_px=size_min_px,
         size_max_px=size_max_px,
         n_points=len(pts),
+        marker_opacity=marker_opacity,
+        marker_symbol=marker_symbol,
     )
     fig = go.Figure(
         data=[
@@ -233,6 +247,8 @@ def build_golden_triangle_figure(
     plot_title: str = "",
     xaxis_title: str = "",
     yaxis_title: str = "",
+    marker_opacity: float | None = None,
+    marker_symbol: str | None = None,
 ) -> go.Figure:
     """MW vs LogP with the golden-triangle drug-likeness region."""
     pts = dataset.points
@@ -246,6 +262,8 @@ def build_golden_triangle_figure(
         size_min_px=size_min_px,
         size_max_px=size_max_px,
         n_points=len(pts),
+        marker_opacity=marker_opacity,
+        marker_symbol=marker_symbol,
     )
     fig = go.Figure(
         data=[

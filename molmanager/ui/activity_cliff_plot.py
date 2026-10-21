@@ -26,12 +26,19 @@ from plotly import graph_objects as go
 
 from ..analysis.activity_cliff_analysis import ActivityCliffPoint
 from ..plotting.plot_marker_color import (
+    DEFAULT_MARKER_OPACITY,
     DEFAULT_MARKER_SIZE_MAX_PX,
     DEFAULT_MARKER_SIZE_MIN_PX,
+    DEFAULT_MARKER_SYMBOL,
+    apply_marker_appearance,
     attach_marker_size_legend,
+    clamp_marker_opacity,
     colorbar_for_label,
+    colorscale_is_reversed,
     marker_sizes_from_column_values,
+    resolve_plot_colorscale,
     scatter_marker_from_column_values,
+    unselected_marker_opacity,
 )
 from .dockable_plot import resolve_plot_title_text
 from .plotly_html import finalize_plot_legend
@@ -61,6 +68,8 @@ def build_activity_cliff_figure(
     plot_title: str = "",
     xaxis_title: str = "",
     yaxis_title: str = "",
+    marker_opacity: float | None = None,
+    marker_symbol: str | None = None,
 ) -> go.Figure:
     """
     Scatter of structural-change size vs ``|Δactivity|``, colored by signed Δ by default.
@@ -109,7 +118,10 @@ def build_activity_cliff_figure(
         marker = {
             "size": sizes,
             "color": colors,
-            "colorscale": "RdBu",
+            "colorscale": resolve_plot_colorscale(
+                "RdBu",
+                invert=colorscale_is_reversed(colorscale),
+            ),
             "cmin": -cmax,
             "cmax": cmax,
             "colorbar": colorbar_for_label(f"Δ{activity_column}"),
@@ -118,6 +130,11 @@ def build_activity_cliff_figure(
         }
 
     marker.setdefault("line", {"width": 0.5, "color": "#333"})
+    opacity = (
+        DEFAULT_MARKER_OPACITY if marker_opacity is None else clamp_marker_opacity(marker_opacity)
+    )
+    apply_marker_appearance(marker, opacity=opacity, symbol=marker_symbol or DEFAULT_MARKER_SYMBOL)
+    dimmed = unselected_marker_opacity(opacity, rest=DEFAULT_MARKER_OPACITY, dim=0.25)
 
     fig = go.Figure(
         data=[
@@ -129,7 +146,7 @@ def build_activity_cliff_figure(
                 hoverinfo="none",
                 marker=marker,
                 showlegend=False,
-                unselected={"marker": {"opacity": 0.25}},
+                unselected={"marker": {"opacity": dimmed}},
                 selected={"marker": {"opacity": 1.0}},
             )
         ]

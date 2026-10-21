@@ -40,7 +40,7 @@ from ..plotting.plot_marker_color import (
     DEFAULT_MARKER_SIZE_PX,
     DEFAULT_SELECTED_MARKER_SIZE_3D_PX,
     DEFAULT_SELECTED_MARKER_SIZE_PX,
-    resolve_plot_colorscale,
+    unselected_marker_opacity,
 )
 from ..plotting.plot_heatmap import build_heatmap_figure, oids_in_heatmap_cell, summarize_heatmap
 from ..plotting.plot_radar import (
@@ -181,8 +181,18 @@ class PlotRenderMixin:
         # Large selections are applied after react via molmanagerSetSelection (avoids fat payloads).
         bake_selection = bool(selected_points) and len(selected_points) <= overlay_max
         marker = self._scatter_marker_for_oids(
-            foids, point_size=DEFAULT_MARKER_SIZE_3D_PX if is3d else DEFAULT_MARKER_SIZE_PX
+            foids,
+            point_size=DEFAULT_MARKER_SIZE_3D_PX if is3d else DEFAULT_MARKER_SIZE_PX,
+            scatter3d=is3d,
         )
+        selected_marker_2d = {
+            "size": DEFAULT_SELECTED_MARKER_SIZE_PX,
+            "color": "#d62828",
+            "opacity": 1.0,
+        }
+        unselected_marker = {
+            "marker": {"opacity": unselected_marker_opacity(marker.get("opacity", 0.85))}
+        }
 
         fig = go.Figure()
         if is3d:
@@ -216,6 +226,7 @@ class PlotRenderMixin:
                             "size": DEFAULT_SELECTED_MARKER_SIZE_3D_PX,
                             "opacity": 1.0,
                             "color": "#d62828",
+                            "symbol": marker.get("symbol", "circle"),
                         },
                         name="Selected",
                         showlegend=False,
@@ -247,14 +258,8 @@ class PlotRenderMixin:
                             "marker": marker,
                             "showlegend": False,
                             "selectedpoints": selected_points if bake_selection else None,
-                            "selected": {
-                                "marker": {
-                                    "size": DEFAULT_SELECTED_MARKER_SIZE_PX,
-                                    "color": "#d62828",
-                                    "opacity": 1.0,
-                                }
-                            },
-                            "unselected": {"marker": {"opacity": 0.35}},
+                            "selected": {"marker": selected_marker_2d},
+                            "unselected": unselected_marker,
                         },
                         foids,
                     )
@@ -330,7 +335,11 @@ class PlotRenderMixin:
                                 "opacity": 1.0,
                             }
                         },
-                        "unselected": {"marker": {"opacity": 0.35}},
+                        "unselected": {
+                            "marker": {
+                                "opacity": unselected_marker_opacity(marker.get("opacity", 0.85))
+                            }
+                        },
                     },
                     foids,
                 )
@@ -382,6 +391,8 @@ class PlotRenderMixin:
             "marker": {
                 "color": "#2a74d6",
                 "size": DEFAULT_MARKER_SIZE_PX,
+                "opacity": self._marker_opacity(),
+                "symbol": self._marker_symbol(),
                 "line": {"color": "#1d3557", "width": 1},
             },
         }
@@ -600,7 +611,7 @@ class PlotRenderMixin:
         y_edges, y_width = compute_histogram_bin_edges(
             fy, bin_width=y_bin_width, xmin=ymin, xmax=ymax
         )
-        colorscale = resolve_plot_colorscale(self.colorscale_combo.currentText())
+        colorscale = self._current_colorscale()
         fig, counts = build_heatmap_figure(
             fx,
             fy,

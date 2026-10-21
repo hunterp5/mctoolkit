@@ -26,14 +26,22 @@ from ..analysis.mmp_neighborhood_analysis import MmpNetworkGraph
 from ..plotting.plot_marker_color import (
     DEFAULT_MARKER_SIZE_MAX_PX,
     DEFAULT_MARKER_SIZE_MIN_PX,
+    DEFAULT_MARKER_SYMBOL,
+    apply_marker_appearance,
     attach_marker_size_legend,
+    clamp_marker_opacity,
     colorbar_for_label,
+    colorscale_is_reversed,
     marker_sizes_from_column_values,
     resolve_plot_colorscale,
     scatter_marker_from_column_values,
+    unselected_marker_opacity,
 )
 from .dockable_plot import resolve_plot_title_text
 from .plotly_html import finalize_plot_legend
+
+_MMP_MARKER_OPACITY = 0.92
+_MMP_UNSELECTED_OPACITY = 0.3
 
 
 def _equal_aspect_ranges(
@@ -70,6 +78,8 @@ def build_mmp_neighborhood_figure(
     plot_title: str = "",
     xaxis_title: str = "",
     yaxis_title: str = "",
+    marker_opacity: float | None = None,
+    marker_symbol: str | None = None,
 ) -> go.Figure:
     """Node+edge scatter: edge color by signed Δ; nodes color/size by options or defaults.
 
@@ -152,7 +162,7 @@ def build_mmp_neighborhood_figure(
             color_max=color_max,
             size_values=None,
             point_size=14,
-            opacity=0.92,
+            opacity=_MMP_MARKER_OPACITY,
         )
         marker["size"] = sizes
         if color_label:
@@ -162,10 +172,13 @@ def build_mmp_neighborhood_figure(
         marker = {
             "size": sizes,
             "color": node_color,
-            "colorscale": resolve_plot_colorscale(colorscale) if color_values else "Viridis",
+            "colorscale": resolve_plot_colorscale(
+                "Viridis",
+                invert=colorscale_is_reversed(colorscale),
+            ),
             "colorbar": colorbar_for_label(activity_column),
             "line": {"width": 0.8, "color": "#333"},
-            "opacity": 0.92,
+            "opacity": _MMP_MARKER_OPACITY,
         }
         if color_min is not None or color_max is not None:
             finite = [c for c in node_color if c == c]
@@ -177,6 +190,13 @@ def build_mmp_neighborhood_figure(
             marker["cmax"] = hi
 
     marker.setdefault("line", {"width": 0.8, "color": "#333"})
+    opacity = (
+        _MMP_MARKER_OPACITY if marker_opacity is None else clamp_marker_opacity(marker_opacity)
+    )
+    apply_marker_appearance(marker, opacity=opacity, symbol=marker_symbol or DEFAULT_MARKER_SYMBOL)
+    dimmed = unselected_marker_opacity(
+        opacity, rest=_MMP_MARKER_OPACITY, dim=_MMP_UNSELECTED_OPACITY
+    )
 
     node_trace_index = len(traces)
     traces.append(
@@ -189,7 +209,7 @@ def build_mmp_neighborhood_figure(
             hoverinfo="none",
             marker=marker,
             showlegend=False,
-            unselected={"marker": {"opacity": 0.3}},
+            unselected={"marker": {"opacity": dimmed}},
             selected={"marker": {"opacity": 1.0}},
         )
     )

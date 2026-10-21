@@ -24,12 +24,19 @@ from typing import Any
 from plotly import graph_objects as go
 
 from ..plotting.plot_marker_color import (
+    DEFAULT_MARKER_OPACITY,
     DEFAULT_MARKER_SIZE_MAX_PX,
     DEFAULT_MARKER_SIZE_MIN_PX,
+    DEFAULT_MARKER_SYMBOL,
+    apply_marker_appearance,
     attach_marker_size_legend,
+    clamp_marker_opacity,
     colorbar_for_label,
+    colorscale_is_reversed,
     marker_sizes_from_column_values,
+    resolve_plot_colorscale,
     scatter_marker_from_column_values,
+    unselected_marker_opacity,
 )
 from ..analysis.sali_analysis import SaliPoint
 from .dockable_plot import resolve_plot_title_text
@@ -63,6 +70,8 @@ def build_sali_figure(
     yaxis_title: str = "",
     selectivity: bool = False,
     treat_logarithmically: bool = False,
+    marker_opacity: float | None = None,
+    marker_symbol: str | None = None,
 ) -> go.Figure:
     """Scatter of fingerprint similarity vs ``|Δactivity|``, colored by SALI by default."""
     if selectivity:
@@ -100,13 +109,21 @@ def build_sali_figure(
         marker = {
             "size": sizes,
             "color": colors,
-            "colorscale": "Viridis",
+            "colorscale": resolve_plot_colorscale(
+                "Viridis",
+                invert=colorscale_is_reversed(colorscale),
+            ),
             "colorbar": colorbar_for_label("SALI"),
             "line": {"width": 0.5, "color": "#333"},
             "opacity": 0.85,
         }
 
     marker.setdefault("line", {"width": 0.5, "color": "#333"})
+    opacity = (
+        DEFAULT_MARKER_OPACITY if marker_opacity is None else clamp_marker_opacity(marker_opacity)
+    )
+    apply_marker_appearance(marker, opacity=opacity, symbol=marker_symbol or DEFAULT_MARKER_SYMBOL)
+    dimmed = unselected_marker_opacity(opacity, rest=DEFAULT_MARKER_OPACITY, dim=0.25)
 
     fig = go.Figure(
         data=[
@@ -118,7 +135,7 @@ def build_sali_figure(
                 hoverinfo="none",
                 marker=marker,
                 showlegend=False,
-                unselected={"marker": {"opacity": 0.25}},
+                unselected={"marker": {"opacity": dimmed}},
                 selected={"marker": {"opacity": 1.0}},
             )
         ]
