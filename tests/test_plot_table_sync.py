@@ -81,13 +81,26 @@ def test_apply_table_selection_skips_identical_selection(qapp) -> None:  # noqa:
 
 
 def test_apply_table_selection_selects_immediately_with_origin(qapp) -> None:  # noqa: ARG001
-    """Plot→table is not debounced; the plot is the origin and the table is not revealed."""
+    """Plot→table is not debounced; the plot centers the first row and keeps plot focus."""
+    app = _app_with_store({10}, {0: 10, 1: 20})
+    plot = object()
+
+    apply_table_selection_for_source_rows(app, [1, 0], scroll=True, focus=False, origin=plot)
+
+    app.select_table_rows.assert_called_once_with(
+        [0, 1], origin=plot, reveal=True, focus=False, center=True
+    )
+
+
+def test_apply_table_selection_can_skip_reveal(qapp) -> None:  # noqa: ARG001
     app = _app_with_store({10}, {0: 10, 1: 20})
     plot = object()
 
     apply_table_selection_for_source_rows(app, [1, 0], scroll=False, origin=plot)
 
-    app.select_table_rows.assert_called_once_with([0, 1], origin=plot, reveal=False)
+    app.select_table_rows.assert_called_once_with(
+        [0, 1], origin=plot, reveal=False, focus=False, center=False
+    )
 
 
 def test_clear_table_selection_from_plot_passes_origin() -> None:

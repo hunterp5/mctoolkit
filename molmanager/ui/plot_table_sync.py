@@ -156,14 +156,16 @@ def apply_table_selection_for_source_rows(
     source_rows: list[int],
     *,
     scroll: bool = True,
+    focus: bool = True,
     origin: object = None,
 ) -> None:
     """Replace the entry selection with source-model rows picked in a plot (lasso / click).
 
-    ``scroll`` reveals and focuses the first selected row in the table; plots that should
-    keep keyboard focus (Shift+select in floating plots) pass ``False``. ``origin`` is the
-    plot, so its own ``selection_store.changed`` can be told apart from other writers.
-    Re-applying the current selection is a no-op, which absorbs Plotly echo events.
+    ``scroll`` reveals the first selected row in the table and centers it. ``focus`` also
+    moves keyboard focus there; plot clicks pass ``False`` so Shift+select stays in the
+    plot. ``origin`` is the plot, so its own ``selection_store.changed`` can be told apart
+    from other writers. Re-applying the current selection is a no-op, which absorbs
+    Plotly echo events.
     """
     if not source_rows:
         return
@@ -171,7 +173,13 @@ def apply_table_selection_for_source_rows(
     with perf_span("selection.plot_to_table"):
         if _source_rows_already_selected(parent_app, uniq):
             return
-        parent_app.select_table_rows(uniq, origin=origin, reveal=scroll)
+        parent_app.select_table_rows(
+            uniq,
+            origin=origin,
+            reveal=scroll,
+            focus=bool(focus) and bool(scroll),
+            center=bool(scroll),
+        )
 
 
 def clear_table_selection_from_plot(

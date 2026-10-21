@@ -192,6 +192,45 @@ def test_selection_browser_rescope_keeps_previews(qapp):  # noqa: ARG001
     w.close()
 
 
+def test_browser_open_with_selection_shows_first_selected_row(qapp):  # noqa: ARG001
+    """Opening Browser while rows are selected lands on the first of them."""
+    w = ChemistryWorkspaceWindow()
+    _seed_row(w)
+    w._table_model.append_row(1, {"SMILES": "CCC", "Name": "propane", "MW": "44.10"})
+    w._table_model.append_row(2, {"SMILES": "CCCC", "Name": "butane", "MW": "58.12"})
+    w.mols[1] = Chem.MolFromSmiles("CCC")
+    w.mols[2] = Chem.MolFromSmiles("CCCC")
+    w.next_oid = 3
+    w.select_table_rows([2, 1], reveal=False)
+    panel = SelectionBrowserWidget(w)
+    revealed: list[dict] = []
+    w.reveal_first_selected_row = lambda **k: revealed.append(k)  # type: ignore[method-assign]
+    panel._idx = len(panel._rows) - 1
+    panel.apply_open_request()
+    assert panel._rows[panel._idx] == 1
+    assert panel._row_table.item(0, 1).text() == "propane"
+    assert revealed == [{"focus": False}]
+    panel.deleteLater()
+    w.close()
+
+
+def test_browser_open_without_selection_keeps_place(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _seed_row(w)
+    w._table_model.append_row(1, {"SMILES": "CCC", "Name": "propane", "MW": "44.10"})
+    w.mols[1] = Chem.MolFromSmiles("CCC")
+    w.next_oid = 2
+    panel = SelectionBrowserWidget(w)
+    panel._cb_only_selected.setChecked(False)
+    panel.refresh_from_app()
+    panel._step(1)
+    panel.apply_open_request()
+    assert panel._idx == 1
+    assert panel._row_table.item(0, 1).text() == "propane"
+    panel.deleteLater()
+    w.close()
+
+
 def test_selection_browser_focus_oid_walks_to_row(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     _seed_row(w)

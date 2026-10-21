@@ -151,20 +151,27 @@ class TableSelectionMixin:
         *,
         preserve_scroll: bool = False,
         scroll_pos: tuple[int, int] | None = None,
+        focus: bool = True,
+        center: bool = False,
     ) -> None:
         """
         Show selection highlight immediately after programmatic select.
 
         Deferred one event-loop tick so context-menu focus is released first; then
-        anchor the current cell, scroll if needed, focus the table, and repaint.
+        anchor the current cell, scroll if needed, optionally focus the table, and repaint.
 
         When ``anchor_col`` is given (e.g. column selection), the current cell and any
         auto-scroll target that column so the horizontal scroll position is preserved;
         otherwise it defaults to the Structure column for row-based selections.
         ``preserve_scroll`` keeps the current viewport (column header clicks).
         ``scroll_pos`` is the viewport to restore when ``preserve_scroll`` is set.
+        ``center`` places the anchor row in the middle of the viewport. ``focus`` gives
+        the table keyboard focus.
         """
         frozen = scroll_pos if preserve_scroll else None
+        scroll_hint = (
+            QAbstractItemView.PositionAtCenter if center else QAbstractItemView.EnsureVisible
+        )
 
         def _apply() -> None:
             # This runs a tick later, by which point the window may be gone: a test has ended, or
@@ -192,11 +199,11 @@ class TableSelectionMixin:
                     sm = self.table.selectionModel()
                     if sm is not None and idx.isValid():
                         sm.setCurrentIndex(idx, QItemSelectionModel.NoUpdate)
-                        self.table.scrollTo(idx, QAbstractItemView.EnsureVisible)
+                        self.table.scrollTo(idx, scroll_hint)
             finally:
                 if frozen is not None:
                     self._restore_table_scroll_pos(frozen)
-                if not preserve_scroll:
+                if not preserve_scroll and focus:
                     self.table.setFocus(Qt.OtherFocusReason)
                 self.table.viewport().update()
 
@@ -345,17 +352,26 @@ class TableSelectionMixin:
         extra_status: str = "",
         origin: object = None,
         reveal: bool = True,
+        focus: bool = True,
+        center: bool = False,
     ) -> int:
         """Replace the selection with the given source-model rows (an empty list clears it).
 
         Rows hidden by filters stay selected. ``origin`` tags the resulting
         ``selection_store.changed`` so a subscriber can recognise its own change.
-        ``reveal`` moves the current cell to the first row, scrolls to it, and focuses the
-        table; plots pass ``False`` so a click does not steal focus or jump the table.
+        ``reveal`` moves the current cell to the first visible row and scrolls it into
+        view. ``center`` places that row in the middle of the viewport. ``focus`` gives
+        the table keyboard focus. Plot clicks reveal and center without taking focus, so
+        Shift+select stays in the plot.
         """
         with perf_span("selection.select_rows"):
             return self._apply_table_row_selection(
-                rows, extra_status=extra_status, origin=origin, reveal=reveal
+                rows,
+                extra_status=extra_status,
+                origin=origin,
+                reveal=reveal,
+                focus=focus,
+                center=center,
             )
 
     def select_table_oids(
@@ -365,6 +381,8 @@ class TableSelectionMixin:
         extra_status: str = "",
         origin: object = None,
         reveal: bool = True,
+        focus: bool = True,
+        center: bool = False,
     ) -> int:
         """Replace the selection with the given OIDs (an empty set clears it)."""
         source_rows: list[int] = []
@@ -376,7 +394,12 @@ class TableSelectionMixin:
             if row >= 0:
                 source_rows.append(int(row))
         return self.select_table_rows(
-            source_rows, extra_status=extra_status, origin=origin, reveal=reveal
+            source_rows,
+            extra_status=extra_status,
+            origin=origin,
+            reveal=reveal,
+            focus=focus,
+            center=center,
         )
 
     def _source_rows_to_view_rows(self, source_rows: list[int]) -> list[int]:
@@ -402,6 +425,8 @@ class TableSelectionMixin:
         extra_status: str = "",
         origin: object = None,
         reveal: bool = True,
+        focus: bool = True,
+        center: bool = False,
     ) -> int:
         """Store the entry selection; the table paints it from the store (no Qt mirror)."""
         n_rows = self._table_model.rowCount()
@@ -419,7 +444,11 @@ class TableSelectionMixin:
             extra = f"{extra} {hint}".strip() if extra else hint
         if reveal:
             first_shown = next((r for r in uniq if self._is_source_row_visible(r)), None)
-            self._refresh_table_selection_visual(None if first_shown is None else [first_shown])
+            self._refresh_table_selection_visual(
+                None if first_shown is None else [first_shown],
+                focus=focus,
+                center=center,
+            )
         n = len(oids)
         self._report_table_selection_status(n, extra=extra, pump=True)
         return n
@@ -562,6 +591,14 @@ class TableSelectionMixin:
             ),
         )
         self.select_table_rows(to_sel)
+
+    def reveal_first_selected_row(self, *, focus: bool = False, center: bool = True) -> None:
+        """Scroll the compound table to the first visible selected entry."""
+        rows = self._selected_logical_rows()
+        first = next((r for r in rows if self._is_source_row_visible(r)), None)
+        if first is None:
+            return
+        self._refresh_table_selection_visual([first], focus=focus, center=center)
 
     def _selected_logical_rows(self) -> list[int]:
         """Sorted source-model rows of the selected entries (includes filtered-out rows)."""

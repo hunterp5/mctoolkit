@@ -67,6 +67,7 @@ class DockToolsMixin:
         usable = [m for m in (mols or []) if m is not None]
         if not usable:
             return None
+        self.reveal_first_selected_row(focus=False)
         copies = _copy_dock_pose_mols(usable)
         rec_path = (receptor_path or "").strip() or None
         xtal_path = (crystal_path or "").strip() or None

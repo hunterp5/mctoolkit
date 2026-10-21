@@ -341,6 +341,10 @@ class RandomMoleculeDialog(QDialog):
         hits = list(self._last)
         if not hits:
             return
+        app = self.parent_app
+        reveal = getattr(app, "reveal_first_selected_row", None)
+        if callable(reveal):
+            reveal(focus=False)
         from ..random_molecule_browser import (
             RandomMoleculeBrowserDialog,
             RandomMoleculeBrowserWidget,
@@ -348,7 +352,6 @@ class RandomMoleculeDialog(QDialog):
         from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
 
         unique_only = bool(self.chk_unique.isChecked())
-        app = self.parent_app
         if app is not None:
             iter_docked = getattr(app, "iter_docked_plot_widgets", None)
             if callable(iter_docked):

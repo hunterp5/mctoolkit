@@ -479,9 +479,29 @@ class SelectionBrowserWidget(QWidget):
         """Apply a Data → Browser / context-menu open: optional view mode and row focus."""
         if preview_mode:
             self.set_preview_mode(preview_mode)
-        self.refresh_from_app(preserve_position=focus_oid is None)
         if focus_oid is not None:
+            self.refresh_from_app(preserve_position=False)
             self.focus_oid(int(focus_oid))
+            return
+        self.refresh_from_app(preserve_position=True)
+        self._show_first_selected_entry()
+
+    def _show_first_selected_entry(self) -> None:
+        """Show the first selected entry and scroll the compound table to it."""
+        app = self._app
+        if app is None or app.selection_store.is_empty():
+            return
+        selected = [r for r in app._selected_logical_rows() if self._row_navigable(r)]
+        if not selected:
+            return
+        target = selected[0]
+        if target in self._rows:
+            self._idx = self._rows.index(target)
+            self._sync_caption(target)
+            self._update_preview(target)
+        reveal = getattr(app, "reveal_first_selected_row", None)
+        if callable(reveal):
+            reveal(focus=False)
 
     def focus_oid(self, oid: int) -> None:
         """Walk to the table row for *oid*, expanding scope off “Browse Selected” if needed."""

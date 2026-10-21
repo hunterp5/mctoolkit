@@ -229,10 +229,10 @@ class PlotShellMixin:
         self._select_rows_for_source_rows(source_rows)
 
     def _select_rows_for_source_rows(self, source_rows: list[int]) -> None:
-        # Do not scroll or focus the table: keeps plot clicks from jumping the table and
-        # keeps keyboard focus (Shift+select) in the plot.
+        # Center the first selected row. Leave keyboard focus in the plot so Shift+select
+        # keeps adding points.
         apply_table_selection_for_source_rows(
-            self.parent_app, source_rows, scroll=False, origin=self
+            self.parent_app, source_rows, scroll=True, focus=False, origin=self
         )
 
     def _on_plot_point_clicked(self, point_index: int, *, additive: bool = False) -> None:

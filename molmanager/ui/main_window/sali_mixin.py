@@ -208,6 +208,8 @@ class SaliMixin:
     ) -> None:
         from ..sali_browser import SaliBrowserDialog
 
+        self.reveal_first_selected_row(focus=False)
+
         def _factory():
             dlg = SaliBrowserDialog(
                 self,

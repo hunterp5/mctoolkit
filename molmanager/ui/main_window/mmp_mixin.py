@@ -155,6 +155,8 @@ class MmpMixin:
     def _open_mmp_browser(self, pairs, *, activity_column: str) -> None:
         from ..mmp_browser import MmpBrowserDialog
 
+        self.reveal_first_selected_row(focus=False)
+
         def _factory():
             dlg = MmpBrowserDialog(self, pairs, activity_column=activity_column)
             dlg.setModal(False)
