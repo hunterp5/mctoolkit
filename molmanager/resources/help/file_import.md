@@ -16,7 +16,7 @@ Current table plus an external file. Matching/merge behavior depends on the impo
 
 ## Options
 
-- **Source file** - choose the external file to bring in.
+- **Source file** - choose the external file to bring in. The file is added to **File → Open Recent**. Choosing it there later opens it with **Open File**, which replaces the current table.
 - **Append / merge** - combine into the active session table rather than replacing the session wholesale.
 - **New columns / rows** - appear in the main table after import completes.
 

@@ -156,6 +156,7 @@ def test_file_session_submenu_lists_session_actions(qapp):  # noqa: ARG001
         "Save Selected to Session…",
         "New Session",
         "Duplicate Session",
+        "Send Selected to New Session",
         "Close Session",
     ]
 
@@ -239,6 +240,67 @@ def test_save_selected_to_session_requires_selection(qapp, monkeypatch):  # noqa
     assert w.save_selected_to_session() is False
     assert seen["title"] == "Save Selected to Session"
     assert "No rows are selected" in seen["text"]
+
+
+def test_send_selected_to_new_session_opens_subset(qapp, monkeypatch, tmp_path):  # noqa: ARG001
+    from pathlib import Path
+
+    from molmanager.table.session_codec import expand_session_document, loads_session_bytes
+
+    w = ChemistryWorkspaceWindow()
+    _seed_two_rows(w)
+    w.selection_store.set({1})
+    w._mark_session_dirty()
+    source = str(tmp_path / "original.cms")
+    w._session_source_path = source
+    launched: list[list[str]] = []
+
+    def fake_popen(args, **kwargs):  # noqa: ARG001
+        launched.append([str(part) for part in args])
+
+    monkeypatch.setattr(
+        "molmanager.ui.main_window.session_save_mixin.subprocess.Popen",
+        fake_popen,
+    )
+    assert w.send_selected_to_new_session() is True
+    assert w.threadpool.waitForDone(60_000)
+    qapp.processEvents()
+    assert w._session_source_path == source
+    assert w._session_has_unsaved_changes()
+    assert w._table_model.rowCount() == 2
+    assert len(launched) == 1
+    args = launched[0]
+    assert "--load-session" in args
+    path = args[args.index("--load-session") + 1]
+    doc = expand_session_document(loads_session_bytes(Path(path).read_bytes()))
+    assert [row["id"] for row in doc["rows"]] == [1]
+    assert w.status_label.text().startswith("Selected rows sent to ")
+
+
+def test_send_selected_to_new_session_requires_selection(qapp, monkeypatch):  # noqa: ARG001
+    from PyQt5.QtWidgets import QMessageBox
+
+    w = ChemistryWorkspaceWindow()
+    _seed_two_rows(w)
+    seen: dict[str, str] = {}
+
+    def fake_info(_parent, title, text):
+        seen["title"] = title
+        seen["text"] = text
+
+    monkeypatch.setattr(QMessageBox, "information", fake_info)
+
+    def fail_launch(*_args, **_kwargs):
+        raise AssertionError("window should not launch")
+
+    monkeypatch.setattr(
+        "molmanager.ui.main_window.session_save_mixin.subprocess.Popen",
+        fail_launch,
+    )
+    assert w.send_selected_to_new_session() is False
+    assert seen["title"] == "Send Selected to New Session"
+    assert "No rows are selected" in seen["text"]
+    assert w._table_model.rowCount() == 2
 
 
 def test_session_load_uses_loading_page_then_reveals(qapp, monkeypatch):  # noqa: ARG001
@@ -510,6 +572,21 @@ def test_plot_fanout_is_leading_edge_throttled(qapp, monkeypatch):  # noqa: ARG0
     w._plot_table_sync_timer.stop()
     w._plot_table_sync_timer.timeout.emit()
     assert len(syncs) == 2
+
+
+def test_reveal_first_selected_row_targets_earliest_visible(qapp, monkeypatch):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _seed_rows(w, 5)
+    w.select_table_rows([3, 1], reveal=False)
+    seen: list[tuple] = []
+    monkeypatch.setattr(
+        w,
+        "_refresh_table_selection_visual",
+        lambda rows, **k: seen.append((rows, k)),
+    )
+    w.reveal_first_selected_row()
+    assert seen == [([1], {"focus": False, "center": True})]
+    w.close()
 
 
 def test_select_without_reveal_leaves_table_focus_and_scroll(qapp, monkeypatch):  # noqa: ARG001

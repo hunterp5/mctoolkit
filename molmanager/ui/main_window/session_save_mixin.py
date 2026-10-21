@@ -50,6 +50,7 @@ from ...table.session_document_build import assemble_session_document, write_ses
 from ...chem.molecule_conversion import mol_to_canonical_smiles
 from ...workers.session_save import SessionSaveWorker
 from ..background_jobs import register_background_job, unregister_background_job
+from ..recent_paths import KIND_SESSION, remember_recent
 from ..threadpool_access import start_runnable_on_app_pool
 from ..widgets import CategoryFilterCard, FilterCard, SubstructureFilterCard, TextFilterCard
 
@@ -235,6 +236,35 @@ class SessionSaveMixin:
             clear_dirty=False,
             status_prefix="Session duplicated to",
             dialog_title="Duplicate Session",
+            on_success=lambda p=path: self._launch_duplicate_session(p),
+        )
+
+    def send_selected_to_new_session(self) -> bool:
+        """Open a new MolManager window containing only the selected rows.
+
+        The current session stays open and keeps those rows.
+        """
+        oids = {int(o) for o in self._selected_oids_set()}
+        if not oids:
+            QMessageBox.information(
+                self,
+                "Send Selected to New Session",
+                "No rows are selected. Select one or more rows in the table first.",
+            )
+            return False
+        try:
+            path = self._session_bundle_temp_path()
+            snapshot = self._snapshot_session_save_inputs(oids=oids)
+        except Exception as e:
+            QMessageBox.warning(self, "Send Selected to New Session", str(e))
+            return False
+        return self._enqueue_session_save(
+            path,
+            snapshot,
+            clear_dirty=False,
+            adopt_source=False,
+            status_prefix="Selected rows sent to",
+            dialog_title="Send Selected to New Session",
             on_success=lambda p=path: self._launch_duplicate_session(p),
         )
 
@@ -601,14 +631,20 @@ class SessionSaveMixin:
         status_prefix: str,
         dialog_title: str,
         on_success: Callable[[], None] | None = None,
+        adopt_source: bool = True,
     ) -> bool:
-        """Queue compact+write off the GUI thread. Returns True if a write was started."""
+        """Queue compact+write off the GUI thread. Returns True if a write was started.
+
+        *adopt_source* is false when the file is only a launch bundle for another
+        window. The open session then keeps its current path.
+        """
         pending = {
             "path": path,
             "clear_dirty": bool(clear_dirty),
             "status_prefix": str(status_prefix),
             "dialog_title": str(dialog_title),
             "on_success": on_success,
+            "adopt_source": bool(adopt_source),
         }
         sigs = getattr(self, "_session_save_signals", None)
         pool = getattr(self, "threadpool", None)
@@ -669,10 +705,12 @@ class SessionSaveMixin:
             clear = getattr(self, "_clear_session_dirty", None)
             if callable(clear):
                 clear()
-        self._session_source_path = path
-        write_cache = getattr(self, "_write_session_structure_cache", None)
-        if callable(write_cache):
-            write_cache(path)
+        if pending.get("adopt_source", True):
+            self._session_source_path = path
+            remember_recent(KIND_SESSION, path)
+            write_cache = getattr(self, "_write_session_structure_cache", None)
+            if callable(write_cache):
+                write_cache(path)
         on_success = pending.get("on_success")
         if callable(on_success):
             on_success()
@@ -741,6 +779,7 @@ class SessionSaveMixin:
                 self._finish_failed_open()
                 self._warn_could_not_open("Open Session", damaged_session_message(path))
                 return False
+            remember_recent(KIND_SESSION, path)
             return True
         try:
             with open(path, "rb") as f:
@@ -764,4 +803,5 @@ class SessionSaveMixin:
             self._finish_failed_open()
             self._warn_could_not_open("Open Session", damaged_session_message(path))
             return False
+        remember_recent(KIND_SESSION, path)
         return True

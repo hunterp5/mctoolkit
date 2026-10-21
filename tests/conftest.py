@@ -61,6 +61,18 @@ def _destroy_leftover_widgets() -> None:
     QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_recent_paths(tmp_path, monkeypatch) -> None:
+    """Keep File → Open Recent off the developer QSettings profile."""
+    from PyQt5.QtCore import QSettings
+
+    ini = str(tmp_path / "recent_paths.ini")
+    monkeypatch.setattr(
+        "molmanager.ui.recent_paths.QSettings",
+        lambda *_a, **_k: QSettings(ini, QSettings.IniFormat),
+    )
+
+
 @pytest.fixture(scope="session")
 def qapp():
     """Single QApplication for the test session."""

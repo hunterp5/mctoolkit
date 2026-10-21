@@ -1,6 +1,6 @@
 # Sessions
 
-Sessions let you open, save, create, and duplicate MolManager project states so table data and related workspace context can be revisited later. All session commands live under **File → Session**.
+Sessions let you open, save, create, and duplicate MolManager project states so table data and related workspace context can be revisited later. Session commands live under **File → Session**. Sessions you have opened or saved also appear under **File → Open Recent**.
 
 ## Goal
 
@@ -17,6 +17,7 @@ The current in-memory table and session metadata. Open loads from a saved sessio
 ## Options
 
 - **Open Session** - load an existing session.
+- **Open Recent** - **File → Open Recent** lists those sessions (and data files) so you can reopen one without browsing. Duplicate Session's temporary copy is not listed. **Clear Recent** empties the list.
 - **Save Session** - write the current session to disk.
 - **Save Selected to Session** - write a new session file that contains only the selected table rows (does not replace or clear the current session).
 - **New Session** - start a fresh session.

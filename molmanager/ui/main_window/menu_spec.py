@@ -160,6 +160,12 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
     submenu(
         "&File",
         action("&Open File...", "open_file_dialog", hotkey="file.open"),
+        submenu(
+            "Open &Recent",
+            tooltips_visible=True,
+            attr="_recent_menu",
+            about_to_show="_populate_recent_menu",
+        ),
         action("&Save File...", "run_export", hotkey="file.export_all", args=(False,)),
         action("Save Selected...", "run_export", args=(True,)),
         action("Import &Data...", "open_import_file_dialog"),
@@ -171,7 +177,13 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             action("Save Selected to Session…", "save_selected_to_session"),
             action("&New Session", "new_session"),
             action("&Duplicate Session", "duplicate_session"),
+            action(
+                "Send Selected to New Session",
+                "send_selected_to_new_session",
+                tooltip="Open a new window that contains only the selected rows.",
+            ),
             action("Close Session", "close_session", hotkey="file.close_session"),
+            tooltips_visible=True,
         ),
     ),
     submenu(
@@ -670,7 +682,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             action(
                 "Manage Lists…",
                 "manage_row_lists",
-                tooltip="Delete named row lists.",
+                tooltip="Rename or delete named row lists.",
                 attr="_act_manage_lists",
             ),
             attr="_lists_menu",
@@ -695,9 +707,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             action(
                 "CoMSIA…",
                 "open_comsia_dialog",
-                tooltip=(
-                    "Fit a 3D CoMSIA model on aligned poses and write predicted activities."
-                ),
+                tooltip=("Fit a 3D CoMSIA model on aligned poses and write predicted activities."),
             ),
             tooltips_visible=True,
         ),
@@ -736,22 +746,22 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "ranked by support and activity effect."
             ),
         ),
-            action(
-                "Free-&Wilson…",
-                "open_free_wilson_dialog",
-                tooltip=(
-                    "Fit an additive Free-Wilson model on a shared core and list predicted "
-                    "activities for missing substituent combinations."
-                ),
+        action(
+            "Free-&Wilson…",
+            "open_free_wilson_dialog",
+            tooltip=(
+                "Fit an additive Free-Wilson model on a shared core and list predicted "
+                "activities for missing substituent combinations."
             ),
-            action(
-                "SAR Matrix…",
-                "open_sar_matrix_dialog",
-                tooltip=(
-                    "Pivot R-group columns into an R1 × R2 grid colored by activity. "
-                    "A third substituent becomes pages. Click a cell to select its rows."
-                ),
+        ),
+        action(
+            "SAR Matrix…",
+            "open_sar_matrix_dialog",
+            tooltip=(
+                "Pivot R-group columns into an R1 × R2 grid colored by activity. "
+                "A third substituent becomes pages. Click a cell to select its rows."
             ),
+        ),
         SEPARATOR,
         submenu(
             "&MedChem Plots",

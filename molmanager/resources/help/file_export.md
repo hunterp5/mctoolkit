@@ -18,7 +18,7 @@ Current table columns and structures. Choose all rows or selected rows depending
 
 - Save **all** rows (**File → Save File**) or **selected** rows (**File → Save Selected**).
 - Format choice appropriate to the destination (SDF, MOL, MOL2, SMILES, CSV, TSV, Excel, TDT, PDB, PDBQT).
-- Destination path / file name.
+- Destination path / file name. A successful save is added to **File → Open Recent** under Files.
 
 ## Workflow
 

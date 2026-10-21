@@ -33,6 +33,7 @@ from ..platform_support.config import load_config
 from ..platform_support.tool_progress import format_tool_progress_text
 from .app_kernel import bind_mixin_methods
 from .main_window.app_progress_mixin import AppProgressMixin
+from .recent_paths import remember_successful_export
 from .strings import STATUS_READY
 
 
@@ -240,6 +241,7 @@ class ProgressController:
         self._app._export_busy = False
         self._clear_tool_progress(status_message=None)
         self._app.status_label.setText(message)
+        remember_successful_export(message)
 
     def _refresh_status_from_slots(self) -> None:
         message, done, total, active = self._status_progress_snapshot()

@@ -103,7 +103,8 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "file_open",
                 "Open File",
                 "Open File",
-                "Load SDF, MOL, SMILES, CSV, RXN, and related formats.",
+                "Load SDF, MOL, SMILES, CSV, RXN, and related formats. "
+                "Reopen recent files from File → Open Recent.",
             ),
             _e(
                 "file_import",
@@ -115,7 +116,9 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "file_sessions",
                 "Sessions",
                 "Sessions",
-                "Open, save, save selected rows, create, duplicate, and close sessions.",
+                "Open, save, save selected rows, create, duplicate, send the selection "
+                "to a new session, and close sessions. "
+                "Recent sessions are under File → Open Recent.",
             ),
             _e(
                 "file_export",

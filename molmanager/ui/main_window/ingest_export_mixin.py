@@ -29,6 +29,7 @@ from ...platform_support.config import load_config
 from ...table.open_messages import preflight_open_path
 from ...table.table_file_formats import TABLE_OPEN_FILTER, TABLE_SAVE_FILTER
 from ...workers import ExportWorker, UniversalLoadWorker
+from ..recent_paths import KIND_FILE, remember_recent
 from ..strings import LOADING_DETAIL_APPEND, LOADING_DETAIL_READING_DISK
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ class IngestExportMixin:
     def load_file(self, path: str) -> None:
         if self._reject_unopenable_path(path, title="Open File"):
             return
+        remember_recent(KIND_FILE, path)
         self._note_open_attempt("Open File")
         self._accept_file_ingest_results()
         self._ingest_append_mode = False
@@ -112,6 +114,7 @@ class IngestExportMixin:
         """Load molecules from disk and append them to the current table (merge columns as needed)."""
         if self._reject_unopenable_path(path, title="Import Data"):
             return
+        remember_recent(KIND_FILE, path)
         self._note_open_attempt("Import Data")
         self._accept_file_ingest_results()
         self._pending_batches = []

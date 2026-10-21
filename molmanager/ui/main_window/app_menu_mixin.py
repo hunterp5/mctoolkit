@@ -19,15 +19,26 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QHBoxLayout,
+    QMenu,
     QToolButton,
     QWidget,
 )
 
 from ...platform_support.config import load_config
+from ...table.open_messages import preflight_open_path
+from ..recent_paths import (
+    KIND_SESSION,
+    RecentEntry,
+    clear_recent,
+    forget_recent,
+    load_recent,
+    recent_display_name,
+)
 from .menu_builder import install_menu_specs
 from .menu_spec import MAIN_WINDOW_MENUS
 
@@ -44,6 +55,56 @@ class AppMenuMixin:
             mb.setNativeMenuBar(False)
         self._install_menubar_corner(mb)
         self._sync_main_toolbar_for_table_ready()
+
+    def _populate_recent_menu(self) -> None:
+        """Fill File → Open Recent with saved files, then saved sessions."""
+        menu = self._recent_menu
+        menu.clear()
+        entries = load_recent()
+        files = [entry for entry in entries if entry.kind != KIND_SESSION]
+        sessions = [entry for entry in entries if entry.kind == KIND_SESSION]
+        if not files and not sessions:
+            empty = menu.addAction("No Recent Items")
+            empty.setEnabled(False)
+            return
+        if files:
+            self._add_recent_section(menu, "Files", files)
+        if files and sessions:
+            menu.addSeparator()
+        if sessions:
+            self._add_recent_section(menu, "Sessions", sessions)
+        menu.addSeparator()
+        clear = menu.addAction("Clear Recent")
+        clear.triggered.connect(lambda *_args: clear_recent())
+
+    def _add_recent_section(self, menu: QMenu, title: str, entries: Sequence[RecentEntry]) -> None:
+        header = menu.addAction(title)
+        header.setEnabled(False)
+        peers = [entry.path for entry in entries]
+        for entry in entries:
+            label = recent_display_name(entry.path, peers).replace("&", "&&")
+            act = menu.addAction(label)
+            act.setToolTip(entry.path)
+            act.setStatusTip(entry.path)
+            act.triggered.connect(
+                lambda *_args, kind=entry.kind, path=entry.path: self._open_recent_entry(kind, path)
+            )
+
+    def _open_recent_entry(self, kind: str, path: str) -> None:
+        """Open a recent data file or session. Drop the entry when the path is unusable."""
+        problem = preflight_open_path(path)
+        if problem:
+            forget_recent(path)
+            title = "Open Session" if kind == KIND_SESSION else "Open File"
+            self._warn_could_not_open(title, problem)
+            return
+        if kind == KIND_SESSION:
+            if str(path).lower().endswith(".csv"):
+                self.load_session_csv(path)
+            else:
+                self.apply_saved_session_from_file(path)
+            return
+        self.load_file(path)
 
     def _install_menubar_corner(self, mb) -> None:
         corner = QWidget(mb)

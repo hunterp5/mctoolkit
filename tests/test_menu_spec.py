@@ -57,6 +57,17 @@ def test_top_level_menu_order():
     ]
 
 
+def test_file_menu_includes_open_recent():
+    file_menu = find_submenu(MAIN_WINDOW_MENUS, "File")
+    labels = menu_outline(file_menu.items)
+    assert labels[0] == "Open File..."
+    assert labels[1] == {"Open Recent": []}
+    recent = find_submenu(file_menu.items, "Open Recent")
+    assert recent.about_to_show == "_populate_recent_menu"
+    assert recent.attr == "_recent_menu"
+    assert recent.tooltips_visible is True
+
+
 def test_file_session_submenu_outline():
     file_menu = find_submenu(MAIN_WINDOW_MENUS, "File")
     labels = menu_outline(file_menu.items)
@@ -68,6 +79,7 @@ def test_file_session_submenu_outline():
         "Save Selected to Session…",
         "New Session",
         "Duplicate Session",
+        "Send Selected to New Session",
         "Close Session",
     ]
 
@@ -129,7 +141,9 @@ def test_reaction_menu_outline():
     reaction = find_submenu(tools.items, "Reaction")
     rxn_labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(reaction.items)]
     assert rxn_labels.index("Extract…") < rxn_labels.index("R-Group Decomposition")
-    assert rxn_labels.index("Reaction Based Enumeration…") < rxn_labels.index("R-Group Enumeration…")
+    assert rxn_labels.index("Reaction Based Enumeration…") < rxn_labels.index(
+        "R-Group Enumeration…"
+    )
     decomp = find_submenu(reaction.items, "R-Group Decomposition")
     assert menu_outline(decomp.items) == [
         "Core-Based Decomposition…",
@@ -151,7 +165,9 @@ def test_lists_menu_sits_under_data_below_table():
     data_labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]
     assert data_labels.index("Lists") == data_labels.index("Table") + 1
     table = find_submenu(data.items, "Table")
-    assert "Lists" not in [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(table.items)]
+    assert "Lists" not in [
+        x if isinstance(x, str) else next(iter(x)) for x in menu_outline(table.items)
+    ]
     lists = find_submenu(data.items, "Lists")
     assert lists.attr == "_lists_menu"
     assert lists.about_to_show == "_rebuild_lists_menu"

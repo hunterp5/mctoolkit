@@ -25,6 +25,7 @@ from PyQt5.QtCore import QTimer, Qt
 
 from ...storage import load_mols_from_parse_result
 from ...table.open_messages import damaged_session_message, preflight_open_path
+from ..recent_paths import KIND_SESSION, remember_recent
 from ..strings import LOADING_DETAIL_SESSION
 from ..threadpool_access import start_runnable_on_app_pool
 from ...workers.session_rows_parse import (
@@ -53,6 +54,7 @@ class SessionCsvMixin:
             logger.warning("Open session CSV: %s", problem)
             self._warn_could_not_open("Open Session", problem)
             return
+        remember_recent(KIND_SESSION, path)
         self._note_open_attempt("Open Session")
         self._session_mutation_paused = True
         self._pending_session_clean_on_ready = True

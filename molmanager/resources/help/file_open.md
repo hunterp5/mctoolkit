@@ -19,6 +19,7 @@ File on disk. Structure columns are parsed when the format carries molecules; CS
 - **File browser** / path selection for supported chemistry and table formats (SDF/SD/MOL, MOL2, SMILES, CSV/TSV, Excel ``.xlsx``, TDT, PDB, PDBQT, RXN/RDF, including ``.gz``).
 - **Format parsing** - multi-molecule SDF/MOL2/PDBQT, SMILES lists, delimited or Excel tables with structure columns, and MDL reaction files.
 - **Main table** columns and depictions populated after a successful load.
+- **Open Recent** — **File → Open Recent** lists files and sessions you have opened or saved (ten of each, newest first). Choosing a file opens it the same way as **Open File**. **Clear Recent** empties the list. A path that is missing or unreadable is dropped when you choose it.
 
 ## Workflow
 
