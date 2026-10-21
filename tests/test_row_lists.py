@@ -71,6 +71,34 @@ def test_row_list_store_loads_session_payload():
     assert store.oids("B") == []
 
 
+def test_row_list_store_apply_edits_renames_and_reuses_deleted_names():
+    store = RowListStore()
+    store.add("Actives", [0, 2])
+    store.add("Leads", [1])
+
+    deleted, renames = store.apply_edits([("Actives", "Hits"), ("Leads", "Leads")])
+    assert deleted == []
+    assert renames == [("Actives", "Hits")]
+    assert store.names() == ["Hits", "Leads"]
+    assert store.oids("Hits") == [0, 2]
+
+    deleted, renames = store.apply_edits([("Hits", "Leads")])
+    assert deleted == ["Leads"]
+    assert renames == [("Hits", "Leads")]
+    assert store.names() == ["Leads"]
+    assert store.oids("Leads") == [0, 2]
+
+
+def test_row_list_store_apply_edits_rejects_a_duplicate_name():
+    store = RowListStore()
+    store.add("Actives", [0])
+    store.add("Leads", [1])
+    with pytest.raises(ValueError, match="already exists"):
+        store.apply_edits([("Actives", "Same"), ("Leads", "Same")])
+    assert store.names() == ["Actives", "Leads"]
+    assert store.oids("Leads") == [1]
+
+
 def test_add_selected_dialog_requires_a_name(qapp):  # noqa: ARG001
     dlg = AddSelectedToListDialog(None, existing_names=["Actives"])
     assert not dlg._ok_btn.isEnabled()
@@ -86,12 +114,79 @@ def test_add_selected_dialog_requires_a_name(qapp):  # noqa: ARG001
     assert dlg.list_name() == "Leads"
 
 
-def test_manage_lists_dialog_delete_keeps_the_rest(qapp):  # noqa: ARG001
+def test_add_selected_dialog_picks_an_existing_list(qapp):  # noqa: ARG001
+    dlg = AddSelectedToListDialog(None, existing_names=["Actives", "Leads"])
+    assert dlg.name_combo.currentIndex() == -1
+    dlg.name_combo.setCurrentIndex(0)
+    assert dlg._ok_btn.isEnabled()
+    dlg._accept_name()
+    assert dlg.list_name() == "Actives"
+
+    again = AddSelectedToListDialog(None, existing_names=["Actives"])
+    again.name_combo.setCurrentText("actives")
+    again._accept_name()
+    assert again.list_name() == "Actives"
+
+
+def test_manage_lists_dialog_delete_keeps_the_rest(qapp, monkeypatch):  # noqa: ARG001
+    dlg = ManageListsDialog(None, entries=[("Actives", 2), ("Leads", 1)])
+    asked: list[str] = []
+
+    def _question(*args, **kwargs):  # noqa: ARG001
+        asked.append(str(args[2]) if len(args) > 2 else "")
+        return QMessageBox.Yes
+
+    monkeypatch.setattr("molmanager.ui.dialogs.row_lists.QMessageBox.question", _question)
+    dlg._list.setCurrentRow(0)
+    assert dlg._rename_btn.isEnabled()
+    dlg._delete_selected()
+    assert asked and 'Delete list "Actives"?' in asked[0]
+    assert "Rows in the table are kept." in asked[0]
+    assert dlg.remaining_names() == ["Leads"]
+    assert dlg.kept_lists() == [("Leads", "Leads")]
+    assert not dlg._delete_btn.isEnabled()
+    assert not dlg._rename_btn.isEnabled()
+
+
+def test_manage_lists_dialog_delete_can_be_cancelled(qapp, monkeypatch):  # noqa: ARG001
+    dlg = ManageListsDialog(None, entries=[("Actives", 2), ("Leads", 1)])
+    monkeypatch.setattr(
+        "molmanager.ui.dialogs.row_lists.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.No,  # noqa: ARG005
+    )
+    dlg._list.clearSelection()
+    dlg._list.item(0).setSelected(True)
+    dlg._list.item(1).setSelected(True)
+    assert not dlg._rename_btn.isEnabled()
+    dlg._delete_selected()
+    assert dlg.remaining_names() == ["Actives", "Leads"]
+
+
+def test_manage_lists_dialog_renames_one_list(qapp, monkeypatch):  # noqa: ARG001
     dlg = ManageListsDialog(None, entries=[("Actives", 2), ("Leads", 1)])
     dlg._list.setCurrentRow(0)
-    dlg._delete_selected()
-    assert dlg.remaining_names() == ["Leads"]
-    assert not dlg._delete_btn.isEnabled()
+    monkeypatch.setattr(
+        "molmanager.ui.dialogs.row_lists.QInputDialog.getText",
+        lambda *args, **kwargs: ("  Hits  ", True),  # noqa: ARG005
+    )
+    dlg._rename_selected()
+    assert dlg.kept_lists() == [("Actives", "Hits"), ("Leads", "Leads")]
+    assert dlg._list.item(0).text() == "Hits (2 rows)"
+
+    monkeypatch.setattr(
+        "molmanager.ui.dialogs.row_lists.QInputDialog.getText",
+        lambda *args, **kwargs: ("leads", True),  # noqa: ARG005
+    )
+    warned: list[str] = []
+
+    def _warn(*args, **kwargs):  # noqa: ARG001
+        warned.append(str(args[2]) if len(args) > 2 else "")
+        return QMessageBox.Ok
+
+    monkeypatch.setattr("molmanager.ui.dialogs.row_lists.QMessageBox.warning", _warn)
+    dlg._rename_selected()
+    assert dlg.kept_lists() == [("Actives", "Hits"), ("Leads", "Leads")]
+    assert warned and "already exists" in warned[0]
 
 
 def _seed_rows(window: ChemistryWorkspaceWindow) -> None:
@@ -180,6 +275,27 @@ def test_named_list_selects_rows_and_can_be_deleted(qapp):  # noqa: ARG001
     window.close()
 
 
+def test_add_selected_unions_into_an_existing_list(qapp, monkeypatch):  # noqa: ARG001
+    window = ChemistryWorkspaceWindow()
+    _seed_rows(window)
+    window.commit_named_row_list("Actives", {0})
+    window.select_table_oids({1, 2})
+    qapp.processEvents()
+
+    def _exec(self):
+        assert "Actives" in [self.name_combo.itemText(i) for i in range(self.name_combo.count())]
+        self.name_combo.setCurrentIndex(self.name_combo.findText("Actives"))
+        self._accept_name()
+        return self.result()
+
+    monkeypatch.setattr(AddSelectedToListDialog, "exec_", _exec)
+    window.add_selected_to_list()
+    assert window._row_list_store().names() == ["Actives"]
+    assert window._row_list_store().oids("Actives") == [0, 1, 2]
+    assert window.status_label.text() == 'Added 2 row(s) to list "Actives".'
+    window.close()
+
+
 def test_manage_row_lists_deletes_on_accept(qapp, monkeypatch):  # noqa: ARG001
     window = ChemistryWorkspaceWindow()
     _seed_rows(window)
@@ -193,13 +309,42 @@ def test_manage_row_lists_deletes_on_accept(qapp, monkeypatch):  # noqa: ARG001
         def exec_(self):
             return QDialog.Accepted
 
-        def remaining_names(self):
-            return ["Leads"]
+        def kept_lists(self):
+            return [("Leads", "Leads")]
 
     monkeypatch.setattr("molmanager.ui.dialogs.row_lists.ManageListsDialog", _Dlg)
     window.manage_row_lists()
     assert window._row_list_store().names() == ["Leads"]
+    assert window._row_list_store().oids("Leads") == [1, 2]
     assert _menu_labels(window)[1] == "Leads"
+    assert window.status_label.text() == 'Deleted list "Actives".'
+    window.close()
+
+
+def test_manage_row_lists_renames_on_accept(qapp, monkeypatch):  # noqa: ARG001
+    window = ChemistryWorkspaceWindow()
+    _seed_rows(window)
+    window.commit_named_row_list("Actives", {0, 2})
+    window.commit_named_row_list("Leads", {1})
+    window._session_dirty = False
+
+    class _Dlg:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def exec_(self):
+            return QDialog.Accepted
+
+        def kept_lists(self):
+            return [("Actives", "Hits"), ("Leads", "Leads")]
+
+    monkeypatch.setattr("molmanager.ui.dialogs.row_lists.ManageListsDialog", _Dlg)
+    window.manage_row_lists()
+    assert window._row_list_store().names() == ["Hits", "Leads"]
+    assert window._row_list_store().oids("Hits") == [0, 2]
+    assert _menu_labels(window)[1:3] == ["Hits", "Leads"]
+    assert window.status_label.text() == 'Renamed "Actives" to "Hits".'
+    assert window._session_dirty is True
     window.close()
 
 

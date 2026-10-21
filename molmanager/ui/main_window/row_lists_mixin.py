@@ -14,13 +14,28 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Lists menu: save the current selection under a name, recall it, and delete lists."""
+"""Lists menu: save a selection, add it to an existing list, rename, and delete lists."""
 
 from __future__ import annotations
 
 from PyQt5.QtWidgets import QAction, QDialog, QMessageBox
 
 from ..row_lists import RowListStore, normalize_list_name
+
+
+def _row_list_edit_status(removed: list[str], renames: list[tuple[str, str]]) -> str:
+    """Status-bar text after a manage-lists accept that changed something."""
+    parts: list[str] = []
+    if len(renames) == 1:
+        old, new = renames[0]
+        parts.append(f'Renamed "{old}" to "{new}"')
+    elif renames:
+        parts.append(f"Renamed {len(renames)} lists")
+    if len(removed) == 1:
+        parts.append(f'Deleted list "{removed[0]}"')
+    elif removed:
+        parts.append(f"Deleted {len(removed)} lists")
+    return ". ".join(parts) + "."
 
 
 class RowListsMixin:
@@ -115,7 +130,7 @@ class RowListsMixin:
         return int(self.select_table_oids(oids, extra_status=f"List: {name}."))
 
     def manage_row_lists(self) -> None:
-        """Open the dialog that deletes named lists."""
+        """Open the dialog that renames and deletes named lists."""
         from ..dialogs.row_lists import ManageListsDialog
 
         store = self._row_list_store()
@@ -123,8 +138,12 @@ class RowListsMixin:
         dlg = ManageListsDialog(self, entries=entries)
         if dlg.exec_() != QDialog.Accepted:
             return
-        removed = store.retain(dlg.remaining_names())
-        if not removed:
+        try:
+            removed, renames = store.apply_edits(dlg.kept_lists())
+        except ValueError as exc:
+            QMessageBox.warning(self, "Manage Lists", str(exc))
+            return
+        if not removed and not renames:
             return
         self._rebuild_lists_menu()
         mark = getattr(self, "_mark_session_dirty", None)
@@ -132,8 +151,7 @@ class RowListsMixin:
             mark()
         label = getattr(self, "status_label", None)
         if label is not None:
-            noun = "list" if len(removed) == 1 else "lists"
-            label.setText(f"Deleted {len(removed)} {noun}.")
+            label.setText(_row_list_edit_status(removed, renames))
 
     def clear_row_lists(self) -> None:
         self._row_list_store().clear()

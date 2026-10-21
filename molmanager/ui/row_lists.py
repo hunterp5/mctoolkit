@@ -73,6 +73,41 @@ class RowListStore:
             del self._oids[name]
         return removed
 
+    def apply_edits(
+        self, kept: Iterable[tuple[str, str]]
+    ) -> tuple[list[str], list[tuple[str, str]]]:
+        """Keep *kept* as ``(current_name, new_name)`` pairs, in that order.
+
+        Lists left out are deleted. A list may take the name of one that is deleted
+        in the same edit. The store changes only after every new name is valid.
+        Return ``(deleted_names, renames)`` with renames as ``(old, new)`` pairs.
+        """
+        pairs = [(str(old), normalize_list_name(new)) for old, new in kept]
+        for _old, new in pairs:
+            if not new:
+                raise ValueError("List name is empty.")
+        seen: set[str] = set()
+        for _old, new in pairs:
+            if new in seen:
+                raise ValueError(f'A list named "{new}" already exists.')
+            seen.add(new)
+        keep_orig = {old for old, _new in pairs}
+        deleted = [name for name in self._order if name not in keep_orig]
+        new_order: list[str] = []
+        new_oids: dict[str, list[int]] = {}
+        renames: list[tuple[str, str]] = []
+        for old, new in pairs:
+            oids = self._oids.get(old)
+            if oids is None:
+                continue
+            new_oids[new] = oids
+            new_order.append(new)
+            if new != old:
+                renames.append((old, new))
+        self._order = new_order
+        self._oids = new_oids
+        return deleted, renames
+
     def clear(self) -> None:
         self._order.clear()
         self._oids.clear()
