@@ -25,6 +25,7 @@ import time
 from PyQt5 import sip
 from PyQt5.QtCore import QObject, QRunnable, pyqtSignal
 
+from ..chem.structure_payload import StructurePayload, smiles_text_for_payload
 from ..predictions.permeability_prediction import (
     format_permeability_row,
     permeability_model_available,
@@ -61,7 +62,7 @@ class PermeabilityPredictorWorker(QRunnable):
 
     def __init__(
         self,
-        rows: list[tuple[int, str]],
+        rows: list[StructurePayload],
         worker_signals,
         permeability_signals: PermeabilityPredictorSignals,
         cancel_event: threading.Event | None = None,
@@ -121,19 +122,25 @@ class PermeabilityPredictorWorker(QRunnable):
 
         oids: list[int] = []
         smiles: list[str] = []
-        for oid, smi in self.rows:
+        for payload in self.rows:
             if cancel_ev is not None and cancel_ev.is_set():
                 _safe_emit(self.permeability_signals, "failed", "Cancelled.")
                 return
             done += 1
             _emit_progress("Predict Permeability…")
-            text = (smi or "").strip()
+            if payload.oid is None:
+                continue
+            text = smiles_text_for_payload(payload)
             if text:
-                oids.append(int(oid))
+                oids.append(int(payload.oid))
                 smiles.append(text)
 
         if not smiles:
-            _safe_emit(self.permeability_signals, "finished", [])
+            _safe_emit(
+                self.permeability_signals,
+                "failed",
+                "No valid structures were found for this scope and source.",
+            )
             return
 
         _emit_progress("Running GNN-MTL model…", force=True)

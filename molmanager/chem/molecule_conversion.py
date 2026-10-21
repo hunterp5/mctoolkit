@@ -80,12 +80,15 @@ def parse_molecule_from_cell_text(raw: str):
         except Exception:
             pass
         if looks_like_mol_block(raw):
-            try:
-                m = Chem.MolFromMolBlock(raw)
+            # ``strip()`` drops the blank title line that ``MolToMolBlock`` writes, which
+            # shifts the counts line and makes an otherwise valid mol block fail to parse.
+            for candidate in (raw, "\n" + raw):
+                try:
+                    m = Chem.MolFromMolBlock(candidate)
+                except Exception:
+                    m = None
                 if m is not None:
                     return m
-            except Exception:
-                pass
         head = raw[:200]
         if "ATOM  " in head or raw.startswith("COMPND") or raw.startswith("HEADER"):
             try:

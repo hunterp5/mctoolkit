@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from .molecule_conversion import parse_molecule_from_cell_text
+from .molecule_conversion import mol_to_canonical_smiles, parse_molecule_from_cell_text
 
 
 @dataclass(frozen=True)
@@ -56,6 +56,36 @@ def mol_from_payload(payload: StructurePayload):
     if not smi:
         return None
     return parse_molecule_from_cell_text(smi)
+
+
+def smiles_text_for_payload(payload: StructurePayload) -> str:
+    """SMILES for a tool that cannot read a stored mol blob.
+
+    SDF and session rows often keep a valid connection table with no SMILES
+    string. Hydrate the payload and canonicalize so callers are not limited to
+    datasets that already have a SMILES column.
+    """
+    mol = mol_from_payload(payload)
+    if mol is None:
+        return ""
+    try:
+        return mol_to_canonical_smiles(mol).strip()
+    except Exception:  # noqa: BLE001 — RDKit raises varied C++ wrap errors
+        return ""
+
+
+def smiles_rows_from_payloads(
+    payloads: Iterable[StructurePayload],
+) -> list[tuple[int, str]]:
+    """``(oid, SMILES)`` for payloads that canonicalize. Drops empty and unparsed rows."""
+    rows: list[tuple[int, str]] = []
+    for payload in payloads:
+        if payload.oid is None:
+            continue
+        smi = smiles_text_for_payload(payload)
+        if smi:
+            rows.append((int(payload.oid), smi))
+    return rows
 
 
 def mols_from_payloads(

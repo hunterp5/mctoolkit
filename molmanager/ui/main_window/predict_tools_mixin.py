@@ -142,8 +142,16 @@ class PredictToolsMixin:
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, "Predict Permeability"):
             return
-        rows_smi = self.collect_scoped_table_smiles(src, only_selected=only_selected)
-        if not rows_smi:
+        # Blob-only rows (SDF / sessions with no SMILES column) are valid structures.
+        # SMILES are derived on the worker so this snapshot does not hydrate RDKit here.
+        payloads = [
+            payload
+            for payload in self.collect_scoped_table_structure_payloads(
+                src, only_selected=only_selected
+            )
+            if payload.oid is not None and payload.has_structure()
+        ]
+        if not payloads:
             QMessageBox.information(
                 self,
                 "Predict Permeability",
@@ -151,12 +159,12 @@ class PredictToolsMixin:
             )
             return
         perm_signals = self._ensure_permeability_predictor_signals()
-        n = len(rows_smi)
+        n = len(payloads)
         enqueue_process_queue_job(
             self,
             "Predict Permeability",
             n,
-            lambda ev, ps, r=rows_smi, ws=self.signals, sig=perm_signals, c=output_columns: (
+            lambda ev, ps, r=payloads, ws=self.signals, sig=perm_signals, c=output_columns: (
                 PermeabilityPredictorWorker(
                     r, ws, sig, cancel_event=ev, output_columns=c, progress_state=ps
                 )
@@ -316,6 +324,8 @@ class PredictToolsMixin:
             return
         self._som_browse_records = list(records or [])
         self._discard_stale_som_browser_dialog()
+        if focus_oid is None:
+            self.reveal_first_selected_row(focus=False)
 
         def _focus(widget) -> None:
             if widget is None or focus_oid is None:
@@ -576,6 +586,8 @@ class PredictToolsMixin:
             return
         self._metabolite_browse_records = list(records)
         self._discard_stale_metabolite_browser_dialog()
+        if focus_oid is None:
+            self.reveal_first_selected_row(focus=False)
 
         def _focus(widget) -> None:
             if widget is None or focus_oid is None:

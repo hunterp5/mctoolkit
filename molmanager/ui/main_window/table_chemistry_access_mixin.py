@@ -370,8 +370,11 @@ class TableChemistryAccessMixin:
         """
         Like :meth:`collect_scoped_table_structure_payloads` but ``(oid, SMILES text)`` only.
 
-        Does not hydrate RDKit molecules. ``process_ui_every`` is kept for callers; the
-        snapshot is a backing-value walk so the event loop is not pumped.
+        Does not hydrate RDKit molecules, so a row stored only as a blob (no SMILES
+        text) is omitted. Callers that must accept those rows should collect payloads
+        and derive SMILES on a worker with ``smiles_text_for_payload``.
+        ``process_ui_every`` is kept for callers; the snapshot is a backing-value walk
+        so the event loop is not pumped.
         """
         del process_ui_every
         payloads = self.collect_scoped_table_structure_payloads(

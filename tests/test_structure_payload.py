@@ -27,6 +27,8 @@ from molmanager.chem.structure_payload import (
     mol_rows_from_job_params,
     mols_from_payloads,
     oid_mol_rows_from_payloads,
+    smiles_rows_from_payloads,
+    smiles_text_for_payload,
 )
 
 
@@ -58,6 +60,32 @@ def test_oid_mol_rows_from_payloads_drops_none_oid():
         [StructurePayload(None, None, "CC"), StructurePayload(3, None, "CCO")]
     )
     assert [oid for oid, _mol in rows] == [3]
+
+
+def test_smiles_text_for_payload_blob_without_smiles():
+    mol = Chem.MolFromSmiles("c1ccccc1O")
+    blob = mol_graph_binary(mol)
+    got = smiles_text_for_payload(StructurePayload(1, blob, ""))
+    assert got == Chem.MolToSmiles(mol, canonical=True)
+
+
+def test_smiles_text_for_payload_molblock_text():
+    mol = Chem.MolFromSmiles("CCO")
+    block = Chem.MolToMolBlock(mol)
+    got = smiles_text_for_payload(StructurePayload(2, None, block))
+    assert got == "CCO"
+
+
+def test_smiles_rows_from_payloads_keeps_blob_only_and_drops_invalid():
+    mol = Chem.MolFromSmiles("CC")
+    rows = smiles_rows_from_payloads(
+        [
+            StructurePayload(4, mol_graph_binary(mol), ""),
+            StructurePayload(5, None, "not-a-molecule"),
+            StructurePayload(None, None, "CCO"),
+        ]
+    )
+    assert rows == [(4, "CC")]
 
 
 def test_mol_rows_from_job_params_prefers_payloads():

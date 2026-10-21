@@ -88,6 +88,13 @@ def test_parse_molecule_from_cell_text_skips_urls_and_json_quietly(capsys):
     assert "SMARTS Parse Error" not in err
 
 
+def test_parse_molecule_from_cell_text_accepts_molblock_with_blank_title():
+    block = Chem.MolToMolBlock(Chem.MolFromSmiles("CCO"))
+    parsed = parse_molecule_from_cell_text(block)
+    assert parsed is not None
+    assert Chem.MolToSmiles(parsed, canonical=True) == "CCO"
+
+
 def test_mol_structure_copy_texts_ethanol():
     mol = Chem.MolFromSmiles("CCO")
     texts = mol_structure_copy_texts(mol)
