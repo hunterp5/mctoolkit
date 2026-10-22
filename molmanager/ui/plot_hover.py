@@ -24,7 +24,7 @@ from typing import Any
 
 from ..chem.depiction_coords import mol_for_app_depiction
 from ..chem.depiction_scene import is_scene_blob
-from ..chem.structure_2d_depiction import render_molecule_png
+from ..table.structure_image import molecule_png_bytes
 
 HOVER_THUMB_WIDTH = 140
 HOVER_THUMB_HEIGHT = 116
@@ -120,7 +120,7 @@ def structure_png_data_url_for_oid(
     if mol is not None:
         try:
             mol = mol_for_app_depiction(app, mol, int(oid), "Structure")
-            png = render_molecule_png(mol, int(width), int(height))
+            png = molecule_png_bytes(mol, int(width), int(height))
         except Exception:
             pass
     if not png:

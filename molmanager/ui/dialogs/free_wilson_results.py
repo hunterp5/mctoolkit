@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -45,7 +45,7 @@ from ...analysis.free_wilson import (
     MissingAnalog,
     report_label,
 )
-from ...chem.structure_2d_depiction import render_molecule_png
+from ...table.structure_image import molecule_pixmap
 from ..qt_widget_utils import make_window_resizable, qobject_is_deleted
 from ..strings import TOOL_FREE_WILSON
 
@@ -274,13 +274,13 @@ class FreeWilsonResultsDialog(QDialog):
             self._preview.setPixmap(QPixmap())
             return
         try:
-            png = render_molecule_png(mol, 240, 160)
+            pixmap = molecule_pixmap(mol, 240, 160)
         except _DRAW_ERRORS:
             self._preview.setText(smiles)
             self._preview.setPixmap(QPixmap())
             return
         self._preview.setText("")
-        self._preview.setPixmap(QPixmap.fromImage(QImage.fromData(png)))
+        self._preview.setPixmap(pixmap)
 
     def _selected_analogs(self) -> list[MissingAnalog]:
         rows = sorted({item.row() for item in self._missing_table.selectedItems()})

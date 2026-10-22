@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from PyQt5.QtCore import QEvent, Qt, QTimer
-from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPixmap
+from PyQt5.QtGui import QColor, QFont, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -50,7 +50,7 @@ from ...table.structure_depiction_layout import (
     BROWSER_STRUCTURE_PREVIEW_MIN_HEIGHT,
     BROWSER_STRUCTURE_PREVIEW_MIN_WIDTH,
 )
-from ...chem.structure_2d_depiction import render_molecule_png
+from ...table.structure_image import molecule_pixmap
 from ..dockable_plot import (
     discard_host_dialog_after_dock,
     make_add_to_main_button,
@@ -231,10 +231,9 @@ def _pixmap_from_smiles(smiles: str, width: int, height: int) -> QPixmap | None:
     if mol is None:
         return None
     try:
-        png = render_molecule_png(mol, int(width), int(height))
+        pm = molecule_pixmap(mol, int(width), int(height))
     except Exception:
         return None
-    pm = QPixmap.fromImage(QImage.fromData(png))
     return None if pm.isNull() else pm
 
 

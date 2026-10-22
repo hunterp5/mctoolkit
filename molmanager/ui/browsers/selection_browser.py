@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt5.QtCore import QEvent, QItemSelectionModel, QSize, Qt, QTimer
-from PyQt5.QtGui import QBrush, QFont, QIcon, QImage, QPixmap
+from PyQt5.QtGui import QBrush, QFont, QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -39,6 +39,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ...table.structure_image import molecule_pixmap
 from ...table.structure_depiction_layout import (
     BROWSER_STRUCTURE_PREVIEW_MIN_HEIGHT,
     BROWSER_STRUCTURE_PREVIEW_MIN_WIDTH,
@@ -1019,11 +1020,10 @@ class SelectionBrowserWidget(QWidget):
             lh = max(260, BROWSER_STRUCTURE_PREVIEW_MIN_HEIGHT // 2)
         return max(1, int(lw * dpr)), max(1, int(lh * dpr)), dpr
 
-    def _render_preview_pixmap(self, logical_row: int, pw: int, ph: int) -> QPixmap | None:
-        try:
-            from rdkit.Chem.Draw import rdMolDraw2D
-        except Exception:
-            return None
+    def _render_preview_pixmap(
+        self, logical_row: int, pw: int, ph: int, dpr: float = 1.0
+    ) -> QPixmap | None:
+        """Preview of one row at *pw* × *ph* device pixels (*dpr* device pixels per point)."""
         app = self._app
         try:
             oid = int(app._table_model.row_oid(logical_row))
@@ -1039,14 +1039,8 @@ class SelectionBrowserWidget(QWidget):
         if mol is None:
             return None
         try:
-            d = rdMolDraw2D.MolDraw2DCairo(pw, ph)
-            opts = d.drawOptions()
-            # Keep molecule canvas white to match the preview host background.
-            opts.setBackgroundColour((1.0, 1.0, 1.0, 1.0))
-            rdMolDraw2D.PrepareAndDrawMolecule(d, mol)
-            d.FinishDrawing()
-            img = QImage.fromData(d.GetDrawingText())
-            pm = QPixmap.fromImage(img)
+            scale = max(float(dpr), 1e-6)
+            pm = molecule_pixmap(mol, max(1, round(pw / scale)), max(1, round(ph / scale)))
             if not pm.isNull():
                 self._preview_pix_cache[cache_key] = pm
                 return pm
@@ -1084,7 +1078,7 @@ class SelectionBrowserWidget(QWidget):
             return
         self._sync_preview_mode()
         pw, ph, dpr = self._preview_pixel_size()
-        pm = self._render_preview_pixmap(logical_row, pw, ph)
+        pm = self._render_preview_pixmap(logical_row, pw, ph, dpr)
         if pm is None or pm.isNull():
             table_pm = self._structure_pixmap(logical_row)
             if isinstance(table_pm, QPixmap) and not table_pm.isNull():

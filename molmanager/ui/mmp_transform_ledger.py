@@ -22,7 +22,7 @@ import logging
 from typing import Any
 
 from PyQt5.QtCore import QSize, Qt
-from PyQt5.QtGui import QColor, QImage, QPainter, QPixmap
+from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QAbstractScrollArea,
@@ -40,7 +40,6 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 from rdkit import Chem
-from rdkit.Chem.Draw import rdMolDraw2D
 
 from ..analysis.mmp_analysis import (
     MmpPair,
@@ -49,6 +48,7 @@ from ..analysis.mmp_analysis import (
     pairs_for_summary,
     pairs_involving_oid,
 )
+from ..table.structure_image import molecule_pixmap
 from .qt_widget_utils import make_window_resizable
 from .widgets import NumericTableWidgetItem
 
@@ -109,15 +109,6 @@ class _LedgerStructureDelegate(QStyledItemDelegate):
         if opt.state & QStyle.State_Selected:
             painter.fillRect(opt.rect, QColor(0, 120, 215, 48))
         painter.restore()
-
-
-def _try_configure_drawer(drawer, width: int) -> None:
-    try:
-        from ..chem.structure_2d_depiction import configure_mol_drawer as cfg
-
-        cfg(drawer, width)
-    except Exception:
-        pass
 
 
 def _fmt_delta(value: float) -> str:
@@ -415,12 +406,7 @@ class MmpTransformLedgerDialog(QDialog):
 
     def _render_mol(self, mol: Chem.Mol, pw: int, ph: int) -> QPixmap | None:
         try:
-            drawer = rdMolDraw2D.MolDraw2DCairo(pw, ph)
-            _try_configure_drawer(drawer, pw)
-            rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol)
-            drawer.FinishDrawing()
-            img = QImage.fromData(drawer.GetDrawingText())
-            return QPixmap.fromImage(img)
+            return molecule_pixmap(mol, pw, ph)
         except Exception:
             return None
 

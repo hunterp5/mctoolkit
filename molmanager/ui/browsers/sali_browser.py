@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QBrush, QImage, QPixmap
+from PyQt5.QtGui import QBrush, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QGroupBox,
@@ -36,12 +36,11 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 from rdkit import Chem
-from rdkit.Chem.Draw import rdMolDraw2D
 
 from ...analysis.sali_analysis import SaliPoint, as_sali_activity
+from ...table.structure_image import molecule_pixmap
 from .chrome import (
     BrowserIndexSpinBox,
-    configure_browser_mol_drawer,
     style_browser_data_table,
     style_browser_emphasis_label,
     style_browser_group_box,
@@ -515,11 +514,6 @@ class SaliBrowserDialog(PairBrowserDialog):
 
     def _render_mol(self, mol: Chem.Mol, pw: int, ph: int) -> QPixmap | None:
         try:
-            drawer = rdMolDraw2D.MolDraw2DCairo(pw, ph)
-            configure_browser_mol_drawer(drawer, pw)
-            rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol)
-            drawer.FinishDrawing()
-            img = QImage.fromData(drawer.GetDrawingText())
-            return QPixmap.fromImage(img)
+            return molecule_pixmap(mol, pw, ph)
         except Exception:
             return None

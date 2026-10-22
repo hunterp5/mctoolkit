@@ -22,7 +22,7 @@ import math
 from dataclasses import dataclass
 
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -37,7 +37,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-from ...chem.structure_2d_depiction import render_molecule_png
+from ...table.structure_image import molecule_pixmap
 from ...chem.substructure_align import (
     conformer_xy,
     prepare_query_mol,
@@ -180,8 +180,7 @@ class AlignSubstructureDialog(QDialog):
             self.preview.setText("No query")
             return
         try:
-            png = render_molecule_png(mol, _PREVIEW_W, _PREVIEW_H)
-            self.preview.setPixmap(QPixmap.fromImage(QImage.fromData(png)))
+            self.preview.setPixmap(molecule_pixmap(mol, _PREVIEW_W, _PREVIEW_H))
             self.preview.setText("")
         except (ValueError, RuntimeError, TypeError):
             self.preview.setPixmap(QPixmap())

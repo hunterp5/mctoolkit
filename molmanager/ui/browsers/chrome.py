@@ -165,16 +165,6 @@ def make_pair_prop_box(parent: QWidget | None = None) -> tuple[QGroupBox, QFormL
     return box, form
 
 
-def configure_browser_mol_drawer(drawer: Any, width: int) -> None:
-    """Apply the shared RDKit drawer theme when the helper is available."""
-    try:
-        from ...chem.structure_2d_depiction import configure_mol_drawer as cfg
-
-        cfg(drawer, width)
-    except Exception:
-        pass
-
-
 class BrowserIndexSpinBox(QSpinBox):
     """Index field. Focus selects the current value so typing replaces it."""
 
