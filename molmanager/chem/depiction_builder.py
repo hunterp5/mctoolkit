@@ -498,26 +498,29 @@ class _SceneBuilder:
         offset = DOUBLE_BOND_OFFSET * self.mbl
         return _add(_add(here, normal, side * offset), direction, offset)
 
-    def _preferred_ring(self, bond) -> list[int] | None:
-        """Ring the second line goes inside: aromatic, then most double bonds, then six."""
-        rings = [
-            list(ring)
-            for ring in self.mol.GetRingInfo().AtomRings()
-            if bond.GetBeginAtomIdx() in ring and bond.GetEndAtomIdx() in ring
-        ]
+    def _preferred_ring(self, bond) -> set[int] | None:
+        """Atoms of the ring the second line goes inside, or ``None`` outside rings.
+
+        As in RDKit: the first ring whose bonds all share this bond's aromaticity, so a
+        fused aromatic bond lines the aromatic ring, otherwise the first ring.
+        """
+        rings = [ring for ring in self.mol.GetRingInfo().BondRings() if bond.GetIdx() in ring]
         if not rings:
             return None
-
-        def rank(ring: list[int]):
-            bonds = [
-                self.mol.GetBondBetweenAtoms(ring[i], ring[(i + 1) % len(ring)])
-                for i in range(len(ring))
-            ]
-            aromatic = all(b.GetIsAromatic() for b in bonds)
-            doubles = sum(b.GetBondType() == Chem.BondType.DOUBLE for b in bonds)
-            return (not aromatic, -doubles, abs(len(ring) - 6), len(ring))
-
-        return min(rings, key=rank)
+        aromatic = bond.GetIsAromatic()
+        chosen = next(
+            (
+                ring
+                for ring in rings
+                if all(self.mol.GetBondWithIdx(i).GetIsAromatic() == aromatic for i in ring)
+            ),
+            rings[0],
+        )
+        atoms: set[int] = set()
+        for index in chosen:
+            ring_bond = self.mol.GetBondWithIdx(index)
+            atoms.update((ring_bond.GetBeginAtomIdx(), ring_bond.GetEndAtomIdx()))
+        return atoms
 
     def _others(self, at: int, exclude: int) -> list[int]:
         return [
@@ -535,13 +538,11 @@ class _SceneBuilder:
             return
         ring = self._preferred_ring(bond)
         if ring is not None:
-            centre = (
-                sum(self.pos[i][0] for i in ring) / len(ring),
-                sum(self.pos[i][1] for i in ring) / len(ring),
-            )
-            side = 1.0 if _cross(_sub(q, p), _sub(centre, p)) >= 0 else -1.0
             ring_a = [i for i in self._others(a, b) if i in ring]
             ring_b = [i for i in self._others(b, a) if i in ring]
+            # The next ring atom marks the inside; a ring centre misleads in puckered macrocycles.
+            inside = self.pos[(ring_a or ring_b)[0]]
+            side = 1.0 if _cross(_sub(q, p), _sub(inside, p)) >= 0 else -1.0
             self._line(bond, p, q)
             self._line(
                 bond, self._inner_end(a, b, ring_a, side), self._inner_end(b, a, ring_b, -side)
@@ -560,11 +561,19 @@ class _SceneBuilder:
         )
 
     def _centred(self, a: int, b: int, others_a: list[int], others_b: list[int]) -> bool:
-        """Centre a chain double bond on its axis instead of offsetting the second line."""
-        for end, others, far_others in ((a, others_a, others_b), (b, others_b, others_a)):
-            if others:
-                continue
-            if end in self.trim_boxes or not far_others or len(far_others) == 2:
+        """Centre a chain double bond on its axis instead of offsetting the second line.
+
+        Centred between two labelled atoms (N=N, N=O), at a cumulated centre (C=C=C), and
+        for a terminal double bond unless the far atom has exactly one other substituent
+        to lean towards, as in an aldehyde.
+        """
+        if a in self.trim_boxes and b in self.trim_boxes:
+            return True
+        for end in (a, b):
+            if self._is_cumulated_centre(self.mol.GetAtomWithIdx(end)):
+                return True
+        for others, far_others in ((others_a, others_b), (others_b, others_a)):
+            if not others and len(far_others) != 1:
                 return True
         return False
 
