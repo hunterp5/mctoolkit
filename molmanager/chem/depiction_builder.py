@@ -62,7 +62,7 @@ from molmanager.chem.depiction_text import cap_height, text_advance, text_ink_bo
 
 # Bump whenever the builder draws the same molecule differently, so cached scenes
 # (``.mctcache`` sidecars) are rebuilt instead of showing the old picture.
-BUILDER_REVISION = 2
+BUILDER_REVISION = 3
 
 # Fractions of the mean bond length.
 DOUBLE_BOND_OFFSET = 0.15
@@ -269,6 +269,7 @@ class _SceneBuilder:
         self._place_added_hydrogens()
         self.roles = [atom.GetAtomicNum() for atom in mol.GetAtoms()]
         self.trim_boxes: dict[int, Box] = {}
+        self._stereo_double_bonds: set[int] | None = None
         self.strokes: list[Stroke] = []
         self.fills: list[Fill] = []
         self.labels: list[Label] = []
@@ -665,7 +666,7 @@ class _SceneBuilder:
         a, b = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
         p, q, _direction, normal = self._frame(bond)
         offset = DOUBLE_BOND_OFFSET * self.mbl
-        if bond.GetStereo() == Chem.BondStereo.STEREOANY:
+        if bond.GetStereo() == Chem.BondStereo.STEREOANY and self._can_be_stereo(bond):
             half = offset / 2
             self._line(bond, _add(p, normal, half), _add(q, normal, -half))
             self._line(bond, _add(p, normal, -half), _add(q, normal, half))
@@ -693,6 +694,20 @@ class _SceneBuilder:
         self._line(
             bond, self._inner_end(a, b, others_a, side), self._inner_end(b, a, others_b, -side)
         )
+
+    def _can_be_stereo(self, bond) -> bool:
+        """Whether *bond* could be E or Z, so an "either" flag on it means something.
+
+        Files flag bonds as either-stereo that have two identical groups on one end
+        (malotilate's dithiole ylidene); drawn crossed they look twisted for nothing.
+        """
+        if self._stereo_double_bonds is None:
+            self._stereo_double_bonds = {
+                int(info.centeredOn)
+                for info in Chem.FindPotentialStereo(Chem.Mol(self.mol))
+                if info.type == Chem.StereoType.Bond_Double
+            }
+        return bond.GetIdx() in self._stereo_double_bonds
 
     def _centred(self, a: int, b: int, others_a: list[int], others_b: list[int]) -> bool:
         """Centre a chain double bond on its axis instead of offsetting the second line.

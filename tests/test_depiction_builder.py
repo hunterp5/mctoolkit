@@ -282,12 +282,40 @@ def test_wedge_wide_end_meets_the_neighbouring_bond():
     assert met >= 1
 
 
-def test_either_double_bond_is_crossed():
-    mol = Chem.MolFromSmiles("CC=CC")
-    mol.GetBondWithIdx(1).SetStereo(Chem.BondStereo.STEREOANY)
+def _lines_cross(first, second) -> bool:
+    def side(s, x, y) -> float:
+        return (s.x2 - s.x1) * (y - s.y1) - (s.y2 - s.y1) * (x - s.x1)
+
+    return (
+        side(first, second.x1, second.y1) * side(first, second.x2, second.y2) < 0
+        and side(second, first.x1, first.y1) * side(second, first.x2, first.y2) < 0
+    )
+
+
+def _either_bond_lines(smiles: str, bond_index: int):
+    mol = Chem.MolFromSmiles(smiles)
+    mol.GetBondWithIdx(bond_index).SetStereo(Chem.BondStereo.STEREOANY)
     scene, _reason = build_scene(mol)
-    crossed = [s for s in scene.strokes if s.bond == 1]
-    assert len(crossed) == 2
+    return [s for s in scene.strokes if s.bond == bond_index]
+
+
+def test_either_double_bond_is_crossed():
+    lines = _either_bond_lines("CC=CC", 1)
+    assert len(lines) == 2 and _lines_cross(*lines)
+
+
+def test_either_flag_is_ignored_where_e_and_z_are_the_same():
+    mol = Chem.MolFromSmiles("CC(C)OC(=O)C(C(=O)OC(C)C)=C1SC=CS1")
+    ylidene = next(
+        b.GetIdx()
+        for b in mol.GetBonds()
+        if b.GetBondType() == Chem.BondType.DOUBLE
+        and b.GetBeginAtom().GetSymbol() == "C"
+        and b.GetEndAtom().GetSymbol() == "C"
+        and not b.IsInRing()
+    )
+    lines = _either_bond_lines("CC(C)OC(=O)C(C(=O)OC(C)C)=C1SC=CS1", ylidene)
+    assert len(lines) == 2 and not _lines_cross(*lines)
 
 
 @pytest.mark.parametrize(
