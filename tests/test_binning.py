@@ -28,7 +28,6 @@ from molmanager.table.column_binning import (
     BinningParams,
     bin_column_texts,
     classification_labels,
-    parse_custom_labels_text,
     parse_edges_text,
 )
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
@@ -120,16 +119,10 @@ def test_classification_labels_follow_bin_order() -> None:
     assert two.classes == ("Inactive", "Active")
     three = bin_column_texts(["0", "5", "10"], _params(bin_count=3))
     assert three.classes == ("Low", "Medium", "High")
-    renamed = bin_column_texts(["0", "6"], _params(class_labels=("no", "yes")))
-    assert renamed.classes == ("no", "yes")
-    assert renamed.ranges == ("[0, 3)", "[3, 6]")
-    with pytest.raises(ValueError, match="class labels"):
-        bin_column_texts(["0", "6"], _params(class_labels=("only",)))
 
 
 def test_edges_and_width_validation() -> None:
     assert parse_edges_text("5, 6; 7") == (5.0, 6.0, 7.0)
-    assert parse_custom_labels_text(" low ; high ") == ("low", "high")
     with pytest.raises(ValueError, match="strictly increasing"):
         parse_edges_text("1, 1, 2")
     with pytest.raises(ValueError, match="wider bin"):
@@ -210,30 +203,20 @@ def test_binning_dialog_methods_and_params(qapp) -> None:  # noqa: ARG001
     assert dlg.bin_count_spin.isHidden() is True
     assert dlg.open_ends_cb.isHidden() is False
     dlg.method_combo.setCurrentIndex(dlg.method_combo.findData("equal_width"))
-    dlg.bin_count_spin.setValue(2)
-    assert dlg.class_labels_input.isHidden() is False
-    assert dlg.class_labels_input.text() == "Inactive; Active"
     dlg.col_combo.setCurrentText("LogP")
     assert dlg.params().range_column == "LogP_bin"
     assert dlg.params().class_column == "LogP_class"
-    assert dlg.params().class_labels == ("Inactive", "Active")
-    dlg.bin_count_spin.setValue(3)
-    assert dlg.class_labels_input.text() == "Low; Medium; High"
-    dlg.class_labels_input.setText("no; yes")
-    dlg.bin_count_spin.setValue(4)
-    assert dlg.class_labels_input.text() == "no; yes"
+    assert not hasattr(dlg, "class_labels_input")
     dlg.method_combo.setCurrentIndex(dlg.method_combo.findData("custom"))
     dlg.edges_input.setText("1, 2, 3")
     dlg.range_input.setText("Band")
     dlg.class_input.setText("BandClass")
-    dlg.class_labels_input.setText("a; b; c; d")
     params = dlg.params()
     assert params.method == "custom"
     assert params.edges == (1.0, 2.0, 3.0)
     assert params.open_ends is True
     assert params.range_column == "Band"
     assert params.class_column == "BandClass"
-    assert params.class_labels == ("a", "b", "c", "d")
     dlg.close()
 
 

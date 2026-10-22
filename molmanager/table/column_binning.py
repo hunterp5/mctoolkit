@@ -65,7 +65,6 @@ class BinningParams:
     maximum: float | None = None
     edges: tuple[float, ...] = ()
     open_ends: bool = True
-    class_labels: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -128,17 +127,6 @@ def classification_labels(n_bins: int) -> tuple[str, ...]:
     return tuple(f"Class {i + 1}" for i in range(n_bins))
 
 
-def parse_custom_labels_text(text: str) -> tuple[str, ...]:
-    """Split semicolon-separated bin labels. Empty pieces are an error."""
-    raw = text or ""
-    if not raw.strip():
-        raise ValueError("Enter labels separated by semicolons.")
-    labels = tuple(part.strip() for part in raw.split(";"))
-    if any(not part for part in labels):
-        raise ValueError("Labels cannot be empty. Separate labels with semicolons.")
-    return labels
-
-
 def bin_column_texts(texts: list[str], params: BinningParams) -> BinnedColumn:
     """Label each cell. Non-numeric cells are blank. Raises ``ValueError`` on bad settings."""
     numeric = [parse_numeric_cell(text) for text in texts]
@@ -147,7 +135,7 @@ def bin_column_texts(texts: list[str], params: BinningParams) -> BinnedColumn:
         raise ValueError("No numeric values in the current scope.")
     intervals = _intervals_for(finite, params)
     range_names = tuple(_interval_label(interval) for interval in intervals)
-    class_names = _class_names(len(intervals), params.class_labels)
+    class_names = classification_labels(len(intervals))
     ranges: list[str] = []
     classes: list[str] = []
     for value in numeric:
@@ -345,21 +333,6 @@ def _require_bin_count(n_bins: int) -> None:
         raise ValueError("Enter at least 2 bins.")
     if n_bins > MAX_BINS:
         raise ValueError(f"Use at most {MAX_BINS} bins.")
-
-
-def _class_names(n_bins: int, custom: tuple[str, ...]) -> tuple[str, ...]:
-    if not custom:
-        return classification_labels(n_bins)
-    return _require_label_count(custom, n_bins, kind="class labels")
-
-
-def _require_label_count(labels: tuple[str, ...], n: int, *, kind: str) -> tuple[str, ...]:
-    if len(labels) != n:
-        noun = "bin" if n == 1 else "bins"
-        raise ValueError(
-            f"This column produces {n} {noun}. Enter {n} {kind} separated by semicolons."
-        )
-    return tuple(labels)
 
 
 def _format_edge(value: float) -> str:

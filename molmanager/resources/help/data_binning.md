@@ -23,16 +23,15 @@ One numeric column in the current table. Optional **Selected Rows Only**. The so
 - **Minimum** / **Maximum** — optional ends of an equal-width range. Values outside are left blank.
 - **Edges** — custom cut points, such as `5, 6, 7`. They must increase.
 - **Open ends** — for custom edges, add a bin below the first cut and a bin at or above the last cut.
-- **Class labels** — names written to the classification column, from the low bin to the high bin, separated by semicolons. Suggested names depend on how many bins are produced: two bins are `Inactive; Active`, three are `Low; Medium; High`, four are `Low; Medium; High; Very high`, and any other count is `Class 1; Class 2; …`. Edit the suggestion to use your own names. The count must match the bins produced.
 - **Range column** — header for the bin range (`[0, 1)`, with the last bin closed). Defaults to the source name plus `_bin`.
-- **Class column** — header for the classification label. Defaults to the source name plus `_class`. An existing name gets a `(1)` suffix.
+- **Class column** — header for the classification. Names run from the low bin to the high bin: two bins are Inactive and Active, three are Low, Medium, and High, four are Low, Medium, High, and Very high, and any other count is Class 1, Class 2, and so on. Defaults to the source name plus `_class`. An existing name gets a `(1)` suffix.
 - **Selected Rows Only** — write labels only for the current selection.
 
 ## Workflow
 
 1. Choose the numeric column and a method.
 2. Set the bin count, width, or edges.
-3. Confirm the class labels and the two column names.
+3. Confirm the range and classification column names.
 4. Apply and inspect the new columns.
 
 ## Use cases

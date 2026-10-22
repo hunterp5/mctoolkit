@@ -40,10 +40,8 @@ from ...table.column_binning import (
     BinMethod,
     BinningParams,
     bin_column_texts,
-    classification_labels,
     default_bin_column_name,
     default_class_column_name,
-    parse_custom_labels_text,
     parse_edges_text,
     parse_numeric_cell,
 )
@@ -66,9 +64,6 @@ class BinningDialog(QDialog):
         self.setMinimumWidth(460)
         self.resize(500, 0)
         self._have_selection = selected_row_count > 0
-        self._class_labels_user_edited = False
-        self._class_autofill = ""
-        self._filling_class_labels = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 8)
@@ -94,7 +89,6 @@ class BinningDialog(QDialog):
         self.bin_count_spin = QSpinBox()
         self.bin_count_spin.setRange(2, MAX_BINS)
         self.bin_count_spin.setValue(5)
-        self.bin_count_spin.valueChanged.connect(self._refresh_class_label_prefill)
         self._form.addRow("Bins:", self.bin_count_spin)
 
         self.bin_width_input = QLineEdit()
@@ -103,7 +97,6 @@ class BinningDialog(QDialog):
             "Optional width. When set, this is used instead of the bin count. "
             "With Min and Max empty, edges line up with histogram bins."
         )
-        self.bin_width_input.textChanged.connect(self._refresh_class_label_prefill)
         self._form.addRow("Bin width:", self.bin_width_input)
 
         self.min_input = QLineEdit()
@@ -111,7 +104,6 @@ class BinningDialog(QDialog):
         self.min_input.setToolTip(
             "Optional lower end of the range. Values below it are left blank."
         )
-        self.min_input.textChanged.connect(self._refresh_class_label_prefill)
         self._form.addRow("Minimum:", self.min_input)
 
         self.max_input = QLineEdit()
@@ -119,7 +111,6 @@ class BinningDialog(QDialog):
         self.max_input.setToolTip(
             "Optional upper end of the range. Values above it are left blank."
         )
-        self.max_input.textChanged.connect(self._refresh_class_label_prefill)
         self._form.addRow("Maximum:", self.max_input)
 
         self.edges_input = QLineEdit()
@@ -127,7 +118,6 @@ class BinningDialog(QDialog):
         self.edges_input.setToolTip(
             "Cut points, separated by commas or spaces. They must increase."
         )
-        self.edges_input.textChanged.connect(self._refresh_class_label_prefill)
         self._form.addRow("Edges:", self.edges_input)
 
         self.open_ends_cb = QCheckBox("Open ends")
@@ -135,17 +125,7 @@ class BinningDialog(QDialog):
         self.open_ends_cb.setToolTip(
             "Add a bin below the first edge and a bin at or above the last edge."
         )
-        self.open_ends_cb.toggled.connect(self._refresh_class_label_prefill)
         self._form.addRow(self.open_ends_cb)
-
-        self.class_labels_input = QLineEdit()
-        self.class_labels_input.setPlaceholderText("Inactive; Active")
-        self.class_labels_input.setToolTip(
-            "Class names from the low bin to the high bin, separated by semicolons. "
-            "Two bins default to Inactive and Active; three to Low, Medium, and High."
-        )
-        self.class_labels_input.textChanged.connect(self._on_labels_edited)
-        self._form.addRow("Class labels:", self.class_labels_input)
 
         self.range_input = QLineEdit()
         self.range_input.setPlaceholderText("Range column")
@@ -158,7 +138,9 @@ class BinningDialog(QDialog):
         self.class_input = QLineEdit()
         self.class_input.setPlaceholderText("Class column")
         self.class_input.setToolTip(
-            "Column for the classification label. "
+            "Classification written beside the range. "
+            "Two bins are Inactive and Active; three are Low, Medium, and High; "
+            "four are Low, Medium, High, and Very high; otherwise Class 1, Class 2, …. "
             "Defaults to the source name plus _class. Existing names get a (1) suffix."
         )
         self._form.addRow("Class column:", self.class_input)
@@ -172,7 +154,6 @@ class BinningDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
-        self.only_selected_cb.toggled.connect(self._refresh_class_label_prefill)
         root.addWidget(self.only_selected_cb)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -218,14 +199,12 @@ class BinningDialog(QDialog):
             self.bin_count_spin.setToolTip(
                 "Number of equal-width bins across the range. Ignored when Bin width is set."
             )
-        self._refresh_class_label_prefill()
 
     def _on_source_changed(self, name: str) -> None:
         if not (self.range_input.text() or "").strip():
             self.range_input.setPlaceholderText(default_bin_column_name(name))
         if not (self.class_input.text() or "").strip():
             self.class_input.setPlaceholderText(default_class_column_name(name))
-        self._refresh_class_label_prefill()
 
     def _prefer_numeric_column(self) -> None:
         app = self.parent_app
@@ -281,63 +260,7 @@ class BinningDialog(QDialog):
     def params(self) -> BinningDialogParams:
         return self._build_params()
 
-    def _on_labels_edited(self) -> None:
-        if self._filling_class_labels:
-            return
-        text = self.class_labels_input.text()
-        self._class_labels_user_edited = bool(text.strip()) and text != self._class_autofill
-        if not text.strip():
-            self._class_labels_user_edited = False
-            self._refresh_class_label_prefill()
-
-    def _suggested_class_count(self) -> int | None:
-        counted = self._counted_bins()
-        if counted is not None:
-            return counted
-        if self._method() == "custom":
-            try:
-                edges = parse_edges_text(self.edges_input.text())
-            except ValueError:
-                return None
-            if self.open_ends_cb.isChecked():
-                return len(edges) + 1
-            return len(edges) - 1 if len(edges) >= 2 else None
-        if self._method() == "equal_width" and self.bin_width_input.text().strip():
-            return None
-        return int(self.bin_count_spin.value())
-
-    def _counted_bins(self) -> int | None:
-        try:
-            draft = self._build_params(ignore_class_labels=True)
-            return len(bin_column_texts(self._read_texts(), draft).range_names)
-        except ValueError:
-            return None
-
-    def _refresh_class_label_prefill(self) -> None:
-        if self._class_labels_user_edited:
-            return
-        n_bins = self._suggested_class_count()
-        if n_bins is None or n_bins < 1:
-            return
-        text = "; ".join(classification_labels(n_bins))
-        self._class_autofill = text
-        if self.class_labels_input.text() == text:
-            return
-        self._filling_class_labels = True
-        try:
-            self.class_labels_input.setText(text)
-        finally:
-            self._filling_class_labels = False
-
-    def _class_label_texts(self, *, ignore: bool) -> tuple[str, ...]:
-        if ignore:
-            return ()
-        raw = self.class_labels_input.text()
-        if not raw.strip():
-            return ()
-        return parse_custom_labels_text(raw)
-
-    def _build_params(self, *, ignore_class_labels: bool = False) -> BinningDialogParams:
+    def _build_params(self) -> BinningDialogParams:
         source = (self.col_combo.currentText() or "").strip()
         if not source:
             raise ValueError("Choose a column to bin.")
@@ -371,7 +294,6 @@ class BinningDialog(QDialog):
             maximum=maximum,
             edges=edges,
             open_ends=self.open_ends_cb.isChecked(),
-            class_labels=self._class_label_texts(ignore=ignore_class_labels),
         )
 
     def accept(self) -> None:
