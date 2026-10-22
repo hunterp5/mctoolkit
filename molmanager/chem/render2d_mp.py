@@ -24,7 +24,9 @@ from __future__ import annotations
 
 from rdkit import Chem
 
+from .depiction_builder import build_scene
 from .depiction_coords import apply_depiction_coords
+from .depiction_scene import pack_scene
 from .molecule_conversion import parse_molecule_from_cell_text
 from .structure_2d_depiction import render_molecule_png, render_reaction_png
 
@@ -76,6 +78,17 @@ def mol_from_render_payload(payload):
     return payload
 
 
+def _scene_blob(mol) -> bytes:
+    """Packed depiction scene for *mol*, or empty when the row needs the RDKit picture."""
+    scene, _reason = build_scene(mol)
+    if scene is None:
+        return b""
+    try:
+        return pack_scene(scene)
+    except ValueError:
+        return b""
+
+
 def mp_render_structure_batch(args: tuple) -> list[tuple]:
     """Render many structures per child-process task.
 
@@ -84,18 +97,29 @@ def mp_render_structure_batch(args: tuple) -> list[tuple]:
     moves that ceiling so extra cores actually help. Batch renders never read mol properties, so
     rows are ``(oid, png, ok, w, h)``.
 
-    Each item is ``(oid, mol_bytes)``, ``(oid, (REACTION_PAYLOAD_TAG, smarts_bytes))``, or
+    *args* is ``(items, w, h)`` or ``(items, w, h, want_scenes)``. Each item is
+    ``(oid, mol_bytes)``, ``(oid, (REACTION_PAYLOAD_TAG, smarts_bytes))``, or
     ``(oid, (STRUCTURE_PAYLOAD_TAG, mol_bytes, smiles_bytes, coord_bytes))``.
     ``coord_bytes`` is optional; empty bytes keep the usual layout.
+
+    With *want_scenes* every row gains a sixth field, the packed depiction scene. A row
+    with a scene carries no PNG; reactions and molecules the scene builder hands back
+    carry the PNG and an empty scene.
     """
-    items, w, h = args
+    items, w, h = args[:3]
+    want_scenes = bool(args[3]) if len(args) > 3 else False
     width, height = int(w), int(h)
     out: list[tuple] = []
+
+    def emit(oid: int, png: bytes, ok: bool, scene: bytes = b"") -> None:
+        row = (oid, png, ok, width, height)
+        out.append(row + (scene,) if want_scenes else row)
+
     for item in items:
         oid = int(item[0])
         payload = item[1]
         if not payload:
-            out.append((oid, b"", False, width, height))
+            emit(oid, b"", False)
             continue
         try:
             if isinstance(payload, tuple) and payload[0] == REACTION_PAYLOAD_TAG:
@@ -107,18 +131,23 @@ def mp_render_structure_batch(args: tuple) -> list[tuple]:
                     if mol is None:
                         raise
                     png = render_molecule_png(mol, width, height)
-            elif isinstance(payload, tuple) and payload[0] == STRUCTURE_PAYLOAD_TAG:
+                emit(oid, png, True)
+                continue
+            if isinstance(payload, tuple) and payload[0] == STRUCTURE_PAYLOAD_TAG:
                 mol = _mol_from_render_payload(payload[1], _as_text(payload[2]))
                 if mol is None:
-                    out.append((oid, b"", False, width, height))
+                    emit(oid, b"", False)
                     continue
                 mol = apply_depiction_coords(mol, _coord_blob(payload))
-                png = render_molecule_png(mol, width, height)
             else:
-                png = render_molecule_png(Chem.Mol(payload), width, height)
-            out.append((oid, png, True, width, height))
+                mol = Chem.Mol(payload)
+            scene = _scene_blob(mol) if want_scenes else b""
+            if scene:
+                emit(oid, b"", True, scene)
+            else:
+                emit(oid, render_molecule_png(mol, width, height), True)
         except Exception:  # noqa: BLE001 — per-row draw failures must not abort the batch
-            out.append((oid, b"", False, width, height))
+            emit(oid, b"", False)
     return out
 
 

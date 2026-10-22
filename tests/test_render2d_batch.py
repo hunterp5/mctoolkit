@@ -60,6 +60,32 @@ def test_batch_render_honors_requested_size() -> None:
     assert len(large[1]) > len(small[1])
 
 
+def test_scene_mode_returns_scenes_and_png_only_for_fallbacks() -> None:
+    from molmanager.chem.depiction_scene import unpack_scene
+    from molmanager.chem.render2d_mp import REACTION_PAYLOAD_TAG
+
+    items = [
+        (1, Chem.MolFromSmiles("CCO").ToBinary()),
+        (2, Chem.MolFromSmiles("[CH3]").ToBinary()),
+        (3, (REACTION_PAYLOAD_TAG, b"CC>>CO")),
+        (4, b""),
+    ]
+    rows = _mp_render_structure_batch((items, 210, 170, True))
+    assert [len(r) for r in rows] == [6, 6, 6, 6]
+    scene_row, radical_row, reaction_row, empty_row = rows
+    assert scene_row[1] == b"" and scene_row[2] is True
+    assert unpack_scene(scene_row[5]) is not None
+    for row in (radical_row, reaction_row):
+        assert row[1].startswith(b"\x89PNG") and row[5] == b""
+    assert empty_row[2] is False and empty_row[5] == b""
+
+
+def test_scene_mode_off_keeps_five_field_rows() -> None:
+    items = [(0, Chem.MolFromSmiles("CCO").ToBinary())]
+    (row,) = _mp_render_structure_batch((items, 210, 170, False))
+    assert len(row) == 5 and row[1].startswith(b"\x89PNG")
+
+
 def test_worker_count_respects_env_override(monkeypatch) -> None:
     monkeypatch.setenv("MOLMANAGER_RENDER2D_PROCESS_WORKERS", "3")
     assert render2d_process_worker_count() == 3
