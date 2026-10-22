@@ -97,6 +97,26 @@ class StructureRenderStore:
         except Exception:
             pass
 
+    def adopt_file(self, path: str | Path) -> None:
+        """Replace this store's scenes with the ``pngs`` table in *path* and own that file."""
+        import sqlite3
+
+        self._lru.clear()
+        close_owned_sqlite(self._path, self._conn, owns_path=self._owns_path)
+        self._path = Path(path)
+        self._owns_path = True
+        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS pngs ("
+            "oid INTEGER PRIMARY KEY, blob BLOB NOT NULL, seq INTEGER NOT NULL)"
+        )
+        self._conn.execute("CREATE INDEX IF NOT EXISTS pngs_seq ON pngs(seq)")
+        self._conn.commit()
+        self._seq = self._next_seq()
+        self._count = self._count_rows()
+        self._closed = False
+
     def clear(self) -> None:
         self._conn.execute("DELETE FROM pngs")
         self._conn.commit()

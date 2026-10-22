@@ -105,6 +105,22 @@ class EnsembleStore(MutableMapping[tuple[int, str], str]):
         self._lru.clear()
         close_owned_sqlite(self._path, self._conn, owns_path=self._owns_path)
 
+    def adopt_file(self, path: str | Path) -> None:
+        """Replace this store's contents with the ``ensembles`` table in *path* and own it."""
+        self.close()
+        self._path = Path(path)
+        self._owns_path = True
+        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("PRAGMA temp_store=MEMORY")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS ensembles ("
+            "oid INTEGER NOT NULL, col TEXT NOT NULL, kind TEXT NOT NULL, "
+            "blob BLOB NOT NULL, PRIMARY KEY (oid, col))"
+        )
+        self._conn.commit()
+        self._pending = 0
+
     def clear(self) -> None:
         self._flush()
         self._conn.execute("DELETE FROM ensembles")

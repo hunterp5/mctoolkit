@@ -118,6 +118,30 @@ class MolStore(MutableMapping[int, Chem.Mol]):
         except Exception:
             pass
 
+    def flush(self) -> None:
+        """Commit pending writes so another connection (a session save) can read them."""
+        self._flush()
+
+    def adopt_file(self, path: str | Path) -> None:
+        """Replace this store's contents with the ``mols`` table in *path* and own that file.
+
+        Session open copies the saved table into a temp file on a worker thread; adopting
+        it here swaps files without copying rows, and references to this store stay valid.
+        """
+        self._flush()
+        close_owned_sqlite(self._path, self._conn, owns_path=self._owns_path)
+        self._path = Path(path)
+        self._owns_path = True
+        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("PRAGMA temp_store=MEMORY")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS mols (oid INTEGER PRIMARY KEY, blob BLOB, smiles TEXT)"
+        )
+        self._conn.commit()
+        self._lru.clear()
+        self._pending = 0
+
     def clear(self) -> None:
         self._conn.execute("DELETE FROM mols")
         self._conn.commit()
