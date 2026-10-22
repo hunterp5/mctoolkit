@@ -22,6 +22,10 @@ decoded pixmap into a cell. With ``--session`` it also reads that session's ``.m
 sidecar and reports the bytes it stores per row. These are the baselines the vector depiction
 work is measured against; ``scripts/benchmark_render2d.py`` covers process-pool throughput.
 
+The ``scene`` section measures the vector path on the same molecules: scene build time,
+packed bytes per row, fallback count by reason, and the time to paint one scene into a cell
+with no caching.
+
 Usage:
     python scripts/benchmark_depiction.py samples/fda_approved.sdf
         [--limit N] [--session samples/fda_approved.cms] [--json OUT]
@@ -36,14 +40,18 @@ import sqlite3
 import sys
 import tempfile
 import time
+from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from bench_common import emit_result  # noqa: E402
 from depiction_samples import load_depiction_samples, rdkit_release_ok, summarize  # noqa: E402
 
+from molmanager.chem.depiction_builder import build_scene  # noqa: E402
+from molmanager.chem.depiction_scene import pack_scene  # noqa: E402
 from molmanager.chem.structure_2d_depiction import render_molecule_png  # noqa: E402
 from molmanager.table.structure_depiction_layout import (  # noqa: E402
+    STRUCTURE_DEPICT_BOND_LINE_WIDTH,
     structure_depict_height,
     structure_depict_width,
 )
@@ -87,6 +95,50 @@ def _measure_decode_and_blit(
     finally:
         painter.end()
     return decode_ms, blit_us
+
+
+def _measure_scenes(mols, width: int, height: int) -> dict:
+    from PyQt5.QtCore import QRectF
+    from PyQt5.QtGui import QImage, QPainter
+
+    from molmanager.ui.depiction_painter import light_palette, paint_scene
+
+    build_ms: list[float] = []
+    blob_bytes: list[float] = []
+    paint_us: list[float] = []
+    reasons: Counter[str] = Counter()
+    scenes = []
+    for mol in mols:
+        t0 = time.perf_counter()
+        scene, reason = build_scene(mol)
+        build_ms.append((time.perf_counter() - t0) * 1000.0)
+        if scene is None:
+            reasons[str(reason)] += 1
+            continue
+        blob_bytes.append(float(len(pack_scene(scene))))
+        scenes.append(scene)
+    cell = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
+    rect = QRectF(0, 0, width, height)
+    palette = light_palette()
+    painter = QPainter(cell)
+    try:
+        for scene in scenes:
+            t0 = time.perf_counter()
+            paint_scene(
+                painter, scene, rect, palette, line_width_px=STRUCTURE_DEPICT_BOND_LINE_WIDTH
+            )
+            paint_us.append((time.perf_counter() - t0) * 1e6)
+    finally:
+        painter.end()
+    return {
+        "built": len(scenes),
+        "fallbacks": dict(reasons.most_common()),
+        "fallback_rate": round(sum(reasons.values()) / max(1, len(mols)), 4),
+        "build_ms_per_molecule": summarize(build_ms),
+        "blob_bytes_per_row": summarize(blob_bytes, digits=1),
+        "blob_total_mb": round(sum(blob_bytes) / (1024 * 1024), 2),
+        "paint_us_per_row_uncached": summarize(paint_us, digits=1),
+    }
 
 
 def _sidecar_stats(session_path: str, width: int, height: int) -> dict:
@@ -163,6 +215,7 @@ def main() -> None:
         "png_total_mb": round(sum(sizes) / (1024 * 1024), 2),
         "decode_ms_per_row": summarize(decode_ms),
         "blit_us_per_row": summarize(blit_us, digits=1),
+        "scene": _measure_scenes([s.mol for s in samples], width, height),
     }
     if args.session:
         result["sidecar"] = _sidecar_stats(args.session, width, height)

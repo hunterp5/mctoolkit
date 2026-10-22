@@ -16,13 +16,14 @@
 
 """Render a molecule set into one labelled image grid for visual review.
 
-Each cell is drawn by the table's PNG renderer at the table's depiction size (times
-``--scale``), with the molecule's name and category underneath. Sheets from this script are
-the reference that later depiction renderers are compared against side by side.
+Each cell is drawn at the table's depiction size (times ``--scale``) with the molecule's
+name and category underneath. ``--renderer rdkit`` uses the table's PNG renderer,
+``vector`` paints the depiction scene, and ``both`` puts the two side by side, RDKit on
+the left. A molecule the scene builder hands back to RDKit shows the fallback reason.
 
 Usage:
     python scripts/depiction_review_sheet.py tests/data/depiction_golden.tsv --out review.png
-        [--columns 8] [--limit N] [--scale 2]
+        [--renderer both] [--columns 8] [--limit N] [--scale 2]
 """
 
 from __future__ import annotations
@@ -35,14 +36,53 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from depiction_samples import load_depiction_samples, rdkit_release_ok  # noqa: E402
 
+from molmanager.chem.depiction_builder import build_scene  # noqa: E402
 from molmanager.chem.structure_2d_depiction import render_molecule_png  # noqa: E402
 from molmanager.table.structure_depiction_layout import (  # noqa: E402
+    STRUCTURE_DEPICT_BOND_LINE_WIDTH,
     structure_depict_height,
     structure_depict_width,
 )
 
 _CAPTION_LINES = 2
 _GRID_LINE = 1
+_RENDERERS = ("rdkit", "vector", "both")
+
+
+def _draw_rdkit(painter, sample, x: int, y: int, cell_w: int, cell_h: int) -> None:
+    from PyQt5.QtCore import QRect, Qt
+    from PyQt5.QtGui import QColor, QImage
+
+    try:
+        png = render_molecule_png(sample.mol, cell_w, cell_h)
+    except Exception:  # noqa: BLE001 — show the failure in the sheet instead
+        png = b""
+    image = QImage.fromData(png) if png else QImage()
+    if image.isNull():
+        painter.setPen(QColor(200, 40, 40))
+        painter.drawText(QRect(x, y, cell_w, cell_h), Qt.AlignCenter, "draw failed")
+    else:
+        painter.drawImage(x, y, image)
+
+
+def _draw_vector(painter, sample, x: int, y: int, cell_w: int, cell_h: int, scale: int) -> None:
+    from PyQt5.QtCore import QRect, QRectF, Qt
+    from PyQt5.QtGui import QColor
+
+    from molmanager.ui.depiction_painter import light_palette, paint_scene
+
+    scene, reason = build_scene(sample.mol)
+    if scene is None:
+        painter.setPen(QColor(200, 40, 40))
+        painter.drawText(QRect(x, y, cell_w, cell_h), Qt.AlignCenter, f"fallback: {reason}")
+        return
+    paint_scene(
+        painter,
+        scene,
+        QRectF(x, y, cell_w, cell_h),
+        light_palette(),
+        line_width_px=STRUCTURE_DEPICT_BOND_LINE_WIDTH * scale,
+    )
 
 
 def main() -> None:
@@ -52,6 +92,7 @@ def main() -> None:
     ap.add_argument("--columns", type=int, default=8)
     ap.add_argument("--limit", type=int, default=0, help="molecules to include (0 = all)")
     ap.add_argument("--scale", type=int, default=1, help="cell size multiple, e.g. 2 for zoom")
+    ap.add_argument("--renderer", choices=_RENDERERS, default="both")
     args = ap.parse_args()
 
     from PyQt5.QtCore import QRect, Qt
@@ -65,7 +106,9 @@ def main() -> None:
         raise SystemExit(f"no molecules read from {args.path}")
 
     scale = max(1, int(args.scale))
-    cell_w = int(structure_depict_width()) * scale
+    pane_w = int(structure_depict_width()) * scale
+    panes = 2 if args.renderer == "both" else 1
+    cell_w = pane_w * panes
     cell_h = int(structure_depict_height()) * scale
     font = QFont()
     font.setPointSize(8)
@@ -84,23 +127,22 @@ def main() -> None:
         painter.setPen(QColor(90, 90, 90))
         title = (
             f"{os.path.basename(args.path)} · {len(samples)} molecules · "
-            f"{cell_w}x{cell_h} px · RDKit {rdkit_version}"
+            f"{pane_w}x{cell_h} px · {args.renderer} · RDKit {rdkit_version}"
             + ("" if rdkit_release_ok() else " (older than the project requires)")
         )
         painter.drawText(QRect(6, 0, sheet.width() - 12, header_h), Qt.AlignVCenter, title)
         for index, sample in enumerate(samples):
             x = (index % columns) * pitch_w
             y = header_h + (index // columns) * pitch_h
-            try:
-                png = render_molecule_png(sample.mol, cell_w, cell_h)
-            except Exception:  # noqa: BLE001 — show the failure in the sheet instead
-                png = b""
-            image = QImage.fromData(png) if png else QImage()
-            if image.isNull():
-                painter.setPen(QColor(200, 40, 40))
-                painter.drawText(QRect(x, y, cell_w, cell_h), Qt.AlignCenter, "draw failed")
-            else:
-                painter.drawImage(x, y, image)
+            vector_x = x
+            if args.renderer in ("rdkit", "both"):
+                _draw_rdkit(painter, sample, x, y, pane_w, cell_h)
+                vector_x = x + pane_w
+            if args.renderer in ("vector", "both"):
+                _draw_vector(painter, sample, vector_x, y, pane_w, cell_h, scale)
+            if panes == 2:
+                painter.setPen(QColor(240, 240, 240))
+                painter.drawLine(x + pane_w, y + 6, x + pane_w, y + cell_h - 6)
             painter.setPen(QColor(60, 60, 60))
             caption = sample.name if not sample.category else f"{sample.name}\n{sample.category}"
             painter.drawText(
