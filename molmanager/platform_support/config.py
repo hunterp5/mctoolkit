@@ -322,7 +322,7 @@ def load_config() -> MolManagerConfig:
             "MOLMANAGER_STRUCTURE_RENDER_PIXMAP_LRU", 384, lo=32, hi=4096
         ),
         # Draw Structure cells from depiction scenes instead of RDKit PNGs.
-        structure_vector_depiction=_env_bool("MOLMANAGER_STRUCTURE_VECTOR_DEPICTION", False),
+        structure_vector_depiction=_env_bool("MOLMANAGER_STRUCTURE_VECTOR_DEPICTION", True),
         fingerprint_cache_max_entries=_env_int(
             "MOLMANAGER_FINGERPRINT_CACHE_MAX_ENTRIES", 50_000, lo=0, hi=5_000_000
         ),
