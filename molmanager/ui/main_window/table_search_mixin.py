@@ -34,7 +34,7 @@ from PyQt5.QtWidgets import (
 from rdkit import Chem
 
 from ...platform_support.config import load_config
-from ...workers import SubstructureFilterWorker
+from ... import workers
 from ..search_panel import SearchCriterionRow
 from ..search_query import (
     classify_search_query,
@@ -622,7 +622,7 @@ class TableSearchMixin:
         if callable(begin):
             begin("Searching substructure", n_rows)
         pool.start(
-            SubstructureFilterWorker(
+            workers.SubstructureFilterWorker(
                 gen,
                 signals=sigs,
                 group_queries=group_queries,

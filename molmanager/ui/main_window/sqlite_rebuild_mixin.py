@@ -25,7 +25,7 @@ from PyQt5.QtCore import QTimer
 
 from ...platform_support.config import load_config
 from ...storage import SqliteTableStore
-from ...workers import SqliteRebuildWorker
+from ... import workers
 from ..strings import loaded_session_status
 
 logger = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ class SqliteRebuildMixin:
         if callable(bind) and job_id:
             prog = bind(job_id)
         pool.start(
-            SqliteRebuildWorker(
+            workers.SqliteRebuildWorker(
                 gen,
                 headers,
                 None,

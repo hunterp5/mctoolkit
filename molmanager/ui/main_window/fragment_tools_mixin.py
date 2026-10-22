@@ -34,11 +34,7 @@ from ..strings import (
 )
 from ...chem.structure_payload import oid_mol_rows_from_payloads
 from ...table.structure_depiction_layout import structure_depict_height, structure_depict_width
-from ...workers import (
-    FragmentDecompositionWorker,
-    FragmentRecompositionWorker,
-    RGroupDecompositionWorker,
-)
+from ... import workers
 from ..analysis_job_support import enqueue_process_queue_job
 
 logger = logging.getLogger(__name__)
@@ -82,7 +78,7 @@ class FragmentToolsMixin:
             self,
             "Core-based decomposition",
             len(payloads),
-            lambda ev, ps, dt=payloads, pp=p, sigs=self.signals: RGroupDecompositionWorker(
+            lambda ev, ps, dt=payloads, pp=p, sigs=self.signals: workers.RGroupDecompositionWorker(
                 oid_mol_rows_from_payloads(dt),
                 pp.core_query,
                 pp.column_prefix,
@@ -173,7 +169,7 @@ class FragmentToolsMixin:
             p.tool_title,
             len(data),
             lambda ev, ps, dt=data, m=method, pref=prefix, title=p.tool_title, sigs=self.signals: (
-                FragmentDecompositionWorker(
+                workers.FragmentDecompositionWorker(
                     oid_mol_rows_from_payloads(dt),
                     m,
                     pref,
@@ -328,7 +324,7 @@ class FragmentToolsMixin:
             p.tool_title,
             p.max_products,
             lambda ev, ps, fr=fragments, pp=p, m=method, sigs=self.signals: (
-                FragmentRecompositionWorker(
+                workers.FragmentRecompositionWorker(
                     fr,
                     m,
                     pp.max_depth,

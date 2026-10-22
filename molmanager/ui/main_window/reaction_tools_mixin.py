@@ -29,7 +29,7 @@ from ...chem.reaction_extract import (
     preferred_reaction_source_column,
 )
 from ...chem.reaction_file_io import reaction_smarts_from_app_selection
-from ...workers import ReactionEnumerationWorker, RGroupEnumerationWorker
+from ... import workers
 from ..analysis_job_support import enqueue_process_queue_job
 
 logger = logging.getLogger(__name__)
@@ -147,7 +147,7 @@ class ReactionToolsMixin:
             self,
             TOOL_REACTION_ENUMERATION,
             p.max_products,
-            lambda ev, ps, req=p, sigs=self.signals: ReactionEnumerationWorker(
+            lambda ev, ps, req=p, sigs=self.signals: workers.ReactionEnumerationWorker(
                 req,
                 TOOL_REACTION_ENUMERATION,
                 sigs,
@@ -229,7 +229,7 @@ class ReactionToolsMixin:
             self,
             TOOL_RGROUP_ENUMERATION,
             request.max_products,
-            lambda ev, ps, req=request, sigs=self.signals: RGroupEnumerationWorker(
+            lambda ev, ps, req=request, sigs=self.signals: workers.RGroupEnumerationWorker(
                 req,
                 TOOL_RGROUP_ENUMERATION,
                 sigs,

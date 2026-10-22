@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import QDialog, QMessageBox
 
 from ...platform_support.config import load_config
 from ...chem.molecule_conversion import safe_float
-from ...workers import CustomCalcWorker
+from ... import workers
 from ..analysis_job_support import enqueue_process_queue_job
 from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
 from ..strings import (
@@ -82,7 +82,7 @@ class TableCalcMixin:
             self,
             "Calculator…",
             len(row_data),
-            lambda ev, ps, rd=row_data, ex=expr, sigs=self.signals: CustomCalcWorker(
+            lambda ev, ps, rd=row_data, ex=expr, sigs=self.signals: workers.CustomCalcWorker(
                 rd, ex, sigs, cancel_event=ev, progress_state=ps
             ),
             queue_label=f"Calculator ({len(row_data)} rows)",

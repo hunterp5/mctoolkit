@@ -24,8 +24,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
 )
 
-from ...workers.chemistry_descriptors import CalcDescriptorsRequest, CalcWorker
-from ...workers.common_core import CommonCoreWorker
+from ... import workers
 from ..analysis_job_support import enqueue_process_queue_job
 from ..strings import TOOL_BEMIS_MURCKO, TOOL_COMMON_CORE
 
@@ -68,7 +67,9 @@ class DescriptorsToolsMixin:
         if not headers:
             return
         src = dialog.src_combo.currentText()
-        rows = self._rows_for_structure_column_job(src, dialog.only_selected_rows(), TOOL_BEMIS_MURCKO)
+        rows = self._rows_for_structure_column_job(
+            src, dialog.only_selected_rows(), TOOL_BEMIS_MURCKO
+        )
         if rows is None:
             return
         data, oids_list, is_text = rows
@@ -112,7 +113,7 @@ class DescriptorsToolsMixin:
             self,
             TOOL_COMMON_CORE,
             len(data),
-            lambda ev, ps, payload=data, opts=params: CommonCoreWorker(
+            lambda ev, ps, payload=data, opts=params: workers.CommonCoreWorker(
                 payload,
                 outliers=opts.outliers,
                 complete_rings=opts.complete_rings,
@@ -205,7 +206,7 @@ class DescriptorsToolsMixin:
         confs_col_by_idx=None,
         ensemble_db=None,
     ) -> None:
-        req = CalcDescriptorsRequest(
+        req = workers.CalcDescriptorsRequest(
             data=data,
             disp_headers=disp_headers,
             int_fns=int_fns,
@@ -219,7 +220,7 @@ class DescriptorsToolsMixin:
             self,
             title,
             len(data),
-            lambda ev, ps, request=req: CalcWorker(
+            lambda ev, ps, request=req: workers.CalcWorker(
                 request,
                 self.signals,
                 cancel_event=ev,

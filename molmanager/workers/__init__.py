@@ -21,10 +21,10 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-# ``chemistry_tools`` pulls in ``medchem_descriptors`` and must not load during ``workers``
-# package init (e.g. ``ionization`` imports stay lazy from descriptor callables).
-_CHEMISTRY_TOOLS_EXPORTS = frozenset(
-    {
+# Exports resolve on first attribute access so importing the package (or one light submodule)
+# does not load every worker's chemistry stack at application start.
+_LAZY_EXPORT_MODULES: dict[str, tuple[str, ...]] = {
+    ".chemistry_tools": (
         "CalcWorker",
         "ConformerGenParams",
         "ConformerGenerationWorker",
@@ -49,83 +49,96 @@ _CHEMISTRY_TOOLS_EXPORTS = frozenset(
         "strain_overlay_for_mol",
         "strain_overlay_for_mols",
         "strain_overlay_for_blocks_b64",
-    }
-)
+    ),
+    ".chemistry_descriptors": ("CalcDescriptorsRequest",),
+    ".bulk_similarity": ("BulkSimilarityResult", "BulkSimilarityWorker"),
+    ".cluster_worker": ("ClusterExploreWorker", "ClusterWorker"),
+    ".common_core": ("CommonCoreWorker",),
+    ".export_worker": ("ExportWorker",),
+    "..chem.rdkit_fingerprints": (
+        "SIMILARITY_FP_TYPE_LABELS",
+        "fingerprint_bitvect_for_ui_choice",
+    ),
+    ".diverse_subset_worker": (
+        "DiverseSubsetWorker",
+        "build_diverse_subset_pool",
+        "materialize_pool_fingerprints",
+        "maxmin_diverse_pick_bulk",
+        "maxmin_diverse_pick_indices",
+        "maxmin_diverse_pick_lazy",
+        "run_diverse_subset_pick",
+    ),
+    ".fingerprint_similarity": (
+        "FPSimilarityWorker",
+        "SIMILARITY_METRIC_LABELS",
+        "pairwise_fingerprint_similarity",
+    ),
+    ".pharmacophore_screen": ("PharmacophoreScreenWorker",),
+    ".fast_prepare": ("FastPrepareWorker",),
+    ".load_render": (
+        "AddExplicitHydrogensWorker",
+        "NeutralizeWorker",
+        "RemoveExplicitHydrogensWorker",
+        "Render2DBatchHeldJob",
+        "Render2DBatchProcessWorker",
+        "RenderWorker",
+        "STRUCTURE_PAYLOAD_TAG",
+        "UniversalLoadWorker",
+        "DisconnectFragmentsWorker",
+    ),
+    ".pka_predictor": ("PKaPredictorSignals", "PKaPredictorWorker"),
+    ".permeability_worker": ("PermeabilityPredictorSignals", "PermeabilityPredictorWorker"),
+    ".som_worker": ("SomPredictorSignals", "SomPredictorWorker"),
+    ".biotransformer_worker": ("BiotransformerSignals", "BiotransformerWorker"),
+    ".protomer_generator": ("ProtomerGeneratorSignals", "ProtomerGeneratorWorker"),
+    ".protonate_worker": ("ProtonateSignals", "ProtonateWorker"),
+    ".pdbqt_generator": ("PdbqtGenSignals", "PdbqtGenRequest", "PdbqtGeneratorWorker"),
+    ".conforge_worker": ("ConforgeConformerWorker",),
+    ".openbabel_confab_worker": ("SystematicConformerWorker",),
+    ".protein_msa": ("MafftAlignSignals", "MafftAlignWorker"),
+    ".fragment_decomposition": ("FragmentDecompositionWorker",),
+    ".fragment_recomposition": ("FragmentRecompositionWorker",),
+    ".mmp_worker": ("MmpAnalysisWorker",),
+    ".sali_worker": ("SaliAnalysisWorker",),
+    ".reaction_enumeration": ("ReactionEnumerationWorker",),
+    ".rgroup_decomposition": ("RGroupDecompositionWorker",),
+    ".rgroup_enumeration": ("RGroupEnumerationWorker",),
+    ".free_wilson_worker": ("FreeWilsonWorker",),
+    ".signals": (
+        "BulkSimilaritySignals",
+        "DiverseSubsetSignals",
+        "FilterApplySignals",
+        "FPSimilaritySignals",
+        "PharmacophoreScreenSignals",
+        "SessionSaveSignals",
+        "SqliteRebuildSignals",
+        "SubstructureFilterSignals",
+        "WorkerSignals",
+    ),
+    ".session_save": ("SessionSaveWorker",),
+    ".sqlite_rebuild": ("SqliteRebuildWorker",),
+    ".filter_apply": ("FilterApplyWorker",),
+    ".substructure_align": ("SubstructureAlignWorker",),
+    ".substructure_filter": ("SubstructureFilterWorker",),
+}
+
+_MODULE_FOR_EXPORT: dict[str, str] = {
+    name: module for module, names in _LAZY_EXPORT_MODULES.items() for name in names
+}
 
 
 def __getattr__(name: str) -> Any:
-    if name in _CHEMISTRY_TOOLS_EXPORTS:
-        ct = importlib.import_module(".chemistry_tools", __package__)
-        return getattr(ct, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name = _MODULE_FOR_EXPORT.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module_name, __package__), name)
+    globals()[name] = value
+    return value
 
 
-from .bulk_similarity import BulkSimilarityResult, BulkSimilarityWorker
-from .cluster_worker import ClusterExploreWorker, ClusterWorker
-from .common_core import CommonCoreWorker
-from .export_worker import ExportWorker
-from ..chem.rdkit_fingerprints import SIMILARITY_FP_TYPE_LABELS, fingerprint_bitvect_for_ui_choice
-from .diverse_subset_worker import (
-    DiverseSubsetWorker,
-    build_diverse_subset_pool,
-    materialize_pool_fingerprints,
-    maxmin_diverse_pick_bulk,
-    maxmin_diverse_pick_indices,
-    maxmin_diverse_pick_lazy,
-    run_diverse_subset_pick,
-)
-from .fingerprint_similarity import (
-    FPSimilarityWorker,
-    SIMILARITY_METRIC_LABELS,
-    pairwise_fingerprint_similarity,
-)
-from .pharmacophore_screen import PharmacophoreScreenWorker
-from .fast_prepare import FastPrepareWorker
-from .load_render import (
-    AddExplicitHydrogensWorker,
-    NeutralizeWorker,
-    RemoveExplicitHydrogensWorker,
-    Render2DBatchHeldJob,
-    Render2DBatchProcessWorker,
-    RenderWorker,
-    STRUCTURE_PAYLOAD_TAG,
-    UniversalLoadWorker,
-    DisconnectFragmentsWorker,
-)
-from .pka_predictor import PKaPredictorSignals, PKaPredictorWorker
-from .permeability_worker import PermeabilityPredictorSignals, PermeabilityPredictorWorker
-from .som_worker import SomPredictorSignals, SomPredictorWorker
-from .biotransformer_worker import BiotransformerSignals, BiotransformerWorker
-from .protomer_generator import ProtomerGeneratorSignals, ProtomerGeneratorWorker
-from .protonate_worker import ProtonateSignals, ProtonateWorker
-from .pdbqt_generator import PdbqtGenSignals, PdbqtGenRequest, PdbqtGeneratorWorker
-from .conforge_worker import ConforgeConformerWorker
-from .openbabel_confab_worker import SystematicConformerWorker
-from .protein_msa import MafftAlignSignals, MafftAlignWorker
-from .fragment_decomposition import FragmentDecompositionWorker
-from .fragment_recomposition import FragmentRecompositionWorker
-from .mmp_worker import MmpAnalysisWorker
-from .sali_worker import SaliAnalysisWorker
-from .reaction_enumeration import ReactionEnumerationWorker
-from .rgroup_decomposition import RGroupDecompositionWorker
-from .rgroup_enumeration import RGroupEnumerationWorker
-from .free_wilson_worker import FreeWilsonWorker
-from .signals import (
-    BulkSimilaritySignals,
-    DiverseSubsetSignals,
-    FilterApplySignals,
-    FPSimilaritySignals,
-    PharmacophoreScreenSignals,
-    SessionSaveSignals,
-    SqliteRebuildSignals,
-    SubstructureFilterSignals,
-    WorkerSignals,
-)
-from .session_save import SessionSaveWorker
-from .sqlite_rebuild import SqliteRebuildWorker
-from .filter_apply import FilterApplyWorker
-from .substructure_align import SubstructureAlignWorker
-from .substructure_filter import SubstructureFilterWorker
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_MODULE_FOR_EXPORT))
+
 
 __all__ = [
     "CalcWorker",

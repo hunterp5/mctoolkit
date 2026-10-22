@@ -25,7 +25,7 @@ from ...platform_support.config import MolManagerConfig, load_config
 from ...table.filter_compute import build_sqlite_where, fetch_matching_oids
 from ...services.filter_config import cfg_column
 from ...chem.molecule_conversion import safe_float
-from ...workers import FilterApplyWorker, SubstructureFilterWorker
+from ... import workers
 from ..background_jobs import register_background_job, unregister_background_job
 from .cards import CategoryFilterCard, FilterCard, SubstructureFilterCard, TextFilterCard
 
@@ -232,7 +232,7 @@ class FilterApplyMixin:
         if callable(bind):
             progress_state = bind(job_id)
         self.threadpool.start(
-            FilterApplyWorker(
+            workers.FilterApplyWorker(
                 gen,
                 str(store.db_path),
                 where_sql,
@@ -693,7 +693,7 @@ class FilterApplyMixin:
             if callable(bind):
                 progress_state = bind(job_id)
             self.threadpool.start(
-                SubstructureFilterWorker(
+                workers.SubstructureFilterWorker(
                     gen,
                     signals=sigs,
                     queries=queries,

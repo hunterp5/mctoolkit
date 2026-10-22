@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import QMessageBox
 
 from ...analysis.free_wilson import parse_free_wilson_core
 from ...platform_support.memory_guards import check_product_enumeration
-from ...workers.free_wilson_worker import FreeWilsonWorker
+from ... import workers
 from ..analysis_job_support import (
     ensure_activity_analysis_ready,
     report_cancellable_job_failure,
@@ -70,7 +70,7 @@ class FreeWilsonMixin:
             return
 
         def _make_worker(records, *, cancel_event, signals, progress_state):
-            return FreeWilsonWorker(
+            return workers.FreeWilsonWorker(
                 records,
                 settings,
                 signals,

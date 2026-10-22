@@ -28,7 +28,7 @@ from ..analysis_job_support import (
     start_scoped_activity_job,
 )
 from ..strings import TOOL_ACTIVITY_CLIFF_MAP
-from ...workers import MmpAnalysisWorker
+from ... import workers
 from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
 
 
@@ -57,7 +57,7 @@ class ActivityCliffMixin:
         p = d.params()
 
         def _make_worker(rec, *, cancel_event, signals, progress_state):
-            return MmpAnalysisWorker(
+            return workers.MmpAnalysisWorker(
                 rec,
                 activity_column=p.activity_column,
                 max_cuts=p.max_cuts,

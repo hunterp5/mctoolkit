@@ -21,7 +21,7 @@ from __future__ import annotations
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMessageBox
 
-from ...workers import DisconnectFragmentsWorker
+from ... import workers
 from ..analysis_job_support import enqueue_process_queue_job
 
 
@@ -87,7 +87,7 @@ class StructureEditMixin:
             self,
             "Disconnect fragments",
             len(data),
-            lambda ev, ps, d=data, s=self.signals: DisconnectFragmentsWorker(
+            lambda ev, ps, d=data, s=self.signals: workers.DisconnectFragmentsWorker(
                 d, s, is_smiles=False, cancel_event=ev, progress_state=ps
             ),
             queue_label=f"{queue_title_prefix}disconnect largest fragments{suffix}",

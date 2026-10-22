@@ -34,13 +34,7 @@ from ...conformers.conformer_column_codec import (
     rehydrate_v1_confs_cell,
     unpack_confs_blocks_json_b64,
 )
-from ...workers import (
-    ConforgeConformerWorker,
-    ConformerGenerationWorker,
-    SuperposeConformersWorker,
-    SuperposeStructuresWorker,
-    SystematicConformerWorker,
-)
+from ... import workers
 from ..analysis_job_support import enqueue_process_queue_job
 
 logger = logging.getLogger(__name__)
@@ -166,7 +160,7 @@ class ConformersToolsMixin:
             self,
             "Generate conformations",
             n,
-            lambda ev, ps, d=data, p=params, sigs=self.signals: ConformerGenerationWorker(
+            lambda ev, ps, d=data, p=params, sigs=self.signals: workers.ConformerGenerationWorker(
                 d, p, sigs, cancel_event=ev, progress_state=ps
             ),
             queue_label=f"Generate conformations ({n} structures)",
@@ -210,7 +204,7 @@ class ConformersToolsMixin:
             self,
             "Systematic conformations",
             n,
-            lambda ev, ps, d=data, p=params, sigs=self.signals: SystematicConformerWorker(
+            lambda ev, ps, d=data, p=params, sigs=self.signals: workers.SystematicConformerWorker(
                 d, p, sigs, cancel_event=ev, progress_state=ps
             ),
             queue_label=f"Systematic conformations ({n} structures)",
@@ -254,7 +248,7 @@ class ConformersToolsMixin:
             self,
             "CONFORGE conformations",
             n,
-            lambda ev, ps, d=data, p=params, sigs=self.signals: ConforgeConformerWorker(
+            lambda ev, ps, d=data, p=params, sigs=self.signals: workers.ConforgeConformerWorker(
                 d, p, sigs, cancel_event=ev, progress_state=ps
             ),
             queue_label=f"CONFORGE conformations ({n} structures)",
@@ -468,7 +462,7 @@ class ConformersToolsMixin:
             "Superpose",
             n,
             lambda ev, ps, d=data, p=params, sigs=self.signals, db=db_path: (
-                SuperposeConformersWorker(
+                workers.SuperposeConformersWorker(
                     d, p, sigs, cancel_event=ev, progress_state=ps, ensemble_db=db
                 )
             ),
@@ -568,7 +562,9 @@ class ConformersToolsMixin:
             "Superpose",
             n,
             lambda ev, ps, rid=ref_oid, rm=ref_mol, pr=probes, p=params, sigs=self.signals: (
-                SuperposeStructuresWorker(rid, rm, pr, p, sigs, cancel_event=ev, progress_state=ps)
+                workers.SuperposeStructuresWorker(
+                    rid, rm, pr, p, sigs, cancel_event=ev, progress_state=ps
+                )
             ),
             queue_label=f"Superpose ({n} structures)",
         )

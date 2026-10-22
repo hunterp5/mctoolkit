@@ -30,7 +30,7 @@ from ..analysis_job_support import (
     start_scoped_activity_job,
 )
 from ..strings import TOOL_SALI_MAP
-from ...workers import SaliAnalysisWorker
+from ... import workers
 from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
 
 
@@ -91,7 +91,7 @@ class SaliMixin:
                 return
 
         def _make_worker(rec, *, cancel_event, signals, progress_state):
-            return SaliAnalysisWorker(
+            return workers.SaliAnalysisWorker(
                 rec,
                 activity_column=p.activity_column,
                 fp_choice=p.fp_choice,
