@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Calculator, potency units, random columns, split/join columns, fingerprint similarity, and diverse subset."""
+"""Calculator, potency units, random columns, split/join/bin columns, fingerprint similarity, and diverse subset."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ from ...workers import CustomCalcWorker
 from ..analysis_job_support import enqueue_process_queue_job
 from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
 from ..strings import (
+    TOOL_BINNING,
     TOOL_CALCULATOR,
     TOOL_JOIN_COLUMNS,
     TOOL_POTENCY,
@@ -522,6 +523,100 @@ class TableCalcMixin:
         self.status_label.setText(
             f'{TOOL_JOIN_COLUMNS}: column "{final_col}" from "{left}" and "{right}" '
             f"({len(rows)} row(s))."
+        )
+
+    def open_binning_dialog(self) -> None:
+        if not self.headers or self._table_model.rowCount() == 0:
+            QMessageBox.information(
+                self,
+                TOOL_BINNING,
+                "Open a file or add rows so the table has a column to bin.",
+            )
+            return
+        columns = self._filterable_data_column_names()
+        if not columns:
+            QMessageBox.information(
+                self,
+                TOOL_BINNING,
+                "No columns are available to bin.",
+            )
+            return
+        from ..dialogs import BinningDialog
+
+        d = BinningDialog(columns, len(self._selected_logical_rows()), self)
+        self._prepare_tool_dialog(d)
+        d.setAttribute(Qt.WA_DeleteOnClose, True)
+        d.accepted.connect(lambda *_, dlg=d: self._on_binning_dialog_accepted(dlg))
+        d.show()
+
+    def _on_binning_dialog_accepted(self, d) -> None:
+        from ...table.column_binning import bin_column_texts
+
+        try:
+            p = d.params()
+        except ValueError as exc:
+            QMessageBox.warning(self, TOOL_BINNING, str(exc) or "Could not bin the column.")
+            return
+        source = p.source_column
+        if not source or source not in self.headers:
+            QMessageBox.warning(self, TOOL_BINNING, "Choose a column to bin.")
+            return
+        only_selected = d.only_selected_rows()
+        allowed = self._selected_oids_set() if only_selected else None
+        if self._abort_if_only_selected_but_empty(only_selected, allowed, TOOL_BINNING):
+            return
+        oids = self._all_oids_in_table_order()
+        if allowed is not None:
+            oids = [o for o in oids if o in allowed]
+        if not oids:
+            QMessageBox.information(self, TOOL_BINNING, "No rows to process for this scope.")
+            return
+        try:
+            ci = self.headers.index(source)
+        except ValueError:
+            QMessageBox.warning(self, TOOL_BINNING, "Choose a column to bin.")
+            return
+        texts: list[str] = []
+        for oid in oids:
+            row = self._table_model.logical_row_for_oid(int(oid))
+            if row < 0:
+                texts.append("")
+                continue
+            raw = self._table_model.backing_value_for_row_header(row, source) or ""
+            if not raw:
+                raw = self._table_cell_text(row, ci) or ""
+            texts.append(str(raw))
+        try:
+            binned = bin_column_texts(texts, p)
+        except ValueError as exc:
+            QMessageBox.warning(self, TOOL_BINNING, str(exc) or "Could not bin the column.")
+            return
+        range_name = (p.range_column or "").strip() or source
+        class_name = (p.class_column or "").strip() or f"{source}_class"
+        if range_name == class_name:
+            QMessageBox.warning(
+                self,
+                TOOL_BINNING,
+                "Choose different names for the range and classification columns.",
+            )
+            return
+        rows = [
+            (
+                int(oid),
+                {range_name: binned.ranges[j], class_name: binned.classes[j]},
+            )
+            for j, oid in enumerate(oids)
+        ]
+        written = self.on_calc_finished(
+            rows, [range_name, class_name], progress_label=TOOL_BINNING
+        )
+        range_final = written[0] if written else range_name
+        class_final = written[1] if len(written) > 1 else class_name
+        labeled = sum(1 for label in binned.ranges if label)
+        noun = "bin" if len(binned.range_names) == 1 else "bins"
+        self.status_label.setText(
+            f'{TOOL_BINNING}: "{range_final}" and "{class_final}" — '
+            f"{len(binned.range_names)} {noun}, {labeled} of {len(rows)} row(s)."
         )
 
     def open_fp_similarity(self):

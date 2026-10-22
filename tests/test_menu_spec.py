@@ -191,6 +191,12 @@ def test_help_menu_sits_inside_settings():
     assert HELP_MENU.attr == "_help_menu"
 
 
+def test_binning_follows_cluster():
+    data = find_submenu(MAIN_WINDOW_MENUS, "Data")
+    labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]
+    assert labels.index("Binning…") == labels.index("Cluster…") + 1
+
+
 def test_sar_matrix_follows_free_wilson():
     data = find_submenu(MAIN_WINDOW_MENUS, "Data")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]

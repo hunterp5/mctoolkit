@@ -45,6 +45,7 @@ TOOL_RANDOM_NUMBER = "Random Number"
 TOOL_RANDOM_MOLECULE = "Random Molecule"
 TOOL_SPLIT_COLUMN = "Split Column"
 TOOL_JOIN_COLUMNS = "Join Columns"
+TOOL_BINNING = "Binning"
 TOOL_PREDICT_SOM = "Predict SOM"
 TOOL_PREDICT_METABOLITES = "Predict Metabolites"
 

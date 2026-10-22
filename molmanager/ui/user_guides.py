@@ -38,7 +38,7 @@ from ..reference.help_markdown import (
     markdown_to_html_fragment,
     missing_topic_html,
 )
-from .qt_widget_utils import make_window_minimizable
+from .qt_widget_utils import make_window_resizable
 
 if TYPE_CHECKING:
     from PyQt5.QtWidgets import QWidget
@@ -471,6 +471,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Join two columns with a delimiter into a new column.",
             ),
             _e(
+                "data_binning",
+                "Binning",
+                "Binning",
+                "Data → Binning. Write bin ranges and classification labels to separate columns.",
+            ),
+            _e(
                 "tools_cluster",
                 "Cluster",
                 "Cluster",
@@ -690,7 +696,7 @@ def open_user_guide_dialog(parent: QWidget | None, guide_id: str | None = "overv
             _show_guide_dialog(dlg, gid)
 
     lst.currentItemChanged.connect(on_pick)
-    make_window_minimizable(dlg)
+    make_window_resizable(dlg)
 
     if host is not None:
         host._user_guide_dialog = dlg

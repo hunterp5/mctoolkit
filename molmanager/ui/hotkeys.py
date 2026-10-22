@@ -70,6 +70,7 @@ HOTKEY_SPECS: tuple[HotkeySpec, ...] = (
     HotkeySpec("data.analyze_table", "Statistics…", "Data", ()),
     HotkeySpec("data.split_column", "Split Column…", "Data", ()),
     HotkeySpec("data.join_columns", "Join Columns…", "Data", ()),
+    HotkeySpec("data.binning", "Binning…", "Data", ()),
     HotkeySpec("help.user_guides", "User Guide", "Help", ("F1",)),
     HotkeySpec("help.citations", "Citations", "Help", ()),
 )

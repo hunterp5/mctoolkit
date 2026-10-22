@@ -378,6 +378,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                     "batch (see Log)."
                 ),
             ),
+            action(
+                "Align to Substructure…",
+                "run_align_substructure",
+                tooltip=(
+                    "Redraw matching structures so a drawn substructure shares one orientation. "
+                    "Rows that do not match are left unchanged."
+                ),
+            ),
             tooltips_visible=True,
         ),
         submenu(
@@ -726,6 +734,15 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltip=(
                 "Cluster compounds by fingerprint, numeric columns, or both "
                 "(K-Means, Butina, sphere exclusion, etc.)."
+            ),
+        ),
+        action(
+            "Binning…",
+            "open_binning_dialog",
+            hotkey="data.binning",
+            tooltip=(
+                "Assign numeric values to bins and write the range and classification "
+                "into separate columns."
             ),
         ),
         SEPARATOR,
