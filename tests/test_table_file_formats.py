@@ -22,6 +22,7 @@ import gzip
 from pathlib import Path
 
 from rdkit import Chem
+from rdkit.Chem import AllChem
 
 from molmanager.table.text_file_ingest import find_smiles_column
 from molmanager.table.table_file_formats import (
@@ -108,6 +109,101 @@ def test_iter_sd_and_gzip_sdf(tmp_path: Path) -> None:
     gz_mols = list(iter_sdf_mols(gz))
     assert len(gz_mols) == 1
     assert Chem.MolToSmiles(gz_mols[0]) == "CCO"
+
+
+def _hydrogen_xy(mol: Chem.Mol) -> list[tuple[float, float]]:
+    conf = mol.GetConformer()
+    points = []
+    for atom in mol.GetAtoms():
+        if atom.GetAtomicNum() != 1:
+            continue
+        pos = conf.GetAtomPosition(atom.GetIdx())
+        points.append((float(pos.x), float(pos.y)))
+    return points
+
+
+def test_sdf_keeps_wedged_hydrogen_coordinates(tmp_path: Path) -> None:
+    """A wedge or dash hydrogen stays, with its coordinates. Other hydrogens do not."""
+    mol = Chem.AddHs(Chem.MolFromSmiles("C[C@H](O)CC"))
+    AllChem.Compute2DCoords(mol)
+    path = tmp_path / "chiral.sdf"
+    _write_mol(path, mol)
+
+    loaded = list(iter_sdf_mols(path))
+    assert len(loaded) == 1
+    kept = loaded[0]
+    assert sum(atom.GetAtomicNum() == 1 for atom in kept.GetAtoms()) == 1
+    assert kept.GetNumConformers() == 1
+    wedged = [
+        bond
+        for bond in kept.GetBonds()
+        if bond.GetBondDir() != Chem.BondDir.NONE
+        and (bond.GetBeginAtom().GetAtomicNum() == 1 or bond.GetEndAtom().GetAtomicNum() == 1)
+    ]
+    assert len(wedged) == 1
+
+    with open(path, "rb") as fh:
+        raw = next(Chem.ForwardSDMolSupplier(fh, removeHs=False))
+    Chem.ReapplyMolBlockWedging(raw)
+    raw_h = _hydrogen_xy(raw)
+    kept_h = _hydrogen_xy(kept)
+    assert len(kept_h) == 1
+    assert any(abs(x - kept_h[0][0]) < 1e-4 and abs(y - kept_h[0][1]) < 1e-4 for x, y in raw_h)
+
+    from molmanager.chem.depiction_coords import depiction_blob_from_mol, unpack_xy
+
+    points = unpack_xy(depiction_blob_from_mol(kept))
+    assert points is not None and len(points) == kept.GetNumAtoms()
+    h_idx = next(atom.GetIdx() for atom in kept.GetAtoms() if atom.GetAtomicNum() == 1)
+    assert abs(points[h_idx][0] - kept_h[0][0]) < 1e-4
+    assert abs(points[h_idx][1] - kept_h[0][1]) < 1e-4
+
+
+def test_sdf_keeps_double_bond_stereo_hydrogen(tmp_path: Path) -> None:
+    mol = Chem.MolFromSmiles(r"[H]/C=C/C")
+    assert mol is not None
+    AllChem.Compute2DCoords(mol)
+    path = tmp_path / "ez.mol"
+    _write_mol(path, mol)
+    loaded = list(iter_sdf_mols(path))
+    assert len(loaded) == 1
+    assert Chem.MolToSmiles(loaded[0]) == "[H]/C=C/C"
+    assert sum(atom.GetAtomicNum() == 1 for atom in loaded[0].GetAtoms()) == 1
+
+
+def test_sdf_drops_nonstereo_explicit_hydrogens(tmp_path: Path) -> None:
+    mol = Chem.AddHs(Chem.MolFromSmiles("CCO"))
+    AllChem.Compute2DCoords(mol)
+    path = tmp_path / "ethanol.sdf"
+    _write_mol(path, mol)
+    loaded = list(iter_sdf_mols(path))
+    assert len(loaded) == 1
+    assert Chem.MolToSmiles(loaded[0]) == "CCO"
+    assert sum(atom.GetAtomicNum() == 1 for atom in loaded[0].GetAtoms()) == 0
+
+
+def test_stereocenter_hydrogen_stays_without_a_wedge() -> None:
+    """Coordinates can define the stereocenter when the molblock has no wedge flag."""
+    from molmanager.chem.structure_hydrogens import keep_stereo_hydrogens
+
+    mol = Chem.AddHs(Chem.MolFromSmiles("C[C@H](O)CC"))
+    AllChem.Compute2DCoords(mol)
+    for bond in mol.GetBonds():
+        bond.SetBondDir(Chem.BondDir.NONE)
+    kept = keep_stereo_hydrogens(mol)
+    hydrogens = [atom for atom in kept.GetAtoms() if atom.GetAtomicNum() == 1]
+    assert len(hydrogens) == 1
+    neighbor = hydrogens[0].GetNeighbors()[0]
+    assert neighbor.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED
+    assert kept.GetBondBetweenAtoms(hydrogens[0].GetIdx(), neighbor.GetIdx()).GetBondDir() == (
+        Chem.BondDir.NONE
+    )
+
+
+def _write_mol(path: Path, mol: Chem.Mol) -> None:
+    writer = Chem.SDWriter(str(path))
+    writer.write(mol)
+    writer.close()
 
 
 def test_iter_mol2(tmp_path: Path) -> None:

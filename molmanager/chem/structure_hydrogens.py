@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 from rdkit import Chem
 
 
@@ -37,6 +39,70 @@ def add_explicit_hydrogens(mol: Chem.Mol) -> Chem.Mol | None:
         return Chem.AddHs(m)
     except Exception:
         return None
+
+
+def _bond_stereo_atom_ids(mol: Chem.Mol) -> set[int]:
+    """Atom indices that define E/Z or cis/trans bond stereo."""
+    ids: set[int] = set()
+    for bond in mol.GetBonds():
+        if bond.GetStereo() == Chem.BondStereo.STEREONONE:
+            continue
+        ids.update(int(atom_id) for atom_id in bond.GetStereoAtoms())
+    return ids
+
+
+def _nonstereo_hydrogen_indices(mol: Chem.Mol) -> list[int]:
+    """Explicit hydrogens whose position is not part of the stereochemical drawing."""
+    stereo_atoms = _bond_stereo_atom_ids(mol)
+    drop: list[int] = []
+    for atom in mol.GetAtoms():
+        if atom.GetAtomicNum() != 1 or atom.GetIsotope() > 0 or atom.GetDegree() != 1:
+            continue
+        bond = atom.GetBonds()[0]
+        if bond.GetBondDir() != Chem.BondDir.NONE:
+            continue
+        if atom.GetIdx() in stereo_atoms:
+            continue
+        neighbor = bond.GetOtherAtom(atom)
+        if neighbor.GetAtomicNum() <= 1:
+            continue
+        if neighbor.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED:
+            continue
+        drop.append(int(atom.GetIdx()))
+    return drop
+
+
+def keep_stereo_hydrogens(mol: Chem.Mol) -> Chem.Mol:
+    """Drop explicit hydrogens that do not depict stereochemistry.
+
+    Molblock wedging is restored first. A hydrogen stays when it carries a
+    wedge, dash, or wavy bond, sits on a stereocenter, or defines double-bond
+    stereo. Its coordinates stay with it. Other explicit hydrogens are removed.
+    Isotopes, bridging hydrogens, and hydrogens not bonded to a heavy atom stay.
+    """
+    if mol is None or mol.GetNumAtoms() == 0:
+        return mol
+    work = Chem.Mol(mol)
+    if work.GetNumConformers() > 0:
+        with suppress(ValueError, RuntimeError):
+            Chem.ReapplyMolBlockWedging(work)
+    drop = _nonstereo_hydrogen_indices(work)
+    if not drop:
+        return work
+    editable = Chem.RWMol(work)
+    for idx in sorted(drop, reverse=True):
+        editable.RemoveAtom(idx)
+    out = editable.GetMol()
+    try:
+        Chem.SanitizeMol(out)
+    except ValueError:
+        try:
+            return Chem.RemoveHs(work)
+        except ValueError:
+            return work
+    if out.GetNumAtoms() == 0:
+        return work
+    return out
 
 
 def remove_explicit_hydrogens(mol: Chem.Mol) -> Chem.Mol | None:

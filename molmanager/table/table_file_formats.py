@@ -29,6 +29,8 @@ from typing import IO, Any, TextIO
 
 from rdkit import Chem
 
+from ..chem.structure_hydrogens import keep_stereo_hydrogens
+
 logger = logging.getLogger(__name__)
 
 SDF_EXTS = frozenset({".sdf", ".sd", ".mol"})
@@ -136,12 +138,14 @@ def iter_sdf_mols(path: str | Path) -> Iterator[Chem.Mol]:
     """Yield molecules from SDF / SD / molfile, including gzipped files.
 
     Always uses ``ForwardSDMolSupplier`` so uncompressed files are not indexed.
+    Hydrogens are read with the record so molblock wedges and their coordinates
+    exist, then hydrogens that do not depict stereochemistry are removed.
     """
     with open_binary_maybe_gzip(path) as fh:
-        suppl = Chem.ForwardSDMolSupplier(fh)
+        suppl = Chem.ForwardSDMolSupplier(fh, removeHs=False)
         for mol in suppl:
             if mol is not None:
-                yield mol
+                yield keep_stereo_hydrogens(mol)
 
 
 def _iter_mol2_blocks(fh: TextIO) -> Iterator[str]:
