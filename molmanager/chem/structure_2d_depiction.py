@@ -31,6 +31,11 @@ from ..table.structure_depiction_layout import (
     structure_depict_width,
 )
 
+from .depiction_scene import SceneHighlight
+
+# Bond length of RDKit's own 2D layouts, used when a molecule has no coordinates yet.
+_RDKIT_BOND_LENGTH = 1.5
+
 
 @dataclass(frozen=True)
 class ReactionDrawSpec:
@@ -57,14 +62,57 @@ def _apply_table_draw_options(drawer: rdMolDraw2D.MolDraw2DCairo, target_w: int)
     configure_mol_drawer(drawer, target_w)
 
 
-def render_molecule_png(mol: Chem.Mol, target_w: int, target_h: int) -> bytes:
-    """Draw *mol* to PNG bytes at the requested table / zoom size."""
+def render_molecule_png(
+    mol: Chem.Mol,
+    target_w: int,
+    target_h: int,
+    *,
+    highlight: SceneHighlight | None = None,
+) -> bytes:
+    """Draw *mol* to PNG bytes at the requested table / zoom size, with an optional *highlight*."""
     cw, ch = structure_cairo_dimensions(target_w, target_h)
     drawer = rdMolDraw2D.MolDraw2DCairo(int(cw), int(ch))
     configure_mol_drawer(drawer, int(cw))
-    rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol)
+    if highlight is None or not (highlight.atoms or highlight.bonds):
+        rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol)
+    else:
+        rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol, **_rdkit_highlight_args(mol, highlight))
     drawer.FinishDrawing()
     return drawer.GetDrawingText()
+
+
+def _rdkit_highlight_args(mol: Chem.Mol, highlight: SceneHighlight) -> dict:
+    """*highlight* as PrepareAndDrawMolecule keywords; radii become molecule units."""
+    bond_length = _mean_bond_length(mol)
+    bond_colours: dict[int, tuple[float, float, float]] = {}
+    for (begin, end), colour in highlight.bonds.items():
+        bond = mol.GetBondBetweenAtoms(int(begin), int(end))
+        if bond is not None:
+            bond_colours[bond.GetIdx()] = colour
+    atoms = [atom for atom in highlight.atoms if 0 <= atom < mol.GetNumAtoms()]
+    return {
+        "highlightAtoms": atoms,
+        "highlightAtomColors": {atom: highlight.atoms[atom] for atom in atoms},
+        "highlightAtomRadii": {atom: highlight.radius(atom) * bond_length for atom in atoms},
+        "highlightBonds": list(bond_colours),
+        "highlightBondColors": bond_colours,
+    }
+
+
+def _mean_bond_length(mol: Chem.Mol) -> float:
+    """Mean 2D bond length of *mol*'s coordinates, or RDKit's layout length without any."""
+    if mol.GetNumConformers() == 0 or mol.GetNumBonds() == 0:
+        return _RDKIT_BOND_LENGTH
+    conformer = mol.GetConformer()
+    lengths = [
+        (
+            conformer.GetAtomPosition(bond.GetBeginAtomIdx())
+            - conformer.GetAtomPosition(bond.GetEndAtomIdx())
+        ).Length()
+        for bond in mol.GetBonds()
+    ]
+    mean = sum(lengths) / len(lengths)
+    return mean if mean > 1e-6 else _RDKIT_BOND_LENGTH
 
 
 def render_reaction_png(smarts: str, target_w: int, target_h: int) -> bytes:

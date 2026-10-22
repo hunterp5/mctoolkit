@@ -34,6 +34,7 @@ from molmanager.chem.depiction_scene import (
     SCRIPT_SCALE,
     DepictionScene,
     PieceKind,
+    SceneHighlight,
     StrokeStyle,
 )
 from molmanager.table.depiction_font import depiction_label_font
@@ -44,6 +45,8 @@ _REFERENCE_FONT_PX = 128
 _WAVE_LENGTH = 0.12
 _WAVE_AMPLITUDE = 0.05
 _DASH_PATTERN = [3.0, 2.0]
+# Width of a highlighted bond's band, as a fraction of the mean bond length.
+_HIGHLIGHT_BAND_WIDTH = 0.3
 
 # RDKit's default element colours, so the first vector pictures compare like for like.
 _LIGHT_ELEMENT_RGB: dict[int, tuple[int, int, int]] = {
@@ -144,6 +147,34 @@ def _wave_path(path: QPainterPath, start: QPointF, end: QPointF, wave: float, am
         path.quadTo(control, stop)
 
 
+def _paint_highlight(
+    painter: QPainter, scene: DepictionScene, fit: SceneFit, highlight: SceneHighlight
+) -> None:
+    """Bands along highlighted bonds, then discs on highlighted atoms, under the drawing.
+
+    Indices outside the scene are skipped, so a highlight made for a molecule with
+    fewer or more atoms than the scene cannot fail the paint.
+    """
+    bond_px = scene.mean_bond_length * fit.scale
+    n_atoms = len(scene.atoms)
+    painter.setBrush(Qt.NoBrush)
+    for (begin, end), rgb in highlight.bonds.items():
+        if not (0 <= begin < n_atoms and 0 <= end < n_atoms):
+            continue
+        pen = QPen(QColor.fromRgbF(*rgb), _HIGHLIGHT_BAND_WIDTH * bond_px)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(fit.map(*scene.atoms[begin]), fit.map(*scene.atoms[end]))
+    painter.setPen(Qt.NoPen)
+    for atom, rgb in highlight.atoms.items():
+        if not 0 <= atom < n_atoms:
+            continue
+        radius = highlight.radius(atom) * bond_px
+        painter.setBrush(QColor.fromRgbF(*rgb))
+        painter.drawEllipse(fit.map(*scene.atoms[atom]), radius, radius)
+    painter.setBrush(Qt.NoBrush)
+
+
 def paint_scene(
     painter: QPainter,
     scene: DepictionScene,
@@ -152,14 +183,17 @@ def paint_scene(
     *,
     line_width_px: float = 1.0,
     max_bond_px: float | None = None,
+    highlight: SceneHighlight | None = None,
 ) -> SceneFit:
-    """Draw *scene* centred in *rect*. Returns the fit used, for hit-testing."""
+    """Draw *scene* centred in *rect*, over *highlight* if given. Returns the fit used."""
     fit = fit_scene(scene, rect, max_bond_px=max_bond_px)
     bond_px = scene.mean_bond_length * fit.scale
     painter.save()
     try:
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
+        if highlight is not None:
+            _paint_highlight(painter, scene, fit, highlight)
         painter.setPen(Qt.NoPen)
         for fill in scene.fills:
             painter.setBrush(palette.colour(fill.role))

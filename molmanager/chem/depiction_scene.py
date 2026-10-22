@@ -35,7 +35,7 @@ callers fall back to the RDKit picture in the same way as :func:`unpack_xy`.
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 
 SCENE_VERSION = 1
@@ -154,6 +154,41 @@ class DepictionScene:
     fills: tuple[Fill, ...] = ()
     labels: tuple[Label, ...] = ()
     flags: int = 0
+
+
+Rgb = tuple[float, float, float]
+
+# Highlight disc radius as a fraction of the mean bond length.
+DEFAULT_HIGHLIGHT_RADIUS = 0.25
+
+
+@dataclass(frozen=True)
+class SceneHighlight:
+    """Colours drawn under a molecule: discs on atoms and bands along bonds.
+
+    Colours are RGB in 0..1. *atoms* maps atom index to colour and *bonds* maps a
+    ``(begin, end)`` atom-index pair to colour. *atom_radii* overrides
+    :data:`DEFAULT_HIGHLIGHT_RADIUS` per atom, as a fraction of the mean bond length.
+    Highlights are not stored in a scene; the painter applies them at draw time.
+    """
+
+    atoms: dict[int, Rgb] = field(default_factory=dict)
+    bonds: dict[tuple[int, int], Rgb] = field(default_factory=dict)
+    atom_radii: dict[int, float] = field(default_factory=dict)
+
+    def radius(self, atom: int) -> float:
+        return self.atom_radii.get(int(atom), DEFAULT_HIGHLIGHT_RADIUS)
+
+
+def atom_set_highlight(mol, atoms, colour: Rgb) -> SceneHighlight:
+    """Highlight *atoms* of *mol* and every bond between two of them in *colour*."""
+    chosen = {int(atom) for atom in atoms}
+    bonds = {
+        (bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()): colour
+        for bond in mol.GetBonds()
+        if bond.GetBeginAtomIdx() in chosen and bond.GetEndAtomIdx() in chosen
+    }
+    return SceneHighlight(atoms=dict.fromkeys(chosen, colour), bonds=bonds)
 
 
 def scene_bounds(
