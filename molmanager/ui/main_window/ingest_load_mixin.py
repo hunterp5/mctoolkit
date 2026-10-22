@@ -57,9 +57,9 @@ class IngestLoadMixin:
         if len(struct_cols) >= 2:
             picked, ok = StructureSourcePickerDialog.pick_column(self, struct_cols)
             if ok and picked:
-                self._structure_field_override = picked
+                self._ingest_structure_field = picked
             elif not ok:
-                self._structure_field_override = None
+                self._ingest_structure_field = None
         ev = getattr(self, "_structure_choice_event", None)
         if ev is not None:
             ev.set()
@@ -157,64 +157,88 @@ class IngestLoadMixin:
     def _ingest_append_batch_items(
         self, items: list, new_rows: list[tuple[int, dict[str, str]]]
     ) -> None:
-        """Convert one worker batch (mol blobs or cell dicts) into pending table rows."""
+        """Convert one worker batch (mol blobs or cell dicts) into pending table rows.
+
+        Every row's molecule goes to the store here, once. Cells are kept exactly as read.
+        When the user picked a structure column at open, that column's text is the row's
+        molecule; otherwise it is the file's structure (or the ``SMILES`` cell of a text file).
+        """
+        source_field = self._ingest_structure_source_field()
+        texts: list[tuple[int, str]] = []
         if is_ingest_cell_batch(items):
             for cells in items:
                 oid = self.next_oid
                 self.next_oid += 1
                 new_rows.append((oid, dict(cells)))
+                text = (
+                    source_field and self._ingest_cell_structure_text(cells, source_field)
+                ) or self._ingest_cell_structure_text(cells, "SMILES")
+                if text:
+                    texts.append((oid, text))
+            self._ingest_store_structure_texts(texts)
             return
-        override_field = getattr(self, "_structure_field_override", None)
         # Structures go to the store in one write per batch; see ``_ingest_store_mol``.
         batch: list | None = [] if callable(getattr(self.mols, "ingest_structures", None)) else None
         for item in items:
-            blob, cells = self._split_ingest_item(item)
-            source_blob = blob if isinstance(blob, (bytes, bytearray)) else None
-            if override_field:
-                m, precomputed = self._resolve_override_ingest_mol(blob, cells, override_field)
-                if precomputed is None:
-                    # The override parsed a different column, so the worker blob is not this mol.
-                    source_blob = None
-            else:
-                m = self._coerce_ingest_mol(blob)
-                precomputed = cells
+            blob, cells, smiles = self._split_ingest_item(item)
             oid = self.next_oid
             self.next_oid += 1
+            text = self._ingest_cell_structure_text(cells, source_field) if source_field else ""
+            if text:
+                new_rows.append((oid, dict(cells)))
+                texts.append((oid, text))
+                continue
             new_rows.append(
                 (
                     oid,
                     self._ingest_store_mol(
                         oid,
-                        m,
-                        precomputed_cells=precomputed,
-                        source_blob=source_blob,
+                        self._coerce_ingest_mol(blob),
+                        precomputed_cells=cells,
+                        source_blob=blob if isinstance(blob, (bytes, bytearray)) else None,
+                        source_text=smiles,
                         batch=batch,
                     ),
                 )
             )
         if batch:
             self.mols.ingest_structures(batch)
+        self._ingest_store_structure_texts(texts)
 
-    def _resolve_override_ingest_mol(self, blob, cells, field: str):
-        """Apply a structure-column override during ingest, reading the field from the cell dict.
+    def _ingest_structure_source_field(self) -> str | None:
+        """The column the user picked as the structure source for this open, if any."""
+        field = getattr(self, "_ingest_structure_field", None)
+        if not isinstance(field, str) or not field.strip():
+            return None
+        from ...chem.structure_source_headers import is_tool_generated_structure_header
 
-        Ingest blobs carry structure only (no properties), so the override source column is taken
-        from the worker-built cells. When it parses, cells are recomputed from the override mol
-        (matching the non-blob behavior); otherwise the parsed structure and its cells are kept.
-        """
-        raw = (cells.get(field) or "").strip() if isinstance(cells, dict) else ""
-        if raw:
-            nm = self._mol_from_structure_text(raw)
-            if nm is not None:
-                return nm, None
-        return self._coerce_ingest_mol(blob), cells
+        return None if is_tool_generated_structure_header(field) else field.strip()
+
+    @staticmethod
+    def _ingest_cell_structure_text(cells, field: str) -> str:
+        if not isinstance(cells, dict):
+            return ""
+        return str(cells.get(field) or "").strip()
+
+    def _ingest_store_structure_texts(self, texts: list[tuple[int, str]]) -> None:
+        """Store rows whose molecule is cell text; RDKit parses each one when it is first needed."""
+        if not texts:
+            return
+        ingest_jobs = getattr(self.mols, "ingest_jobs", None)
+        if callable(ingest_jobs):
+            ingest_jobs((oid, None, text) for oid, text in texts)
+            return
+        for oid, text in texts:
+            mol = self._mol_from_structure_text(text)
+            if mol is not None:
+                self.mols[oid] = mol
 
     @staticmethod
     def _split_ingest_item(item):
-        """Return ``(blob_or_mol, precomputed_cells)`` from a worker ingest item."""
+        """Return ``(blob_or_mol, precomputed_cells, canonical_smiles)`` from a worker item."""
         if isinstance(item, tuple):
-            return item[0], item[1]
-        return item, None
+            return item[0], item[1], item[2] if len(item) > 2 else ""
+        return item, None, ""
 
     @staticmethod
     def _coerce_ingest_mol(item) -> Chem.Mol | None:
@@ -233,6 +257,7 @@ class IngestLoadMixin:
         precomputed_cells: dict[str, str] | None = None,
         *,
         source_blob: bytes | None = None,
+        source_text: str = "",
         batch: list | None = None,
     ) -> dict[str, str]:
         """
@@ -249,6 +274,8 @@ class IngestLoadMixin:
         *batch*, when given, collects ``(oid, mol, blob, smiles)`` for one bulk store write
         instead of a per-row insert. *source_blob* is the load worker's already-serialized
         structure, reused so ingest never re-pickles a molecule the worker just pickled.
+        *source_text* is the worker's canonical SMILES for *mol*; without it the store
+        computes the text the first time the Structure cell asks for it.
         """
         cells = (
             dict(precomputed_cells)
@@ -278,11 +305,11 @@ class IngestLoadMixin:
             depict = prepare_mol_2d(mol)
             # The depiction is a fresh 2D copy, so the worker blob does not describe it.
             self._ingest_remember_mol(
-                oid, depict if depict is not None else mol, None, cells, batch
+                oid, depict if depict is not None else mol, None, source_text, batch
             )
             cells["confs"] = light
             return cells
-        self._ingest_remember_mol(oid, mol, source_blob, cells, batch)
+        self._ingest_remember_mol(oid, mol, source_blob, source_text, batch)
         return cells
 
     def _ingest_remember_mol(
@@ -290,7 +317,7 @@ class IngestLoadMixin:
         oid: int,
         mol: Chem.Mol | None,
         source_blob: bytes | None,
-        cells: dict[str, str],
+        source_text: str,
         batch: list | None,
     ) -> None:
         """Hand one ingested structure to the molecule store, batched when the store supports it."""
@@ -303,7 +330,7 @@ class IngestLoadMixin:
         # when the molecule carries no conformers; otherwise it has coordinates to strip.
         if source_blob is not None and mol.GetNumConformers():
             source_blob = None
-        batch.append((int(oid), mol, source_blob, str(cells.get("SMILES") or "")))
+        batch.append((int(oid), mol, source_blob, source_text or ""))
 
     def _note_open_attempt(self, title: str) -> None:
         """Remember workspace state so a failed open can restore the dirty flag."""

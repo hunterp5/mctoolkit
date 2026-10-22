@@ -71,7 +71,7 @@ class IngestExportMixin:
         self._note_open_attempt("Open File")
         self._accept_file_ingest_results()
         self._ingest_append_mode = False
-        self._structure_field_override = None
+        self._ingest_structure_field = None
         self._session_mutation_paused = True
         self._pending_session_clean_on_ready = True
         self.clear_all()
@@ -120,7 +120,7 @@ class IngestExportMixin:
         self._pending_batches = []
         self._processing_batches = False
         self._last_batch_received = False
-        self._structure_field_override = None
+        self._ingest_structure_field = None
         self._ingest_append_mode = True
         self._pending_session_clean_on_ready = False
         mark = getattr(self, "_mark_session_dirty", None)

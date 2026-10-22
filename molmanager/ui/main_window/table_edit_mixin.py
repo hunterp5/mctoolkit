@@ -25,6 +25,7 @@ from rdkit import Chem
 from ...platform_support.config import load_config
 from ...chem.molecule_conversion import looks_like_mol_block, mol_to_canonical_smiles
 from ..compound_table_model import CompoundTableModel
+from ..dialogs.edit_structure import ask_edit_structure_text
 from ..table_clipboard import format_tsv_grid, parse_tsv_grid, tsv_grid_is_block
 from .table_undo_commands import (
     DeleteRowSnapshot,
@@ -33,6 +34,7 @@ from .table_undo_commands import (
     UndoDeleteRowsCommand,
     UndoPasteBlockCommand,
     UndoPasteCellCommand,
+    UndoUpdateRowStructureCommand,
 )
 
 
@@ -46,11 +48,9 @@ class TableEditMixin:
         if col == 0:
             return True, str(oid)
         if col == CompoundTableModel.STRUCTURE_COL:
-            if "SMILES" in self.headers:
-                sci = self.headers.index("SMILES")
-                t = (self._table_model.cell_text(row, sci) or "").strip()
-                if t:
-                    return True, t
+            text = self._structure_text_for_oid(oid)
+            if text and "\n" not in text and not text.startswith("InChI="):
+                return True, text
             mol = self.mols.get(oid)
             if mol is not None:
                 try:
@@ -683,6 +683,57 @@ class TableEditMixin:
             self._confirm_and_push_clear_cells()
             return
         self._confirm_and_push_delete_rows(oids=self._selected_oids_for_delete())
+
+    def replace_row_structure(
+        self, oid: int, mol: Chem.Mol, *, description: str = "Update table entry"
+    ) -> bool:
+        """Replace one row's molecule with *mol*. Undo restores the previous structure.
+
+        A molecule that canonicalizes to the one already stored is left as it is, so
+        opening an editor and committing the same SMILES does not add an undo step.
+        """
+        if self.logical_row_for_oid(int(oid)) < 0 or mol is None:
+            return False
+        current = self.mols.get(int(oid))
+        if current is not None:
+            try:
+                if mol_to_canonical_smiles(current) == mol_to_canonical_smiles(mol):
+                    return True
+            except Exception:  # noqa: BLE001 — RDKit raises varied C++ wrap errors
+                pass
+        self._undo_stack.push(UndoUpdateRowStructureCommand(self, int(oid), mol, description))
+        return True
+
+    def commit_structure_text_edit(self, oid: int, text: str) -> bool:
+        """Parse typed Structure-cell text and replace that row's molecule."""
+        text = (text or "").strip()
+        if not text:
+            return False
+        mol = self._mol_from_structure_text(text)
+        if mol is None:
+            # Status rather than a dialog: this runs while the cell editor is closing.
+            self.status_label.setText(
+                "Could not read that structure text. Use SMILES, InChI, or a mol block."
+            )
+            return False
+        return self.replace_row_structure(int(oid), mol, description="Edit structure")
+
+    def edit_structure_cell(self, row: int) -> None:
+        """Ask for structure text in a dialog and replace that row's molecule."""
+        try:
+            oid = int(self._table_model.row_oid(row))
+        except (IndexError, TypeError, ValueError):
+            return
+        current = self._structure_text_for_oid(oid)
+        text, ok = ask_edit_structure_text(self, current)
+        if not ok or not str(text or "").strip():
+            return
+        if not self.commit_structure_text_edit(oid, text):
+            QMessageBox.warning(
+                self,
+                "Edit Structure",
+                "Could not read that text as a structure. Use SMILES, InChI, or a mol block.",
+            )
 
     def _apply_pasted_cell_value(self, row: int, col: int, oid: int, text: str) -> bool:
         """Write one pasted value without refreshing bounds or filters."""

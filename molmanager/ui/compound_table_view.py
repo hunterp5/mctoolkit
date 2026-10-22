@@ -29,6 +29,7 @@ from PyQt5.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QHeaderView,
+    QLineEdit,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
@@ -218,6 +219,25 @@ class StructureDelegate(QStyledItemDelegate):
                 align = int(Qt.AlignLeft | Qt.AlignVCenter)
             painter.drawText(r, int(align) | int(Qt.TextWordWrap), text)
             painter.restore()
+
+    def createEditor(self, parent, option, index):  # noqa: N802
+        editor = super().createEditor(parent, option, index)
+        if isinstance(editor, QLineEdit):
+            editor.setPlaceholderText("SMILES or InChI")
+        return editor
+
+    def updateEditorGeometry(self, editor, option, index) -> None:  # noqa: N802
+        rect = option.rect
+        if rect.width() < 8 or rect.height() < 8:
+            editor.setGeometry(rect)
+            return
+        height = min(rect.height() - 4, max(editor.sizeHint().height(), 24))
+        editor.setGeometry(
+            rect.x() + 4,
+            rect.bottom() - height - 2,
+            max(1, rect.width() - 8),
+            height,
+        )
 
     def sizeHint(self, option, index):  # noqa: N802
         sh = super().sizeHint(option, index)
@@ -461,7 +481,8 @@ class CompoundTableView(QTableView):
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableView.SelectItems)
         self.setSelectionMode(QTableView.ExtendedSelection)
-        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # F2 or typing edits a Structure cell. Double-click stays a depiction zoom.
+        self.setEditTriggers(QAbstractItemView.EditKeyPressed | QAbstractItemView.AnyKeyPressed)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.verticalHeader().setDefaultSectionSize(structure_row_default_height())
@@ -525,6 +546,18 @@ class CompoundTableView(QTableView):
         if flags & QItemSelectionModel.Clear:
             controller.clear_for_cell_input()
         return flags
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        """Type into a Structure cell, but let Delete and Backspace stay table shortcuts."""
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            triggers = self.editTriggers()
+            self.setEditTriggers(triggers & ~QAbstractItemView.AnyKeyPressed)
+            try:
+                super().keyPressEvent(event)
+            finally:
+                self.setEditTriggers(triggers)
+            return
+        super().keyPressEvent(event)
 
     def apply_table_font(self, font: QFont) -> None:
         """Set the table font and grow or shrink header bars to match."""

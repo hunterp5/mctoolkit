@@ -41,6 +41,20 @@ class CompoundTableStructureMixin:
     def clear_structure_png_store(self) -> None:
         self.set_structure_png_store(None)
 
+    def set_structure_text_source(self, source) -> None:
+        """Set ``source(oid) -> str``, the row's structure text from the molecule store."""
+        self._structure_text_source = source
+
+    def structure_text_for_oid(self, oid: int) -> str:
+        """The row's structure text (SMILES, InChI, or a mol block), or ``""``."""
+        source = self._structure_text_source
+        if source is None:
+            return ""
+        try:
+            return (source(int(oid)) or "").strip()
+        except Exception:  # noqa: BLE001 — a failed lookup must not break painting the cell
+            return ""
+
     def structure_pixmap_for_oid(self, oid: int) -> QPixmap | None:
         pix = self._pixmaps.get(int(oid))
         if pix is not None and not pix.isNull():

@@ -26,6 +26,7 @@ from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtWidgets import QApplication
 
 from ...platform_support.config import load_config
+from ...chem.structure_source_headers import is_tool_generated_structure_header
 from ...conformers.conformer_column_codec import deserialize_confs_sidecar
 from ...ionization.microstate_cache import restore_ionization_sidecar
 from ...table.open_messages import damaged_session_message
@@ -108,7 +109,6 @@ class SessionRestoreMixin:
         if len(headers) < 2 or headers[0] != "ID_HIDDEN" or headers[1] != "Structure":
             raise ValueError("Invalid session headers.")
         self.headers = list(headers)
-        self._structure_field_override = doc.get("structure_field_override")
         self.zoomed_ids = set(int(x) for x in (doc.get("zoomed_ids") or []) if x is not None)
         self.table.setSortingEnabled(False)
         self._table_model.clear_rows()
@@ -167,6 +167,7 @@ class SessionRestoreMixin:
                 generation=gen,
                 structure_smiles=list(doc.get("structure_smiles") or []),
                 structure_mols=list(doc.get("structure_mols") or []),
+                structure_field=self._session_legacy_structure_field(doc),
             )
             # Pytest has no lasting event-loop turn for threadpool completions; parse inline.
             if "pytest" in sys.modules:
@@ -220,6 +221,20 @@ class SessionRestoreMixin:
         if "pytest" in sys.modules:
             self._drain_pending_session_load()
 
+    def _session_legacy_structure_field(self, doc: dict) -> str | None:
+        """Structure-column override saved by older sessions, when it names a data column.
+
+        Restore writes that column's text into the molecule store, so the session is migrated
+        once and the override is not kept.
+        """
+        field = doc.get("structure_field_override")
+        if not isinstance(field, str) or not field.strip():
+            return None
+        field = field.strip()
+        if field not in self.headers or is_tool_generated_structure_header(field):
+            return None
+        return field
+
     def _session_v3_data_headers(self, doc: dict) -> list[str]:
         saved = doc.get("data_headers")
         if isinstance(saved, list) and saved:
@@ -248,7 +263,11 @@ class SessionRestoreMixin:
         ctx["index"] = index + 1
         if "pytest" in sys.modules:
             self._on_session_v3_parsed(
-                parse_session_rows(rows, headers, smiles, mols), ctx["gen"], ctx["doc"]
+                parse_session_rows(
+                    rows, headers, smiles, mols, self._session_legacy_structure_field(ctx["doc"])
+                ),
+                ctx["gen"],
+                ctx["doc"],
             )
             return
         signals = SessionRowsParseSignals(self)
@@ -267,6 +286,7 @@ class SessionRestoreMixin:
             generation=int(ctx["gen"]),
             structure_smiles=smiles,
             structure_mols=mols,
+            structure_field=self._session_legacy_structure_field(ctx["doc"]),
         )
         signals.finished.connect(_on_parsed, type=Qt.QueuedConnection)
         signals.failed.connect(_on_failed, type=Qt.QueuedConnection)

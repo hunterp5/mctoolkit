@@ -135,37 +135,3 @@ def collect_canonical_keys_from_column(
         if k:
             keys.add(k)
     return keys
-
-
-def structure_row_is_empty(
-    *,
-    mol_present: bool,
-    smiles_text: str,
-    probe_cells: Iterable[tuple[str, str]],
-    override_header: str = "",
-    is_smiles_named: Callable[[str], bool],
-    header_looks_structural: Callable[[str], bool],
-    is_tool_generated: Callable[[str], bool],
-    looks_like_mol_block: Callable[[str], bool],
-) -> bool:
-    """True when a row has no usable chemical structure text/mol.
-
-    *probe_cells* yields ``(header, cell_text)`` in lookup order (SMILES already
-    checked via *smiles_text* may be omitted by the caller).
-    """
-    if mol_present:
-        return False
-    if (smiles_text or "").strip():
-        return False
-    ov = (override_header or "").strip()
-    for header, raw in probe_cells:
-        text = (raw or "").strip()
-        if not text:
-            continue
-        if is_tool_generated(header) and header != ov:
-            continue
-        if (ov and header == ov) or is_smiles_named(header) or header_looks_structural(header):
-            return False
-        if looks_like_mol_block(text):
-            return False
-    return True

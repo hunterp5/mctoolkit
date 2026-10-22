@@ -341,7 +341,7 @@ class ChemistryWorkspaceWindow(
         self._apply_table_font()
         self._refresh_structure_delegate_theme()
         self.next_oid = 0
-        self._structure_field_override = None
+        self._ingest_structure_field = None
         self._structure_choice_event = threading.Event()
         self._structure_choice_event.set()
         # incremental batch processing state to avoid UI freezes
@@ -543,6 +543,8 @@ class ChemistryWorkspaceWindow(
         content_h = QHBoxLayout(self._workspace_ready_page)
         content_h.setContentsMargins(0, 0, 0, 0)
         self._table_model = CompoundTableModel([])
+        self._table_model.set_structure_text_source(self._structure_text_for_oid)
+        self._table_model.structureTextEdited.connect(self.commit_structure_text_edit)
         self._table_model.modelReset.connect(self._prune_selection_store)
         self._table_model.rowsRemoved.connect(self._prune_selection_store)
         self.table = CompoundTableView()

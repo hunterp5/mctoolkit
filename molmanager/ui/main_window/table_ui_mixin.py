@@ -270,7 +270,7 @@ class TableUIMixin(
         self.filters, self.headers, self.global_bounds = [], [], {}
         self._logarithmic_columns = set()
         self.next_oid = 0
-        self._structure_field_override = None
+        self._ingest_structure_field = None
         self._export_prep = None
         self._export_busy = False
         self._render2d_queue = None

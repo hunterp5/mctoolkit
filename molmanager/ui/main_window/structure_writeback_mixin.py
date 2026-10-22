@@ -130,10 +130,7 @@ class StructureWritebackMixin:
         if row < 0:
             return None
         if src == "Structure":
-            mol = self.mols.get(oid)
-            if mol is not None:
-                return mol
-            return self._mol_for_structure_row(row)
+            return self.mols.get(oid)
         if src not in self.headers:
             return None
         col = self.headers.index(src)
@@ -154,15 +151,7 @@ class StructureWritebackMixin:
         if row < 0:
             return None
         if src == "Structure":
-            raw = (self._table_model.backing_value_for_row_header(row, "Structure") or "").strip()
-            if raw:
-                return raw
-            smiles_h = self._canonical_smiles_header_for_updates()
-            if smiles_h is not None:
-                return (
-                    self._table_cell_text(row, self.headers.index(smiles_h)) or ""
-                ).strip() or None
-            return None
+            return self._structure_text_for_oid(oid) or None
         if src in self.headers and self._table_model.is_pixmap_data_column(src):
             raw = (self._table_model.backing_value_for_row_header(row, src) or "").strip()
             return raw or None

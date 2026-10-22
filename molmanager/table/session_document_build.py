@@ -83,6 +83,8 @@ def assemble_session_rows(
         if not blob and smi:
             mol = parse_molecule_from_cell_text(smi)
             blob = mol_graph_binary(mol)
+            if mol is not None and ("\n" in smi or smi.startswith("InChI=")):
+                smi = mol_to_canonical_smiles(mol) or smi
         elif blob and not smi:
             mol = _mol_from_blob(blob)
             smi = mol_to_canonical_smiles(mol) if mol is not None else ""

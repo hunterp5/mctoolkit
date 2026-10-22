@@ -153,8 +153,14 @@ def parse_session_rows(
     data_headers: list[str],
     structure_smiles: list[str] | None = None,
     structure_mols: list[str] | None = None,
+    structure_field: str | None = None,
 ) -> SessionRowsParseResult:
-    """Turn saved row dicts into table cells and mol-decode jobs."""
+    """Turn saved row dicts into table cells and mol-decode jobs.
+
+    *structure_field* is the structure-column override that older sessions saved instead
+    of storing that column's molecule. A row with text in that column takes it as its
+    structure; other rows keep their saved structure.
+    """
     smiles = list(structure_smiles or [])
     mols = list(structure_mols or [])
     prepared: list[tuple[int, dict[str, str]]] = []
@@ -175,6 +181,10 @@ def parse_session_rows(
         smi = row_structure_smiles(cells, saved_smi)
         row_cells = {cname: str(cells.get(cname, "") or "") for cname in data_headers}
         prepared.append((oid, row_cells))
+        field_text = str(cells.get(structure_field) or "").strip() if structure_field else ""
+        if field_text:
+            jobs.append((oid, None, field_text))
+            continue
         blob = decode_mol_blob_b64(mols[i]) if i < len(mols) else None
         jobs.append((oid, blob, smi))
     return SessionRowsParseResult(prepared_rows=prepared, mol_jobs=jobs, max_id=max_id)
@@ -192,6 +202,7 @@ class SessionRowsParseWorker(QRunnable):
         generation: int,
         structure_smiles: list[str] | None = None,
         structure_mols: list[str] | None = None,
+        structure_field: str | None = None,
     ):
         super().__init__()
         self.setAutoDelete(True)
@@ -199,6 +210,7 @@ class SessionRowsParseWorker(QRunnable):
         self.data_headers = list(data_headers)
         self.structure_smiles = list(structure_smiles or [])
         self.structure_mols = list(structure_mols or [])
+        self.structure_field = structure_field
         self.signals = signals
         self.generation = int(generation)
 
@@ -212,6 +224,7 @@ class SessionRowsParseWorker(QRunnable):
                     self.data_headers,
                     self.structure_smiles,
                     self.structure_mols,
+                    self.structure_field,
                 ),
             )
         except Exception as exc:

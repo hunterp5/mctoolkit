@@ -106,7 +106,8 @@ def test_blank_confs_load_stores_structure_coordinates(qapp):  # noqa: ARG001
     mol = _flat_ethanol()
     mol.SetProp("SMILES", "CCO")
     mol.SetProp("confs", "")
-    blob, cells = _mol_ingest_item(mol, ["SMILES", "confs"])
+    blob, cells, smiles = _mol_ingest_item(mol, ["SMILES", "confs"])
+    assert smiles == "CCO"
     rebuilt = Chem.Mol(bytes(blob))
     assert rebuilt is not None and rebuilt.GetNumConformers() == 1
     assert not (cells.get("confs") or "").strip()
@@ -134,7 +135,7 @@ def test_blank_confs_load_stores_structure_coordinates(qapp):  # noqa: ARG001
     kept = _flat_ethanol()
     kept.SetProp("SMILES", "CCO")
     kept.SetProp("confs", payload)
-    kept_blob, kept_cells = _mol_ingest_item(kept, ["SMILES", "confs"])
+    kept_blob, kept_cells, _smiles = _mol_ingest_item(kept, ["SMILES", "confs"])
     kept_mol = Chem.Mol(bytes(kept_blob))
     assert kept_mol.GetNumConformers() == 0
     assert kept_cells["confs"] == payload

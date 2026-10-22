@@ -49,7 +49,6 @@ SESSION_ENSEMBLES_KEY = "__ensembles_sqlite__"
 _OMIT_IF_EMPTY = frozenset(
     {
         "zoomed_ids",
-        "structure_field_override",
         "workspace_layout",
         "docked_plots",
         "floating_plots",

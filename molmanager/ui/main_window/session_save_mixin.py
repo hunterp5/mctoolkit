@@ -440,7 +440,6 @@ class SessionSaveMixin:
             "global_bounds": compact_global_bounds(getattr(self, "global_bounds", None)),
             "next_oid": int(self.next_oid),
             "zoomed_ids": sorted(int(x) for x in self.zoomed_ids if want is None or int(x) in want),
-            "structure_field_override": getattr(self, "_structure_field_override", None),
             "filter_panel_visible": bool(self.f_panel.isVisible()),
             "workspace_layout": (
                 self._workspace_layout.collect_splitter_sizes()

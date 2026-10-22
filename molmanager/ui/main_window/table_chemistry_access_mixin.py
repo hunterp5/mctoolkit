@@ -22,14 +22,12 @@ from rdkit import Chem
 
 from ...chem.structure_source_headers import (
     header_looks_like_structure_text,
-    is_tool_generated_structure_header,
 )
 from ...services.chemistry_columns import (
     canonical_smiles_header_for_updates,
     cell_texts_have_parseable_molecule,
     data_headers_confirmed_for_chemistry_tools,
     is_smiles_named_header,
-    ordered_headers_for_molecule_lookup,
     skip_chemistry_tool_column_dropdown,
     should_skip_chemical_scan_column,
 )
@@ -38,7 +36,6 @@ from ...chem.molecule_conversion import (
     looks_like_mol_block,
     parse_molecule_from_cell_text,
     row_cells_from_mol,
-    safe_mol_prop_string,
 )
 from ...chem.structure_payload import (
     StructurePayload,
@@ -89,27 +86,16 @@ class TableChemistryAccessMixin:
     def _data_headers_confirmed_for_chemistry_tools(self) -> list[str]:
         """
         Data columns suitable as chemistry-tool sources: structural-looking names,
-        optional ``_structure_field_override``, or at least one parseable cell in a bounded scan.
+        or at least one parseable cell in a bounded scan.
         """
-        ov = getattr(self, "_structure_field_override", None)
         return data_headers_confirmed_for_chemistry_tools(
             self.headers,
-            structure_field_override=ov if isinstance(ov, str) else None,
             column_has_parseable_sample=self._column_has_parseable_molecule_sample,
         )
 
     def _should_skip_chemical_scan_column(self, h: str) -> bool:
         return should_skip_chemical_scan_column(
             h,
-            is_pixmap_column=self._table_model.is_pixmap_data_column,
-        )
-
-    def _ordered_headers_for_molecule_lookup(self) -> list[str]:
-        """Column names to probe for parseable chemistry (likely names first, then all other data columns)."""
-        ov = getattr(self, "_structure_field_override", None)
-        return ordered_headers_for_molecule_lookup(
-            self.headers,
-            structure_field_override=ov if isinstance(ov, str) else None,
             is_pixmap_column=self._table_model.is_pixmap_data_column,
         )
 
@@ -132,38 +118,25 @@ class TableChemistryAccessMixin:
         """Build row cell values for all data columns from one molecule."""
         return row_cells_from_mol(mol, self.headers[2:])
 
+    def _structure_text_for_oid(self, oid: int) -> str:
+        """The row's structure text from the molecule store (what the Structure cell shows)."""
+        store = self.mols
+        lookup = getattr(store, "structure_text_for", None)
+        if callable(lookup):
+            return lookup(int(oid))
+        mol = store.get(int(oid))
+        if mol is None:
+            return ""
+        try:
+            return Chem.MolToSmiles(mol)
+        except Exception:  # noqa: BLE001 — RDKit raises varied C++ wrap errors
+            return ""
+
     def _mol_for_structure_row(self, row: int) -> Chem.Mol | None:
-        """Best-effort RDKit mol: in-memory store, then any parseable chemistry in table columns."""
+        """The row's molecule from the molecule store, or ``None`` when it has no structure."""
         if row < 0 or row >= self._table_model.rowCount():
             return None
-        t0 = self._table_model.cell_text(row, 0)
-        oid = int(t0) if t0.isdigit() else None
-        if oid is not None:
-            m = self.mols.get(oid)
-            if m is not None:
-                return self._apply_structure_field_override(m)
-        ov = getattr(self, "_structure_field_override", None)
-        ov_s = str(ov).strip() if isinstance(ov, str) else ""
-        for h in self._ordered_headers_for_molecule_lookup():
-            if is_tool_generated_structure_header(h) and h != ov_s:
-                continue
-            ci = self.headers.index(h)
-            raw = (self._table_model.cell_text(row, ci) or "").strip()
-            if not raw:
-                raw = (self._table_model.backing_value_for_row_header(row, h) or "").strip()
-            if not raw:
-                continue
-            priority = (
-                (ov_s and h == ov_s)
-                or self._is_smiles_named_header(h)
-                or self._header_looks_structural(h)
-            )
-            if not priority and len(raw) > 20000 and not looks_like_mol_block(raw):
-                continue
-            m = self._mol_from_structure_text(raw)
-            if m is not None:
-                return self._apply_structure_field_override(m)
-        return None
+        return self.mols.get(self._table_model.row_oid(row))
 
     def _column_eligible_for_table_chemistry_menu(self, row: int, col: int) -> bool:
         """Whether the table cell's column should offer structure tools / Copy formats."""
@@ -216,8 +189,7 @@ class TableChemistryAccessMixin:
         raw = self._structure_text_for_table_cell(row, col)
         if not raw or (len(raw) > 20000 and not looks_like_mol_block(raw)):
             return None
-        m = self._mol_from_structure_text(raw)
-        return self._apply_structure_field_override(m) if m is not None else None
+        return self._mol_from_structure_text(raw)
 
     def _mol_from_structure_text(self, raw: str) -> Chem.Mol | None:
         return parse_molecule_from_cell_text(raw)
@@ -263,7 +235,7 @@ class TableChemistryAccessMixin:
     ) -> list[StructurePayload]:
         """Copy ``(oid, blob, smiles)`` in scope without hydrating RDKit molecules.
 
-        ``src`` is ``"Structure"`` (MolStore blob/SMILES plus the SMILES column) or a
+        ``src`` is ``"Structure"`` (the molecule store's blob and structure text) or a
         data-column header (cell / pixmap backing text only). ``allowed_oids`` narrows the
         scope to those ids and replaces ``only_selected``. Rows come back in table order.
         Callers that need live mols should hydrate on a worker with :func:`mols_from_payloads`.
@@ -285,44 +257,23 @@ class TableChemistryAccessMixin:
                 rows = self._plain_store_structure_payloads(allowed)
             for oid, blob, smi in rows:
                 store_map[int(oid)] = (blob, smi or "")
-        smiles_h = self._canonical_smiles_header_for_updates() if src == "Structure" else None
-        ov = getattr(self, "_structure_field_override", None)
-        ov_s = str(ov).strip() if isinstance(ov, str) else ""
-        use_ov = bool(
-            ov_s and ov_s in self.headers and not is_tool_generated_structure_header(ov_s)
-        )
         col = None if src == "Structure" else self.headers.index(src)
         is_pixmap_src = src != "Structure" and self._table_model.is_pixmap_data_column(src)
 
-        def _cell(r: int, header: str, col_idx: int | None) -> str:
-            raw = (self._table_model.backing_value_for_row_header(r, header) or "").strip()
-            if raw:
+        def _cell(r: int) -> str:
+            raw = (self._table_model.backing_value_for_row_header(r, src) or "").strip()
+            if raw or is_pixmap_src:
                 return raw
-            if col_idx is None:
-                try:
-                    col_idx = self.headers.index(header)
-                except ValueError:
-                    return ""
-            return (self._table_cell_text(r, col_idx) or "").strip()
+            return (self._table_cell_text(r, col) or "").strip()
 
         def _resolve(r: int, oid: int) -> StructurePayload | None:
-            if use_ov:
-                raw = _cell(r, ov_s, None)
-                if raw:
-                    return StructurePayload(int(oid), None, raw)
             if src == "Structure":
                 blob, smi = store_map.get(int(oid), (None, ""))
                 smi = (smi or "").strip()
-                if not smi and smiles_h:
-                    smi = _cell(r, smiles_h, None)
                 if blob or smi:
                     return StructurePayload(int(oid), blob, smi)
                 return None
-            raw = ""
-            if is_pixmap_src:
-                raw = (self._table_model.backing_value_for_row_header(r, src) or "").strip()
-            else:
-                raw = _cell(r, src, col)
+            raw = _cell(r)
             if not raw:
                 return None
             return StructurePayload(int(oid), None, raw)
@@ -358,48 +309,6 @@ class TableChemistryAccessMixin:
                 continue
             rows.append((int(oid), mol))
         return rows
-
-    def collect_scoped_table_smiles(
-        self,
-        src: str,
-        *,
-        only_selected: bool = False,
-        only_visible: bool = False,
-        process_ui_every: int = 64,
-    ) -> list[tuple[int, str]]:
-        """
-        Like :meth:`collect_scoped_table_structure_payloads` but ``(oid, SMILES text)`` only.
-
-        Does not hydrate RDKit molecules, so a row stored only as a blob (no SMILES
-        text) is omitted. Callers that must accept those rows should collect payloads
-        and derive SMILES on a worker with ``smiles_text_for_payload``.
-        ``process_ui_every`` is kept for callers; the snapshot is a backing-value walk
-        so the event loop is not pumped.
-        """
-        del process_ui_every
-        payloads = self.collect_scoped_table_structure_payloads(
-            src, only_selected=only_selected, only_visible=only_visible
-        )
-        out: list[tuple[int, str]] = []
-        for payload in payloads:
-            if payload.oid is None:
-                continue
-            smi = (payload.smiles or "").strip()
-            if smi:
-                out.append((int(payload.oid), smi))
-        return out
-
-    def _apply_structure_field_override(self, mol: Chem.Mol | None) -> Chem.Mol | None:
-        field = getattr(self, "_structure_field_override", None)
-        if not field or mol is None:
-            return mol
-        if is_tool_generated_structure_header(str(field)):
-            return mol
-        if not mol.HasProp(field):
-            return mol
-        raw = (safe_mol_prop_string(mol, field) or "").strip()
-        nm = self._mol_from_structure_text(raw)
-        return nm if nm is not None else mol
 
     def logical_row_for_oid(self, oid: int) -> int:
         """Return the logical table row for a compound OID, or -1 if missing."""

@@ -67,6 +67,27 @@ def test_mol_store_ingest_jobs_replaces_cached_mol():
         store.close()
 
 
+def test_mol_store_structure_text_for():
+    store = MolStore(lru_max=8)
+    try:
+        inchi = Chem.MolToInchi(Chem.MolFromSmiles("CCO"))
+        store.ingest_jobs(
+            [
+                (1, Chem.MolFromSmiles("OCC").ToBinary(), ""),
+                (2, None, "c1ccccc1"),
+                (3, None, inchi),
+            ]
+        )
+        assert store.structure_text_for(1) == "CCO"
+        assert list(store.structure_payloads_for([1]))[0][2] == "CCO"
+        assert store.structure_text_for(2) == "c1ccccc1"
+        assert store.structure_text_for(3) == inchi
+        assert Chem.MolToSmiles(store[3]) == "CCO"
+        assert store.structure_text_for(99) == ""
+    finally:
+        store.close()
+
+
 def test_mol_store_structure_payloads_for_returns_only_requested():
     store = MolStore(lru_max=8)
     try:

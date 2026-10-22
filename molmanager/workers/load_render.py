@@ -137,17 +137,22 @@ def mol_to_ingest_blob(mol: "Chem.Mol", *, keep_conformers: bool = False) -> byt
     return mol.ToBinary()
 
 
-def _mol_ingest_item(mol: "Chem.Mol", data_headers: list[str]) -> tuple[bytes, dict[str, str]]:
-    """Ingest payload for one mol: structure blob (rebuilt into ``self.mols``) plus pre-built row cells.
+def _mol_ingest_item(mol: "Chem.Mol", data_headers: list[str]) -> tuple[bytes, dict[str, str], str]:
+    """Ingest payload for one mol: structure blob, pre-built row cells, and canonical SMILES.
 
-    Extracting cells here keeps property reads off the GUI thread and in parallel with parsing.
-    A structure with coordinates and an empty ``confs`` cell keeps those coordinates so ingest can
-    store the structure as that conformation instead of a blank cell.
+    Extracting cells and SMILES here keeps that work off the GUI thread and in parallel with
+    parsing. The SMILES is the molecule store's structure text, which the Structure cell shows
+    until the row is drawn. A structure with coordinates and an empty ``confs`` cell keeps those
+    coordinates so ingest can store the structure as that conformation instead of a blank cell.
     """
     cells = row_cells_from_mol(mol, data_headers)
     confs_cell = cells.get("confs") if "confs" in cells else None
     keep = mol_coordinates_fill_blank_confs(mol, confs_cell)
-    return mol_to_ingest_blob(mol, keep_conformers=keep), cells
+    try:
+        smiles = Chem.MolToSmiles(mol)
+    except Exception:  # noqa: BLE001 — RDKit raises varied C++ wrap errors
+        smiles = ""
+    return mol_to_ingest_blob(mol, keep_conformers=keep), cells, smiles
 
 
 # Re-export for call sites / tests that still import the private name from this module.

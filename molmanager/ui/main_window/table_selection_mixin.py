@@ -23,7 +23,6 @@ from PyQt5.QtWidgets import QAbstractItemView, QApplication
 from rdkit import Chem
 
 from ...platform_support.config import load_config
-from ...chem.structure_source_headers import is_tool_generated_structure_header
 from ...services.table_selection import (
     cached_string_key,
     first_rows_for_distinct_keys,
@@ -31,9 +30,7 @@ from ...services.table_selection import (
     oids_for_source_rows,
     oids_from_id_hidden_cells,
     rows_where,
-    structure_row_is_empty,
 )
-from ...chem.molecule_conversion import looks_like_mol_block
 from ..layout_perf import perf_span
 from ..qt_widget_utils import qobject_is_deleted
 from ..selection_store import ORIGIN_TABLE
@@ -508,37 +505,12 @@ class TableSelectionMixin:
         self.select_table_rows(to_sel)
 
     def _structure_column_row_is_empty(self, row: int) -> bool:
-        """True when the row has no chemical structure (fast text/mol store check)."""
+        """True when the molecule store has no structure for the row."""
         try:
             oid = self._table_model.row_oid(row)
         except (IndexError, ValueError, TypeError):
             return True
-        smi_h = self._canonical_smiles_header_for_updates()
-        smiles_text = ""
-        if smi_h and smi_h in self.headers:
-            ci = self.headers.index(smi_h)
-            smiles_text = (self._table_model.cell_text(row, ci) or "").strip()
-        ov = getattr(self, "_structure_field_override", None)
-        ov_s = str(ov).strip() if isinstance(ov, str) else ""
-
-        def _probe():
-            for h in self._ordered_headers_for_molecule_lookup():
-                if smi_h and h == smi_h:
-                    continue
-                ci = self.headers.index(h)
-                raw = (self._table_model.cell_text(row, ci) or "").strip()
-                yield h, raw
-
-        return structure_row_is_empty(
-            mol_present=self.mols.get(oid) is not None,
-            smiles_text=smiles_text,
-            probe_cells=_probe(),
-            override_header=ov_s,
-            is_smiles_named=self._is_smiles_named_header,
-            header_looks_structural=self._header_looks_structural,
-            is_tool_generated=is_tool_generated_structure_header,
-            looks_like_mol_block=looks_like_mol_block,
-        )
+        return not self._structure_text_for_oid(oid)
 
     def _select_empty_structure_cells(self) -> None:
         self._maybe_status_before_large_select()
@@ -564,15 +536,7 @@ class TableSelectionMixin:
                 raw = ""
             if raw:
                 return self._canonical_structure_key_cached(raw, smiles_key_cache)
-            return ""
-        try:
-            smi_col = self.headers.index("SMILES")
-        except ValueError:
-            return ""
-        raw = (self._table_model.cell_text(row, smi_col) or "").strip()
-        if not raw:
-            return ""
-        return self._canonical_structure_key_cached(raw, smiles_key_cache)
+        return ""
 
     def _canonical_structure_key_cached(self, smiles: str, cache: dict[str, str] | None) -> str:
         return cached_string_key(

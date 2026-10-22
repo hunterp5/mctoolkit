@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 __all__ = [
     "UndoDeleteRowsCommand",
     "UndoPasteCellCommand",
+    "UndoUpdateRowStructureCommand",
     "UndoPasteBlockCommand",
     "UndoCellTextChangeCommand",
     "UndoClearCellsCommand",
@@ -228,6 +229,57 @@ class UndoDeleteRowsCommand(QUndoCommand):
         self._refresh_after_table_mutation()
         app.table.setSortingEnabled(False)
         app.status_label.setText(f"Undo: restored {len(self._snapshots)} row(s).")
+
+
+class UndoUpdateRowStructureCommand(QUndoCommand):
+    """Replace one row's stored molecule with a structure from the sketcher."""
+
+    def __init__(
+        self, app: AppKernel, oid: int, mol: Chem.Mol, description: str = "Update table entry"
+    ) -> None:
+        super().__init__(description)
+        self._app = app
+        self._oid = int(oid)
+        self._new = Chem.Mol(mol)
+        prev = app.mols.get(self._oid)
+        self._prev = Chem.Mol(prev) if prev is not None else None
+        self._prev_pm = app._table_model.structure_pixmap_copy(self._oid)
+        self._had_smiles = "SMILES" in app.headers
+        row = app.logical_row_for_oid(self._oid)
+        self._prev_smiles = ""
+        if self._had_smiles and row >= 0:
+            self._prev_smiles = app._table_model.value_for_header(row, "SMILES") or ""
+
+    def _apply(self, mol: Chem.Mol | None, smiles: str, pixmap, *, render: bool) -> None:
+        app = self._app
+        oid = self._oid
+        if app.logical_row_for_oid(oid) < 0:
+            return
+        if mol is None:
+            app.mols.pop(oid, None)
+        else:
+            app.mols[oid] = Chem.Mol(mol)
+        if self._had_smiles and "SMILES" in app.headers:
+            app._table_model.set_cell_text(oid, "SMILES", smiles)
+        app._table_model.set_structure_pixmap(oid, pixmap)
+        if render and mol is not None and hasattr(app, "start_render_worker"):
+            app.start_render_worker(oid, Chem.Mol(mol), skip_mol_props=True)
+        for name in ("_mark_session_dirty", "_mark_sqlite_store_dirty"):
+            mark = getattr(app, name, None)
+            if callable(mark):
+                mark()
+
+    def redo(self) -> None:
+        try:
+            smiles = mol_to_canonical_smiles(self._new)
+        except Exception:
+            smiles = ""
+        self._apply(self._new, smiles, None, render=True)
+        self._app.status_label.setText("Updated the table entry from the sketcher.")
+
+    def undo(self) -> None:
+        self._apply(self._prev, self._prev_smiles, self._prev_pm, render=self._prev is not None)
+        self._app.status_label.setText("Undo: table entry restored.")
 
 
 class UndoPasteCellCommand(QUndoCommand):

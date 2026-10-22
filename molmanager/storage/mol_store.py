@@ -60,18 +60,29 @@ def _mol_from_blob(blob: bytes | None) -> Chem.Mol | None:
     return mol
 
 
-def _mol_from_smiles(smiles: str | None) -> Chem.Mol | None:
-    smi = (smiles or "").strip()
-    if not smi:
+def _mol_from_text(text: str | None) -> Chem.Mol | None:
+    from ..chem.molecule_conversion import parse_molecule_from_cell_text
+
+    return parse_molecule_from_cell_text(text or "")
+
+
+def _canonical_text(mol: Chem.Mol | None) -> str | None:
+    if mol is None:
         return None
     try:
-        return Chem.MolFromSmiles(smi)
+        return Chem.MolToSmiles(mol) or None
     except Exception:
         return None
 
 
 class MolStore(MutableMapping[int, Chem.Mol]):
-    """Disk-backed ``oid -> RDKit mol``. Only a bounded LRU stays hydrated."""
+    """Disk-backed ``oid -> RDKit mol``. Only a bounded LRU stays hydrated.
+
+    Each row is the table's one molecule for that ``oid``: an RDKit connection-table blob
+    and its structure text. The text is canonical SMILES once RDKit has seen the molecule.
+    A file read as text stores the source cell (SMILES, InChI, or a mol block) with no blob,
+    and the blob is filled in the first time the molecule is needed.
+    """
 
     def __init__(self, db_path: str | Path | None = None, *, lru_max: int = _DEFAULT_LRU) -> None:
         self._owns_path = db_path is None
@@ -178,6 +189,27 @@ class MolStore(MutableMapping[int, Chem.Mol]):
         if self._pending >= _AUTOCOMMIT_EVERY:
             self._flush()
 
+    def structure_text_for(self, oid: int) -> str:
+        """Structure text for one row, or ``""`` when the row has no structure.
+
+        A row stored as a blob only gets canonical SMILES computed and saved the first
+        time it is asked for, so later reads are one indexed lookup.
+        """
+        row = self._conn.execute(
+            "SELECT blob, smiles FROM mols WHERE oid = ?", (int(oid),)
+        ).fetchone()
+        if row is None:
+            return ""
+        blob, text = row
+        text = (text or "").strip()
+        if text or not blob:
+            return text
+        computed = _canonical_text(_mol_from_blob(blob))
+        if not computed:
+            return ""
+        self._write_row(int(oid), bytes(blob), computed)
+        return computed
+
     def blob_for(self, oid: int) -> bytes | None:
         """Return the stored RDKit pickle without hydrating a live mol."""
         self._flush()
@@ -272,11 +304,7 @@ class MolStore(MutableMapping[int, Chem.Mol]):
             if mol is None:
                 continue
             blob = _mol_blob(mol)
-            smi = None
-            try:
-                smi = Chem.MolToSmiles(mol) or None
-            except Exception:
-                smi = None
+            smi = _canonical_text(mol)
             if not blob and not smi:
                 continue
             oid_i = int(oid)
@@ -304,7 +332,7 @@ class MolStore(MutableMapping[int, Chem.Mol]):
             raise KeyError(key)
         mol = _mol_from_blob(row[0])
         if mol is None:
-            mol = _mol_from_smiles(row[1])
+            mol = _mol_from_text(row[1])
         if mol is None:
             raise KeyError(key)
         if not row[0]:
@@ -319,13 +347,7 @@ class MolStore(MutableMapping[int, Chem.Mol]):
         if mol is None:
             self.pop(oid, None)
             return
-        blob = _mol_blob(mol)
-        smi = None
-        try:
-            smi = Chem.MolToSmiles(mol) or None
-        except Exception:
-            smi = None
-        self._write_row(oid, blob, smi)
+        self._write_row(oid, _mol_blob(mol), _canonical_text(mol))
         self._remember(oid, mol)
 
     def __delitem__(self, key: int) -> None:

@@ -28,9 +28,10 @@ Run the standalone demo::
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from PyQt5.QtCore import QAbstractItemModel, QAbstractTableModel, QModelIndex, QSize, Qt
+from PyQt5.QtCore import QAbstractItemModel, QAbstractTableModel, QModelIndex, QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QPixmap
 
 from ..table.column_color_compute import ColumnColorRule
@@ -80,6 +81,26 @@ __all__ = [
 ]
 
 
+def structure_cell_display_text(text: str) -> str:
+    """What an undrawn Structure cell shows for its structure text.
+
+    One-line text (SMILES, InChI) is shown as is. A mol block or an empty row shows the
+    Render 2D hint instead, since a multi-line connection table is not readable in a cell.
+    """
+    text = (text or "").strip()
+    if not text or "\n" in text:
+        return STRUCTURE_COLUMN_PENDING_HINT
+    return text
+
+
+def structure_cell_edit_text(text: str) -> str:
+    """Text placed in the Structure cell editor: one-line SMILES or InChI, else blank."""
+    text = (text or "").strip()
+    if not text or "\n" in text:
+        return ""
+    return text
+
+
 @dataclass
 class _Row:
     oid: int
@@ -97,9 +118,14 @@ class CompoundTableModel(
     File-split of one table model (structure / bounds / bulk / color modules), not reusable mixins.
 
     Column 0: hidden id (string of oid).
-    Column 1: Structure (pixmap via DecorationRole, or placeholder).
+    Column 1: Structure. The rendered pixmap, else the row's structure text, else a hint.
     Column 2..n: text from ``values`` keyed by header name.
+
+    The Structure cell accepts typed SMILES or InChI. Committing the editor emits
+    ``structureTextEdited``; the window parses that text and replaces the row's molecule.
     """
+
+    structureTextEdited = pyqtSignal(int, str)
 
     STRUCTURE_COL = 1
     STRUCTURE_PAINT_ROLES = frozenset(
@@ -136,6 +162,7 @@ class CompoundTableModel(
         self._rows = ColumnStore()
         self._pixmaps: dict[int, QPixmap] = {}
         self._structure_png_store: StructureRenderStore | None = None
+        self._structure_text_source: Callable[[int], str] | None = None
         self._oid_to_row: dict[int, int] = {}
         # Optional extra columns that show a 2D pixmap (e.g. disconnected fragment) keyed by (oid, header).
         self._pixmap_columns: set[str] = set()
@@ -506,13 +533,18 @@ class CompoundTableModel(
             has_pix = pix is not None and not pix.isNull()
             if role == Qt.DecorationRole:
                 return pix if has_pix else None
-            if role in (Qt.DisplayRole, Qt.EditRole):
+            if role == Qt.EditRole:
+                return structure_cell_edit_text(self.structure_text_for_oid(oid))
+            if role in (Qt.DisplayRole, Qt.ToolTipRole):
                 if has_pix:
-                    return ""
+                    return None if role == Qt.ToolTipRole else ""
                 store = self._structure_png_store
                 if store is not None and store.has_png(oid):
-                    return ""
-                return STRUCTURE_COLUMN_PENDING_HINT
+                    return None if role == Qt.ToolTipRole else ""
+                text = self.structure_text_for_oid(oid)
+                if role == Qt.ToolTipRole:
+                    return text or STRUCTURE_COLUMN_PENDING_HINT
+                return structure_cell_display_text(text)
             if role == Qt.TextAlignmentRole:
                 if has_pix:
                     return int(Qt.AlignCenter)
@@ -521,13 +553,6 @@ class CompoundTableModel(
                 if has_pix:
                     return QSize(pix.width(), pix.height())
                 return QSize(structure_depict_width(), structure_depict_height())
-            if role == Qt.ToolTipRole:
-                if has_pix:
-                    return None
-                store = self._structure_png_store
-                if store is not None and store.has_png(oid):
-                    return None
-                return STRUCTURE_COLUMN_PENDING_HINT
             return None
 
         if h in self._pixmap_columns:
@@ -579,7 +604,12 @@ class CompoundTableModel(
         if not index.isValid() or role != Qt.EditRole:
             return False
         row, col = index.row(), index.column()
-        if row < 0 or row >= len(self._rows) or col < 2:
+        if row < 0 or row >= len(self._rows):
+            return False
+        if col == self.STRUCTURE_COL:
+            self.structureTextEdited.emit(int(self._rows.oid_at(row)), str(value))
+            return True
+        if col < 2:
             return False
         h = self._headers[col]
         text_s = str(value)
@@ -591,7 +621,10 @@ class CompoundTableModel(
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:  # noqa: N802
         if not index.isValid():
             return Qt.NoItemFlags
-        return Qt.ItemIsEnabled | Qt.ItemIsSelectable
+        flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable
+        if index.column() == self.STRUCTURE_COL:
+            return flags | Qt.ItemIsEditable
+        return flags
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole):  # noqa: N802
         if role == Qt.TextAlignmentRole:
@@ -666,11 +699,7 @@ class CompoundTableModel(
         if col == 0:
             return str(self._rows.oid_at(row))
         if col == self.STRUCTURE_COL:
-            oid = self._rows.oid_at(row)
-            pix = self._pixmaps.get(oid)
-            if pix is not None and not pix.isNull():
-                return ""
-            return STRUCTURE_COLUMN_PENDING_HINT
+            return self.structure_text_for_oid(self._rows.oid_at(row))
         h = self._headers[col]
         if h in self._pixmap_columns:
             return ""
