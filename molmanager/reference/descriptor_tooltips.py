@@ -35,8 +35,6 @@ _TOOLTIPS: dict[str, str] = {
     "SMILES": "Canonical SMILES of the target structure.",
     "INCHIKEY": "InChIKey hashed identifier of the target structure.",
     "MOLFORMULA": "Hill-system molecular formula.",
-    "COMMON_NAME": "PubChem preferred name for this structure (needs network; N/A if unknown).",
-    "SYNONYMS": "PubChem compound synonyms, semicolon-separated (needs network; N/A if unknown).",
     "QED": "Quantitative Estimate of Drug-likeness (0–1; higher is more drug-like).",
     "AB_MPS": (
         "AbbVie MPS: |log D7.4 − 3| + aromatic rings + rotatable bonds (lower is more favorable)."

@@ -19,7 +19,6 @@ Fingerprint columns use RDKit implementations. The **2D pharmacophore (Gobbi)** 
 ``rdkit.Chem.Pharm2D`` with ``Gobbi_Pharm2D`` (Gobbi & Poppinger, *Perspect. Drug Discov. Des.* 1998).
 Drug-likeness columns that invoke ``medchem_descriptors`` / Uni-pKa cite
 ``molmanager.reference.method_citations`` and the worker module docstrings there.
-**Common Name** and **Synonyms** query PubChem (Title / compound synonyms) via ``pubchem_names``.
 """
 
 import logging
@@ -66,11 +65,6 @@ from ..descriptors.medchem_descriptors import (
     mol_inchi_key,
     mol_net_formal_charge,
     ro5_pass,
-)
-from ..sources.pubchem_names import (
-    lookup_names_for_mols,
-    names_cell_value,
-    split_name_lookup_descriptors,
 )
 from ..ionization.unipka_ensembles import int_fns_need_ionization, microstates_for_mol
 from .ionization_parallel import build_microstates_cache_for_rows
@@ -169,57 +163,6 @@ def _calc_descriptor_row_values(
     return int(idx), row_data
 
 
-def _attach_name_lookup_columns(
-    results: list,
-    *,
-    prepared: list,
-    name_disp: list[str],
-    name_fns: list[str],
-    cancelled: bool,
-    cancel_event,
-    progress_state,
-    signals,
-) -> tuple[list, bool]:
-    """Fill PubChem Common Name / Synonyms on descriptor rows (rate-limited, unique structures)."""
-    if not name_fns:
-        return results, cancelled
-    row_map: dict[int, dict[str, str]] = {int(oid): dict(row or {}) for oid, row in results}
-    if not row_map:
-        return results, cancelled
-    ordered = [(int(oid), mol) for oid, mol in prepared if int(oid) in row_map]
-    records: list = [None] * len(ordered)
-    lookup_cancelled = bool(cancelled)
-    if not lookup_cancelled:
-
-        def _on_prog(done: int, total: int) -> None:
-            from ..platform_support.tool_progress import report_tool_progress
-
-            report_tool_progress(
-                message="Looking up names…",
-                done=done,
-                total=max(1, int(total)),
-                progress_state=progress_state,
-                signals=signals,
-                force_signal=True,
-            )
-
-        records = lookup_names_for_mols(
-            [mol for _oid, mol in ordered],
-            want_common="COMMON_NAME" in name_fns,
-            want_synonyms="SYNONYMS" in name_fns,
-            cancel_event=cancel_event,
-            on_progress=_on_prog,
-        )
-        if cancel_event is not None and cancel_event.is_set():
-            lookup_cancelled = True
-    for (oid, _mol), rec in zip(ordered, records):
-        row = row_map.setdefault(oid, {})
-        for disp, fn in zip(name_disp, name_fns):
-            row[disp] = names_cell_value(rec, fn)
-    out = [(oid, row_map[oid]) for oid, _mol in prepared if int(oid) in row_map]
-    return out, lookup_cancelled
-
-
 def descriptor_callable_for_int_fn(i_f, smarts_cache, row_ctx=None):
     """Return ``callable(mol)`` for one internal descriptor id (shared by thread and process workers)."""
     ctx = row_ctx if row_ctx is not None else {}
@@ -238,10 +181,6 @@ def descriptor_callable_for_int_fn(i_f, smarts_cache, row_ctx=None):
         return lambda m: mol_inchi_key(m) if m is not None else ""
     if i_f == "MOLFORMULA":
         return lambda m: mol_formula(m) if m is not None else ""
-    if i_f == "COMMON_NAME":
-        return lambda m, c=ctx: str((c.get("name_lookup") or {}).get("common_name") or "N/A")
-    if i_f == "SYNONYMS":
-        return lambda m, c=ctx: str((c.get("name_lookup") or {}).get("synonyms") or "N/A")
     if i_f == "RO5_VIOLATIONS":
         return lambda m: lipinski_violations(m) if m is not None else 0
     if i_f == "RO5_PASS":
@@ -544,10 +483,6 @@ class CalcWorker(QRunnable):
                 _emit_prep_progress(idx + 1)
         _emit_prep_progress(len(prepared), force=True)
 
-        local_disp, local_fns, name_disp, name_fns = split_name_lookup_descriptors(
-            self.disp_headers, self.int_fns
-        )
-
         cfg = load_config()
         if cfg.descriptor_threads is not None:
             max_workers = cfg.descriptor_threads
@@ -627,8 +562,8 @@ class CalcWorker(QRunnable):
                                 (
                                     i,
                                     mol,
-                                    local_disp,
-                                    tuple(local_fns),
+                                    self.disp_headers,
+                                    tuple(self.int_fns),
                                     smarts_cache,
                                     pka_by_idx.get(i),
                                     True,
@@ -644,8 +579,6 @@ class CalcWorker(QRunnable):
                 self._emit_descriptor_results(
                     results,
                     prepared=prepared,
-                    name_disp=name_disp,
-                    name_fns=name_fns,
                     cancelled=cancelled,
                     pka_cache_used=pka_cache_used,
                     tot=tot,
@@ -654,15 +587,15 @@ class CalcWorker(QRunnable):
         # ThreadPoolExecutor row tasks so RDKit never runs on the Qt GUI thread and small jobs
         # still use a worker thread instead of the process-queue thread doing every row inline.
         # RDKit descriptor / fingerprint work holds the GIL; child processes keep Qt responsive.
-        mp_min = _descriptor_process_pool_min_rows(cfg, local_fns)
-        use_process_pool = bool(local_fns) and nrows >= mp_min and nrows >= 2 and max_workers > 1
+        mp_min = _descriptor_process_pool_min_rows(cfg, self.int_fns)
+        use_process_pool = bool(self.int_fns) and nrows >= mp_min and nrows >= 2 and max_workers > 1
         mp_used = False
         if use_process_pool:
             try:
                 results, pool_cancelled = _run_descriptor_process_pool(
                     prepared,
-                    disp_headers=local_disp,
-                    int_fns=tuple(local_fns),
+                    disp_headers=self.disp_headers,
+                    int_fns=tuple(self.int_fns),
                     pka_by_idx=pka_by_idx,
                     pka_cache_used=pka_cache_used,
                     max_workers=max_workers,
@@ -681,7 +614,7 @@ class CalcWorker(QRunnable):
             pass
         elif nrows == 0:
             results = []
-        elif not local_fns:
+        elif not self.int_fns:
             results = [(i, {}) for i, _mol in prepared]
         else:
             _emit_progress(0, force=True)
@@ -689,8 +622,8 @@ class CalcWorker(QRunnable):
                 (
                     i,
                     mol,
-                    local_disp,
-                    tuple(local_fns),
+                    self.disp_headers,
+                    tuple(self.int_fns),
                     smarts_cache,
                     pka_by_idx.get(i) if pka_cache_used else None,
                     pka_cache_used,
@@ -737,8 +670,6 @@ class CalcWorker(QRunnable):
         self._emit_descriptor_results(
             results,
             prepared=prepared,
-            name_disp=name_disp,
-            name_fns=name_fns,
             cancelled=cancelled,
             pka_cache_used=pka_cache_used,
             tot=tot,
@@ -749,8 +680,6 @@ class CalcWorker(QRunnable):
         results,
         *,
         prepared,
-        name_disp,
-        name_fns,
         cancelled,
         pka_cache_used,
         tot,
@@ -758,16 +687,6 @@ class CalcWorker(QRunnable):
         from ..chem.murcko import apply_murcko_scaffold_counts
 
         results = apply_murcko_scaffold_counts(results, prepared, self.disp_headers, self.int_fns)
-        results, cancelled = _attach_name_lookup_columns(
-            results,
-            prepared=prepared,
-            name_disp=name_disp,
-            name_fns=name_fns,
-            cancelled=cancelled,
-            cancel_event=self.cancel_event,
-            progress_state=self.progress_state,
-            signals=self.signals,
-        )
         emit_partial_results_if_cancelled(
             self.signals, self.progress_label, len(results), tot, cancelled
         )

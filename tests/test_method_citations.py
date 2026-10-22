@@ -36,7 +36,6 @@ def test_descriptor_footer_html_links() -> None:
     assert "Luo" in html
     assert "Sauer" in html
     assert "Firth" in html
-    assert "PubChem" in html
 
 
 def test_descriptor_checkbox_citations() -> None:
@@ -50,8 +49,6 @@ def test_descriptor_checkbox_citations() -> None:
     assert "Sauer" in (sc.descriptor_checkbox_citation_html("NPR1") or "")
     assert sc.descriptor_checkbox_citation_html("PBF") is not None
     assert "Firth" in (sc.descriptor_checkbox_citation_html("PBF") or "")
-    assert "PubChem" in (sc.descriptor_checkbox_citation_html("COMMON_NAME") or "")
-    assert "PubChem" in (sc.descriptor_checkbox_citation_html("SYNONYMS") or "")
 
 
 def test_ab_mps_score_formula() -> None:

@@ -855,11 +855,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "pubchem",
                 "PubChem / PubChemPy",
-                (
-                    "Tools → Query Database → PubChem and Vendors; "
-                    "Tools → Random → Molecule; "
-                    "Calculate Descriptors → Name (Common Name, Synonyms)."
-                ),
+                ("Tools → Query Database → PubChem and Vendors; Tools → Random → Molecule."),
                 (
                     (
                         "Kim, S.; et al. PubChem 2023 update. Nucleic Acids Res. 2023, 51, D1373–D1380.",

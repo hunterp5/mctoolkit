@@ -89,13 +89,6 @@ def test_descriptor_dispatch_custom_ids(_mock_ms: object) -> None:
     assert mol is not None
     assert descriptor_callable_for_int_fn("INCHIKEY", cache, None)(mol) == mol_inchi_key(mol)
     assert descriptor_callable_for_int_fn("MOLFORMULA", cache)(mol) == "C2H6O"
-    assert (
-        descriptor_callable_for_int_fn(
-            "COMMON_NAME", cache, {"name_lookup": {"common_name": "ethanol"}}
-        )(mol)
-        == "ethanol"
-    )
-    assert descriptor_callable_for_int_fn("SYNONYMS", cache)(mol) == "N/A"
     assert descriptor_callable_for_int_fn("RO5_VIOLATIONS", cache)(mol) == 0
     assert descriptor_callable_for_int_fn("RO5_PASS", cache)(mol) == "Yes"
     assert isinstance(descriptor_callable_for_int_fn("CNS_MPO", cache)(mol), float)

@@ -176,14 +176,6 @@ def descriptor_checkbox_citation_html(internal_key: str) -> str | None:
         "FP_Pharm2D_Gobbi": (
             "RDKit Pharm2D; Gobbi &amp; Poppinger, <i>Perspect. Drug Discov. Des.</i> 1998"
         ),
-        "COMMON_NAME": (
-            '<a href="https://doi.org/10.1093/nar/gkac956">Kim et al., Nucleic Acids Res. 2023</a> '
-            "(PubChem preferred name / Title)"
-        ),
-        "SYNONYMS": (
-            '<a href="https://doi.org/10.1093/nar/gkac956">Kim et al., Nucleic Acids Res. 2023</a> '
-            "(PubChem compound synonyms)"
-        ),
         "PMI1": shape_html,
         "PMI2": shape_html,
         "PMI3": shape_html,
@@ -228,9 +220,6 @@ def descriptor_dialog_footer_html() -> str:
         '<a href="https://doi.org/10.1038/nchem.1243">Bickerton et al., Nat. Chem. 2012</a> (RDKit QED).<br>'
         "<b>Ro5:</b> Lipinski et al., Adv. Drug Deliv. Rev. 1997 (RDKit Lipinski counts).<br>"
         "<b>2D pharmacophore (Gobbi):</b> RDKit Pharm2D / Gobbi–Poppinger definitions.<br>"
-        "<b>Common Name / Synonyms:</b> "
-        '<a href="https://doi.org/10.1093/nar/gkac956">PubChem</a> preferred name (Title) and '
-        "compound synonyms via PubChemPy (network lookup; N/A if not in PubChem).<br>"
         "<b>3D shape (PMI, NPR, asphericity, …):</b> "
         '<a href="https://doi.org/10.1021/ci025599w">Sauer &amp; Schwarz, J. Chem. Inf. Comput. Sci. 2003</a> '
         "(RDKit Descriptors3D; lowest-energy packed conformer in <code>confs</code>).<br>"

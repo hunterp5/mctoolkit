@@ -26,7 +26,7 @@ from molmanager.ui.dialogs.properties import PropertyDialog
 def test_descriptor_checkbox_tooltip_covers_common_keys() -> None:
     assert "sp3" in descriptor_checkbox_tooltip("FractionCSP3").lower()
     assert "pH 7.4" in descriptor_checkbox_tooltip("LOGD74")
-    assert "PubChem" in descriptor_checkbox_tooltip("COMMON_NAME")
+    assert "canonical" in descriptor_checkbox_tooltip("SMILES").lower()
     assert "3D" in descriptor_checkbox_tooltip("PMI1")
     assert "carbon" in descriptor_checkbox_tooltip("Count_C")
     assert descriptor_checkbox_tooltip("") == ""

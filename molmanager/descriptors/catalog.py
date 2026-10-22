@@ -53,8 +53,6 @@ DESCRIPTOR_TAB_ITEMS: dict[str, tuple[tuple[str, str], ...]] = {
         ("SMILES String", "SMILES"),
         ("InChI Key", "INCHIKEY"),
         ("Molecular formula", "MOLFORMULA"),
-        ("Common Name", "COMMON_NAME"),
-        ("Synonyms", "SYNONYMS"),
     ),
     "Drug-likeness": (
         ("AB-MPS score", "AB_MPS"),
