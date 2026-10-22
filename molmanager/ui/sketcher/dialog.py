@@ -45,6 +45,7 @@ from PyQt5.QtWidgets import (
 from rdkit import Chem
 
 from ...table.structure_depiction_layout import reaction_depict_size
+from ...chem.molecule_conversion import mol_to_canonical_smiles
 from ...chem.reaction_file_io import RXN_SMARTS_HEADER
 from ...chem.structure_2d_depiction import ReactionDrawSpec
 from ...workers import ExportWorker
@@ -156,12 +157,16 @@ class SketcherDialog(QDialog):
         initial_mol: Chem.Mol | None = None,
         *,
         element_symbols: list[str] | None = None,
+        source_oid: int | None = None,
+        update_on_close: bool = False,
     ):
         super().__init__(parent)
         self.parent_app = parent
         if initial_mol is not None and not isinstance(initial_mol, Chem.Mol):
             initial_mol = None
         self._initial_mol = initial_mol
+        self._source_oid = int(source_oid) if source_oid is not None else None
+        self._update_on_close = bool(update_on_close) and self._source_oid is not None
         self._element_symbols_override = element_symbols
         self.setWindowTitle("Sketcher")
         self.resize(*_sketcher_preferred_dialog_size())
@@ -1863,17 +1868,26 @@ class SketcherDialog(QDialog):
             return
         self.load_structure_from_mol(mol, confirm_if_nonempty=False)
 
+    def set_source_entry(self, oid: int | None, *, update_on_close: bool = False) -> None:
+        """Remember the table row this sketch edits.
+
+        *update_on_close* asks, when the sketcher closes, whether to write the sketch
+        into that row. Structure → Edit in Sketcher sets it; other opens leave it off.
+        """
+        self._source_oid = int(oid) if oid is not None else None
+        self._update_on_close = bool(update_on_close) and self._source_oid is not None
+
     def load_structure_from_mol(
         self, mol: Chem.Mol | None, confirm_if_nonempty: bool = True
-    ) -> None:
+    ) -> bool:
         """Load an RDKit molecule into the canvas (optionally confirm if the sketch is non-empty)."""
         if mol is None or not isinstance(mol, Chem.Mol):
-            return
+            return False
         try:
             m = Chem.Mol(mol)
         except Exception:
             QMessageBox.warning(self, "Sketcher", "Could not copy this structure for editing.")
-            return
+            return False
         if confirm_if_nonempty and self.canvas.to_smiles().strip():
             res = QMessageBox.question(
                 self,
@@ -1883,7 +1897,7 @@ class SketcherDialog(QDialog):
                 QMessageBox.No,
             )
             if res != QMessageBox.Yes:
-                return
+                return False
         c = self.canvas.rect().center()
         center = c if self.canvas.rect().width() > 8 and self.canvas.rect().height() > 8 else None
         if not self.canvas.load_from_rdkit_mol(m, center=center):
@@ -1892,7 +1906,7 @@ class SketcherDialog(QDialog):
                 "Sketcher",
                 "Could not build a 2D layout for this structure. It may be unsupported or invalid.",
             )
-            return
+            return False
         self.tb_erase.blockSignals(True)
         self.tb_erase.setChecked(False)
         self.tb_erase.blockSignals(False)
@@ -1901,6 +1915,7 @@ class SketcherDialog(QDialog):
         self.select_btn.blockSignals(False)
         self._toggle_select(True)
         self._update_sketch_status()
+        return True
 
     def _on_cleanup_layout(self) -> None:
         ok = self.canvas.cleanup_layout_2d()
@@ -2022,7 +2037,70 @@ class SketcherDialog(QDialog):
             QMessageBox.warning(self, "Add to Table", msg)
             return
 
+    def _sketched_molecule(self):
+        """The canvas as one molecule, or ``None`` when it is empty, a reaction, or unreadable."""
+        app = self.parent_app
+        if app is None or self.canvas.reaction_arrow is not None or not self.canvas.nodes:
+            return None
+        text = (self.canvas.to_smiles() or "").strip()
+        if not text or not hasattr(app, "_mol_from_structure_text"):
+            return None
+        return app._mol_from_structure_text(text)
+
+    def _row_already_has_molecule(self, app, oid: int, mol) -> bool:
+        current = app.mols.get(int(oid))
+        if current is None:
+            return False
+        try:
+            return mol_to_canonical_smiles(current) == mol_to_canonical_smiles(mol)
+        except Exception:  # noqa: BLE001 — RDKit raises varied C++ wrap errors
+            return False
+
+    def _confirm_close_updates_row(self) -> bool:
+        """Ask before writing an edited sketch back. Return False to keep the sketcher open."""
+        app = self.parent_app
+        oid = self._source_oid
+        if app is None or oid is None or not hasattr(app, "replace_row_structure"):
+            return True
+        if self.canvas.reaction_arrow is not None:
+            QMessageBox.information(
+                self,
+                "Edit in Sketcher",
+                "This sketch is a reaction, so the table row was left unchanged. "
+                "Use Export to Table to add it as a new row.",
+            )
+            return True
+        mol = self._sketched_molecule()
+        if mol is None:
+            if self.canvas.nodes:
+                QMessageBox.warning(
+                    self,
+                    "Edit in Sketcher",
+                    "Could not build a structure from this sketch, so the table row was left unchanged.",
+                )
+            return True
+        if self._row_already_has_molecule(app, int(oid), mol):
+            return True
+        choice = QMessageBox.question(
+            self,
+            "Edit in Sketcher",
+            "Update this table row with the edited structure?",
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Yes,
+        )
+        if choice == QMessageBox.Cancel:
+            return False
+        if choice == QMessageBox.Yes and not app.replace_row_structure(int(oid), mol):
+            QMessageBox.warning(
+                self, "Edit in Sketcher", "That table row is no longer in the table."
+            )
+        return True
+
     def closeEvent(self, event):
+        if self._update_on_close and not self._confirm_close_updates_row():
+            event.ignore()
+            return
+        self._update_on_close = False
         self._set_parent_delete_action_blocked(False)
         self._remove_sketch_key_filters()
         event.accept()

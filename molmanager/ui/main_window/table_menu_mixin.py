@@ -32,6 +32,7 @@ from ...conformers.conformer_column_codec import (
 )
 from ...docking.pose_file_io import is_poses_header
 from ...chem.molecule_conversion import mol_structure_copy_texts
+from ..compound_table_model import CompoundTableModel
 from ..strings import TOOL_RENDER_2D
 from ..widgets import CategoryFilterCard, FilterCard, TextFilterCard
 from .table_undo_commands import (
@@ -484,6 +485,16 @@ class TableMenuMixin:
         can_paste = oid is not None and self._column_accepts_cell_paste(row, col)
         paste_act = menu.addAction("Paste")
         paste_act.setEnabled(can_paste)
+        edit_sketch_act = None
+        if col == CompoundTableModel.STRUCTURE_COL and oid is not None:
+            edit_sketch_act = menu.addAction("Edit in Sketcher")
+            edit_sketch_act.setToolTip(
+                "Edit this row's structure. Closing the sketcher asks whether to update the row."
+            )
+            edit_structure_act = menu.addAction("Edit Structure…")
+            edit_structure_act.setToolTip("Enter a SMILES, InChI, or mol block for this row.")
+        else:
+            edit_structure_act = None
 
         text_editable = self._table_model.column_accepts_text_edit(col)
         edit_act = clear_act = None
@@ -513,7 +524,7 @@ class TableMenuMixin:
             if callable(exporter):
                 exporter(int(oid), som_header)
         elif action == sketch_act and mol_ctx is not None:
-            self.open_sketcher(mol_ctx)
+            self.open_sketcher(mol_ctx, source_oid=oid)
         elif view_poses_act is not None and action == view_poses_act and oid is not None:
             column = self.headers[col] if 0 <= col < len(self.headers) else ""
             self.show_packed_poses_in_viewer(int(oid), column)
@@ -546,6 +557,10 @@ class TableMenuMixin:
             QApplication.clipboard().setText(copy_text)
         elif action == paste_act and can_paste:
             self.edit_paste(origin=(row, col))
+        elif edit_sketch_act is not None and action == edit_sketch_act:
+            self.open_sketcher(mol_ctx, source_oid=oid, update_on_close=True)
+        elif edit_structure_act is not None and action == edit_structure_act:
+            self.edit_structure_cell(row)
         elif edit_act is not None and action == edit_act:
             old_t = self._table_model.cell_text(row, col) or ""
             txt, ok = QInputDialog.getText(self, "Edit value", "New value:", text=old_t)

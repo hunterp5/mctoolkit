@@ -28,7 +28,7 @@ Starts from a blank canvas or an existing molecule when launched in an edit cont
 1. Open **Sketcher** from the tools entry point.
 2. Draw or edit the molecule. For a reaction, draw reactants, click the reaction-arrow tool, drag from reactants toward products, then draw products on the head side.
 3. Validate valence/stereo visually.
-4. Apply/insert the structure (or reaction) into the table or query field.
+4. **File → Export to Table** adds the sketch as new rows. On the Structure column, right-click **Edit in Sketcher** (under Paste). Closing that sketcher asks whether to replace the row, and that write can be undone.
 
 ## Use cases
 
