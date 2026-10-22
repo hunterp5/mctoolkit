@@ -189,6 +189,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Regenerate 2D depictions as a background batch.",
             ),
             _e(
+                "tools_align_substructure",
+                "Align to Substructure",
+                "Align to Substructure",
+                "Redraw matching rows so a drawn substructure shares one orientation.",
+            ),
+            _e(
                 "tools_protonate",
                 "Protonate",
                 "Protonate",

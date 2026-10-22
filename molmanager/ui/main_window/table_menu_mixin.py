@@ -42,6 +42,7 @@ from .table_undo_commands import (
     UndoInsertRowCommand,
     UndoLogarithmicColumnCommand,
     UndoPrecisionColumnCommand,
+    depiction_column_for_cell,
 )
 
 
@@ -454,6 +455,12 @@ class TableMenuMixin:
 
         chem_col = self._column_eligible_for_table_chemistry_menu(row, col)
         mol_ctx = self._mol_for_table_context_menu(row, col) if chem_col else None
+        sketch_mol = mol_ctx
+        depiction_column = depiction_column_for_cell(self, col)
+        if sketch_mol is not None and oid is not None and depiction_column:
+            from ...chem.depiction_coords import mol_for_app_depiction
+
+            sketch_mol = mol_for_app_depiction(self, sketch_mol, int(oid), depiction_column)
 
         sketch_act = view_poses_act = view_conformers_act = browser_act = render2d_act = None
         structure_menu = False
@@ -524,7 +531,7 @@ class TableMenuMixin:
             if callable(exporter):
                 exporter(int(oid), som_header)
         elif action == sketch_act and mol_ctx is not None:
-            self.open_sketcher(mol_ctx, source_oid=oid)
+            self.open_sketcher(sketch_mol, source_oid=oid)
         elif view_poses_act is not None and action == view_poses_act and oid is not None:
             column = self.headers[col] if 0 <= col < len(self.headers) else ""
             self.show_packed_poses_in_viewer(int(oid), column)
@@ -558,7 +565,7 @@ class TableMenuMixin:
         elif action == paste_act and can_paste:
             self.edit_paste(origin=(row, col))
         elif edit_sketch_act is not None and action == edit_sketch_act:
-            self.open_sketcher(mol_ctx, source_oid=oid, update_on_close=True)
+            self.open_sketcher(sketch_mol, source_oid=oid, update_on_close=True)
         elif edit_structure_act is not None and action == edit_structure_act:
             self.edit_structure_cell(row)
         elif edit_act is not None and action == edit_act:

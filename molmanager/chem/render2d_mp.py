@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from rdkit import Chem
 
+from .depiction_coords import apply_depiction_coords
 from .molecule_conversion import parse_molecule_from_cell_text
 from .structure_2d_depiction import render_molecule_png, render_reaction_png
 
@@ -55,6 +56,17 @@ def _mol_from_render_payload(blob, text: str):
     return parse_molecule_from_cell_text(text)
 
 
+def _coord_blob(payload) -> bytes:
+    """Optional packed xy on a structure payload. Empty means the usual layout."""
+    if (
+        isinstance(payload, tuple)
+        and len(payload) > 3
+        and isinstance(payload[3], (bytes, bytearray))
+    ):
+        return bytes(payload[3])
+    return b""
+
+
 def mol_from_render_payload(payload):
     """Molecule a Render 2D task payload describes (tagged tuple, pickle bytes, or live mol)."""
     if isinstance(payload, tuple) and payload and payload[0] == STRUCTURE_PAYLOAD_TAG:
@@ -73,7 +85,8 @@ def mp_render_structure_batch(args: tuple) -> list[tuple]:
     rows are ``(oid, png, ok, w, h)``.
 
     Each item is ``(oid, mol_bytes)``, ``(oid, (REACTION_PAYLOAD_TAG, smarts_bytes))``, or
-    ``(oid, (STRUCTURE_PAYLOAD_TAG, mol_bytes, smiles_bytes))``.
+    ``(oid, (STRUCTURE_PAYLOAD_TAG, mol_bytes, smiles_bytes, coord_bytes))``.
+    ``coord_bytes`` is optional; empty bytes keep the usual layout.
     """
     items, w, h = args
     width, height = int(w), int(h)
@@ -99,6 +112,7 @@ def mp_render_structure_batch(args: tuple) -> list[tuple]:
                 if mol is None:
                     out.append((oid, b"", False, width, height))
                     continue
+                mol = apply_depiction_coords(mol, _coord_blob(payload))
                 png = render_molecule_png(mol, width, height)
             else:
                 png = render_molecule_png(Chem.Mol(payload), width, height)

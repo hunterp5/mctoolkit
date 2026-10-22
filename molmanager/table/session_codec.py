@@ -68,6 +68,7 @@ _OMIT_IF_EMPTY = frozenset(
         "structure_smiles",
         "structure_mols",
         "global_bounds",
+        "depiction_2d",
         "table_search",
         "protein_viewer",
         "gnina_dock",

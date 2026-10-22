@@ -70,6 +70,9 @@ class StructureWritebackMixin:
         """
         model = self._table_model
         oids = [int(oid) for oid, _blob, _smiles in rows]
+        depiction = getattr(self, "_depiction_coords", None)
+        if depiction is not None and oids:
+            depiction.discard_column_oids(dest, oids)
         if dest == "Structure":
             self._store_structure_blobs(rows)
             model.clear_structure_pixmaps_for_oids(oids)

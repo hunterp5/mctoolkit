@@ -35,6 +35,40 @@ from ..widgets import CategoryFilterCard, FilterCard, TextFilterCard
 if TYPE_CHECKING:
     from ..app_kernel import AppKernel
 
+
+def depiction_column_for_cell(app, col: int) -> str | None:
+    """Column name whose stored orientation this cell draws, if any."""
+    if col == CompoundTableModel.STRUCTURE_COL:
+        return "Structure"
+    headers = getattr(app, "headers", None) or []
+    if not 0 <= col < len(headers):
+        return None
+    header = headers[col]
+    model = getattr(app, "_table_model", None)
+    if model is not None and model.is_pixmap_data_column(header):
+        return header
+    return None
+
+
+def capture_depiction_blob(app, column: str | None, oid: int) -> bytes | None:
+    """Packed coordinates for one cell, or ``None`` when the cell has no pose."""
+    store = getattr(app, "_depiction_coords", None)
+    if store is None or not column:
+        return None
+    return store.get(str(column), int(oid))
+
+
+def restore_depiction_blob(app, column: str | None, oid: int, blob: bytes | None) -> None:
+    """Put *blob* back, or drop the cell's pose when *blob* is empty."""
+    store = getattr(app, "_depiction_coords", None)
+    if store is None or not column:
+        return
+    if blob:
+        store.set(str(column), int(oid), bytes(blob))
+    else:
+        store.discard_column_oids(str(column), [int(oid)])
+
+
 __all__ = [
     "UndoDeleteRowsCommand",
     "UndoPasteCellCommand",
@@ -137,6 +171,9 @@ class UndoDeleteRowsCommand(QUndoCommand):
             app.mols.pop(oid, None)
             app.zoomed_ids.discard(oid)
         app._confs_sidecar_discard_oids(list(oids))
+        depiction = getattr(app, "_depiction_coords", None)
+        if depiction is not None:
+            depiction.discard_oids(oids)
         app._clear_table_selection_after_delete()
 
     def _restore_rows_to_app(self) -> None:
@@ -243,6 +280,7 @@ class UndoUpdateRowStructureCommand(QUndoCommand):
         self._new = Chem.Mol(mol)
         prev = app.mols.get(self._oid)
         self._prev = Chem.Mol(prev) if prev is not None else None
+        self._prev_depiction = capture_depiction_blob(app, "Structure", self._oid)
         self._prev_pm = app._table_model.structure_pixmap_copy(self._oid)
         self._had_smiles = "SMILES" in app.headers
         row = app.logical_row_for_oid(self._oid)
@@ -250,7 +288,15 @@ class UndoUpdateRowStructureCommand(QUndoCommand):
         if self._had_smiles and row >= 0:
             self._prev_smiles = app._table_model.value_for_header(row, "SMILES") or ""
 
-    def _apply(self, mol: Chem.Mol | None, smiles: str, pixmap, *, render: bool) -> None:
+    def _apply(
+        self,
+        mol: Chem.Mol | None,
+        smiles: str,
+        pixmap,
+        *,
+        render: bool,
+        depiction: bytes | None,
+    ) -> None:
         app = self._app
         oid = self._oid
         if app.logical_row_for_oid(oid) < 0:
@@ -259,6 +305,7 @@ class UndoUpdateRowStructureCommand(QUndoCommand):
             app.mols.pop(oid, None)
         else:
             app.mols[oid] = Chem.Mol(mol)
+        restore_depiction_blob(app, "Structure", oid, depiction)
         if self._had_smiles and "SMILES" in app.headers:
             app._table_model.set_cell_text(oid, "SMILES", smiles)
         app._table_model.set_structure_pixmap(oid, pixmap)
@@ -274,11 +321,17 @@ class UndoUpdateRowStructureCommand(QUndoCommand):
             smiles = mol_to_canonical_smiles(self._new)
         except Exception:
             smiles = ""
-        self._apply(self._new, smiles, None, render=True)
+        self._apply(self._new, smiles, None, render=True, depiction=None)
         self._app.status_label.setText("Updated the table entry from the sketcher.")
 
     def undo(self) -> None:
-        self._apply(self._prev, self._prev_smiles, self._prev_pm, render=self._prev is not None)
+        self._apply(
+            self._prev,
+            self._prev_smiles,
+            self._prev_pm,
+            render=self._prev is not None,
+            depiction=self._prev_depiction,
+        )
         self._app.status_label.setText("Undo: table entry restored.")
 
 
@@ -292,6 +345,8 @@ class UndoPasteCellCommand(QUndoCommand):
         self._col = col
         self._oid = oid
         self._clip = clip_text
+        self._depiction_column = depiction_column_for_cell(app, col)
+        self._prev_depiction = capture_depiction_blob(app, self._depiction_column, oid)
         if col == CompoundTableModel.STRUCTURE_COL:
             pm = app.mols.get(oid)
             self._prev_mol = Chem.Mol(pm) if pm is not None else None
@@ -335,6 +390,7 @@ class UndoPasteCellCommand(QUndoCommand):
                 app._table_model.set_column_pixmap(oid, h, self._prev_pm)
             else:
                 app._table_model.set_cell_text(oid, h, self._prev_text)
+        restore_depiction_blob(app, self._depiction_column, oid, self._prev_depiction)
         app.calculate_global_bounds()
         app.apply_filters()
         app.status_label.setText("Undo: paste reverted.")
@@ -351,6 +407,8 @@ class _PasteBlockCell:
     prev_pm: QPixmap | None = None
     prev_smiles: str = ""
     pixmap_header: str | None = None
+    depiction_column: str | None = None
+    prev_depiction: bytes | None = None
 
 
 class UndoPasteBlockCommand(QUndoCommand):
@@ -375,6 +433,8 @@ class UndoPasteBlockCommand(QUndoCommand):
                 cell.pixmap_header = h if app._table_model.is_pixmap_data_column(h) else None
                 if cell.pixmap_header:
                     cell.prev_pm = app._table_model.column_pixmap_copy(oid, h)
+            cell.depiction_column = depiction_column_for_cell(app, col)
+            cell.prev_depiction = capture_depiction_blob(app, cell.depiction_column, oid)
             self._cells.append(cell)
 
     def redo(self) -> None:
@@ -404,13 +464,14 @@ class UndoPasteBlockCommand(QUndoCommand):
                 if "SMILES" in app.headers:
                     app._table_model.set_cell_text(oid, "SMILES", cell.prev_smiles or "")
                 app._table_model.set_structure_pixmap(oid, cell.prev_pm)
-                continue
-            h = app.headers[cell.col]
-            if cell.pixmap_header:
-                app._table_model.set_backing_text(oid, h, cell.prev_text)
-                app._table_model.set_column_pixmap(oid, h, cell.prev_pm)
             else:
-                app._table_model.set_cell_text(oid, h, cell.prev_text)
+                h = app.headers[cell.col]
+                if cell.pixmap_header:
+                    app._table_model.set_backing_text(oid, h, cell.prev_text)
+                    app._table_model.set_column_pixmap(oid, h, cell.prev_pm)
+                else:
+                    app._table_model.set_cell_text(oid, h, cell.prev_text)
+            restore_depiction_blob(app, cell.depiction_column, oid, cell.prev_depiction)
         app.calculate_global_bounds()
         app.apply_filters()
         app.status_label.setText("Undo: paste reverted.")

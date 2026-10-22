@@ -35,6 +35,7 @@ from .table_undo_commands import (
     UndoPasteBlockCommand,
     UndoPasteCellCommand,
     UndoUpdateRowStructureCommand,
+    restore_depiction_blob,
 )
 
 
@@ -744,6 +745,7 @@ class TableEditMixin:
             if mol is None:
                 return False
             self.mols[oid] = mol
+            restore_depiction_blob(self, "Structure", oid, None)
             if "SMILES" in self.headers:
                 try:
                     self._table_model.set_cell_text(oid, "SMILES", mol_to_canonical_smiles(mol))
@@ -762,6 +764,7 @@ class TableEditMixin:
                 smi = text
             self._table_model.set_backing_text(oid, h, smi)
             self._table_model.set_column_pixmap(oid, h, None)
+            restore_depiction_blob(self, h, oid, None)
             return True
         if not self._table_model.column_accepts_text_edit(col):
             return False

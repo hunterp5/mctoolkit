@@ -106,8 +106,8 @@ class SelectionBrowserWidget(QWidget):
         self._rows: list[int] = []
         self._idx = 0
         self._preview_pix_cache: dict[
-            tuple[int, int, int], QPixmap
-        ] = {}  # (oid, w_px, h_px) -> pixmap
+            tuple[int, int, int, int], QPixmap
+        ] = {}  # (oid, w_px, h_px, depiction revision) -> pixmap
 
         root = QVBoxLayout(self)
         apply_browser_body_layout(root)
@@ -1029,11 +1029,13 @@ class SelectionBrowserWidget(QWidget):
             oid = int(app._table_model.row_oid(logical_row))
         except Exception:
             return None
-        cache_key = (oid, pw, ph)
+        from ...chem.depiction_coords import depiction_revision, mol_for_app_depiction
+
+        cache_key = (oid, pw, ph, depiction_revision(app))
         cached = self._preview_pix_cache.get(cache_key)
         if cached is not None and not cached.isNull():
             return cached
-        mol = getattr(app, "mols", {}).get(oid)
+        mol = mol_for_app_depiction(app, getattr(app, "mols", {}).get(oid), oid)
         if mol is None:
             return None
         try:
@@ -1069,6 +1071,10 @@ class SelectionBrowserWidget(QWidget):
             view.clear()
             return
         mol = getattr(app, "mols", {}).get(oid)
+        if flat and mol is not None:
+            from ...chem.depiction_coords import mol_for_app_depiction
+
+            mol = mol_for_app_depiction(app, mol, oid)
         view.set_molecule(mol, rebuild_3d=False)
 
     def _update_preview(self, logical_row: int) -> None:

@@ -95,6 +95,13 @@ class Render2DMixin:
             row_by_oid[oid] = row
         return renders, row_by_oid
 
+    def _depiction_bytes_for_render(self, column: str, oid: int) -> bytes:
+        """Packed orientation for one cell, or empty bytes for the usual layout."""
+        store = getattr(self, "_depiction_coords", None)
+        if store is None:
+            return b""
+        return store.get(str(column), int(oid)) or b""
+
     def _iter_render2d_structure_payloads(self):
         """Yield ``(oid, payload)`` for every stored structure, preferring unhydrated payloads.
 
@@ -104,15 +111,30 @@ class Render2DMixin:
         store = self.mols
         bulk = getattr(store, "iter_structure_payloads", None)
         if not callable(bulk):
+            from ...chem.depiction_coords import apply_depiction_coords
+
             for oid in list(store):
                 mol = store.get(int(oid))
                 if mol is not None:
-                    yield int(oid), mol
+                    yield (
+                        int(oid),
+                        apply_depiction_coords(
+                            mol, self._depiction_bytes_for_render("Structure", int(oid))
+                        ),
+                    )
             return
         for oid, blob, smiles in bulk():
             if not blob and not smiles:
                 continue
-            yield oid, (STRUCTURE_PAYLOAD_TAG, blob or b"", smiles.encode("utf-8"))
+            yield (
+                oid,
+                (
+                    STRUCTURE_PAYLOAD_TAG,
+                    blob or b"",
+                    smiles.encode("utf-8"),
+                    self._depiction_bytes_for_render("Structure", int(oid)),
+                ),
+            )
 
     def _build_render2d_tasks_in_table_order(
         self,
@@ -142,7 +164,12 @@ class Render2DMixin:
                 task_payload: tuple = (REACTION_PAYLOAD_TAG, text.encode("utf-8"))
                 rw, rh = reaction_depict_size(zoomed=zoomed)
             else:
-                task_payload = (STRUCTURE_PAYLOAD_TAG, payload.blob or b"", text.encode("utf-8"))
+                task_payload = (
+                    STRUCTURE_PAYLOAD_TAG,
+                    payload.blob or b"",
+                    text.encode("utf-8"),
+                    self._depiction_bytes_for_render(src, oid),
+                )
                 rw, rh = (zoom_w, zoom_h) if zoomed else (base_w, base_h)
             renders.append((oid, task_payload, rw, rh))
             row_by_oid[oid] = row_for_oid(oid)

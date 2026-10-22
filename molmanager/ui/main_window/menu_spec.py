@@ -284,12 +284,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "Size, color, and style stay independent of Settings → Font."
             ),
         ),
+        SEPARATOR,
         action(
             "&Sketcher…",
             "open_sketcher",
             hotkey="tools.sketcher",
             tooltip="Open the structure sketcher to draw or edit molecules.",
         ),
+        SEPARATOR,
         action(
             "&Browser…",
             "open_selection_browser",
@@ -376,6 +378,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 tooltip=(
                     "Regenerate 2D structure drawings for selected rows as a background "
                     "batch (see Log)."
+                ),
+            ),
+            action(
+                "Align to Substructure…",
+                "run_align_substructure",
+                tooltip=(
+                    "Redraw matching rows so a substructure you supply sits in one "
+                    "shared orientation. Rows that do not match are left unchanged."
                 ),
             ),
             tooltips_visible=True,

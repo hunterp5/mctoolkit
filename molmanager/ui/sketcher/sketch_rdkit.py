@@ -1563,6 +1563,19 @@ class SketchWidgetRdkitMixin:
                 parts.append(smi)
         return ".".join(parts) if parts else ""
 
+    def to_query_mol(self) -> Chem.Mol | None:
+        """Single-fragment sketch with its coordinates, for substructure alignment.
+
+        Disconnected sketches return ``None``. Query atoms (wildcards) are kept.
+        """
+        comps = [comp for comp in self.connected_components() if comp]
+        if len(comps) != 1:
+            return None
+        mol = self._mol_from_node_ids(comps[0])
+        if mol is None or mol.GetNumAtoms() < 1 or mol.GetNumConformers() < 1:
+            return None
+        return mol
+
     def to_smarts(self) -> str:
         """RDKit SMARTS for the full sketch (fragments joined with '.')."""
         if not self.nodes:

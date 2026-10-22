@@ -55,6 +55,8 @@ class WorkerSignals(QObject):
     # --- Batch chemistry / tools (disconnect, descriptors, conformers, custom calc, export) ---
     disconnect_fragments_finished = pyqtSignal(list)
     neutralized = pyqtSignal(list)
+    # Align to substructure: dict with column, aligned (oid, coord bytes), counts.
+    substructure_aligned = pyqtSignal(object)
     # Fast Prepare (fused disconnect, optional neutralize): list of
     # (oid, mol_blob_bytes, smaller_fragments_text, canonical_smiles_or_empty)
     fast_prepared = pyqtSignal(list)
