@@ -158,6 +158,82 @@ def test_charges_and_isotopes_are_scripts():
     ]
 
 
+def _fda_molecules(names: set[str]) -> dict[str, Chem.Mol]:
+    """FDA sample molecules whose ``_Name`` starts with one of *names*, keeping SDF coordinates."""
+    from molmanager.chem.molecule_conversion import safe_mol_prop_string
+
+    found = {}
+    for mol in Chem.SDMolSupplier(str(ROOT / "samples" / "fda_approved.sdf")):
+        if mol is None:
+            continue
+        words = safe_mol_prop_string(mol, "_Name").split(".")[0].split()
+        name = words[-1] if words else ""
+        if name in names:
+            found[name] = mol
+    return found
+
+
+def _boxes_overlap(a, b) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def test_added_stereo_hydrogens_stay_clear_of_other_labels_and_bonds():
+    from molmanager.chem.depiction_builder import _box_interval
+
+    mols = _fda_molecules({"Exemestane", "Dutasteride", "Artemisinin", "Gelsemine"})
+    assert len(mols) == 4
+    for name, mol in mols.items():
+        scene, _reason = build_scene(mol)
+        prepared = rdMolDraw2D.PrepareMolForDrawing(mol)
+        added = [lab for lab in scene.labels if lab.atom >= mol.GetNumAtoms()]
+        assert added, name
+        for lab in added:
+            parent_bond = prepared.GetAtomWithIdx(lab.atom).GetBonds()[0].GetIdx()
+            for other in scene.labels:
+                assert other is lab or not _boxes_overlap(lab.box, other.box), name
+            for s in scene.strokes:
+                if s.bond == parent_bond:
+                    continue
+                span = _box_interval((s.x1, s.y1), (s.x2, s.y2), lab.box)
+                assert span is None or span[1] - span[0] < 1e-3, name
+
+
+def test_moving_added_hydrogens_keeps_the_drawn_stereo():
+    from rdkit.Chem.Draw import rdMolDraw2D as draw
+
+    from molmanager.chem.depiction_builder import _SceneBuilder
+
+    def perceived(prepared, positions) -> str:
+        copy = Chem.Mol(prepared)
+        conf = copy.GetConformer()
+        for i, (x, y) in enumerate(positions):
+            conf.SetAtomPosition(i, Point3D(x, y, 0.0))
+        for atom in copy.GetAtoms():
+            atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
+        Chem.AssignChiralTypesFromBondDirs(copy, conf.GetId())
+        Chem.AssignStereochemistry(copy, cleanIt=True, force=True)
+        return Chem.MolToSmiles(Chem.RemoveHs(copy))
+
+    checked = 0
+    for index, mol in enumerate(Chem.SDMolSupplier(str(ROOT / "samples" / "fda_approved.sdf"))):
+        if index >= 600:
+            break
+        if mol is None or scene_fallback_reason(mol):
+            continue
+        prepared = draw.PrepareMolForDrawing(mol)
+        if prepared.GetNumAtoms() == mol.GetNumAtoms():
+            continue
+        conf = prepared.GetConformer()
+        original = [
+            (conf.GetAtomPosition(i).x, conf.GetAtomPosition(i).y)
+            for i in range(len(conf.GetPositions()))
+        ]
+        moved = _SceneBuilder(prepared, first_added_atom=mol.GetNumAtoms()).pos
+        assert perceived(prepared, moved) == perceived(prepared, original), index
+        checked += 1
+    assert checked > 50
+
+
 def test_salt_fragments_are_slid_clear_of_each_other():
     for smiles in ("[NH4+].[Cl-]", "[Na+].[Na+].[O-]S(=O)(=O)[O-]", "CC(=O)[O-].[K+]"):
         scene = _scene(smiles)

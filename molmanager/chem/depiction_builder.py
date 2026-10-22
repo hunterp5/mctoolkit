@@ -62,7 +62,7 @@ from molmanager.chem.depiction_text import cap_height, text_advance, text_ink_bo
 
 # Bump whenever the builder draws the same molecule differently, so cached scenes
 # (``.mctcache`` sidecars) are rebuilt instead of showing the old picture.
-BUILDER_REVISION = 1
+BUILDER_REVISION = 2
 
 # Fractions of the mean bond length.
 DOUBLE_BOND_OFFSET = 0.15
@@ -71,6 +71,7 @@ LABEL_PADDING = 0.05
 WEDGE_HALF_WIDTH = 0.1
 HASH_SPACING = 0.1
 FRAGMENT_GAP = 0.5
+STEREO_H_LENGTH = 0.8
 MIN_HASH_DASHES = 4
 # Fractions of the normal label em size.
 SUBSCRIPT_DROP = 0.25
@@ -143,7 +144,7 @@ def build_scene(mol) -> tuple[DepictionScene | None, str | None]:
         return None, "prepare_failed"
     if any(b.GetBondType() == Chem.BondType.AROMATIC for b in prepared.GetBonds()):
         return None, "not_kekulized"
-    return _SceneBuilder(prepared).build(), None
+    return _SceneBuilder(prepared, first_added_atom=mol.GetNumAtoms()).build(), None
 
 
 def _sub(p: Point, q: Point) -> Point:
@@ -171,6 +172,30 @@ def _unit(v: Point) -> Point:
 
 def _cross(u: Point, v: Point) -> float:
     return u[0] * v[1] - u[1] * v[0]
+
+
+def _segment_distance(point: Point, p: Point, q: Point) -> float:
+    """Distance from *point* to the segment ``p → q``."""
+    seg = _sub(q, p)
+    size = seg[0] * seg[0] + seg[1] * seg[1]
+    if size < 1e-12:
+        return _length(_sub(point, p))
+    t = max(0.0, min(1.0, ((point[0] - p[0]) * seg[0] + (point[1] - p[1]) * seg[1]) / size))
+    return _length(_sub(point, _lerp(p, q, t)))
+
+
+def _gap_bisectors(angles: list[float]) -> list[Point]:
+    """Unit vectors bisecting each gap between bond *angles* (radians) around an atom."""
+    if not angles:
+        return []
+    ordered = sorted(angles)
+    out = []
+    for k, start in enumerate(ordered):
+        end = ordered[(k + 1) % len(ordered)]
+        gap = (end - start) % (2 * math.pi) or 2 * math.pi
+        mid = start + gap / 2
+        out.append((math.cos(mid), math.sin(mid)))
+    return out
 
 
 def _box_interval(p: Point, q: Point, box: Box) -> tuple[float, float] | None:
@@ -219,10 +244,15 @@ def _trim(p: Point, q: Point, boxes: list[Box]) -> tuple[float, float] | None:
 
 
 class _SceneBuilder:
-    """One molecule's scene. Use once: ``_SceneBuilder(prepared_mol).build()``."""
+    """One molecule's scene. Use once: ``_SceneBuilder(prepared_mol).build()``.
 
-    def __init__(self, mol) -> None:
+    Atoms from *first_added_atom* on are the stereo hydrogens drawing preparation
+    added; they are re-placed and left out of the mean bond length.
+    """
+
+    def __init__(self, mol, first_added_atom: int | None = None) -> None:
         self.mol = mol
+        self.first_added = mol.GetNumAtoms() if first_added_atom is None else first_added_atom
         conf = mol.GetConformer()
         self.pos: list[Point] = []
         for index in range(mol.GetNumAtoms()):
@@ -231,10 +261,12 @@ class _SceneBuilder:
         lengths = [
             _length(_sub(self.pos[b.GetBeginAtomIdx()], self.pos[b.GetEndAtomIdx()]))
             for b in mol.GetBonds()
+            if max(b.GetBeginAtomIdx(), b.GetEndAtomIdx()) < self.first_added
         ]
         lengths = [size for size in lengths if size > 1e-6]
         self.mbl = sum(lengths) / len(lengths) if lengths else DEFAULT_BOND_LENGTH
         self.em = LABEL_EM * self.mbl
+        self._place_added_hydrogens()
         self.roles = [atom.GetAtomicNum() for atom in mol.GetAtoms()]
         self.trim_boxes: dict[int, Box] = {}
         self.strokes: list[Stroke] = []
@@ -263,6 +295,47 @@ class _SceneBuilder:
             fills=tuple(self.fills),
             labels=tuple(self.labels),
         )
+
+    def _place_added_hydrogens(self) -> None:
+        """Put each added stereo hydrogen where it has the most room.
+
+        Drawing preparation adds them one unit from their atom whatever the drawing's
+        bond length, often towards a neighbouring hydrogen or substituent (two ring
+        fusion hydrogens can land half a unit apart). Candidates are RDKit's direction
+        and the bisector of every gap between the atom's other bonds, at
+        ``STEREO_H_LENGTH`` of the mean bond length; the one farthest from other
+        atoms and bonds wins. With three other bonds in the plane the wedge reads the
+        same in any gap, so the stereo is unchanged.
+        """
+        for index in range(self.first_added, self.mol.GetNumAtoms()):
+            atom = self.mol.GetAtomWithIdx(index)
+            if atom.GetAtomicNum() != 1 or atom.GetDegree() != 1:
+                continue
+            parent = atom.GetNeighbors()[0].GetIdx()
+            here = self.pos[parent]
+            reach = STEREO_H_LENGTH * self.mbl
+            others = [_sub(self.pos[i], here) for i in self._others(parent, index) if i < index]
+            directions = [_unit(_sub(self.pos[index], here))]
+            directions += _gap_bisectors([math.atan2(v[1], v[0]) for v in others])
+            candidates = [_add(here, d, reach) for d in directions if d != (0.0, 0.0)]
+            if candidates:
+                self.pos[index] = max(candidates, key=lambda q: self._clearance(q, index))
+
+    def _clearance(self, point: Point, hydrogen: int) -> float:
+        """Distance from *point* to the nearest atom or bond placed before *hydrogen*.
+
+        Hydrogens are placed in index order, so lower indices are heavy atoms and
+        hydrogens already moved; later ones are still at RDKit's positions and ignored.
+        """
+        best = min(
+            (_length(_sub(point, self.pos[i])) for i in range(hydrogen)),
+            default=math.inf,
+        )
+        for bond in self.mol.GetBonds():
+            a, b = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+            if max(a, b) < hydrogen:
+                best = min(best, _segment_distance(point, self.pos[a], self.pos[b]))
+        return best
 
     def _separate_fragments(self, labels: dict[int, Label]) -> bool:
         """Slide fragments right until no two share space, labels included.
