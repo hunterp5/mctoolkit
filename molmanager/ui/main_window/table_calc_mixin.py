@@ -607,9 +607,7 @@ class TableCalcMixin:
             )
             for j, oid in enumerate(oids)
         ]
-        written = self.on_calc_finished(
-            rows, [range_name, class_name], progress_label=TOOL_BINNING
-        )
+        written = self.on_calc_finished(rows, [range_name, class_name], progress_label=TOOL_BINNING)
         range_final = written[0] if written else range_name
         class_final = written[1] if len(written) > 1 else class_name
         labeled = sum(1 for label in binned.ranges if label)

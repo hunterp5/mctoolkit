@@ -213,6 +213,7 @@ def test_binning_dialog_methods_and_params(qapp) -> None:  # noqa: ARG001
     dlg.bin_count_spin.setValue(2)
     assert dlg.class_labels_input.isHidden() is False
     assert dlg.class_labels_input.text() == "Inactive; Active"
+    dlg.col_combo.setCurrentText("LogP")
     assert dlg.params().range_column == "LogP_bin"
     assert dlg.params().class_column == "LogP_class"
     assert dlg.params().class_labels == ("Inactive", "Active")
