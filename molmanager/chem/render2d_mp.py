@@ -26,6 +26,7 @@ from rdkit import Chem
 
 from .depiction_builder import build_scene
 from .depiction_coords import apply_depiction_coords
+from .depiction_layout import LayoutOptions, current_layout_options
 from .depiction_scene import SceneHighlight, pack_scene
 from .molecule_conversion import parse_molecule_from_cell_text
 from .structure_2d_depiction import render_molecule_png, render_reaction_png
@@ -78,9 +79,9 @@ def mol_from_render_payload(payload):
     return payload
 
 
-def _scene_blob(mol) -> bytes:
+def _scene_blob(mol, layout: LayoutOptions | None) -> bytes:
     """Packed depiction scene for *mol*, or empty when the row needs the RDKit picture."""
-    scene, _reason = build_scene(mol)
+    scene, _reason = build_scene(mol, layout)
     if scene is None:
         return b""
     try:
@@ -96,13 +97,14 @@ def molecule_image_bytes(
     *,
     want_scene: bool,
     highlight: SceneHighlight | None = None,
+    layout: LayoutOptions | None = None,
 ) -> bytes:
     """Stored image bytes for *mol*: its packed scene when wanted and drawable, else a PNG.
 
     Scenes never contain *highlight*, since the painter adds it at draw time; only the
-    PNG fallback has it drawn in.
+    PNG fallback has it drawn in. *layout* defaults to the configured layout options.
     """
-    scene = _scene_blob(mol) if want_scene else b""
+    scene = _scene_blob(mol, layout) if want_scene else b""
     return scene or render_molecule_png(mol, int(width), int(height), highlight=highlight)
 
 
@@ -125,6 +127,7 @@ def mp_render_structure_batch(args: tuple) -> list[tuple]:
     """
     items, w, h = args[:3]
     want_scenes = bool(args[3]) if len(args) > 3 else False
+    layout = current_layout_options() if want_scenes else None
     width, height = int(w), int(h)
     out: list[tuple] = []
 
@@ -157,7 +160,8 @@ def mp_render_structure_batch(args: tuple) -> list[tuple]:
                 mol = apply_depiction_coords(mol, _coord_blob(payload))
             else:
                 mol = Chem.Mol(payload)
-            emit(oid, molecule_image_bytes(mol, width, height, want_scene=want_scenes), True)
+            image = molecule_image_bytes(mol, width, height, want_scene=want_scenes, layout=layout)
+            emit(oid, image, True)
         except Exception:  # noqa: BLE001 — per-row draw failures must not abort the batch
             emit(oid, b"", False)
     return out

@@ -30,7 +30,7 @@ import os
 import zipfile
 from pathlib import Path
 
-from ..chem.depiction_builder import BUILDER_REVISION
+from ..chem.depiction_builder import scene_revision
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ def build_cache_header(
     header = {
         "format": CACHE_FORMAT,
         "version": int(CACHE_VERSION),
-        "scene_revision": int(BUILDER_REVISION),
+        "scene_revision": scene_revision(),
         "depict_width": int(depict_width),
         "depict_height": int(depict_height),
         "zoomed_ids": sorted(int(x) for x in (zoomed_ids or [])),
@@ -120,9 +120,9 @@ def cached_pngs_fit(header: dict, *, depict_width: int, depict_height: int) -> b
 
 
 def cached_scenes_current(header: dict) -> bool:
-    """True when the cache's scenes came from the current scene builder."""
+    """True when the cache's scenes came from the current builder and layout options."""
     try:
-        return int(header.get("scene_revision", -1)) == BUILDER_REVISION
+        return int(header.get("scene_revision", -1)) == scene_revision()
     except (TypeError, ValueError):
         return False
 

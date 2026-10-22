@@ -16,9 +16,9 @@
 
 """Build a :class:`DepictionScene` from an RDKit molecule, without Qt.
 
-Molecules are prepared by RDKit's ``PrepareMolForDrawing`` exactly as the PNG
-path does, so coordinates, Kekulé form, wedges and added stereo hydrogens match
-today's pictures. The geometry follows RDKit's drawer where it agrees with the
+Coordinates come from :func:`~molmanager.chem.depiction_layout.layout_for_drawing`,
+then RDKit's ``PrepareMolForDrawing`` sets the Kekulé form, wedges and added stereo
+hydrogens as the PNG path does. The geometry follows RDKit's drawer where it agrees with the
 IUPAC 2008 recommendations (docs/IUPAC_DRAWING.md) and the IUPAC rule where it
 does not:
 
@@ -58,11 +58,16 @@ from molmanager.chem.depiction_scene import (
     StrokeStyle,
     scene_bounds,
 )
+from molmanager.chem.depiction_layout import (
+    LayoutOptions,
+    current_layout_options,
+    layout_for_drawing,
+)
 from molmanager.chem.depiction_text import cap_height, text_advance, text_ink_bounds
 
 # Bump whenever the builder draws the same molecule differently, so cached scenes
 # (``.mctcache`` sidecars) are rebuilt instead of showing the old picture.
-BUILDER_REVISION = 3
+BUILDER_REVISION = 4
 
 # Fractions of the mean bond length.
 DOUBLE_BOND_OFFSET = 0.15
@@ -133,13 +138,24 @@ def scene_fallback_reason(mol) -> str | None:
     return None
 
 
-def build_scene(mol) -> tuple[DepictionScene | None, str | None]:
-    """``(scene, None)`` for a drawable molecule, else ``(None, reason)``."""
+def scene_revision(layout: LayoutOptions | None = None) -> int:
+    """Cache revision of scenes built now: the builder revision plus the layout options."""
+    options = layout if layout is not None else current_layout_options()
+    return BUILDER_REVISION * 8 + options.token
+
+
+def build_scene(
+    mol, layout: LayoutOptions | None = None
+) -> tuple[DepictionScene | None, str | None]:
+    """``(scene, None)`` for a drawable molecule, else ``(None, reason)``.
+
+    *layout* defaults to :func:`current_layout_options`; pass it when building many scenes.
+    """
     reason = scene_fallback_reason(mol)
     if reason is not None:
         return None, reason
     try:
-        prepared = rdMolDraw2D.PrepareMolForDrawing(mol)
+        prepared = rdMolDraw2D.PrepareMolForDrawing(layout_for_drawing(mol, layout))
     except (RuntimeError, ValueError):
         return None, "prepare_failed"
     if any(b.GetBondType() == Chem.BondType.AROMATIC for b in prepared.GetBonds()):
