@@ -30,6 +30,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ..chem.rdkit_fingerprints import DEFAULT_FINGERPRINT_LABEL
 from ..descriptors.catalog import DESCRIPTOR_TAB_ORDER, descriptor_tab_items
 from ..descriptors.descriptor_cache_reuse import column_complete_for_oids
 from ..descriptors.descriptors_3d import DESCRIPTOR_3D_KEYS
@@ -57,7 +58,7 @@ _QUICK_SKIP_MODELS = frozenset({"svr"})
 _IONIZATION_KEYS = frozenset({"LOGD74", "LOGS74", "AB_MPS", "CNS_MPO"})
 _SKIP_TABS = frozenset({"Name", "Fingerprints"})
 
-FP_MORGAN = "Morgan (r=2, n=1024)"
+FP_MORGAN = DEFAULT_FINGERPRINT_LABEL
 FP_MACCS = "MACCS (166)"
 FP_RDK = "RDK path (1024)"
 

@@ -34,7 +34,11 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-from ...chem.rdkit_fingerprints import SIMILARITY_FP_TYPE_LABELS, descriptor_onbits_column_aliases
+from ...chem.rdkit_fingerprints import (
+    SIMILARITY_FP_TYPE_LABELS,
+    descriptor_onbits_column_aliases,
+    select_default_fingerprint,
+)
 from ...chem.structure_payload import mols_from_payloads
 from ...platform_support.config import load_config
 from ...platform_support.memory_guards import check_diverse_subset_workload
@@ -88,6 +92,7 @@ class DiverseSubsetDialog(QDialog):
 
         self.fp_combo = QComboBox()
         self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
+        select_default_fingerprint(self.fp_combo)
         form.addRow("Fingerprint:", self.fp_combo)
 
         self.mode_combo = QComboBox()

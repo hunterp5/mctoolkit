@@ -49,6 +49,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ...analysis.dimensionality_reduction import is_fingerprint_bitcount_column
+from ...chem.rdkit_fingerprints import select_default_fingerprint
 from ...chem.structure_payload import oid_mol_rows_from_payloads
 from ...workers import ClusterExploreWorker, ClusterWorker, SIMILARITY_FP_TYPE_LABELS
 from ...workers.cluster_worker import (
@@ -137,8 +138,7 @@ class ClusterDialog(QDialog):
         self.fp_combo = QComboBox()
         self.fp_combo.addItem(_FP_NONE_LABEL)
         self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
-        if self.fp_combo.count() > 1:
-            self.fp_combo.setCurrentIndex(1)
+        select_default_fingerprint(self.fp_combo)
         self.fp_combo.setToolTip(
             "None clusters numeric columns only. Otherwise concatenate this fingerprint, "
             "or use it alone when no columns are checked."

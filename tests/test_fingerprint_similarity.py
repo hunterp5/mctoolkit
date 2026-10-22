@@ -32,6 +32,18 @@ def _toluene() -> Chem.Mol:
     return Chem.MolFromSmiles("Cc1ccccc1")
 
 
+def test_similarity_dialogs_default_to_morgan_r2_2048(qapp):  # noqa: ARG001
+    from molmanager.ui.dialogs.bulk_similarity import BulkSimilarityDialog
+    from molmanager.ui.dialogs.fp_similarity import FPSimilarityDialog
+
+    for dialog_cls in (FPSimilarityDialog, BulkSimilarityDialog):
+        dlg = dialog_cls(None)
+        try:
+            assert dlg.fp_combo.currentText() == "Morgan (r=2, n=2048)"
+        finally:
+            dlg.close()
+
+
 def test_pairwise_metrics_for_related_molecules():
     qmol, tmol = _benzene(), _toluene()
     fp_choice = "Morgan (r=2, n=1024)"

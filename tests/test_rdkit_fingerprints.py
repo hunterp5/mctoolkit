@@ -21,6 +21,7 @@ from __future__ import annotations
 from rdkit import Chem
 
 from molmanager.chem.rdkit_fingerprints import (
+    DEFAULT_FINGERPRINT_LABEL,
     FINGERPRINT_SPECS,
     SIMILARITY_FP_TYPE_LABELS,
     descriptor_fingerprint_categories,
@@ -36,6 +37,14 @@ def test_similarity_labels_match_specs():
     assert len(SIMILARITY_FP_TYPE_LABELS) == len(FINGERPRINT_SPECS)
     assert "FCFP Morgan" in "\n".join(SIMILARITY_FP_TYPE_LABELS)
     assert "Pattern fingerprint" in SIMILARITY_FP_TYPE_LABELS
+
+
+def test_default_fingerprint_is_morgan_radius_2_2048():
+    spec = spec_for_label(DEFAULT_FINGERPRINT_LABEL)
+    assert spec is not None
+    assert spec.radius == 2
+    assert spec.n_bits == 2048
+    assert DEFAULT_FINGERPRINT_LABEL in SIMILARITY_FP_TYPE_LABELS
 
 
 def test_descriptor_categories_cover_all_specs():

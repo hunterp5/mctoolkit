@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import (
 from ...platform_support.config import load_config
 from ...plotting.plot_radar import resolve_entry_row_oid
 from ...chem.molecule_conversion import parse_molecule_from_cell_text
+from ...chem.rdkit_fingerprints import select_default_fingerprint
 from ...chem.structure_payload import mol_from_payload, mols_from_payloads
 from ...workers import (
     FPSimilarityWorker,
@@ -72,6 +73,7 @@ class FPSimilarityDialog(QDialog):
 
         self.fp_combo = QComboBox()
         self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
+        select_default_fingerprint(self.fp_combo)
         form.addRow("Fingerprint:", self.fp_combo)
 
         self.metric_combo = QComboBox()

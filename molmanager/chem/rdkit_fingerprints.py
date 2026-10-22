@@ -290,7 +290,17 @@ LABEL_ALIASES: dict[str, str] = {
 _LABEL_TO_SPEC: dict[str, FingerprintSpec] = {s.label: s for s in FINGERPRINT_SPECS}
 _KEY_TO_SPEC: dict[str, FingerprintSpec] = {s.internal_key: s for s in FINGERPRINT_SPECS}
 
+# Closed-combo default wherever a tool must choose a 2D fingerprint.
+DEFAULT_FINGERPRINT_LABEL = "Morgan (r=2, n=2048)"
+
 SIMILARITY_FP_TYPE_LABELS: list[str] = [s.label for s in FINGERPRINT_SPECS if s.similarity]
+
+
+def select_default_fingerprint(combo) -> None:
+    """Select Morgan (r=2, n=2048) on a combo that lists fingerprint labels."""
+    index = combo.findText(DEFAULT_FINGERPRINT_LABEL)
+    if index >= 0:
+        combo.setCurrentIndex(index)
 
 
 def resolve_fingerprint_label(label: str) -> str:

@@ -202,6 +202,7 @@ def test_cluster_dialog_disables_tanimoto_without_a_fingerprint(qapp):
 
     dlg = ClusterDialog(None)
     try:
+        assert dlg.fp_combo.currentText() == "Morgan (r=2, n=2048)"
         keys = [dlg.method_combo.itemData(i) for i in range(dlg.method_combo.count())]
         dlg.method_combo.setCurrentIndex(keys.index("jarvis_patrick"))
         dlg.fp_combo.setCurrentIndex(0)

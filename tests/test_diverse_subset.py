@@ -337,6 +337,7 @@ def test_diverse_subset_dialog_mode_uses_item_data(qapp):  # noqa: ARG001
 
     dlg = DiverseSubsetDialog(None)
     try:
+        assert dlg.fp_combo.currentText() == "Morgan (r=2, n=2048)"
         keys = [dlg.mode_combo.itemData(i) for i in range(dlg.mode_combo.count())]
         assert keys == [k for k, _ in DIVERSE_SUBSET_MODE_LABELS]
         dlg.mode_combo.setCurrentIndex(keys.index("fast"))
