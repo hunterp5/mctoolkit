@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from .app_kernel import AppKernel, bind_mixin_methods
-from .main_window.session_csv_mixin import SessionCsvMixin
 from .main_window.session_plots_mixin import SessionPlotsMixin
 from .main_window.session_restore_mixin import SessionRestoreMixin
 from .main_window.session_save_mixin import SessionSaveMixin
@@ -41,5 +40,4 @@ class SessionController:
             SessionTableLayoutMixin,
             SessionPlotsMixin,
             SessionRestoreMixin,
-            SessionCsvMixin,
         )

@@ -301,12 +301,6 @@ class TableUIMixin(
             if callable(show_idle):
                 show_idle()
         self._restore_render2d_batch_environment()
-        self._session_restore_ctx = None
-        abort_csv = getattr(self, "_abort_csv_session_load", None)
-        if callable(abort_csv):
-            abort_csv()
-        else:
-            self._csv_session_ctx = None
         self._session_load_generation = int(getattr(self, "_session_load_generation", 0)) + 1
         self._invalidate_substructure_async_jobs()
         self._sqlite_rebuild_gen = int(getattr(self, "_sqlite_rebuild_gen", 0)) + 1

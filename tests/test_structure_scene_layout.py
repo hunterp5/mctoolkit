@@ -18,14 +18,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from rdkit import Chem
 
 from molmanager.chem.depiction_builder import build_scene
 from molmanager.chem.depiction_scene import pack_scene
-from molmanager.storage.session_structure_cache import write_structure_cache
 from molmanager.storage.structure_render_store import StructureRenderStore
 from molmanager.table import structure_depiction_layout as layout
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
@@ -100,28 +97,23 @@ def test_resize_renders_only_rows_without_a_scene(window, monkeypatch) -> None:
     assert window._table_model._structure_png_store.scene_oids() == {0}
 
 
-def test_reopen_keeps_scenes_from_a_cache_at_another_size(
-    window, monkeypatch, tmp_path: Path
-) -> None:
-    _no_workers(window, monkeypatch)
-    session = tmp_path / "demo.cms"
-    session.write_bytes(b"{}")
-    store = window._table_model._structure_png_store
-    store.ingest_png(2, b"\x89PNG-drawn-at-the-old-size")
-    write_structure_cache(
-        session,
-        store.export_sqlite_bytes(),
-        depict_width=10,
-        depict_height=10,
-        zoomed_ids=[1],
-        oid_count=len(store),
-    )
-    window._table_model.clear_structure_png_store()
-    window._session_source_path = str(session)
-    window.zoomed_ids = {1}
+def test_reopen_paints_saved_scenes_at_another_size(window, monkeypatch) -> None:
+    from session_roundtrip import save_session_file
 
-    assert window._try_load_session_structure_cache()
-    loaded = window._table_model._structure_png_store
-    assert sorted(loaded.png_oids()) == [0, 1]
-    zoomed = window._table_model.structure_pixmap_for_oid(1)
-    assert zoomed.width() == 2 * layout.structure_depict_width()
+    window._table_model._structure_png_store.ingest_png(2, b"\x89PNG-drawn-at-the-old-size")
+    window.zoomed_ids = {1}
+    layout.set_structure_depict_size(10, 10, persist=False)
+    session = save_session_file(window)
+    layout.set_structure_depict_size(
+        layout.structure_depict_width() + 90, layout.structure_depict_height() + 90, persist=False
+    )
+    reopened = ChemistryWorkspaceWindow()
+    _no_workers(reopened, monkeypatch)
+    try:
+        assert reopened.apply_saved_session_from_file(str(session))
+        loaded = reopened._table_model._structure_png_store
+        assert sorted(loaded.png_oids()) == [0, 1]
+        zoomed = reopened._table_model.structure_pixmap_for_oid(1)
+        assert zoomed.width() == 2 * layout.structure_depict_width()
+    finally:
+        reopened.close()

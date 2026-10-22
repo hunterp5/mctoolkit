@@ -49,16 +49,23 @@ from molmanager.protein.protein_interactions import (
     detect_prolif_interactions,
     prolif_available,
 )
-from molmanager.table.session_codec import expand_session_document, loads_session_bytes
 from molmanager.protein.structure_atoms import parse_structure_atoms, pocket_view_plan
 from molmanager.protein.structure_cif import _parse_cif_loops, cif_viewer_bond_tables
 from molmanager.protein.structure_inventory import (
     parse_polymer_sequences,
     parse_structure_components,
 )
+from molmanager.table.session_v4 import read_session_v4
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
 from molmanager.ui.protein_embed import ProteinEmbedView
 from molmanager.ui.protein_viewer import ProteinViewerDialog
+
+
+def _session_document(cms_path: Path) -> dict:
+    """The session's manifest and sidecars; row and store files are discarded."""
+    opened = read_session_v4(cms_path)
+    opened.discard_temp_files()
+    return opened.manifest
 
 
 def _ms(fn, *, n: int = 1, warmup: bool = True) -> tuple[list[float], object]:
@@ -157,8 +164,7 @@ def _bench_open_from_app(cms_path: Path) -> None:
     try:
         app._try_auto_render_all_structures_after_ingest = lambda: False
         t0 = time.perf_counter()
-        raw = cms_path.read_bytes()
-        doc = expand_session_document(loads_session_bytes(raw))
+        doc = _session_document(cms_path)
         decode_ms = (time.perf_counter() - t0) * 1000.0
         t0 = time.perf_counter()
         app._restore_protein_viewer(doc.get("protein_viewer"))
@@ -204,7 +210,7 @@ def main() -> None:
     _qapp = QApplication.instance() or QApplication([])
     ProteinEmbedView._ensure_web = lambda self: None  # type: ignore[method-assign]
     t0 = time.perf_counter()
-    doc = expand_session_document(loads_session_bytes(cms_path.read_bytes()))
+    doc = _session_document(cms_path)
     decode_ms = (time.perf_counter() - t0) * 1000.0
     pv = doc.get("protein_viewer")
     print(f"CMS: {cms_path}  ({cms_path.stat().st_size / (1024 * 1024):.1f} MB)", flush=True)

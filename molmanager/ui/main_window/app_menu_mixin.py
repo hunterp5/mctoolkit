@@ -99,10 +99,7 @@ class AppMenuMixin:
             self._warn_could_not_open(title, problem)
             return
         if kind == KIND_SESSION:
-            if str(path).lower().endswith(".csv"):
-                self.load_session_csv(path)
-            else:
-                self.apply_saved_session_from_file(path)
+            self.apply_saved_session_from_file(path)
             return
         self.load_file(path)
 

@@ -18,8 +18,6 @@
 
 from __future__ import annotations
 
-from ...table.session_codec import SESSION_VERSION_CURRENT
-from .session_csv_mixin import SessionCsvMixin
 from .session_plots_mixin import SessionPlotsMixin
 from .session_restore_mixin import SessionRestoreMixin
 from .session_save_mixin import SessionSaveMixin
@@ -31,10 +29,5 @@ class SessionMixin(
     SessionTableLayoutMixin,
     SessionPlotsMixin,
     SessionRestoreMixin,
-    SessionCsvMixin,
 ):
-    _SESSION_FORMAT = "molmanager_session"
-    _SESSION_FORMAT_ALIASES = frozenset(
-        {"molmanager_session", "MOLMANAGER_session", "chemmanager_session"}
-    )
-    _SESSION_VERSION = SESSION_VERSION_CURRENT
+    pass

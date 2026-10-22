@@ -25,31 +25,20 @@ import time
 from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtWidgets import QApplication
 
-from ...platform_support.config import load_config
-from ...chem.structure_source_headers import is_tool_generated_structure_header
+from ...chem.depiction_builder import scene_revision
 from ...conformers.conformer_column_codec import deserialize_confs_sidecar
 from ...ionization.microstate_cache import restore_ionization_sidecar
-from ...table.open_messages import damaged_session_message
-from ...table.session_codec import (
-    SESSION_ENSEMBLES_KEY,
-    expand_session_document,
-    parse_session_global_bounds,
-    read_session_v3_chunk,
-    read_session_v3_ensembles,
-    read_session_v3_manifest,
-    session_v3_chunk_names,
-    session_v3_chunk_rows,
-)
-from ...storage import ensure_confs_sidecar, load_mols_from_parse_result, reset_mol_store
+from ...storage import ensure_confs_sidecar, ensure_mol_store, reset_mol_store
+from ...storage.structure_render_store import StructureRenderStore
+from ...table.open_messages import damaged_session_message, message_for_session_read_failure
+from ...table.session_codec import parse_session_global_bounds
+from ...table.session_v4 import SessionOpenResult
+from ...workers.session_save import SessionOpenWorker
+from ...workers.signals import SessionOpenSignals
+from ..recent_paths import KIND_SESSION, remember_recent
 from ..strings import LOADING_DETAIL_SESSION, TOOL_RENDER_2D, loaded_session_status
 from ..threadpool_access import start_runnable_on_app_pool
 from ..widgets import CategoryFilterCard, FilterCard, SubstructureFilterCard, TextFilterCard
-from ...workers.session_rows_parse import (
-    SessionRowsParseResult,
-    SessionRowsParseSignals,
-    SessionRowsParseWorker,
-    parse_session_rows,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -71,40 +60,115 @@ class SessionRestoreMixin:
         self.filters.append(card)
         self._sync_filter_panel_scroll_content()
 
-    def _prepare_session_surface(self, doc: dict) -> int:
-        """Clear the workspace and install session headers. Returns the load generation."""
-        self._session_mutation_paused = True
-        self._pending_session_clean_on_ready = True
-        self._session_restore_ctx = None
-        self._session_v3_ctx = None
-        self._session_finalize_ctx = None
-        self._session_parse_busy = False
-        self._session_awaiting_ready = False
-        self._session_waiting_for_render = False
-        self._session_plot_wait_deadline = None
-        self._session_structure_cache_hit = False
-        self._session_structure_cache_missing = False
-        self._discard_floating_plot_dialogs()
-        # Keep the loading page up through clear_all → row apply (avoid workspace flash).
+    def _show_session_loading_page(self) -> None:
         self._set_ingest_loading(True)
         self._set_workspace_stack_index(0)
         self._loading_detail.setText(LOADING_DETAIL_SESSION)
         self.status_label.setText("Loading session…")
+
+    def _open_session_v4_file(self, path: str) -> None:
+        """Read *path* on a worker thread; :meth:`_on_session_file_read` installs it.
+
+        The current workspace is kept until the read succeeds.
+        """
+        self._show_session_loading_page()
         try:
             from ...workers.render2d_pool import warm_render2d_process_pool
 
             warm_render2d_process_pool()
         except Exception:
             logger.debug("render pool warm failed", exc_info=True)
+        self._session_open_generation = int(getattr(self, "_session_open_generation", 0)) + 1
+        self._session_parse_busy = True
+        signals = SessionOpenSignals(self)
+        worker = SessionOpenWorker(
+            self._session_open_generation,
+            path,
+            signals,
+            want_scene_revision=scene_revision(),
+        )
+        # Pytest has no lasting event-loop turn for threadpool completions; read inline.
+        if "pytest" in sys.modules:
+            signals.finished.connect(self._on_session_file_read, type=Qt.DirectConnection)
+            signals.failed.connect(self._on_session_file_read_failed, type=Qt.DirectConnection)
+            worker.run()
+            self._drain_pending_session_load()
+            return
+        signals.finished.connect(self._on_session_file_read, type=Qt.QueuedConnection)
+        signals.failed.connect(self._on_session_file_read_failed, type=Qt.QueuedConnection)
+        start_runnable_on_app_pool(self, worker)
+
+    def _on_session_file_read_failed(self, generation: int, message: str) -> None:
+        if generation != getattr(self, "_session_open_generation", 0):
+            return
+        self._session_parse_busy = False
+        path = str(getattr(self, "_session_source_path", None) or "")
+        logger.warning("Session read failed for %s: %s", path, message)
+        self._finish_failed_open()
+        self._warn_could_not_open(
+            "Open Session", message_for_session_read_failure(path, ValueError(message))
+        )
+
+    def _on_session_file_read(self, generation: int, result: object) -> None:
+        if not isinstance(result, SessionOpenResult):
+            return
+        if generation != getattr(self, "_session_open_generation", 0):
+            result.discard_temp_files()
+            return
+        self._session_parse_busy = False
+        try:
+            self._install_opened_session(result)
+        except Exception:
+            result.discard_temp_files()
+            logger.exception("Open session: install failed")
+            self._on_session_open_failed()
+            return
+        remember_recent(KIND_SESSION, str(self._session_source_path or ""))
+
+    def _install_opened_session(self, result: SessionOpenResult) -> None:
+        """Swap the read rows and store files into the workspace, then run finalize."""
+        doc = result.manifest
+        gen = self._prepare_session_surface(doc)
+        try:
+            self.table.setUpdatesEnabled(False)
+        except Exception:
+            pass
+        if result.mol_db is not None:
+            ensure_mol_store(self).adopt_file(result.mol_db)
+            result.temp_files.remove(result.mol_db)
+        if result.ensembles_db is not None:
+            ensure_confs_sidecar(self).adopt_file(result.ensembles_db)
+            result.temp_files.remove(result.ensembles_db)
+        self._table_model.install_rows(result.rows)
+        if result.render_db is not None:
+            store = StructureRenderStore()
+            store.adopt_file(result.render_db)
+            result.temp_files.remove(result.render_db)
+            self._table_model.set_structure_png_store(store)
+        n = result.rows.n
+        self._loading_detail.setText(
+            f"Session loaded ({n:,} row(s)).\nRestoring filters and workspace…"
+        )
+        self._begin_session_finalize(doc, result.max_oid, gen=gen)
+
+    def _prepare_session_surface(self, doc: dict) -> int:
+        """Clear the workspace and install session headers. Returns the load generation."""
+        self._session_mutation_paused = True
+        self._pending_session_clean_on_ready = True
+        self._session_finalize_ctx = None
+        self._session_awaiting_ready = False
+        self._session_waiting_for_render = False
+        self._session_plot_wait_deadline = None
+        self._session_structure_cache_hit = False
+        self._discard_floating_plot_dialogs()
+        # Keep the loading page up through clear_all → row install (avoid workspace flash).
+        self._show_session_loading_page()
         self.clear_all()
         self._session_hold_workspace_surfaces = True
         # clear_all() bumps the load generation; capture after that so callbacks match.
         self._session_load_generation = int(getattr(self, "_session_load_generation", 0)) + 1
         gen = self._session_load_generation
-        self._set_ingest_loading(True)
-        self._set_workspace_stack_index(0)
-        self._loading_detail.setText(LOADING_DETAIL_SESSION)
-        self.status_label.setText("Loading session…")
+        self._show_session_loading_page()
         headers = doc.get("headers") or ["ID_HIDDEN", "Structure", "SMILES"]
         if len(headers) < 2 or headers[0] != "ID_HIDDEN" or headers[1] != "Structure":
             raise ValueError("Invalid session headers.")
@@ -130,210 +194,11 @@ class SessionRestoreMixin:
         self.global_bounds = {}
         return gen
 
-    def _apply_session_document(self, doc: dict) -> None:
-        try:
-            doc = expand_session_document(doc)
-        except ValueError as exc:
-            raise ValueError(str(exc) or "Unsupported session format.") from exc
-        if not self._session_format_ok(doc.get("format")) or not self._session_version_ok(
-            doc.get("version")
-        ):
-            raise ValueError("Unsupported session format.")
-        gen = self._prepare_session_surface(doc)
-        rows = doc.get("rows") or []
-        try:
-            self.table.setUpdatesEnabled(False)
-        except Exception:
-            pass
-
-        if not rows:
-            self._begin_session_finalize(doc, -1, gen=gen)
-        else:
-            self._loading_detail.setText(f"Parsing structures…\n0 / {len(rows):,} rows")
-            self.status_label.setText(f"Loading session… (parsing {len(rows):,} rows)")
-            self._session_parse_busy = True
-            signals = SessionRowsParseSignals(self)
-
-            def _on_parsed(result, g=gen, d=doc) -> None:
-                self._on_session_rows_parsed(result, g, d)
-
-            def _on_failed(message, g=gen) -> None:
-                self._on_session_rows_parse_failed(message, g)
-
-            worker = SessionRowsParseWorker(
-                list(rows),
-                data_headers=list(self.headers[2:]),
-                signals=signals,
-                generation=gen,
-                structure_smiles=list(doc.get("structure_smiles") or []),
-                structure_mols=list(doc.get("structure_mols") or []),
-                structure_field=self._session_legacy_structure_field(doc),
-            )
-            # Pytest has no lasting event-loop turn for threadpool completions; parse inline.
-            if "pytest" in sys.modules:
-                signals.finished.connect(_on_parsed, type=Qt.DirectConnection)
-                signals.failed.connect(_on_failed, type=Qt.DirectConnection)
-                worker.run()
-            else:
-                signals.finished.connect(_on_parsed, type=Qt.QueuedConnection)
-                signals.failed.connect(_on_failed, type=Qt.QueuedConnection)
-                start_runnable_on_app_pool(self, worker)
-
-        # Tests call apply synchronously; drain until async restore finishes.
-        if "pytest" in sys.modules:
-            self._drain_pending_session_load()
-
-    def _apply_session_v3_file(self, path: str) -> None:
-        """Open a version-3 zip one row chunk at a time."""
-        manifest = read_session_v3_manifest(path)
-        if not self._session_format_ok(manifest.get("format")) or not self._session_version_ok(
-            manifest.get("version")
-        ):
-            raise ValueError("Unsupported session format.")
-        ensembles = read_session_v3_ensembles(path)
-        if ensembles:
-            manifest[SESSION_ENSEMBLES_KEY] = ensembles
-        names = session_v3_chunk_names(path)
-        gen = self._prepare_session_surface(manifest)
-        try:
-            self.table.setUpdatesEnabled(False)
-        except Exception:
-            pass
-        total = int(manifest.get("row_count") or 0)
-        self._session_v3_ctx = {
-            "path": path,
-            "names": names,
-            "index": 0,
-            "gen": gen,
-            "doc": manifest,
-            "max_id": -1,
-            "applied": 0,
-            "total": total,
-        }
-        if not names:
-            self._session_v3_ctx = None
-            self._begin_session_finalize(manifest, -1, gen=gen)
-        else:
-            self._session_parse_busy = True
-            self._loading_detail.setText(f"Parsing structures…\n0 / {total:,} rows")
-            self.status_label.setText(f"Loading session… (parsing {total:,} rows)")
-            QTimer.singleShot(0, self._session_v3_step)
-        if "pytest" in sys.modules:
-            self._drain_pending_session_load()
-
-    def _session_legacy_structure_field(self, doc: dict) -> str | None:
-        """Structure-column override saved by older sessions, when it names a data column.
-
-        Restore writes that column's text into the molecule store, so the session is migrated
-        once and the override is not kept.
-        """
-        field = doc.get("structure_field_override")
-        if not isinstance(field, str) or not field.strip():
-            return None
-        field = field.strip()
-        if field not in self.headers or is_tool_generated_structure_header(field):
-            return None
-        return field
-
-    def _session_v3_data_headers(self, doc: dict) -> list[str]:
-        saved = doc.get("data_headers")
-        if isinstance(saved, list) and saved:
-            return [str(name) for name in saved]
-        return [str(name) for name in list(self.headers)[2:]]
-
-    def _session_v3_step(self) -> None:
-        ctx = getattr(self, "_session_v3_ctx", None)
-        if not ctx or ctx.get("gen") != getattr(self, "_session_load_generation", 0):
-            return
-        names = ctx["names"]
-        index = int(ctx["index"])
-        if index >= len(names):
-            self._finish_session_v3(ctx)
-            return
-        try:
-            chunk = read_session_v3_chunk(ctx["path"], names[index])
-            headers = self._session_v3_data_headers(ctx["doc"])
-            rows, smiles, mols = session_v3_chunk_rows(chunk, headers)
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            self._session_v3_ctx = None
-            self._on_session_rows_parse_failed(
-                str(exc) or "Could not read a session chunk.", ctx["gen"]
-            )
-            return
-        ctx["index"] = index + 1
-        if "pytest" in sys.modules:
-            self._on_session_v3_parsed(
-                parse_session_rows(
-                    rows, headers, smiles, mols, self._session_legacy_structure_field(ctx["doc"])
-                ),
-                ctx["gen"],
-                ctx["doc"],
-            )
-            return
-        signals = SessionRowsParseSignals(self)
-
-        def _on_parsed(result, g=ctx["gen"], d=ctx["doc"]) -> None:
-            self._on_session_v3_parsed(result, g, d)
-
-        def _on_failed(message, g=ctx["gen"]) -> None:
-            self._session_v3_ctx = None
-            self._on_session_rows_parse_failed(message, g)
-
-        worker = SessionRowsParseWorker(
-            rows,
-            data_headers=headers,
-            signals=signals,
-            generation=int(ctx["gen"]),
-            structure_smiles=smiles,
-            structure_mols=mols,
-            structure_field=self._session_legacy_structure_field(ctx["doc"]),
-        )
-        signals.finished.connect(_on_parsed, type=Qt.QueuedConnection)
-        signals.failed.connect(_on_failed, type=Qt.QueuedConnection)
-        start_runnable_on_app_pool(self, worker)
-
-    def _on_session_v3_parsed(self, result: object, generation: int, doc: dict) -> None:
-        if generation != getattr(self, "_session_load_generation", 0):
-            return
-        ctx = getattr(self, "_session_v3_ctx", None)
-        if not ctx or ctx.get("gen") != generation:
-            return
-        if not isinstance(result, SessionRowsParseResult):
-            self._session_v3_ctx = None
-            self._on_session_rows_parse_failed("Invalid session parse result.", generation)
-            return
-        prepared = list(result.prepared_rows or [])
-        load_mols_from_parse_result(self, result)
-        if prepared:
-            self._table_model.append_rows_batch(prepared)
-        ctx["max_id"] = max(int(ctx["max_id"]), int(result.max_id))
-        ctx["applied"] = int(ctx["applied"]) + len(prepared)
-        applied = int(ctx["applied"])
-        total = max(int(ctx["total"]), applied)
-        self.status_label.setText(f"Loading session… ({applied}/{total} rows)")
-        self._loading_detail.setText(f"Loading session…\n{applied:,} / {total:,} rows")
-        if int(ctx["index"]) < len(ctx["names"]):
-            QTimer.singleShot(0, self._session_v3_step)
-            return
-        self._finish_session_v3(ctx)
-
-    def _finish_session_v3(self, ctx: dict) -> None:
-        self._session_v3_ctx = None
-        self._session_parse_busy = False
-        applied = int(ctx["applied"])
-        self._loading_detail.setText(
-            f"Session loaded ({applied:,} row(s)).\nRestoring filters and workspace…"
-        )
-        self._begin_session_finalize(ctx["doc"], int(ctx["max_id"]), gen=int(ctx["gen"]))
-
     def _drain_pending_session_load(self, *, timeout_s: float = 60.0) -> None:
-        """Process Qt events until session parse/apply/finalize complete."""
+        """Process Qt events until session read/install/finalize complete."""
         deadline = time.monotonic() + float(timeout_s)
         while time.monotonic() < deadline:
             busy = bool(getattr(self, "_session_parse_busy", False))
-            busy = busy or getattr(self, "_session_restore_ctx", None) is not None
-            busy = busy or getattr(self, "_session_v3_ctx", None) is not None
-            busy = busy or getattr(self, "_csv_session_ctx", None) is not None
             busy = busy or getattr(self, "_session_finalize_ctx", None) is not None
             busy = busy or bool(getattr(self, "_session_awaiting_ready", False))
             busy = busy or bool(getattr(self, "_session_waiting_for_render", False))
@@ -343,14 +208,10 @@ class SessionRestoreMixin:
             time.sleep(0.001)
         raise TimeoutError("Timed out waiting for session restore to finish.")
 
-    def _session_gui_chunk_size(self) -> int:
-        cfg = load_config()
-        return max(64, int(cfg.session_gui_chunk_size), int(cfg.ingest_gui_chunk_size))
-
-    def _on_session_rows_parse_failed(self, message: str, generation: int) -> None:
-        if generation != getattr(self, "_session_load_generation", 0):
-            return
+    def _on_session_open_failed(self) -> None:
+        """Leave the loading page after the workspace was cleared for a session that failed."""
         self._session_parse_busy = False
+        self._session_finalize_ctx = None
         self._session_awaiting_ready = False
         self._session_waiting_for_render = False
         self._session_hold_workspace_surfaces = False
@@ -359,66 +220,9 @@ class SessionRestoreMixin:
             self.table.setUpdatesEnabled(True)
         except Exception:
             pass
-        path = str(getattr(self, "_session_source_path", None) or "")
-        logger.warning("Session row parse failed for %s: %s", path, message)
         self._finish_failed_open()
+        path = str(getattr(self, "_session_source_path", None) or "")
         self._warn_could_not_open("Open Session", damaged_session_message(path))
-
-    def _on_session_rows_parsed(self, result: object, generation: int, doc: dict) -> None:
-        if generation != getattr(self, "_session_load_generation", 0):
-            return
-        self._session_parse_busy = False
-        if not isinstance(result, SessionRowsParseResult):
-            self._on_session_rows_parse_failed("Invalid session parse result.", generation)
-            return
-        prepared = list(result.prepared_rows or [])
-        load_mols_from_parse_result(self, result)
-        if not prepared:
-            self._begin_session_finalize(doc, int(result.max_id), gen=generation)
-            return
-        chunk = self._session_gui_chunk_size()
-        self._session_restore_ctx = {
-            "gen": generation,
-            "doc": doc,
-            "prepared_rows": prepared,
-            "idx": 0,
-            "chunk": chunk,
-            "max_id": int(result.max_id),
-        }
-        n = len(prepared)
-        self.status_label.setText(f"Loading session… (0/{n} rows)")
-        self._loading_detail.setText(f"Loading session…\n0 / {n:,} rows")
-        QTimer.singleShot(0, self._session_restore_apply_step)
-
-    def _session_restore_apply_step(self) -> None:
-        ctx = getattr(self, "_session_restore_ctx", None)
-        if not ctx or ctx.get("gen") != getattr(self, "_session_load_generation", 0):
-            try:
-                self.table.setUpdatesEnabled(True)
-            except Exception:
-                pass
-            return
-        prepared = ctx["prepared_rows"]
-        doc = ctx["doc"]
-        i = int(ctx["idx"])
-        chunk = int(ctx["chunk"])
-        max_id = int(ctx["max_id"])
-        n = len(prepared)
-        end = min(i + chunk, n)
-        batch = prepared[i:end]
-        if batch:
-            self._table_model.append_rows_batch(batch)
-        ctx["idx"] = end
-        self.status_label.setText(f"Loading session… ({end}/{n} rows)")
-        self._loading_detail.setText(f"Loading session…\n{end:,} / {n:,} rows")
-        if end < n:
-            QTimer.singleShot(0, self._session_restore_apply_step)
-            return
-        self._session_restore_ctx = None
-        self._loading_detail.setText(
-            f"Session loaded ({n:,} row(s)).\nRestoring filters and workspace…"
-        )
-        self._begin_session_finalize(doc, max_id, gen=int(ctx["gen"]))
 
     def _begin_session_finalize(self, doc: dict, max_id: int, *, gen: int) -> None:
         self._session_finalize_ctx = {
@@ -649,13 +453,9 @@ class SessionRestoreMixin:
             self._sqlite_store_dirty = True
 
     def _finalize_session_sidecars_and_reveal(self, doc: dict) -> None:
-        cs = ensure_confs_sidecar(self)
-        blob = doc.get(SESSION_ENSEMBLES_KEY)
-        if isinstance(blob, (bytes, bytearray)) and blob:
-            cs.import_sqlite_bytes(bytes(blob), replace=True)
         side = deserialize_confs_sidecar(doc.get("confs_sidecar"))
         if side:
-            cs.update(side)
+            ensure_confs_sidecar(self).update(side)
         depiction = getattr(self, "_depiction_coords", None)
         if depiction is not None:
             depiction.load_session(doc.get("depiction_2d"))
@@ -719,8 +519,8 @@ class SessionRestoreMixin:
             QTimer.singleShot(0, _apply)
 
     def _start_session_auto_render2d(self) -> None:
-        """Start auto Render 2D under the overlay; full ``.mctcache`` hit skips the wait."""
-        if self._try_load_session_structure_cache():
+        """Start auto Render 2D under the overlay; saved scenes for every row skip the wait."""
+        if self._session_scenes_cover_table():
             self._session_waiting_for_render = False
             return
         render = getattr(self, "_try_auto_render_all_structures_after_ingest", None)
@@ -738,82 +538,23 @@ class SessionRestoreMixin:
         if not started:
             self._session_waiting_for_render = False
 
-    def _try_load_session_structure_cache(self) -> bool:
-        """Install Structure depictions from a sidecar cache; True on a full hit (skip auto-render).
+    def _session_scenes_cover_table(self) -> bool:
+        """True when the session file supplied a scene for every structure row.
 
-        Scenes survive a depiction size change. PNG rows from an older cache, and scenes
-        from an older builder, are dropped. Rows left without a scene are rendered again.
+        Saved scenes come from the current builder (the read drops older revisions) and do
+        not depend on the cell size. Rows still without a scene are drawn by auto-render.
         """
-        path = getattr(self, "_session_source_path", None)
-        if not path:
-            return False
-        from ...storage.session_structure_cache import (
-            cached_scenes_current,
-            read_structure_cache,
-        )
-        from ...storage.structure_render_store import StructureRenderStore
-
-        loaded = read_structure_cache(path)
-        if loaded is None:
-            return False
-        header, png_bytes = loaded
-        store = StructureRenderStore()
-        store.import_sqlite_bytes(png_bytes)
-        store.discard_non_scenes()
-        if not cached_scenes_current(header):
-            store.clear()
-        n = len(store)
-        if n <= 0:
-            store.close()
-            return False
-        model = getattr(self, "_table_model", None)
-        if model is None:
-            store.close()
-            return False
-        model.set_structure_png_store(store)
-        if self._structure_oids_without_scene():
-            # Partial hit: keep the scenes; auto-render draws the rows that have none.
-            self._session_structure_cache_missing = True
+        store = getattr(self._table_model, "_structure_png_store", None)
+        n = len(store) if store is not None else 0
+        if n <= 0 or self._structure_oids_without_scene():
             return False
         self._session_structure_cache_hit = True
         self._apply_scene_zoom_overrides()
         refresh = getattr(self, "_refresh_visible_structure_cells", None)
         if callable(refresh):
             refresh()
-        self.status_label.setText(f"Loaded structure cache ({n:,} depiction(s)).")
+        self.status_label.setText(f"Loaded {n:,} saved depiction(s).")
         return True
-
-    def _write_session_structure_cache(self, session_path: str | None = None) -> None:
-        """Persist current Structure scenes next to *session_path* (or the open session)."""
-        path = session_path or getattr(self, "_session_source_path", None)
-        if not path:
-            return
-        model = getattr(self, "_table_model", None)
-        store = getattr(model, "_structure_png_store", None) if model is not None else None
-        if store is None or len(store) <= 0:
-            return
-        store.discard_non_scenes()
-        if len(store) <= 0:
-            return
-        from ...storage.session_structure_cache import write_structure_cache
-        from ...table.structure_depiction_layout import (
-            structure_depict_height,
-            structure_depict_width,
-        )
-
-        try:
-            blob = store.export_sqlite_bytes()
-        except OSError:
-            logger.debug("structure cache export failed", exc_info=True)
-            return
-        write_structure_cache(
-            path,
-            blob,
-            depict_width=structure_depict_width(),
-            depict_height=structure_depict_height(),
-            zoomed_ids=sorted(int(x) for x in (getattr(self, "zoomed_ids", None) or set())),
-            oid_count=len(store),
-        )
 
     def _hide_session_workspace_until_ready(self) -> None:
         """Keep independent floating plot windows hidden until the workspace overlay lifts."""
@@ -892,9 +633,6 @@ class SessionRestoreMixin:
 
     def _session_on_render2d_batch_finished(self) -> None:
         """Continue session reveal after auto Render 2D (or cancel) completes."""
-        write_cache = getattr(self, "_write_session_structure_cache", None)
-        if callable(write_cache):
-            write_cache()
         if getattr(self, "_session_waiting_for_render", False):
             self._session_waiting_for_render = False
         if not getattr(self, "_session_awaiting_ready", False):

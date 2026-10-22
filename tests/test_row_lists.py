@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 from PyQt5.QtWidgets import QDialog, QMessageBox
 from rdkit import Chem
+from session_roundtrip import open_saved, saved_document
 
 from molmanager.ui.dialogs.row_lists import AddSelectedToListDialog, ManageListsDialog
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
@@ -355,17 +356,17 @@ def test_session_roundtrip_restores_lists(qapp):  # noqa: ARG001
     window.commit_named_row_list("Leads", {1})
     window._session_dirty = False
 
-    doc = window._build_session_document()
+    doc = saved_document(window)
     assert doc["row_lists"] == [
         {"name": "Actives", "oids": [0, 2]},
         {"name": "Leads", "oids": [1]},
     ]
-    selected = window._build_session_document(oids={1})
+    selected = saved_document(window, oids={1})
     assert selected["row_lists"] == [{"name": "Leads", "oids": [1]}]
-    assert "row_lists" not in window._build_session_document(oids={9})
+    assert not saved_document(window, oids={9}).get("row_lists")
 
     restored = ChemistryWorkspaceWindow()
-    restored._apply_session_document(doc)
+    open_saved(window, restored)
     assert restored._row_list_store().names() == ["Actives", "Leads"]
     assert restored._row_list_store().oids("Actives") == [0, 2]
     assert _menu_labels(restored)[1:3] == ["Actives", "Leads"]

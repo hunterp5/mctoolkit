@@ -26,28 +26,32 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
+from functools import partial
 
 from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
 
+from ...chem.depiction_builder import scene_revision
+from ...chem.depiction_scene import SCENE_MAGIC
 from ...conformers.conformer_column_codec import serialize_confs_sidecar
 from ...ionization.microstate_cache import serialize_ionization_sidecar
+from ...ionization.microstate_cache import snapshot as ionization_snapshot
 from ...services.filter_config import cfg_column
+from ...storage import EnsembleStore, MolStore
 from ...table.open_messages import (
     damaged_session_message,
-    message_for_session_read_failure,
+    legacy_session_message,
     not_a_session_message,
     preflight_open_path,
 )
-from ...table.session_codec import (
-    compact_global_bounds,
-    expand_session_document,
-    loads_session_bytes,
-    session_path_is_v3,
-    session_format_ok,
-    session_version_ok,
+from ...table.session_codec import compact_global_bounds
+from ...table.session_v4 import (
+    SessionSaveSnapshot,
+    is_legacy_session,
+    is_session_v4,
+    keep_mask,
+    split_manifest,
+    write_session_v4,
 )
-from ...table.session_document_build import assemble_session_document, write_session_v3
-from ...chem.molecule_conversion import mol_to_canonical_smiles
 from ...workers.session_save import SessionSaveWorker
 from ..background_jobs import register_background_job, unregister_background_job
 from ..recent_paths import KIND_SESSION, remember_recent
@@ -58,12 +62,6 @@ logger = logging.getLogger(__name__)
 
 
 class SessionSaveMixin:
-    def _session_format_ok(self, fmt: object) -> bool:
-        return session_format_ok(fmt)
-
-    def _session_version_ok(self, version: object) -> bool:
-        return session_version_ok(version)
-
     def new_session(self) -> None:
         """Launch a new MolManager instance with nothing loaded."""
         try:
@@ -273,55 +271,6 @@ class SessionSaveMixin:
             [sys.executable, "-m", "molmanager", "--load-session", path], close_fds=True
         )
 
-    def _write_session_csv(self) -> str:
-        """Serialize current table to a session CSV (includes all columns except Structure image)."""
-        if not self.headers or self._table_model.rowCount() == 0:
-            # Still create an empty session file.
-            heads = ["SMILES"]
-        else:
-            # Ensure SMILES is first for readability.
-            heads = [h for h in self.headers if h not in ("ID_HIDDEN", "Structure")]
-            if "SMILES" in heads:
-                heads.remove("SMILES")
-                heads.insert(0, "SMILES")
-            else:
-                heads.insert(0, "SMILES")
-
-        session_dir = os.path.join(tempfile.gettempdir(), "MolManagerSessions")
-        os.makedirs(session_dir, exist_ok=True)
-        fname = f"session_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}.csv"
-        out_path = os.path.join(session_dir, fname)
-
-        import csv
-
-        with open(out_path, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=heads)
-            w.writeheader()
-            for r in range(self._table_model.rowCount()):
-                row: dict[str, str] = {}
-                # Prefer existing SMILES cell; fall back to RDKit mol if present.
-                smi = ""
-                if "SMILES" in self.headers:
-                    smi = self._table_cell_text(r, self.headers.index("SMILES"))
-                if not smi:
-                    idr = self._table_model.cell_text(r, 0)
-                    if idr.isdigit():
-                        mol = self._mol_for_structure_row(r)
-                        if mol is not None:
-                            smi = mol_to_canonical_smiles(mol)
-                row["SMILES"] = smi
-
-                for h in heads:
-                    if h == "SMILES":
-                        continue
-                    if h in self.headers:
-                        row[h] = self._export_cell_text(r, self.headers.index(h))
-                    else:
-                        row[h] = ""
-                w.writerow(row)
-
-        return out_path
-
     def _session_bundle_temp_path(self) -> str:
         """Return a new ``.cms`` path under the temp session directory (does not write)."""
         session_dir = os.path.join(tempfile.gettempdir(), "MolManagerSessions")
@@ -332,38 +281,46 @@ class SessionSaveMixin:
     def _session_data_headers(self) -> list[str]:
         return [h for h in self.headers if h not in ("ID_HIDDEN", "Structure")]
 
-    def _snapshot_structure_payloads(
-        self, oids: set[int] | None
-    ) -> dict[int, tuple[bytes | None, str]]:
-        """One MolStore scan of ``(blob, smiles)`` — no RDKit hydrate on the GUI thread."""
-        payloads: dict[int, tuple[bytes | None, str]] = {}
-        iter_fn = getattr(self.mols, "iter_structure_payloads", None)
-        if not callable(iter_fn):
-            return payloads
-        for oid, blob, smi in iter_fn():
-            oid_i = int(oid)
-            if oids is not None and oid_i not in oids:
-                continue
-            payloads[oid_i] = (blob, smi or "")
-        return payloads
+    def _snapshot_session_save_inputs(self, *, oids: set[int] | None = None) -> SessionSaveSnapshot:
+        """GUI-thread snapshot for the save worker: column blobs, metadata and store files.
 
-    def _snapshot_session_save_inputs(self, *, oids: set[int] | None = None) -> dict:
-        """Cheap GUI snapshot: cell text + stored structure payloads, no RDKit serialize."""
-        data_headers = self._session_data_headers()
-        entries = self._table_model.export_rows_for_sqlite(data_headers)
-        if oids is not None:
-            entries = [(oid, cells) for oid, cells in entries if oid in oids]
-        return {
-            "headers": list(self.headers),
-            "entries": entries,
-            "payloads": self._snapshot_structure_payloads(oids),
-            "metadata": self._session_document_metadata(oids=oids),
-            "ensembles": self._ensembles_sqlite_for_session(oids),
-        }
+        Columns and metadata are copied now. Structures, depictions and ensembles stay in
+        their SQLite stores; the worker copies those tables from the flushed store files.
+        """
+        rows = self._table_model.rows_store()
+        keep = keep_mask(rows.oids[: rows.n], oids)
+        manifest, sidecars = split_manifest(self._session_document_metadata(oids=oids))
+        mols = getattr(self, "mols", None)
+        mol_db = None
+        if isinstance(mols, MolStore):
+            mols.flush()
+            mol_db = mols.db_path
+        ensembles = getattr(self, "_confs_blocks_sidecar", None)
+        ensembles_db = ensembles.db_path if isinstance(ensembles, EnsembleStore) else None
+        render = getattr(self._table_model, "_structure_png_store", None)
+        render_db = render.db_path if render is not None and len(render) > 0 else None
+        return SessionSaveSnapshot(
+            manifest=manifest,
+            oids=rows.oids_blob(keep),
+            columns=rows.to_blobs(self._session_data_headers(), keep),
+            sidecars=sidecars,
+            mol_db=mol_db,
+            render_db=render_db,
+            ensembles_db=ensembles_db,
+            scene_revision=scene_revision(),
+            keep_oids=None if oids is None else frozenset(int(o) for o in oids),
+            row_count=rows.n if keep is None else int(keep.sum()),
+        )
 
-    def _build_session_document(self, *, oids: set[int] | None = None) -> dict:
-        """Synchronous compact document (tests). File save uses :meth:`_enqueue_session_save`."""
-        return assemble_session_document(self._snapshot_session_save_inputs(oids=oids))
+    def save_session_to_path(self, path: str, *, oids: set[int] | None = None) -> bool:
+        """Save to *path* without a dialog (benchmarks, scripts, tests)."""
+        return self._enqueue_session_save(
+            str(path),
+            self._snapshot_session_save_inputs(oids=oids),
+            clear_dirty=oids is None,
+            status_prefix="Session saved to",
+            dialog_title="Save Session",
+        )
 
     def _session_document_metadata(self, *, oids: set[int] | None = None) -> dict:
         hh = self.table.horizontalHeader()
@@ -434,8 +391,6 @@ class SessionSaveMixin:
                     }
                 )
         doc = {
-            "format": self._SESSION_FORMAT,
-            "version": self._SESSION_VERSION,
             "headers": list(self.headers),
             "global_bounds": compact_global_bounds(getattr(self, "global_bounds", None)),
             "next_oid": int(self.next_oid),
@@ -463,7 +418,7 @@ class SessionSaveMixin:
             "confs_sidecar": serialize_confs_sidecar(self._confs_sidecar_for_session(want)),
             "depiction_2d": self._depiction_coords_for_session(want),
             "som_browse": self._session_som_browse_payload(oids=want),
-            "ionization_sidecar": serialize_ionization_sidecar(),
+            "ionization_sidecar": partial(serialize_ionization_sidecar, ionization_snapshot()),
             "mmp_ledger": self._session_mmp_ledger_payload(),
             "dock_results": self._session_dock_results_payload(oids=want),
             "pose_column_contexts": self._session_pose_column_contexts(),
@@ -495,25 +450,12 @@ class SessionSaveMixin:
         return store.to_session(oids)
 
     def _confs_sidecar_for_session(self, oids: set[int] | None) -> dict[tuple[int, str], str]:
-        from ...storage import EnsembleStore
-
         store = getattr(self, "_confs_blocks_sidecar", None)
         if store is None or isinstance(store, EnsembleStore):
             return {}
         if oids is None:
             return store
         return {k: v for k, v in store.items() if int(k[0]) in oids}
-
-    def _ensembles_sqlite_for_session(self, oids: set[int] | None) -> bytes | None:
-        from ...storage import EnsembleStore
-
-        store = getattr(self, "_confs_blocks_sidecar", None)
-        if not isinstance(store, EnsembleStore) or len(store) == 0:
-            return None
-        if oids is not None and not any(int(k[0]) in oids for k in store):
-            return None
-        blob = store.export_sqlite_bytes(None if oids is None else oids)
-        return blob or None
 
     def _session_som_browse_payload(self, *, oids: set[int] | None = None) -> list[dict]:
         """Atom-level SOM maps for session restore (redraws table images on open)."""
@@ -607,13 +549,10 @@ class SessionSaveMixin:
         clear_dirty: bool,
         status_prefix: str,
     ) -> bool:
-        path, _ = QFileDialog.getSaveFileName(
-            self, dialog_title, "", "MolManager Session (*.cms);;JSON (*.json)"
-        )
+        path, _ = QFileDialog.getSaveFileName(self, dialog_title, "", "MolManager Session (*.cms)")
         if not path:
             return False
-        low = path.lower()
-        if not low.endswith(".cms") and not low.endswith(".json"):
+        if not path.lower().endswith(".cms"):
             path += ".cms"
         try:
             snapshot = self._snapshot_session_save_inputs(oids=oids)
@@ -632,7 +571,7 @@ class SessionSaveMixin:
     def _enqueue_session_save(
         self,
         path: str,
-        snapshot: dict,
+        snapshot: SessionSaveSnapshot,
         *,
         clear_dirty: bool,
         status_prefix: str,
@@ -640,7 +579,7 @@ class SessionSaveMixin:
         on_success: Callable[[], None] | None = None,
         adopt_source: bool = True,
     ) -> bool:
-        """Queue compact+write off the GUI thread. Returns True if a write was started.
+        """Queue the session write off the GUI thread. Returns True if a write was started.
 
         *adopt_source* is false when the file is only a launch bundle for another
         window. The open session then keeps its current path.
@@ -665,7 +604,7 @@ class SessionSaveMixin:
             self._session_save_pending = jobs
         jobs[gen] = pending
         self._session_save_last_ok = False
-        n_rows = max(1, len(snapshot.get("entries") or []))
+        n_rows = max(1, int(snapshot.row_count))
         job_id = f"session-save-{gen}"
         pending["job_id"] = job_id
         register_background_job(self, job_id, f"Saving session ({n_rows:,} rows)")
@@ -679,15 +618,17 @@ class SessionSaveMixin:
             prog = bind(job_id)
         start_runnable_on_app_pool(
             self,
-            SessionSaveWorker(gen, path, snapshot, sigs, progress_state=prog),
+            SessionSaveWorker(
+                gen, path, snapshot, sigs, scene_magic=SCENE_MAGIC, progress_state=prog
+            ),
         )
         return True
 
-    def _write_session_snapshot_sync(self, snapshot: dict, pending: dict) -> bool:
+    def _write_session_snapshot_sync(self, snapshot: SessionSaveSnapshot, pending: dict) -> bool:
         """Fallback when the thread pool or save signals are unavailable."""
         path = pending["path"]
         try:
-            write_session_v3(path, snapshot)
+            write_session_v4(path, snapshot, scene_magic=SCENE_MAGIC)
         except Exception as e:
             logger.exception("Save session failed: %s", path)
             QMessageBox.warning(self, pending.get("dialog_title") or "Save Session", str(e))
@@ -715,9 +656,6 @@ class SessionSaveMixin:
         if pending.get("adopt_source", True):
             self._session_source_path = path
             remember_recent(KIND_SESSION, path)
-            write_cache = getattr(self, "_write_session_structure_cache", None)
-            if callable(write_cache):
-                write_cache(path)
         on_success = pending.get("on_success")
         if callable(on_success):
             on_success()
@@ -761,54 +699,36 @@ class SessionSaveMixin:
             self,
             "Open Session",
             "",
-            "MolManager Session (*.cms *.json);;Legacy session CSV (*.csv);;All files (*.*)",
+            "MolManager Session (*.cms);;All files (*.*)",
         )
-        if not path:
-            return
-        if path.lower().endswith(".csv"):
-            self.load_session_csv(path)
-        else:
+        if path:
             self.apply_saved_session_from_file(path)
 
     def apply_saved_session_from_file(self, path: str) -> bool:
+        """Start opening a version-4 session; older sessions get a message naming the converter.
+
+        Returns ``False`` when the file is rejected up front. A read failure after the
+        worker starts is reported by :meth:`_on_session_file_read_failed`.
+        """
         problem = preflight_open_path(path)
         if problem:
             logger.warning("Open session: %s", problem)
             self._warn_could_not_open("Open Session", problem)
             return False
-        if session_path_is_v3(path):
-            self._note_open_attempt("Open Session")
-            self._session_source_path = path
-            try:
-                self._apply_session_v3_file(path)
-            except Exception:
-                logger.exception("Open session: apply failed for %s", path)
-                self._finish_failed_open()
-                self._warn_could_not_open("Open Session", damaged_session_message(path))
-                return False
-            remember_recent(KIND_SESSION, path)
-            return True
-        try:
-            with open(path, "rb") as f:
-                raw = f.read()
-            d = expand_session_document(loads_session_bytes(raw))
-        except Exception as e:
-            logger.exception("Open session: could not read %s", path)
-            self._warn_could_not_open("Open Session", message_for_session_read_failure(path, e))
-            return False
-        if not self._session_format_ok(d.get("format")) or not self._session_version_ok(
-            d.get("version")
-        ):
-            self._warn_could_not_open("Open Session", not_a_session_message(path))
+        if not is_session_v4(path):
+            if is_legacy_session(path):
+                message = legacy_session_message(path)
+            else:
+                message = not_a_session_message(path)
+            self._warn_could_not_open("Open Session", message)
             return False
         self._note_open_attempt("Open Session")
         self._session_source_path = path
         try:
-            self._apply_session_document(d)
+            self._open_session_v4_file(path)
         except Exception:
             logger.exception("Open session: apply failed for %s", path)
             self._finish_failed_open()
             self._warn_could_not_open("Open Session", damaged_session_message(path))
             return False
-        remember_recent(KIND_SESSION, path)
         return True

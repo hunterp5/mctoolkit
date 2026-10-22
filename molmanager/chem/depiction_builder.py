@@ -66,7 +66,7 @@ from molmanager.chem.depiction_layout import (
 from molmanager.chem.depiction_text import cap_height, text_advance, text_ink_bounds
 
 # Bump whenever the builder draws the same molecule differently, so cached scenes
-# (``.mctcache`` sidecars) are rebuilt instead of showing the old picture.
+# (saved in session files) are rebuilt instead of showing the old picture.
 BUILDER_REVISION = 4
 
 # Fractions of the mean bond length.

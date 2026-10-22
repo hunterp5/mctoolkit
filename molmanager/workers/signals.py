@@ -170,3 +170,10 @@ class SessionSaveSignals(QObject):
 
     finished = pyqtSignal(int, str)  # job_gen, path written
     failed = pyqtSignal(int, str)  # job_gen, message
+
+
+class SessionOpenSignals(QObject):
+    """Completion signals for :class:`SessionOpenWorker`."""
+
+    finished = pyqtSignal(int, object)  # load generation, SessionOpenResult
+    failed = pyqtSignal(int, str)  # load generation, message

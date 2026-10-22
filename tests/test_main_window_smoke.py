@@ -33,6 +33,18 @@ def _seed_two_rows(w: ChemistryWorkspaceWindow) -> None:
     w.next_oid = 2
 
 
+def _one_row_session(**metadata):
+    """Write a one-row session file (``CCO``) with *metadata* over the workspace defaults."""
+    from session_roundtrip import saved_document, save_session_file
+
+    source = ChemistryWorkspaceWindow()
+    source.headers = ["ID_HIDDEN", "Structure", "SMILES", "MW"]
+    source._table_model.set_headers(list(source.headers))
+    source._table_model.append_row(0, {"SMILES": "CCO", "MW": "46"})
+    source.next_oid = 1
+    return save_session_file(source, doc={**saved_document(source), **metadata})
+
+
 def test_cold_start_shows_idle_loading_page(qapp):  # noqa: ARG001
     from molmanager.ui.strings import LOADING_DETAIL_IDLE
 
@@ -200,7 +212,7 @@ def test_close_session_cancel_keeps_table(qapp, monkeypatch):  # noqa: ARG001
 def test_save_selected_to_session_writes_subset_without_clearing_dirty(qapp, monkeypatch, tmp_path):  # noqa: ARG001
     from PyQt5.QtWidgets import QFileDialog
 
-    from molmanager.table.session_codec import expand_session_document, loads_session_bytes
+    from molmanager.table.session_v4 import read_session_v4
 
     w = ChemistryWorkspaceWindow()
     _seed_two_rows(w)
@@ -216,8 +228,9 @@ def test_save_selected_to_session_writes_subset_without_clearing_dirty(qapp, mon
     assert w.threadpool.waitForDone(60_000)
     qapp.processEvents()
     assert w._session_has_unsaved_changes()
-    doc = expand_session_document(loads_session_bytes(out.read_bytes()))
-    assert [row["id"] for row in doc["rows"]] == [1]
+    opened = read_session_v4(out)
+    opened.discard_temp_files()
+    assert list(opened.rows.oids) == [1]
 
 
 def test_save_selected_to_session_requires_selection(qapp, monkeypatch):  # noqa: ARG001
@@ -243,9 +256,7 @@ def test_save_selected_to_session_requires_selection(qapp, monkeypatch):  # noqa
 
 
 def test_send_selected_to_new_session_opens_subset(qapp, monkeypatch, tmp_path):  # noqa: ARG001
-    from pathlib import Path
-
-    from molmanager.table.session_codec import expand_session_document, loads_session_bytes
+    from molmanager.table.session_v4 import read_session_v4
 
     w = ChemistryWorkspaceWindow()
     _seed_two_rows(w)
@@ -272,8 +283,9 @@ def test_send_selected_to_new_session_opens_subset(qapp, monkeypatch, tmp_path):
     args = launched[0]
     assert "--load-session" in args
     path = args[args.index("--load-session") + 1]
-    doc = expand_session_document(loads_session_bytes(Path(path).read_bytes()))
-    assert [row["id"] for row in doc["rows"]] == [1]
+    opened = read_session_v4(path)
+    opened.discard_temp_files()
+    assert list(opened.rows.oids) == [1]
     assert w.status_label.text().startswith("Selected rows sent to ")
 
 
@@ -310,14 +322,7 @@ def test_session_load_uses_loading_page_then_reveals(qapp, monkeypatch):  # noqa
         lambda self: False,
     )
     w = ChemistryWorkspaceWindow()
-    doc = {
-        "format": "molmanager_session",
-        "version": w._SESSION_VERSION,
-        "headers": ["ID_HIDDEN", "Structure", "SMILES", "MW"],
-        "rows": [{"id": 0, "cells": {"SMILES": "CCO", "MW": "46"}}],
-        "next_oid": 1,
-        "filter_panel_visible": True,
-    }
+    path = _one_row_session(filter_panel_visible=True)
     seen = {"loading": False, "filters_covered": False}
 
     orig_begin = w._begin_session_finalize
@@ -334,7 +339,7 @@ def test_session_load_uses_loading_page_then_reveals(qapp, monkeypatch):  # noqa
 
     monkeypatch.setattr(w, "_begin_session_finalize", wrap_begin)
     monkeypatch.setattr(w, "_finalize_session_filters", wrap_filters)
-    w._apply_session_document(doc)
+    assert w.apply_saved_session_from_file(str(path))
     assert seen["loading"] is True
     assert seen["filters_covered"] is True
     assert seen["filters_restored"] is True
@@ -362,14 +367,7 @@ def test_session_load_waits_for_auto_render_before_reveal(qapp, monkeypatch):  #
         fake_render,
     )
     w = ChemistryWorkspaceWindow()
-    doc = {
-        "format": "molmanager_session",
-        "version": w._SESSION_VERSION,
-        "headers": ["ID_HIDDEN", "Structure", "SMILES", "MW"],
-        "rows": [{"id": 0, "cells": {"SMILES": "CCO", "MW": "46"}}],
-        "next_oid": 1,
-    }
-    w._apply_session_document(doc)
+    assert w.apply_saved_session_from_file(str(_one_row_session()))
     assert held["called"] is True
     assert held["loading"] is True
     assert w._table_stack.currentIndex() == 1

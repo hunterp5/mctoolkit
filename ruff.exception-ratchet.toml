@@ -1,6 +1,6 @@
 # Existing silent-exception sites for BLE001, S110, and SIM105.
 # Shrink this list when a file is cleaned; never add files.
-# ratchet-max-files = 225
+# ratchet-max-files = 222
 
 [lint.per-file-ignores]
 "molmanager/analysis/activity_cliff_analysis.py" = ["BLE001"]
@@ -59,7 +59,6 @@
 "molmanager/storage/sqlite_table_store.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/storage/structure_render_store.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/storage/temp_sqlite.py" = ["BLE001", "S110", "SIM105"]
-"molmanager/table/session_codec.py" = ["BLE001"]
 "molmanager/table/table_file_formats.py" = ["BLE001", "SIM105"]
 "molmanager/ui/activity_cliff_map.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/ui/background_jobs.py" = ["BLE001"]
@@ -112,7 +111,6 @@
 "molmanager/ui/main_window/predict_tools_mixin.py" = ["BLE001", "SIM105"]
 "molmanager/ui/main_window/render2d_results_mixin.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/ui/main_window/render_2d_mixin.py" = ["BLE001", "S110", "SIM105"]
-"molmanager/ui/main_window/session_csv_mixin.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/ui/main_window/session_plots_mixin.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/ui/main_window/session_restore_mixin.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/ui/main_window/session_save_mixin.py" = ["BLE001"]
@@ -211,7 +209,6 @@
 "molmanager/workers/qsar_worker.py" = ["BLE001"]
 "molmanager/workers/rgroup_decomposition.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/workers/sali_worker.py" = ["BLE001"]
-"molmanager/workers/session_rows_parse.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/workers/signals.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/workers/som_worker.py" = ["BLE001", "SIM105"]
 "molmanager/workers/sql_load_worker.py" = ["BLE001", "SIM105"]

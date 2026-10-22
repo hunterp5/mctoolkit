@@ -23,6 +23,7 @@ from PyQt5.QtCore import QEvent, Qt
 from PyQt5.QtGui import QColor, QFont, QPalette, QTextCharFormat, QTextCursor, QTextListFormat
 from PyQt5.QtWidgets import QLabel
 from rdkit import Chem
+from session_roundtrip import open_saved, saved_document
 
 from molmanager.ui.dockable_plot_glyphs import FORMAT_GLYPH_BTN_SIZE, FORMAT_GLYPH_ICON_SIZE
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
@@ -223,18 +224,18 @@ def test_session_roundtrip_restores_notepad(qapp):  # noqa: ARG001
     panel.set_font_pt(18)
     panel.set_color(QColor("#003366"))
 
-    doc = window._build_session_document()
+    doc = saved_document(window)
     assert doc["notepad"]["text"] == "assay notes\nsecond line"
     assert doc["notepad"]["font_pt"] == 18
     assert doc["notepad"]["color"] == "#003366"
     assert doc["notepad"]["visible"] is True
     assert doc["notepad"]["docked"] is False
     assert "003366" in doc["notepad"]["html"].lower()
-    selected = window._build_session_document(oids={0})
+    selected = saved_document(window, oids={0})
     assert selected["notepad"]["text"] == "assay notes\nsecond line"
 
     restored = ChemistryWorkspaceWindow()
-    restored._apply_session_document(doc)
+    open_saved(window, restored)
     restored_panel = restored.session_notepad.panel
     restored_dialog = restored.session_notepad.dialog
     assert restored_panel is not None

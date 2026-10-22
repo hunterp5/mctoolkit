@@ -121,7 +121,6 @@ class MolManagerConfig:
     bounds_async_min_rows: int
     bounds_chunk_rows: int
     ingest_gui_chunk_size: int
-    session_gui_chunk_size: int
     ingest_gui_subslice_rows: int
     ingest_gui_time_budget_ms: int
     ingest_worker_batch_size: int
@@ -291,7 +290,6 @@ def load_config() -> MolManagerConfig:
         ),
         bounds_chunk_rows=_env_int("MOLMANAGER_BOUNDS_CHUNK_ROWS", 2000, lo=64, hi=100_000),
         ingest_gui_chunk_size=_env_int("MOLMANAGER_INGEST_GUI_CHUNK", 512, lo=16, hi=10_000),
-        session_gui_chunk_size=_env_int("MOLMANAGER_SESSION_GUI_CHUNK", 4096, lo=64, hi=50_000),
         ingest_gui_subslice_rows=_env_int("MOLMANAGER_INGEST_GUI_SUBSLICE", 128, lo=16, hi=10_000),
         ingest_gui_time_budget_ms=_env_int("MOLMANAGER_INGEST_GUI_TIME_MS", 30, lo=5, hi=200),
         ingest_worker_batch_size=_env_int("MOLMANAGER_INGEST_WORKER_BATCH", 2000, lo=64, hi=20_000),

@@ -26,7 +26,6 @@ from rdkit import Chem
 from molmanager.ui.compound_table_model import STRUCTURE_COLUMN_PENDING_HINT, CompoundTableModel
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
 from molmanager.workers.load_render import _mol_ingest_item
-from molmanager.workers.session_rows_parse import parse_session_rows
 
 MOL_BLOCK = Chem.MolToMolBlock(Chem.MolFromSmiles("CCO"))
 
@@ -116,15 +115,6 @@ def test_structure_file_ingest_stores_canonical_smiles(qapp):  # noqa: ARG001
         assert rows[0][1]["SMILES"] == "not the structure"
     finally:
         w.close()
-
-
-def test_legacy_session_override_migrates_into_store():
-    rows = [
-        {"id": 0, "cells": {"SMILES": "CCO", "Alt": "c1ccccc1"}},
-        {"id": 1, "cells": {"SMILES": "CCN", "Alt": ""}},
-    ]
-    result = parse_session_rows(rows, ["SMILES", "Alt"], ["CCO", "CCN"], [], "Alt")
-    assert result.mol_jobs == [(0, None, "c1ccccc1"), (1, None, "CCN")]
 
 
 def test_structure_editor_reads_smiles_behind_a_picture(qapp):  # noqa: ARG001

@@ -33,11 +33,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PyQt5.QtWidgets import QApplication
 
-from molmanager.table.session_codec import (
-    dumps_session_document,
-    expand_session_document,
-    loads_session_bytes,
-)
 from molmanager.ui.filters.cards import SubstructureFilterCard, TextFilterCard
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
 from molmanager.workers.export_worker import ExportWorker
@@ -61,7 +56,7 @@ def _percentile(values: list[float], p: float) -> float:
     return float(vals[idx])
 
 
-def _write_session_csv(path: Path, n_rows: int) -> None:
+def _write_table_csv(path: Path, n_rows: int) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=["SMILES", "MW", "Note"])
         writer.writeheader()
@@ -76,15 +71,26 @@ def _write_session_csv(path: Path, n_rows: int) -> None:
             )
 
 
-def _drain_session(app: ChemistryWorkspaceWindow) -> None:
-    drain = getattr(app, "_drain_pending_session_load", None)
-    if callable(drain):
-        drain()
-        return
+def _wait_until(done, *, timeout_s: float = 600.0) -> None:
+    """Process Qt events until ``done()`` is true."""
     qapp = QApplication.instance()
-    if qapp is not None:
-        for _ in range(500):
-            qapp.processEvents()
+    deadline = time.monotonic() + timeout_s
+    while not done():
+        if time.monotonic() > deadline:
+            raise RuntimeError("timed out waiting for the workspace")
+        qapp.processEvents()
+        time.sleep(0.001)
+
+
+def _ingest_idle(app: ChemistryWorkspaceWindow) -> bool:
+    return not app._ingest_loading and not getattr(app, "_pending_batches", None)
+
+
+def _open_session(app: ChemistryWorkspaceWindow, path: Path) -> None:
+    if not app.apply_saved_session_from_file(str(path)):
+        raise RuntimeError(f"could not open {path}")
+    app._drain_pending_session_load(timeout_s=600.0)
+    _wait_until(lambda: _ingest_idle(app))
 
 
 def _build_export_snapshot(app: ChemistryWorkspaceWindow) -> dict[int, dict[str, str]]:
@@ -102,26 +108,25 @@ def _bench_one(scale: int) -> dict[str, float]:
     # Measure load/filter/export; skip auto Render 2D so drain does not wait on paint.
     app._try_auto_render_all_structures_after_ingest = lambda: False
     tmp_dir = Path(tempfile.mkdtemp(prefix="MOLMANAGER_ui_bench_"))
-    csv_path = tmp_dir / f"session_{scale}.csv"
+    csv_path = tmp_dir / f"table_{scale}.csv"
     cms_path = tmp_dir / f"session_{scale}.cms"
     out_csv = tmp_dir / f"export_{scale}.csv"
-    _write_session_csv(csv_path, scale)
+    _write_table_csv(csv_path, scale)
 
     tracemalloc.start()
     t0 = time.perf_counter()
-    app.load_session_csv(str(csv_path))
-    _drain_session(app)
+    app.load_file(str(csv_path))
+    _wait_until(lambda: _ingest_idle(app) and app._table_model.rowCount() == scale)
     load_ms = (time.perf_counter() - t0) * 1000.0
     _cur_b, peak_b = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
     # .cms restore into the same window (avoids dual QMainWindow teardown crashes on Windows).
-    cms_bytes = dumps_session_document(app._build_session_document())
-    cms_path.write_bytes(cms_bytes)
-    doc = expand_session_document(loads_session_bytes(cms_bytes))
+    if not app.save_session_to_path(str(cms_path)):
+        raise RuntimeError(f"could not save {cms_path}")
+    _wait_until(lambda: not getattr(app, "_session_save_pending", None))
     t0 = time.perf_counter()
-    app._apply_session_document(doc)
-    _drain_session(app)
+    _open_session(app, cms_path)
     cms_load_ms = (time.perf_counter() - t0) * 1000.0
     if app._table_model.rowCount() != scale:
         raise RuntimeError(
@@ -233,23 +238,14 @@ def _print_stats(label: str, samples: list[dict[str, float]], keys: tuple[str, .
 
 
 def _bench_cms_file(cms_path: Path) -> dict[str, float]:
-    """Time Open Session on an existing .cms (decode vs apply+drain)."""
+    """Time Open Session on an existing .cms (worker read, install and finalize)."""
     app = ChemistryWorkspaceWindow()
     app._try_auto_render_all_structures_after_ingest = lambda: False
 
     tracemalloc.start()
     t0 = time.perf_counter()
-    raw = cms_path.read_bytes()
-    read_ms = (time.perf_counter() - t0) * 1000.0
-
-    t0 = time.perf_counter()
-    doc = expand_session_document(loads_session_bytes(raw))
-    decode_ms = (time.perf_counter() - t0) * 1000.0
-
-    t0 = time.perf_counter()
-    app._apply_session_document(doc)
-    _drain_session(app)
-    apply_ms = (time.perf_counter() - t0) * 1000.0
+    _open_session(app, cms_path)
+    open_ms = (time.perf_counter() - t0) * 1000.0
     _cur_b, peak_b = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
@@ -263,10 +259,7 @@ def _bench_cms_file(cms_path: Path) -> dict[str, float]:
     except Exception:
         pass
     return {
-        "read_ms": read_ms,
-        "decode_ms": decode_ms,
-        "apply_ms": apply_ms,
-        "cms_load_ms": read_ms + decode_ms + apply_ms,
+        "cms_load_ms": open_ms,
         "peak_mem_mb": peak_b / (1024.0 * 1024.0),
         "rows": float(rows),
         "mols": float(mols_n),
@@ -285,7 +278,7 @@ def run_cms_benchmark(cms_path: Path, runs: int) -> None:
     _print_stats(
         f"Runs: {runs}",
         samples,
-        ("read_ms", "decode_ms", "apply_ms", "cms_load_ms", "peak_mem_mb"),
+        ("cms_load_ms", "peak_mem_mb"),
     )
 
 
@@ -318,7 +311,7 @@ def main() -> None:
         "--cms",
         type=str,
         default="",
-        help="Existing .cms to time (Open Session decode + restore). Skips synthetic scales.",
+        help="Existing .cms to time (Open Session read + restore). Skips synthetic scales.",
     )
     parser.add_argument(
         "--scales",

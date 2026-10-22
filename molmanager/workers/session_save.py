@@ -14,45 +14,46 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Background write of a chunked version-3 ``.cms`` session snapshot."""
+"""Background write and read of version-4 ``.cms`` sessions."""
 
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from PyQt5.QtCore import QRunnable
 
 from ..platform_support.tool_progress import ToolProgressState, report_tool_progress
-from ..table.session_document_build import write_session_v3
-from .signals import SessionSaveSignals
+from ..table.session_v4 import SessionSaveSnapshot, read_session_v4, write_session_v4
+from .signals import SessionOpenSignals, SessionSaveSignals
 
 logger = logging.getLogger(__name__)
 
 
 class SessionSaveWorker(QRunnable):
-    """Assemble, compact, and write a session file off the UI thread."""
+    """Write a session snapshot to disk off the UI thread."""
 
     def __init__(
         self,
         job_gen: int,
         path: str,
-        snapshot: dict[str, Any],
+        snapshot: SessionSaveSnapshot,
         signals: SessionSaveSignals,
         *,
+        scene_magic: bytes | None = None,
         progress_state: ToolProgressState | None = None,
     ) -> None:
         super().__init__()
         self.job_gen = int(job_gen)
         self.path = str(path)
         self.snapshot = snapshot
+        self.scene_magic = scene_magic
         self.signals = signals
         self.progress_state = progress_state
         self._progress_throttle = [0, 0.0]
 
-    def _emit_progress(self, message: str, done: int, total: int) -> None:
+    def _emit_progress(self, done: int, total: int) -> None:
         report_tool_progress(
-            message=message,
+            message="Saving session…",
             done=int(done),
             total=max(1, int(total)),
             progress_state=self.progress_state,
@@ -60,16 +61,44 @@ class SessionSaveWorker(QRunnable):
         )
 
     def run(self) -> None:
-        n = max(1, len(self.snapshot.get("entries") or []))
+        n = max(1, int(self.snapshot.row_count))
         try:
-            self._emit_progress("Saving session…", 0, n)
-            write_session_v3(
+            self._emit_progress(0, n)
+            write_session_v4(
                 self.path,
                 self.snapshot,
-                on_progress=lambda done, total: self._emit_progress("Saving session…", done, total),
+                scene_magic=self.scene_magic,
+                on_progress=self._emit_progress,
             )
-            self._emit_progress("Saving session…", n, n)
+            self._emit_progress(n, n)
             self.signals.finished.emit(self.job_gen, self.path)
         except Exception as exc:
             logger.exception("SessionSaveWorker failed: %s", self.path)
             self.signals.failed.emit(self.job_gen, str(exc))
+
+
+class SessionOpenWorker(QRunnable):
+    """Read a session into memory plus temp store files the GUI thread adopts."""
+
+    def __init__(
+        self,
+        generation: int,
+        path: str,
+        signals: SessionOpenSignals,
+        *,
+        want_scene_revision: int | None,
+    ) -> None:
+        super().__init__()
+        self.generation = int(generation)
+        self.path = str(path)
+        self.signals = signals
+        self.want_scene_revision = want_scene_revision
+
+    def run(self) -> None:
+        try:
+            result = read_session_v4(self.path, want_scene_revision=self.want_scene_revision)
+        except Exception as exc:
+            logger.exception("SessionOpenWorker failed: %s", self.path)
+            self.signals.failed.emit(self.generation, str(exc) or "Could not read the session.")
+            return
+        self.signals.finished.emit(self.generation, result)

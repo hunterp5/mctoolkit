@@ -68,7 +68,7 @@ subpackage reads as its table of contents.
 | `sources/` | External compound providers: `chembl_random_compounds.py`, `pubchem_names.py`, `surechembl_api.py`, `random_molecule_sources.py` |
 | `analysis/` | `mmp_analysis.py` (pair/transform core), `mmp_session.py`, `mmp_table.py`, `mmp_depict.py`, `mmp_neighborhood_analysis.py`, `activity_cliff_analysis.py`, `sali_analysis.py`, `qsar_models.py`, `mpo_scoring.py`, `medchem_space.py`, `dimensionality_reduction.py`, `table_statistics.py` |
 | `plotting/` | Chart computation, no Qt widgets: `plot_axes.py`, `plot_series_collect.py`, `plot_marker_color.py`, `plot_heatmap.py`, `plot_labels.py`, `plot_radar.py`, `plot_statistics_fits.py`, `plotly_legend.py` |
-| `table/` | Table data operations and documents: `column_*.py`, `calculator_expressions.py`, `filter_compute.py`, `random_number_columns.py`, `text_file_ingest.py`, `table_file_formats.py`, `session_codec.py`, `structure_depiction_layout.py` |
+| `table/` | Table data operations and documents: `column_*.py`, `calculator_expressions.py`, `filter_compute.py`, `random_number_columns.py`, `text_file_ingest.py`, `table_file_formats.py`, `session_v4.py`, `session_codec.py`, `structure_depiction_layout.py` |
 | `storage/` | `MolStore`, `SqliteTableStore`, `extra_pixmap_store.py`, `structure_render_store.py` |
 | `services/` | Pure helpers shared by UI and workers (no Qt, no `molmanager.ui` imports) |
 | `workflows/` | What the app should do next, decided without the UI (see *Workflow layer*) |
@@ -141,7 +141,7 @@ window as one-line forwards so dialogs and tests keep calling `app.on_calc_finis
 | `TableWriteService` | `ui/table_write_service.py` | `on_calc_finished`, unique column names, `_ensure_columns` |
 | `TableSession` | `ui/table_session.py` | Selection, chemistry-column lookup, sticky visible-row cache |
 | `TableBuildPipeline` | `ui/table_build_pipeline.py` | Ingest chunks, SQLite rebuild, Render 2D batch/results (`QObject` child) |
-| `SessionController` | `ui/session_controller.py` | `.cms` save/restore, table layout, session plots, legacy CSV |
+| `SessionController` | `ui/session_controller.py` | `.cms` save/restore, table layout, session plots |
 | `WorkspaceTools` | `ui/workspace_tools.py` | Lazy cluster / dimred / QSAR / MPO / medchem / structure-prep adapters |
 | `PlotDockHost` | `ui/plot_dock_host.py` | Dock/undock plot panes |
 | `ProcessQueueManager` | `ui/process_queue.py` | Serial heavy tools |
@@ -379,6 +379,29 @@ is skipped. Lazy PNG store thresholds (`structure_render_lazy_*`) still control 
 images are stored, not when the workspace appears. Session files store 2D mol
 binaries and numeric filter bounds so Open can skip SMILES re-parse and a full
 bounds scan.
+
+### Session files (`.cms`, version 4)
+
+A session is one SQLite database (`table/session_v4.py`). `meta` holds the
+format, version, zlib-compressed JSON manifest (headers, layout, filters, plots),
+the row oids as `<i8`, and the depiction `scene_revision`. `columns` holds one
+row per data column: float64 values plus a missing-value mask for numeric
+columns, JSON text otherwise. `sidecars` holds zlib-compressed JSON for large
+tool payloads (ionization, MMP, docking, notepad). `mols`, `pngs`, and
+`ensembles` use the same schemas as `MolStore`, `StructureRenderStore`, and
+`EnsembleStore`.
+
+Save (`workers/session_save.py`): the GUI thread captures a
+`SessionSaveSnapshot` (column blobs, manifest, store file paths after a flush).
+The worker copies the store tables with `ATTACH` in chunks and keeps only
+vector-scene rows from `pngs`. A sidecar value may be a callable; the worker
+calls it, so slow serialization stays off the GUI thread. Open: `SessionOpenWorker`
+copies the tables into temp store files; the GUI thread adopts them
+(`MolStore.adopt_file`, `EnsembleStore.adopt_file`, `StructureRenderStore.adopt_file`),
+installs the `ColumnStore` in one model reset, then runs the finalize steps.
+Saved scenes are dropped when `scene_revision` differs, and Render 2D is skipped
+when the saved scenes cover the table. Older sessions are rejected with a hint
+to `scripts/convert_session.py`, which keeps frozen v1–v3 and CSV readers.
 
 ## Related docs
 

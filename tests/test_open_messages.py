@@ -108,24 +108,16 @@ def test_open_session_missing_or_damaged_warns_without_applying(qapp, tmp_path: 
     assert win._last_open_error == 'Could not open "no.cms". That file does not exist.'
 
     damaged = tmp_path / "bad.cms"
-    damaged.write_bytes(b"this is not a session")
-    assert win.apply_saved_session_from_file(str(damaged)) is False
+    damaged.write_bytes(b"SQLite format 3\x00" + b"\x00" * 64)
+    win.apply_saved_session_from_file(str(damaged))
+    assert win._table_model.rowCount() == 0
     assert win._last_open_error == 'Could not open "bad.cms". That session file is damaged.'
 
     other = tmp_path / "other.cms"
-    other.write_text('{"hello": 1}', encoding="utf-8")
+    other.write_bytes(b"this is not a session")
     assert win.apply_saved_session_from_file(str(other)) is False
     assert "not a MolManager session" in win._last_open_error
     assert win._ingest_loading is False
-
-
-def test_load_session_csv_missing_does_not_clear(qapp, tmp_path: Path) -> None:  # noqa: ARG001
-    win = ChemistryWorkspaceWindow()
-    cleared: list[bool] = []
-    win.clear_all = lambda: cleared.append(True)  # type: ignore[method-assign]
-    win.load_session_csv(str(tmp_path / "legacy.csv"))
-    assert cleared == []
-    assert "does not exist" in win._last_open_error
 
 
 def test_universal_load_reports_missing_and_unreadable_files(tmp_path: Path, qapp) -> None:  # noqa: ARG001

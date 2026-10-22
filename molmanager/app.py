@@ -137,11 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     if load_session:
         try:
-            p = load_session.lower()
-            if p.endswith(".cms") or p.endswith(".json"):
-                w.apply_saved_session_from_file(load_session)
-            else:
-                w.load_session_csv(load_session)
+            w.apply_saved_session_from_file(load_session)
         except Exception as e:
             logger.warning("Startup session load failed (%s): %s", load_session, e, exc_info=True)
             w._warn_could_not_open(

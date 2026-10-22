@@ -482,7 +482,6 @@ Optional settings for power users and IT deployments:
 | `MOLMANAGER_FILTER_DEBOUNCE_SUBSTRUCTURE_ROWS` / `MOLMANAGER_FILTER_DEBOUNCE_SUBSTRUCTURE_MS` | Debounce when a substructure filter is active |
 | `MOLMANAGER_FILTER_DEBOUNCE_DEFAULT_ROWS` / `MOLMANAGER_FILTER_DEBOUNCE_DEFAULT_MS` | Debounce for other filters |
 | `MOLMANAGER_INGEST_GUI_CHUNK` | File-ingest table insert batch size (default `512`) |
-| `MOLMANAGER_SESSION_GUI_CHUNK` | Session restore table insert batch size (default `4096`) |
 | `MOLMANAGER_PERF_METRICS` | Enable performance metric logging |
 | `MOLMANAGER_PERF_LOG_EVERY` | Perf log interval (default `25` samples) |
 | `MOLMANAGER_PLOT_SCATTERGL_MIN_POINTS` | Upgrade marker scatters to WebGL above this count (default `2000`) |

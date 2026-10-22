@@ -74,7 +74,17 @@ def unreadable_path_message(path: str) -> str:
 def not_a_session_message(path: str) -> str:
     return _could_not_open(
         path,
-        "It is not a MolManager session (expected .cms, version 1–2).",
+        "It is not a MolManager session (.cms).",
+        fallback="session",
+    )
+
+
+def legacy_session_message(path: str) -> str:
+    """The session was written by an older MolManager; point at the converter."""
+    return _could_not_open(
+        path,
+        "It was saved by an older version of MolManager. Convert it with\n"
+        "python scripts/convert_session.py <file>, then open the converted .cms.",
         fallback="session",
     )
 
@@ -142,10 +152,6 @@ def message_for_session_read_failure(path: str, exc: BaseException) -> str:
     if os_msg is not None:
         return os_msg
     text = str(exc).lower()
-    if (
-        "unsupported session" in text
-        or "missing session.cms" in text
-        or "session root must" in text
-    ):
+    if "unsupported session" in text or "not a molmanager session" in text:
         return not_a_session_message(path)
     return damaged_session_message(path)

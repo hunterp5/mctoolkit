@@ -18,8 +18,8 @@
 
 For one sample file this reports RDKit draw time per molecule in a single process, PNG bytes
 per row, GUI-thread decode time through the table's own decode path, and the time to blit a
-decoded pixmap into a cell. With ``--session`` it also reads that session's ``.mctcache``
-sidecar and reports the bytes it stores per row. These are the baselines the vector depiction
+decoded pixmap into a cell. With ``--session`` it also reads the scenes saved in that
+session file and reports the bytes it stores per row. These are the baselines the vector depiction
 work is measured against; ``scripts/benchmark_render2d.py`` covers process-pool throughput.
 
 The ``scene`` section measures the vector path on the same molecules: scene build time,
@@ -38,7 +38,6 @@ import os
 import platform
 import sqlite3
 import sys
-import tempfile
 import time
 from collections import Counter
 
@@ -141,35 +140,22 @@ def _measure_scenes(mols, width: int, height: int) -> dict:
     }
 
 
-def _sidecar_stats(session_path: str, width: int, height: int) -> dict:
-    from molmanager.storage.session_structure_cache import (
-        read_structure_cache,
-        session_cache_path,
-    )
+def _session_scene_stats(session_path: str) -> dict:
+    from molmanager.table.session_v4 import is_session_v4
 
-    cache_path = session_cache_path(session_path)
-    loaded = read_structure_cache(session_path, depict_width=width, depict_height=height)
-    if loaded is None:
-        return {"path": str(cache_path), "usable": False}
-    _header, raw = loaded
-    fd, tmp_name = tempfile.mkstemp(prefix="molmanager_bench_", suffix=".sqlite")
-    os.close(fd)
+    if not is_session_v4(session_path):
+        return {"path": session_path, "usable": False}
+    conn = sqlite3.connect(f"file:{session_path}?mode=ro", uri=True)
     try:
-        with open(tmp_name, "wb") as fh:
-            fh.write(raw)
-        conn = sqlite3.connect(tmp_name)
-        try:
-            rows, avg_bytes, max_bytes = conn.execute(
-                "SELECT COUNT(*), AVG(LENGTH(blob)), MAX(LENGTH(blob)) FROM pngs"
-            ).fetchone()
-        finally:
-            conn.close()
+        rows, avg_bytes, max_bytes = conn.execute(
+            "SELECT COUNT(*), AVG(LENGTH(blob)), MAX(LENGTH(blob)) FROM pngs"
+        ).fetchone()
     finally:
-        os.remove(tmp_name)
+        conn.close()
     return {
-        "path": str(cache_path),
+        "path": session_path,
         "usable": True,
-        "file_mb": round(cache_path.stat().st_size / (1024 * 1024), 2),
+        "file_mb": round(os.path.getsize(session_path) / (1024 * 1024), 2),
         "rows": int(rows or 0),
         "bytes_per_row_mean": round(float(avg_bytes or 0.0), 1),
         "bytes_per_row_max": int(max_bytes or 0),
@@ -180,7 +166,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("path", help="SDF / SD / molfile, or a smiles/name/category TSV")
     ap.add_argument("--limit", type=int, default=2000, help="molecules to measure (0 = all)")
-    ap.add_argument("--session", help="session file whose .mctcache sidecar to measure")
+    ap.add_argument("--session", help="session file whose saved scenes to measure")
     ap.add_argument("--json", help="also write the result to this JSON path")
     args = ap.parse_args()
 
@@ -218,7 +204,7 @@ def main() -> None:
         "scene": _measure_scenes([s.mol for s in samples], width, height),
     }
     if args.session:
-        result["sidecar"] = _sidecar_stats(args.session, width, height)
+        result["session_scenes"] = _session_scene_stats(args.session)
     emit_result(result, args.json)
 
 

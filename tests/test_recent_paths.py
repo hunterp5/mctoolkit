@@ -56,7 +56,6 @@ class _Host(AppMenuMixin):
         self._recent_menu = QMenu()
         self.opened_files: list[str] = []
         self.opened_sessions: list[str] = []
-        self.opened_csv: list[str] = []
         self.warnings: list[tuple[str, str]] = []
 
     def load_file(self, path: str) -> None:
@@ -65,9 +64,6 @@ class _Host(AppMenuMixin):
     def apply_saved_session_from_file(self, path: str) -> bool:
         self.opened_sessions.append(path)
         return True
-
-    def load_session_csv(self, path: str) -> None:
-        self.opened_csv.append(path)
 
     def _warn_could_not_open(self, title: str, message: str) -> None:
         self.warnings.append((title, message))
@@ -185,14 +181,14 @@ def test_open_recent_menu_lists_files_and_sessions(qapp, tmp_path: Path) -> None
     assert host._recent_menu.actions()[0].isEnabled() is False
 
 
-def test_open_recent_routes_csv_and_drops_missing(qapp, tmp_path: Path) -> None:  # noqa: ARG001
+def test_open_recent_routes_by_kind_and_drops_missing(qapp, tmp_path: Path) -> None:  # noqa: ARG001
     data = _touch(tmp_path / "set.sdf")
     legacy = _touch(tmp_path / "legacy.csv", "SMILES\nC\n")
     host = _Host()
     host._open_recent_entry(KIND_FILE, data)
     host._open_recent_entry(KIND_SESSION, legacy)
     assert host.opened_files == [data]
-    assert host.opened_csv == [legacy]
+    assert host.opened_sessions == [legacy]
 
     remember_recent(KIND_SESSION, legacy)
     Path(legacy).unlink()

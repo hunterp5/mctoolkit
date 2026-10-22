@@ -38,7 +38,6 @@ from PyQt5.QtWidgets import (
 from ..app_log_dialog import StatusLogLabel
 
 from ...platform_support.config import load_config
-from ...table.session_codec import SESSION_VERSION_CURRENT
 
 logger = logging.getLogger(__name__)
 from ...platform_support.performance_tracking import PerformanceTracker
@@ -109,7 +108,6 @@ from .reaction_tools_mixin import ReactionToolsMixin
 from .render_2d_mixin import Render2DMixin
 from .render2d_results_mixin import Render2DResultsMixin
 from .sali_mixin import SaliMixin
-from .session_csv_mixin import SessionCsvMixin
 from .session_plots_mixin import SessionPlotsMixin
 from .session_restore_mixin import SessionRestoreMixin
 from .session_save_mixin import SessionSaveMixin
@@ -195,12 +193,6 @@ class ChemistryWorkspaceWindow(
     ``docs/STEREO_AND_ISOMERISM.md``. Valence, bond order, aromaticity handling, and atom typing in
     the sketcher are summarized in ``docs/VALENCE_BONDS_AND_AROMATICITY.md``.
     """
-
-    _SESSION_FORMAT = "molmanager_session"
-    _SESSION_FORMAT_ALIASES = frozenset(
-        {"molmanager_session", "MOLMANAGER_session", "chemmanager_session"}
-    )
-    _SESSION_VERSION = SESSION_VERSION_CURRENT
 
     def __init__(self):
         super().__init__()
@@ -754,7 +746,6 @@ install_window_forwards(
         SessionTableLayoutMixin,
         SessionPlotsMixin,
         SessionRestoreMixin,
-        SessionCsvMixin,
     ),
 )
 install_window_forwards(ChemistryWorkspaceWindow, "session_notepad", (SessionNotepadHost,))

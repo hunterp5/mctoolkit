@@ -23,6 +23,7 @@ memory label.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from PyQt5.QtCore import QTimer
@@ -49,10 +50,8 @@ class AppProgressMixin:
 
         detail = getattr(self, "_loading_detail", None)
         if detail is not None:
-            try:
+            with contextlib.suppress(RuntimeError):
                 detail.setText(LOADING_DETAIL_IDLE)
-            except RuntimeError:
-                pass
         self._set_workspace_stack_index(0)
 
     def _reveal_workspace_ready(self) -> None:
@@ -65,13 +64,7 @@ class AppProgressMixin:
             return False
         if getattr(self, "_session_awaiting_ready", False):
             return True
-        if getattr(self, "_session_finalize_ctx", None) is not None:
-            return True
-        if getattr(self, "_session_restore_ctx", None) is not None:
-            return True
-        if getattr(self, "_csv_session_ctx", None) is not None:
-            return True
-        return False
+        return getattr(self, "_session_finalize_ctx", None) is not None
 
     def _sync_status_chrome_for_workspace(self) -> None:
         """Hide status/memory on the loading page; restore the user's status-bar setting after."""

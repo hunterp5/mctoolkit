@@ -54,31 +54,13 @@ def _input_busy(win) -> bool:
     return bool(getattr(win, "_render2d_batch_active", False))
 
 
-def _start_save(win, path: str) -> None:
-    direct = getattr(win, "save_session_to_path", None)
-    if callable(direct):
-        direct(path)
-        return
-    snapshot = win._snapshot_session_save_inputs()
-    win._enqueue_session_save(
-        path,
-        snapshot,
-        clear_dirty=True,
-        status_prefix="Session saved to",
-        dialog_title="Save Session",
-    )
-
-
 def _save_pending(win) -> bool:
     return bool(getattr(win, "_session_save_pending", None))
 
 
 def _saved_size(path: str) -> int:
-    total = 0
-    for candidate in (Path(path), Path(path + ".mctcache")):
-        if candidate.is_file():
-            total += candidate.stat().st_size
-    return total
+    saved = Path(path)
+    return saved.stat().st_size if saved.is_file() else 0
 
 
 def main() -> None:
@@ -92,8 +74,7 @@ def main() -> None:
 
     out = args.out or os.path.join(tempfile.mkdtemp(prefix="bench_save_"), "out.cms")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-    for stale in (Path(out), Path(out + ".mctcache")):
-        stale.unlink(missing_ok=True)
+    Path(out).unlink(missing_ok=True)
     app, win = make_window(webengine=False)
     stalls = StallRecorder(threshold_ms=args.stall_ms)
     state = {"phase": "opening", "settle": 0, "gui_s": 0.0, "t0": 0.0, "total_s": None}
@@ -107,7 +88,7 @@ def main() -> None:
             state["phase"] = "saving"
             stalls.reset()
             state["t0"] = time.perf_counter()
-            _start_save(win, out)
+            win.save_session_to_path(out)
             state["gui_s"] = time.perf_counter() - state["t0"]
             return
         if state["phase"] == "saving" and not _save_pending(win):
