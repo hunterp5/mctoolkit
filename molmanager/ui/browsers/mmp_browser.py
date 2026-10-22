@@ -251,6 +251,10 @@ class MmpBrowserDialog(PairBrowserDialog):
         mol = None
         if app is not None:
             mol = getattr(app, "mols", {}).get(oid)
+        if mol is not None and app is not None:
+            from ...chem.depiction_coords import mol_for_app_depiction
+
+            mol = mol_for_app_depiction(app, mol, int(oid))
         if mol is None and fallback_smiles:
             try:
                 mol = Chem.MolFromSmiles(fallback_smiles)
@@ -281,7 +285,18 @@ class MmpBrowserDialog(PairBrowserDialog):
         ha, hb = self._highlights_for_pair(pair)
         highlight = ha if side == "a" else hb
         highlight_key = tuple(sorted(highlight))
-        cache_key = (oid, pw, ph, pair.oid_a, pair.oid_b, pair.transform, highlight_key)
+        from ...chem.depiction_coords import depiction_revision
+
+        cache_key = (
+            oid,
+            pw,
+            ph,
+            pair.oid_a,
+            pair.oid_b,
+            pair.transform,
+            highlight_key,
+            depiction_revision(self._app),
+        )
         cached = self._preview_cache.get(cache_key)
         if cached is not None and not cached.isNull():
             pm = cached

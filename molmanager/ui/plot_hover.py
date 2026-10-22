@@ -22,6 +22,7 @@ import base64
 import html
 from typing import Any
 
+from ..chem.depiction_coords import mol_for_app_depiction
 from ..chem.structure_2d_depiction import render_molecule_png
 
 HOVER_THUMB_WIDTH = 140
@@ -117,6 +118,7 @@ def structure_png_data_url_for_oid(
         mol = getter(int(oid))
     if mol is not None:
         try:
+            mol = mol_for_app_depiction(app, mol, int(oid), "Structure")
             png = render_molecule_png(mol, int(width), int(height))
         except Exception:
             pass

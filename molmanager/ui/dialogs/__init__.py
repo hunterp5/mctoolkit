@@ -27,6 +27,8 @@ from typing import Any
 
 # Relative to this package. ``..plot`` / ``..sketcher`` stay out of package init.
 _EXPORTS: dict[str, str] = {
+    "AlignSubstructureDialog": ".align_substructure",
+    "AlignSubstructureConfig": ".align_substructure",
     "ActivityCliffDialog": ".activity_cliff",
     "ActivityCliffDialogParams": ".activity_cliff",
     "AddExplicitHydrogensDialog": ".explicit_hydrogens",
@@ -105,6 +107,8 @@ _EXPORTS: dict[str, str] = {
     "SplitColumnDialogParams": ".split_column",
     "JoinColumnsDialog": ".join_columns",
     "JoinColumnsDialogParams": ".join_columns",
+    "BinningDialog": ".binning",
+    "BinningDialogParams": ".binning",
     "SuperposeConformersDialog": ".superpose",
     "SuperposeDialog": ".superpose",
     "SuperposeStructuresDialog": ".superpose",

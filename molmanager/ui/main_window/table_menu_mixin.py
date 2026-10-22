@@ -38,6 +38,7 @@ from .table_undo_commands import (
     UndoCellTextChangeCommand,
     UndoDeleteColumnCommand,
     UndoDuplicateColumnCommand,
+    depiction_column_for_cell,
     UndoInsertRowCommand,
     UndoLogarithmicColumnCommand,
     UndoPrecisionColumnCommand,
@@ -513,7 +514,13 @@ class TableMenuMixin:
             if callable(exporter):
                 exporter(int(oid), som_header)
         elif action == sketch_act and mol_ctx is not None:
-            self.open_sketcher(mol_ctx)
+            shown = mol_ctx
+            if oid is not None:
+                from ...chem.depiction_coords import mol_for_app_depiction
+
+                column = depiction_column_for_cell(self, col) or "Structure"
+                shown = mol_for_app_depiction(self, mol_ctx, int(oid), column)
+            self.open_sketcher(shown)
         elif view_poses_act is not None and action == view_poses_act and oid is not None:
             column = self.headers[col] if 0 <= col < len(self.headers) else ""
             self.show_packed_poses_in_viewer(int(oid), column)

@@ -79,6 +79,7 @@ from ..tool_dialog_scope import ToolDialogScope
 from ..session_notepad import SessionNotepadHost
 from ..workspace_tools import WorkspaceTools
 from .activity_cliff_mixin import ActivityCliffMixin
+from .align_substructure_mixin import AlignSubstructureMixin
 from .app_lifecycle_mixin import AppLifecycleMixin
 from .app_menu_mixin import AppMenuMixin
 from .app_progress_mixin import AppProgressMixin
@@ -228,6 +229,9 @@ class ChemistryWorkspaceWindow(
             ren_cap = max(2, min(cap, 8))
         self._render_threadpool.setMaxThreadCount(ren_cap)
         self.mols = MolStore(lru_max=cfg.mol_cache_lru)
+        from ...chem.depiction_coords import DepictionCoordStore
+
+        self._depiction_coords = DepictionCoordStore()
         self.headers, self.filters, self.global_bounds = [], [], {}
         self._logarithmic_columns: set[str] = set()
         self.zoomed_ids = set()
@@ -250,6 +254,7 @@ class ChemistryWorkspaceWindow(
             self.on_disconnect_fragments_finished, _qc
         )
         self.signals.neutralized.connect(self.on_neutralize_finished, _qc)
+        self.signals.substructure_aligned.connect(self.on_substructure_aligned, _qc)
         self.signals.fast_prepared.connect(self.on_fast_prepare_finished, _qc)
         self.signals.explicit_hydrogens_added.connect(self.on_add_explicit_hydrogens_finished, _qc)
         self.signals.explicit_hydrogens_removed.connect(
@@ -510,6 +515,12 @@ class ChemistryWorkspaceWindow(
             w = structure_depict_width()
         if h is None:
             h = structure_depict_height()
+        from rdkit import Chem
+
+        from ...chem.depiction_coords import mol_for_app_depiction
+
+        if isinstance(mol, Chem.Mol):
+            mol = mol_for_app_depiction(self, mol, int(oid), "Structure")
         self._render_threadpool.start(
             RenderWorker(
                 oid,
@@ -767,5 +778,6 @@ install_window_forwards(
         FastPrepareToolsMixin,
         StructureEditMixin,
         StructureWritebackMixin,
+        AlignSubstructureMixin,
     ),
 )

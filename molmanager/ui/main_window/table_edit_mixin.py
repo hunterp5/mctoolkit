@@ -33,6 +33,7 @@ from .table_undo_commands import (
     UndoDeleteRowsCommand,
     UndoPasteBlockCommand,
     UndoPasteCellCommand,
+    depiction_column_for_cell,
 )
 
 
@@ -699,6 +700,7 @@ class TableEditMixin:
                 except Exception:
                     pass
             self._table_model.set_structure_pixmap(oid, None)
+            self._clear_cell_depiction(col, oid)
             return True
         h = self.headers[col] if 0 <= col < len(self.headers) else ""
         if h and self._table_model.is_pixmap_data_column(h):
@@ -711,11 +713,19 @@ class TableEditMixin:
                 smi = text
             self._table_model.set_backing_text(oid, h, smi)
             self._table_model.set_column_pixmap(oid, h, None)
+            self._clear_cell_depiction(col, oid)
             return True
         if not self._table_model.column_accepts_text_edit(col):
             return False
         self._table_model.set_cell_text(oid, h, text)
         return True
+
+    def _clear_cell_depiction(self, col: int, oid: int) -> None:
+        """A replaced structure no longer matches coordinates stored for the old drawing."""
+        column = depiction_column_for_cell(self, col)
+        store = getattr(self, "_depiction_coords", None)
+        if column and store is not None:
+            store.discard_column_oids(column, [int(oid)])
 
     def _paste_clipboard_into_table_cell(
         self,
