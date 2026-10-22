@@ -35,7 +35,6 @@ from threading import Event
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import rdRGroupDecomposition
-from scipy.linalg import qr
 
 logger = logging.getLogger(__name__)
 
@@ -546,6 +545,8 @@ def _independent_columns(design: np.ndarray) -> list[int]:
     """Column-pivoted QR indices that span the substituent design matrix."""
     if design.size == 0 or design.shape[1] == 0:
         return []
+    from scipy.linalg import qr
+
     _q, r_matrix, pivots = qr(design, mode="economic", pivoting=True)
     diagonal = np.abs(np.diag(r_matrix))
     if diagonal.size == 0 or diagonal[0] <= 0.0:
