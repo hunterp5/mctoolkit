@@ -465,12 +465,13 @@ class ChemistryWorkspaceWindow(
         cancel_event = getattr(self, "_render2d_queue_cancel_event", None)
         if not payload:
             return
-        renders, row_by_oid, src, column_pixmap_mode = payload
+        renders, row_by_oid, src, column_pixmap_mode, merge_structure_store = payload
         self._begin_render2d_batch_impl(
             renders,
             row_by_oid,
             src,
             column_pixmap_mode=column_pixmap_mode,
+            merge_structure_store=merge_structure_store,
             cancel_event=cancel_event,
         )
 
@@ -531,7 +532,7 @@ class ChemistryWorkspaceWindow(
                 cancel_event=cancel_event,
                 skip_mol_props=skip_mol_props,
                 render_batch_session=render_batch_session,
-                want_scene=load_config().structure_vector_depiction,
+                want_scene=True,
             )
         )
 

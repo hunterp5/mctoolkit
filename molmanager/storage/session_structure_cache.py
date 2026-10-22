@@ -16,10 +16,11 @@
 
 """Sidecar cache (``.mctcache``) of session Structure depictions.
 
-The cache holds the structure store's SQLite file: depiction scenes, plus RDKit
-PNGs for molecules the scene builder hands back. Scenes do not depend on the cell
-size, so a cache written at another size still supplies them; only its PNGs are
-stale. Version 1 caches held PNGs only and are ignored.
+The cache holds the structure store's SQLite file: depiction scenes only. Scenes
+do not depend on the cell size, so a cache written at another size still applies.
+Version 1 caches held PNGs only and are ignored. A version 2 cache may still
+contain PNG rows from before the table stopped storing them; those rows are
+dropped when the cache is loaded.
 """
 
 from __future__ import annotations
@@ -109,16 +110,6 @@ def header_matches_session(header: dict | None, session_path: str | Path) -> boo
     return True
 
 
-def cached_pngs_fit(header: dict, *, depict_width: int, depict_height: int) -> bool:
-    """True when the cache's PNGs were drawn at the current depiction size."""
-    try:
-        return int(header.get("depict_width", -1)) == int(depict_width) and int(
-            header.get("depict_height", -1)
-        ) == int(depict_height)
-    except (TypeError, ValueError):
-        return False
-
-
 def cached_scenes_current(header: dict) -> bool:
     """True when the cache's scenes came from the current builder and layout options."""
     try:
@@ -166,8 +157,8 @@ def write_structure_cache(
 def read_structure_cache(session_path: str | Path) -> tuple[dict, bytes] | None:
     """Load the sidecar written for *session_path*, or ``None`` when missing / stale.
 
-    Callers decide which of its rows still apply with :func:`cached_pngs_fit` and
-    :func:`cached_scenes_current`.
+    Callers drop non-scene rows and reject the rest when :func:`cached_scenes_current`
+    is false. Depiction width and height in the header are recorded and not used.
     """
     path = session_cache_path(session_path)
     if not path.is_file():

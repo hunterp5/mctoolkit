@@ -23,7 +23,6 @@ import zipfile
 from pathlib import Path
 
 from molmanager.storage.session_structure_cache import (
-    cached_pngs_fit,
     cached_scenes_current,
     header_matches_session,
     read_structure_cache,
@@ -77,7 +76,6 @@ def test_session_cache_roundtrip(tmp_path: Path) -> None:
     assert loaded is not None
     header, png_bytes = loaded
     assert header_matches_session(header, session)
-    assert cached_pngs_fit(header, depict_width=180, depict_height=140)
     assert cached_scenes_current(header)
     assert header["oid_count"] == 2
     assert header["zoomed_ids"] == [1]
@@ -114,19 +112,17 @@ def test_version_one_caches_are_ignored(tmp_path: Path) -> None:
     assert read_structure_cache(session) is None
 
 
-def test_size_change_keeps_scenes_and_drops_pngs(tmp_path: Path) -> None:
+def test_loading_a_cache_drops_png_rows(tmp_path: Path) -> None:
     session = _session(tmp_path)
     _write(session, [(1, SCENE), (2, PNG), (3, SCENE)], depict_width=180, depict_height=140)
-    header, blob = read_structure_cache(session)
-    assert not cached_pngs_fit(header, depict_width=240, depict_height=200)
+    _header, blob = read_structure_cache(session)
 
     store = StructureRenderStore()
     try:
         store.import_sqlite_bytes(blob)
-        assert store.count_pngs() == 1
-        assert store.remove_images(scenes=False) == 1
-        assert sorted(store.png_oids()) == [1, 3] and len(store) == 2
-        assert store.remove_images(scenes=True) == 2
+        assert store.discard_non_scenes() == 1
+        assert sorted(store.png_oids()) == [1, 3] and store.scene_oids() == {1, 3}
+        store.clear()
         assert len(store) == 0
     finally:
         store.close()

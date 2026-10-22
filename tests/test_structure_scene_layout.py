@@ -87,12 +87,17 @@ def test_resize_repaints_scenes_without_rendering(window, monkeypatch) -> None:
     assert (pm.width(), pm.height()) == (w, h)
 
 
-def test_resize_with_a_png_row_still_renders(window, monkeypatch) -> None:
+def test_resize_renders_only_rows_without_a_scene(window, monkeypatch) -> None:
     started = []
-    monkeypatch.setattr(window, "_start_render_2d_batch", lambda *a, **k: started.append(a))
-    window._table_model._structure_png_store.ingest_png(1, b"\x89PNG-not-a-scene")
+    monkeypatch.setattr(window, "_start_render_2d_batch", lambda *a, **k: started.append((a, k)))
+    window._table_model._structure_png_store.remove_oid(1)
     window.rerender_structure_column_for_new_size()
     assert started
+    renders, _row_by_oid, src = started[0][0][:3]
+    assert src == "Structure"
+    assert [item[0] for item in renders] == [1]
+    assert started[0][1]["merge_structure_store"] is True
+    assert window._table_model._structure_png_store.scene_oids() == {0}
 
 
 def test_reopen_keeps_scenes_from_a_cache_at_another_size(

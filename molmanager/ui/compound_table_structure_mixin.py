@@ -21,8 +21,11 @@ from __future__ import annotations
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 
+from ..chem.depiction_scene import is_scene_blob
 from ..storage.extra_pixmap_store import pixmap_to_png_bytes
 from ..storage.structure_render_store import StructureRenderStore
+from ..table.structure_depiction_layout import structure_depict_height, structure_depict_width
+from ..table.structure_image import pixmap_from_structure_image
 
 
 class CompoundTableStructureMixin:
@@ -281,9 +284,28 @@ class CompoundTableStructureMixin:
         )
 
     def restore_structure_pngs(self, items: list[tuple[int, bytes | None]]) -> None:
-        """Put structure PNGs back after a cancelled render. Missing bytes clear that row."""
-        pngs = [(int(oid), bytes(raw)) for oid, raw in items if raw]
-        if pngs:
+        """Put structure pictures back after a cancelled render. Missing bytes clear that row.
+
+        Scenes go back into the store. An RDKit PNG is shown as a pixmap, not stored.
+        """
+        scenes: list[tuple[int, bytes]] = []
+        pictures: list[tuple[int, QPixmap | None]] = []
+        width, height = structure_depict_width(), structure_depict_height()
+        for oid, raw in items:
+            oid_i = int(oid)
+            if not raw:
+                self._pixmaps.pop(oid_i, None)
+                if self._structure_png_store is not None:
+                    self._structure_png_store.remove_oid(oid_i)
+                continue
+            blob = bytes(raw)
+            if is_scene_blob(blob):
+                scenes.append((oid_i, blob))
+            else:
+                if self._structure_png_store is not None:
+                    self._structure_png_store.remove_oid(oid_i)
+                pictures.append((oid_i, pixmap_from_structure_image(blob, width, height)))
+        if scenes:
             store = self._structure_png_store
             if store is None:
                 from ..platform_support.config import load_config
@@ -294,14 +316,10 @@ class CompoundTableStructureMixin:
                     max_png_entries=cfg.structure_render_png_max_entries,
                 )
                 self._structure_png_store = store
-            store.expand_png_capacity(len(pngs))
-            store.ingest_batch(pngs)
-        for oid, raw in items:
-            if raw:
-                continue
-            self._pixmaps.pop(int(oid), None)
-            if self._structure_png_store is not None:
-                self._structure_png_store.remove_oid(int(oid))
+            store.expand_png_capacity(len(scenes))
+            store.ingest_batch(scenes)
+        if pictures:
+            self.apply_structure_pixmaps_batch(pictures, emit=False)
         if self._rows:
             self.notify_structure_column_changed()
 
@@ -347,8 +365,18 @@ class CompoundTableStructureMixin:
         return store.png_bytes(oid)
 
     def set_structure_png_bytes(self, oid: int, png: bytes | None) -> None:
-        """Restore structure PNG into the lazy store (decoded on demand)."""
+        """Restore one structure picture: a scene into the store, a PNG as a pixmap."""
         store = self._structure_png_store
+        if png and not is_scene_blob(png):
+            if store is not None:
+                store.remove_oid(int(oid))
+            self.set_structure_pixmap(
+                int(oid),
+                pixmap_from_structure_image(
+                    bytes(png), structure_depict_width(), structure_depict_height()
+                ),
+            )
+            return
         if png:
             if store is None:
                 from ..platform_support.config import load_config

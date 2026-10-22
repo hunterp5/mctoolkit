@@ -221,23 +221,29 @@ def _png_rows(oids):
     return _mp_render_structure_batch(([(o, blob) for o in oids], 242, 202))
 
 
-def test_batched_handler_streams_pngs_instead_of_buffering() -> None:
+def test_batched_handler_streams_scenes_and_drops_png_fallbacks() -> None:
+    from molmanager.chem.depiction_scene import is_scene_blob
     from molmanager.storage.structure_render_store import StructureRenderStore
     from molmanager.ui.main_window.render2d_results_mixin import Render2DResultsMixin
 
+    items = [
+        (1, Chem.MolFromSmiles("CCO").ToBinary()),
+        (2, Chem.MolFromSmiles("[CH3]").ToBinary()),
+    ]
+    rows = _mp_render_structure_batch((items, 210, 170, True))
     app = _App(rows_in_table={1, 2}, goal=4)
     store = StructureRenderStore(max_decoded_pixmaps=4, max_png_entries=0)
     try:
         app._render2d_stream_store = store
         app._render2d_pixmap_target = None
         app._render2d_flush_max_width = 0
-        app._render2d_write_png_rows = lambda rows: Render2DResultsMixin._render2d_write_png_rows(
-            app, rows
+        app._render2d_write_png_rows = lambda ready: Render2DResultsMixin._render2d_write_png_rows(
+            app, ready
         )
-        app.on_render2d_rows_ready(_png_rows([1, 2]), 7)
+        app.on_render2d_rows_ready(rows, 7)
         assert app._render2d_pending == {}
-        assert store.png_bytes(1).startswith(b"\x89PNG")
-        assert store.png_bytes(2).startswith(b"\x89PNG")
+        assert is_scene_blob(store.png_bytes(1))
+        assert store.png_bytes(2) is None
         assert app._import_render_done == 2
         assert not app.flushed
     finally:

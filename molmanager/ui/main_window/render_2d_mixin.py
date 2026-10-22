@@ -203,16 +203,27 @@ class Render2DMixin:
             return False
         self.status_label.setText(f"{TOOL_RENDER_2D}: collecting structures…")
         base_w, base_h = structure_depict_width(), structure_depict_height()
-        renders, row_by_oid = self._build_render2d_tasks_from_mols(base_w, base_h, None)
-        if not renders:
-            # Session restore may have rows before mols are keyed; rebuild from table cells.
+        have = self._stored_structure_scene_oids()
+        if have:
+            # A partial scene cache already covers some rows; draw only the rest from the table.
             renders, row_by_oid = self._build_render2d_tasks_in_table_order(
                 "Structure", base_w, base_h, None
             )
+            renders = [item for item in renders if int(item[0]) not in have]
+            row_by_oid = {oid: row for oid, row in row_by_oid.items() if oid not in have}
+        else:
+            renders, row_by_oid = self._build_render2d_tasks_from_mols(base_w, base_h, None)
+            if not renders:
+                # Session restore may have rows before mols are keyed; rebuild from table cells.
+                renders, row_by_oid = self._build_render2d_tasks_in_table_order(
+                    "Structure", base_w, base_h, None
+                )
         if not renders:
             return False
         self._render2d_after_ingest = True
-        self._start_render_2d_batch(renders, row_by_oid, "Structure")
+        self._start_render_2d_batch(
+            renders, row_by_oid, "Structure", merge_structure_store=bool(have)
+        )
         return True
 
     def _auto_render2d_blocks_workspace_reveal(self, n_rows: int | None = None) -> bool:
@@ -233,6 +244,7 @@ class Render2DMixin:
         self._render2d_eager_flush_queue = None
         self._render2d_eager_flush_idx = 0
         self._render2d_eager_uniform_height = False
+        self._render2d_merge_structure_store = False
         self._render2d_row_by_oid = None
         pix_target = getattr(self, "_render2d_pixmap_target", None)
         self._render2d_pixmap_target = None
@@ -313,8 +325,10 @@ class Render2DMixin:
         self._render2d_eager_flush_queue = None
         self._render2d_eager_flush_idx = 0
         self._render2d_eager_uniform_height = False
-        if getattr(self, "_render2d_lazy_flush", False) and not getattr(
-            self, "_render2d_pixmap_target", None
+        if (
+            getattr(self, "_render2d_lazy_flush", False)
+            and not getattr(self, "_render2d_pixmap_target", None)
+            and not getattr(self, "_render2d_merge_structure_store", False)
         ):
             self._table_model.clear_structure_png_store()
         snap = getattr(self, "_render2d_snapshot", None)
@@ -434,6 +448,7 @@ class Render2DMixin:
         *,
         column_pixmap_mode: bool = True,
         queue_title_prefix: str = "",
+        merge_structure_store: bool = False,
     ) -> None:
         """Start a batch 2D render.
 
@@ -449,10 +464,11 @@ class Render2DMixin:
                 row_by_oid,
                 src,
                 column_pixmap_mode=column_pixmap_mode,
+                merge_structure_store=merge_structure_store,
             )
             return
         title = f"{queue_title_prefix}render 2D ({len(renders)} rows)".strip()
-        payload = (renders, row_by_oid, src, column_pixmap_mode)
+        payload = (renders, row_by_oid, src, column_pixmap_mode, merge_structure_store)
         self.process_queue.enqueue(
             title,
             lambda ev, p=payload: Render2DBatchHeldJob(self, p, ev),
@@ -465,6 +481,7 @@ class Render2DMixin:
         src: str = "Structure",
         *,
         column_pixmap_mode: bool = True,
+        merge_structure_store: bool = False,
         cancel_event: threading.Event | None = None,
     ) -> None:
         """Start batch 2D rendering on the GUI thread (called from :class:`Render2DBatchHeldJob`)."""
@@ -495,6 +512,7 @@ class Render2DMixin:
                 len(oids), structure_column=structure_column
             )
         self._render2d_lazy_flush = lazy_structure
+        self._render2d_merge_structure_store = bool(merge_structure_store) and structure_column
         self._render2d_streamed_column = False
         keep_snapshot = (not after_ingest) and len(oids) <= _RENDER2D_UNDO_SNAPSHOT_MAX_ROWS
         tgt = self._render2d_pixmap_target
@@ -508,14 +526,22 @@ class Render2DMixin:
             self._render2d_snapshot = (
                 self._table_model.snapshot_structure_pngs(oids) if keep_snapshot else {}
             )
-            self._table_model.clear_structure_png_store()
+            if not self._render2d_merge_structure_store:
+                self._table_model.clear_structure_png_store()
             self._table_model.clear_structure_pixmaps_for_oids(oids, emit=False)
         else:
             self._render2d_snapshot = (
                 self._table_model.snapshot_structure_pngs(oids) if keep_snapshot else {}
             )
             self._table_model.clear_structure_pixmaps_for_oids(oids, emit=False)
-        self._open_render2d_stream_store(len(oids) if lazy_structure else 0)
+        reuse_store = bool(
+            self._render2d_merge_structure_store
+            and lazy_structure
+            and self._table_model._structure_png_store is not None
+        )
+        self._open_render2d_stream_store(
+            0 if reuse_store or not lazy_structure else len(oids), reuse=reuse_store
+        )
         if structure_column and not lazy_structure:
             self._table_model.notify_structure_column_changed()
         self._render2d_progress_last_emit = 0.0
@@ -538,7 +564,7 @@ class Render2DMixin:
                 self.signals,
                 self._render2d_cancel_event,
                 self._render2d_batch_session_tag,
-                want_scenes=structure_column and cfg.structure_vector_depiction,
+                want_scenes=structure_column,
             )
         )
 

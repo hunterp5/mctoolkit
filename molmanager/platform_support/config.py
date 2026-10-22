@@ -135,7 +135,6 @@ class MolManagerConfig:
     auto_render_2d_max_rows: int
     structure_render_lazy_min_rows: int
     structure_render_pixmap_lru: int
-    structure_vector_depiction: bool
     structure_layout_macrocycle_coordgen: bool
     structure_layout_flip_inward_substituents: bool
     structure_layout_rotate_to_cell: bool
@@ -325,7 +324,6 @@ def load_config() -> MolManagerConfig:
             "MOLMANAGER_STRUCTURE_RENDER_PIXMAP_LRU", 384, lo=32, hi=4096
         ),
         # Draw Structure cells from depiction scenes instead of RDKit PNGs.
-        structure_vector_depiction=_env_bool("MOLMANAGER_STRUCTURE_VECTOR_DEPICTION", True),
         structure_layout_macrocycle_coordgen=_env_bool(
             "MOLMANAGER_STRUCTURE_LAYOUT_MACROCYCLE_COORDGEN", True
         ),

@@ -24,6 +24,7 @@ from PyQt5.QtCore import QEventLoop, Qt, QTimer
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QApplication
 
+from ...chem.depiction_scene import is_scene_blob
 from ...platform_support.config import load_config
 from ...table.structure_depiction_layout import (
     STRUCTURE_COLUMN_HORIZONTAL_PADDING,
@@ -160,16 +161,32 @@ class Render2DResultsMixin:
             pass
 
     def _close_render2d_stream_store(self) -> None:
-        """Drop a PNG store that was filled during a render and never attached to the table."""
+        """Drop a scene store that was filled during a render and never attached to the table.
+
+        A store borrowed from the table (a resize that keeps existing scenes) is only
+        detached here. Closing it would wipe the rows that were not being redrawn.
+        """
         store = getattr(self, "_render2d_stream_store", None)
+        owned = bool(getattr(self, "_render2d_stream_store_owned", True))
         self._render2d_stream_store = None
+        self._render2d_stream_store_owned = True
+        if not owned:
+            return
         closer = getattr(store, "close", None)
         if callable(closer):
             closer()
 
-    def _open_render2d_stream_store(self, n_rows: int) -> None:
-        """Create the structure PNG store up front so results can be written as they arrive."""
+    def _open_render2d_stream_store(self, n_rows: int, *, reuse: bool = False) -> None:
+        """Create the structure scene store up front so results can be written as they arrive.
+
+        *reuse* keeps writing into the store already on the table.
+        """
+        if reuse:
+            self._render2d_stream_store = self._table_model._structure_png_store
+            self._render2d_stream_store_owned = False
+            return
         self._close_render2d_stream_store()
+        self._render2d_stream_store_owned = True
         if int(n_rows) <= 0:
             return
         cfg = load_config()
@@ -189,18 +206,31 @@ class Render2DResultsMixin:
         if store is None and not pix_target:
             return False
         items: list[tuple[int, bytes]] = []
+        scenes: list[tuple[int, bytes]] = []
+        fallbacks: list[tuple[int, bytes, int, int]] = []
+        structure_store = store is not None and not pix_target
         max_w = int(getattr(self, "_render2d_flush_max_width", 0) or 0)
-        for oid, img, success, w, _h in rows:
+        for oid, img, success, w, h in rows:
             oid_i = int(oid)
             if not success or not img or self._resolve_structure_row_for_oid(oid_i) == -1:
                 continue
-            items.append((oid_i, bytes(img)))
+            raw = bytes(img)
             max_w = max(max_w, int(w))
+            if structure_store and is_scene_blob(raw):
+                scenes.append((oid_i, raw))
+            elif structure_store:
+                fallbacks.append((oid_i, raw, int(w), int(h)))
+            else:
+                items.append((oid_i, raw))
         self._render2d_flush_max_width = max_w
-        if not items:
+        if structure_store:
+            if scenes:
+                store.ingest_batch(scenes)
+            keep = getattr(self, "_keep_structure_fallbacks", None)
+            if callable(keep):
+                keep(fallbacks)
             return True
-        if store is not None:
-            store.ingest_batch(items)
+        if not items:
             return True
         column_mode = getattr(self, "_render2d_column_pixmap_mode", True)
         if column_mode:
@@ -211,6 +241,26 @@ class Render2DResultsMixin:
                 self._table_model.set_cell_png_bytes(oid_i, pix_target, raw, emit=False)
         self._render2d_streamed_column = True
         return True
+
+    def _keep_structure_fallbacks(self, items: list[tuple[int, bytes, int, int]]) -> None:
+        """Show RDKit fallback pictures without putting them in the scene store.
+
+        A fallback is drawn for one cell size, so it lives as a pixmap. The next resize
+        redraws it. Any scene previously stored for the row is removed.
+        """
+        if not items:
+            return
+        model = getattr(self, "_table_model", None)
+        if model is None:
+            return
+        store = model._structure_png_store
+        pictures: list[tuple[int, QPixmap | None]] = []
+        for oid, raw, width, height in items:
+            if store is not None:
+                store.remove_oid(oid)
+            pictures.append((oid, pixmap_from_structure_image(raw, width, height)))
+        if pictures:
+            model.apply_structure_pixmaps_batch(pictures, emit=False)
 
     def _render2d_use_lazy_structure_flush(self, count: int, *, structure_column: bool) -> bool:
         if not structure_column:
@@ -310,30 +360,37 @@ class Render2DResultsMixin:
             if lazy_structure:
                 store = getattr(self, "_render2d_stream_store", None)
                 self._render2d_stream_store = None
+                self._render2d_stream_store_owned = True
+                fallbacks: list[tuple[int, bytes, int, int]] = []
                 if store is None:
                     cfg = load_config()
                     cap = int(cfg.structure_render_png_max_entries)
-                    png_items: list[tuple[int, bytes]] = []
+                    scenes: list[tuple[int, bytes]] = []
                     for oid in ordered:
                         rec = pending.get(oid)
                         if not rec:
                             continue
-                        img_b, ok, _rw, _rh = rec
-                        if ok and img_b:
-                            png_items.append((int(oid), bytes(img_b)))
+                        img_b, ok, rw, rh = rec
+                        if not ok or not img_b:
+                            continue
+                        if is_scene_blob(img_b):
+                            scenes.append((int(oid), bytes(img_b)))
+                        else:
+                            fallbacks.append((int(oid), bytes(img_b), int(rw), int(rh)))
                     if cap > 0:
-                        cap = max(cap, len(png_items))
+                        cap = max(cap, len(scenes) + len(fallbacks))
                     store = StructureRenderStore(
                         max_decoded_pixmaps=cfg.structure_render_pixmap_lru,
                         max_png_entries=cap,
                     )
-                    if png_items:
-                        store.ingest_batch(png_items)
+                    if scenes:
+                        store.ingest_batch(scenes)
                     self._render2d_flush_max_width = max(
                         (int(rec[2]) for rec in pending.values() if rec and rec[1]),
                         default=0,
                     )
                 self._table_model.set_structure_png_store(store)
+                self._keep_structure_fallbacks(fallbacks)
                 self._ensure_structure_lazy_scroll_hook()
                 self._render2d_eager_flush_queue = []
                 self._render2d_eager_flush_idx = 0
@@ -446,6 +503,11 @@ class Render2DResultsMixin:
             if row < 0:
                 decoded.append((oid, None))
                 continue
+            if not getattr(self, "_render2d_pixmap_target", None) and is_scene_blob(img_b):
+                store_scene = getattr(self, "_store_structure_scene", None)
+                if callable(store_scene) and store_scene(oid, img_b):
+                    decoded.append((oid, None))
+                    continue
             decoded.append((oid, pixmap_from_structure_image(img_b, rw, rh)))
             if set_heights and self.table.rowHeight(row) != rh:
                 self.table.setRowHeight(row, rh)

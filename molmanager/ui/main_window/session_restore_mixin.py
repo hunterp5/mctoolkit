@@ -741,22 +741,17 @@ class SessionRestoreMixin:
     def _try_load_session_structure_cache(self) -> bool:
         """Install Structure depictions from a sidecar cache; True on a full hit (skip auto-render).
 
-        Scenes survive a depiction size change; PNGs drawn at another size, and scenes
-        from an older builder, are dropped and count as missing rows.
+        Scenes survive a depiction size change. PNG rows from an older cache, and scenes
+        from an older builder, are dropped. Rows left without a scene are rendered again.
         """
         path = getattr(self, "_session_source_path", None)
         if not path:
             return False
         from ...storage.session_structure_cache import (
-            cached_pngs_fit,
             cached_scenes_current,
             read_structure_cache,
         )
         from ...storage.structure_render_store import StructureRenderStore
-        from ...table.structure_depiction_layout import (
-            structure_depict_height,
-            structure_depict_width,
-        )
 
         loaded = read_structure_cache(path)
         if loaded is None:
@@ -764,11 +759,9 @@ class SessionRestoreMixin:
         header, png_bytes = loaded
         store = StructureRenderStore()
         store.import_sqlite_bytes(png_bytes)
-        dw, dh = structure_depict_width(), structure_depict_height()
-        if not cached_pngs_fit(header, depict_width=dw, depict_height=dh):
-            store.remove_images(scenes=False)
+        store.discard_non_scenes()
         if not cached_scenes_current(header):
-            store.remove_images(scenes=True)
+            store.clear()
         n = len(store)
         if n <= 0:
             store.close()
@@ -777,13 +770,11 @@ class SessionRestoreMixin:
         if model is None:
             store.close()
             return False
-        row_count = int(model.rowCount())
-        if row_count > 0 and n < row_count:
-            # Partial hit: keep cached PNGs; caller starts auto-render for the rest.
-            model.set_structure_png_store(store)
+        model.set_structure_png_store(store)
+        if self._structure_oids_without_scene():
+            # Partial hit: keep the scenes; auto-render draws the rows that have none.
             self._session_structure_cache_missing = True
             return False
-        model.set_structure_png_store(store)
         self._session_structure_cache_hit = True
         self._apply_scene_zoom_overrides()
         refresh = getattr(self, "_refresh_visible_structure_cells", None)
@@ -793,13 +784,16 @@ class SessionRestoreMixin:
         return True
 
     def _write_session_structure_cache(self, session_path: str | None = None) -> None:
-        """Persist current Structure PNGs next to *session_path* (or the open session)."""
+        """Persist current Structure scenes next to *session_path* (or the open session)."""
         path = session_path or getattr(self, "_session_source_path", None)
         if not path:
             return
         model = getattr(self, "_table_model", None)
         store = getattr(model, "_structure_png_store", None) if model is not None else None
         if store is None or len(store) <= 0:
+            return
+        store.discard_non_scenes()
+        if len(store) <= 0:
             return
         from ...storage.session_structure_cache import write_structure_cache
         from ...table.structure_depiction_layout import (

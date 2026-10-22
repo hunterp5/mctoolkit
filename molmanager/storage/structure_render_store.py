@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Lazy PNG cache for structure-column 2D renders on very large tables."""
+"""Scene store for structure-column depictions on very large tables."""
 
 from __future__ import annotations
 
@@ -34,11 +34,12 @@ _IS_SCENE = "substr(blob, 1, 2) = ?"
 
 class StructureRenderStore:
     """
-    Holds rendered structure image bytes (PNG or depiction scene) on disk and decodes
-    them to QPixmap on demand.
+    Holds depiction scenes on disk and paints them to QPixmap on demand.
 
-    Only a bounded number of QPixmaps are kept in memory (LRU). PNG bytes live in
-    a temp SQLite file (optional entry cap, oldest seq evicted).
+    Only a bounded number of QPixmaps are kept in memory (LRU). Scene bytes live in
+    a temp SQLite file (optional entry cap, oldest seq evicted). The table is still
+    named ``pngs`` because session caches already use that schema. RDKit PNGs for
+    molecules without a scene are not stored here.
     """
 
     def __init__(
@@ -233,21 +234,20 @@ class StructureRenderStore:
             if oid not in keep:
                 del self._lru[oid]
 
-    def count_pngs(self) -> int:
-        """Stored rows that are PNGs rather than depiction scenes."""
-        row = self._conn.execute(
-            f"SELECT COUNT(*) FROM pngs WHERE NOT {_IS_SCENE}", (SCENE_MAGIC,)
-        ).fetchone()
-        return int(row[0] if row else 0)
+    def scene_oids(self) -> set[int]:
+        """Row ids whose stored bytes are a depiction scene."""
+        rows = self._conn.execute(
+            f"SELECT oid FROM pngs WHERE {_IS_SCENE}", (SCENE_MAGIC,)
+        ).fetchall()
+        return {int(oid) for (oid,) in rows}
 
-    def remove_images(self, *, scenes: bool) -> int:
-        """Delete every stored scene (*scenes* true) or every PNG. Returns rows removed.
+    def discard_non_scenes(self) -> int:
+        """Delete stored rows that are not depiction scenes. Returns rows removed.
 
-        PNGs are drawn for one cell size and scenes by one builder revision, so a
-        sidecar cache read back after either changed keeps only the other kind.
+        Older caches kept an RDKit PNG for molecules the scene builder handed back.
+        Those pictures belong to one cell size, so they are dropped on load and save.
         """
-        condition = _IS_SCENE if scenes else f"NOT {_IS_SCENE}"
-        cur = self._conn.execute(f"DELETE FROM pngs WHERE {condition}", (SCENE_MAGIC,))
+        cur = self._conn.execute(f"DELETE FROM pngs WHERE NOT {_IS_SCENE}", (SCENE_MAGIC,))
         self._conn.commit()
         removed = max(0, int(cur.rowcount))
         if removed:

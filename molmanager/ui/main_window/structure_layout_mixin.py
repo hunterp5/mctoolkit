@@ -71,23 +71,35 @@ class StructureLayoutMixin:
             self.rerender_structure_column_for_new_size()
 
     def rerender_structure_column_for_new_size(self) -> None:
-        """Re-draw Structure cells after depiction size changed in Settings."""
+        """Re-draw Structure cells after depiction size changed in Settings.
+
+        Stored scenes are painted at the new size with no workers. Only rows without a
+        scene (a fallback picture, or one not drawn yet) are rendered again, and that
+        render keeps the scenes already in the store.
+        """
         if not hasattr(self, "_table_model") or self._table_model.rowCount() <= 0:
             if hasattr(self, "_table_model") and self._table_model is not None:
                 self._table_model.notify_structure_column_changed()
             return
-        if self._repaint_scenes_for_new_size():
+        missing = self._structure_oids_without_scene()
+        if not missing:
+            self._repaint_stored_scenes()
             return
+        self._repaint_stored_scenes()
         if getattr(self, "_render2d_batch_active", False) or self.process_queue.has_running_job():
             if hasattr(self, "status_label"):
                 self.status_label.setText(
                     "2D render size saved. Re-draw structures when the current job finishes."
                 )
             return
-        self.zoomed_ids.clear()
+        merge = len(missing) < self._table_model.rowCount()
+        if not merge:
+            self.zoomed_ids.clear()
+            self._table_model.clear_structure_png_store()
         w, h = structure_depict_width(), structure_depict_height()
-        renders, row_by_oid = self._build_render2d_tasks_in_table_order("Structure", w, h, None)
-        self._table_model.clear_structure_png_store()
+        renders, row_by_oid = self._build_render2d_tasks_in_table_order(
+            "Structure", w, h, set(missing)
+        )
         if not renders:
             self._table_model.notify_structure_column_changed()
             return
@@ -97,27 +109,42 @@ class StructureLayoutMixin:
             "Structure",
             column_pixmap_mode=False,
             queue_title_prefix="structure resize ",
+            merge_structure_store=merge,
         )
 
-    def _repaint_scenes_for_new_size(self) -> bool:
-        """Show the new depiction size without workers when every stored row is a scene.
-
-        Scenes have no pixel size, so dropping the decoded pixmaps is enough. False
-        when the store is missing or holds PNGs, which must be drawn again.
-        """
+    def _repaint_stored_scenes(self) -> None:
+        """Drop decoded pixmaps so stored scenes paint at the current cell size."""
         model = self._table_model
+        if not self._stored_structure_scene_oids():
+            return
         store = model._structure_png_store
-        if store is None or len(store) <= 0 or store.count_pngs() > 0:
-            return False
-        if len(store) < model.rowCount():
-            return False
         store.trim_decoded_cache()
         model.apply_structure_pixmaps_batch(
             [(oid, None) for oid in list(model._pixmaps)], emit=False
         )
         self._apply_scene_zoom_overrides()
         model.notify_structure_column_changed()
-        return True
+
+    def _stored_structure_scene_oids(self) -> set[int]:
+        """Row ids that have a depiction scene in the Structure store."""
+        store = getattr(self._table_model, "_structure_png_store", None)
+        if store is None:
+            return set()
+        return store.scene_oids()
+
+    def _structure_oids_without_scene(self) -> list[int]:
+        """Table row ids with no stored depiction scene, in table order."""
+        model = self._table_model
+        have = self._stored_structure_scene_oids()
+        missing: list[int] = []
+        for row in range(model.rowCount()):
+            try:
+                oid = int(model.row_oid(row))
+            except (TypeError, ValueError):
+                continue
+            if oid not in have:
+                missing.append(oid)
+        return missing
 
     def _stored_scene(self, oid: int) -> bytes | None:
         """The row's stored depiction scene, or ``None`` when it has a PNG or nothing."""

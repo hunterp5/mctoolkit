@@ -28,7 +28,6 @@ from PyQt5.QtGui import QGuiApplication, QImage, QPainter, QPixmap
 
 from molmanager.chem.depiction_scene import SceneHighlight, is_scene_blob, unpack_scene
 from molmanager.chem.render2d_mp import molecule_image_bytes
-from molmanager.platform_support.config import load_config
 from molmanager.table.depiction_painter import light_palette, paint_scene
 from molmanager.table.structure_depiction_layout import (
     STRUCTURE_DEPICT_BOND_LINE_WIDTH,
@@ -94,8 +93,7 @@ def molecule_png_bytes(mol, width: int, height: int) -> bytes:
 
 
 def _molecule_image(mol, width: int, height: int, highlight: SceneHighlight | None) -> QImage:
-    want_scene = load_config().structure_vector_depiction
-    raw = molecule_image_bytes(mol, width, height, want_scene=want_scene, highlight=highlight)
+    raw = molecule_image_bytes(mol, width, height, want_scene=True, highlight=highlight)
     return image_from_structure_bytes(raw, width, height, highlight=highlight)
 
 
