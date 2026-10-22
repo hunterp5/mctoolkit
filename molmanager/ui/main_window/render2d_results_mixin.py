@@ -401,6 +401,7 @@ class Render2DResultsMixin:
             except Exception:
                 pass
         if lazy_structure:
+            self._apply_scene_zoom_overrides()
             self._refresh_visible_structure_cells()
         if getattr(self, "_render2d_streamed_column", False) and pix_target:
             self._notify_streamed_pixmap_column(pix_target)
@@ -464,10 +465,14 @@ class Render2DResultsMixin:
             return
         if oid in self.zoomed_ids:
             self.zoomed_ids.remove(oid)
+            if self._show_scene_zoom(oid, False):
+                return
             if self._try_restore_structure_zoom_out(oid, view_row):
                 return
             w, h = structure_depict_width(), structure_depict_height()
         else:
             self.zoomed_ids.add(oid)
+            if self._show_scene_zoom(oid, True):
+                return
             w, h = structure_depict_width() * 2, structure_depict_height() * 2
         self.start_render_worker(oid, mol, w, h)

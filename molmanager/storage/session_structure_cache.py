@@ -14,7 +14,13 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Sidecar PNG cache (``.mctcache``) for session structure renders."""
+"""Sidecar cache (``.mctcache``) of session Structure depictions.
+
+The cache holds the structure store's SQLite file: depiction scenes, plus RDKit
+PNGs for molecules the scene builder hands back. Scenes do not depend on the cell
+size, so a cache written at another size still supplies them; only its PNGs are
+stale. Version 1 caches held PNGs only and are ignored.
+"""
 
 from __future__ import annotations
 
@@ -24,10 +30,12 @@ import os
 import zipfile
 from pathlib import Path
 
+from ..chem.depiction_builder import BUILDER_REVISION
+
 logger = logging.getLogger(__name__)
 
 CACHE_FORMAT = "molmanager_structure_cache"
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 CACHE_EXTENSION = ".mctcache"
 _HEADER_MEMBER = "header.json"
 _PNG_MEMBER = "pngs.sqlite"
@@ -36,8 +44,10 @@ _PNG_MEMBER = "pngs.sqlite"
 def session_cache_path(session_path: str | Path) -> Path:
     """Return ``<session>.mctcache`` next to the session file."""
     path = Path(session_path)
-    return path.with_suffix(path.suffix + CACHE_EXTENSION) if path.suffix else Path(
-        str(path) + CACHE_EXTENSION
+    return (
+        path.with_suffix(path.suffix + CACHE_EXTENSION)
+        if path.suffix
+        else Path(str(path) + CACHE_EXTENSION)
     )
 
 
@@ -66,10 +76,11 @@ def build_cache_header(
     zoomed_ids: list[int] | None = None,
     oid_count: int = 0,
 ) -> dict:
-    """Metadata written into the sidecar zip so stale caches are rejected."""
+    """Metadata written into the sidecar zip so stale contents are rejected."""
     header = {
         "format": CACHE_FORMAT,
         "version": int(CACHE_VERSION),
+        "scene_revision": int(BUILDER_REVISION),
         "depict_width": int(depict_width),
         "depict_height": int(depict_height),
         "zoomed_ids": sorted(int(x) for x in (zoomed_ids or [])),
@@ -79,29 +90,16 @@ def build_cache_header(
     return header
 
 
-def header_matches_session(
-    header: dict | None,
-    session_path: str | Path,
-    *,
-    depict_width: int,
-    depict_height: int,
-) -> bool:
-    """True when *header* is usable for the given session and depict size."""
+def header_matches_session(header: dict | None, session_path: str | Path) -> bool:
+    """True when *header* is a current-version cache written for this session file."""
     if not isinstance(header, dict):
         return False
     if header.get("format") != CACHE_FORMAT:
         return False
+    identity = _session_identity(session_path)
     try:
         if int(header.get("version", -1)) != CACHE_VERSION:
             return False
-        if int(header.get("depict_width", -1)) != int(depict_width):
-            return False
-        if int(header.get("depict_height", -1)) != int(depict_height):
-            return False
-    except (TypeError, ValueError):
-        return False
-    identity = _session_identity(session_path)
-    try:
         if int(header.get("session_size", -1)) != int(identity["session_size"]):
             return False
         if int(header.get("session_mtime_ns", -1)) != int(identity["session_mtime_ns"]):
@@ -109,6 +107,24 @@ def header_matches_session(
     except (TypeError, ValueError):
         return False
     return True
+
+
+def cached_pngs_fit(header: dict, *, depict_width: int, depict_height: int) -> bool:
+    """True when the cache's PNGs were drawn at the current depiction size."""
+    try:
+        return int(header.get("depict_width", -1)) == int(depict_width) and int(
+            header.get("depict_height", -1)
+        ) == int(depict_height)
+    except (TypeError, ValueError):
+        return False
+
+
+def cached_scenes_current(header: dict) -> bool:
+    """True when the cache's scenes came from the current scene builder."""
+    try:
+        return int(header.get("scene_revision", -1)) == BUILDER_REVISION
+    except (TypeError, ValueError):
+        return False
 
 
 def write_structure_cache(
@@ -147,13 +163,12 @@ def write_structure_cache(
         return None
 
 
-def read_structure_cache(
-    session_path: str | Path,
-    *,
-    depict_width: int,
-    depict_height: int,
-) -> tuple[dict, bytes] | None:
-    """Load a valid sidecar cache, or ``None`` when missing / stale."""
+def read_structure_cache(session_path: str | Path) -> tuple[dict, bytes] | None:
+    """Load the sidecar written for *session_path*, or ``None`` when missing / stale.
+
+    Callers decide which of its rows still apply with :func:`cached_pngs_fit` and
+    :func:`cached_scenes_current`.
+    """
     path = session_cache_path(session_path)
     if not path.is_file():
         return None
@@ -165,9 +180,7 @@ def read_structure_cache(
     except (OSError, KeyError, json.JSONDecodeError, UnicodeDecodeError, zipfile.BadZipFile):
         logger.debug("Ignoring unreadable structure cache %s", path, exc_info=True)
         return None
-    if not header_matches_session(
-        header, session_path, depict_width=depict_width, depict_height=depict_height
-    ):
+    if not header_matches_session(header, session_path):
         logger.debug("Structure cache stale for %s", path)
         return None
     if not png_bytes:

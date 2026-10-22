@@ -21,6 +21,8 @@ from __future__ import annotations
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 
+from ...chem.depiction_scene import is_scene_blob
+from ...table.structure_image import pixmap_from_structure_image
 from ..compound_table_model import CompoundTableModel
 from ...table.structure_depiction_layout import (
     STRUCTURE_COLUMN_HORIZONTAL_PADDING,
@@ -74,6 +76,8 @@ class StructureLayoutMixin:
             if hasattr(self, "_table_model") and self._table_model is not None:
                 self._table_model.notify_structure_column_changed()
             return
+        if self._repaint_scenes_for_new_size():
+            return
         if getattr(self, "_render2d_batch_active", False) or self.process_queue.has_running_job():
             if hasattr(self, "status_label"):
                 self.status_label.setText(
@@ -94,6 +98,57 @@ class StructureLayoutMixin:
             column_pixmap_mode=False,
             queue_title_prefix="structure resize ",
         )
+
+    def _repaint_scenes_for_new_size(self) -> bool:
+        """Show the new depiction size without workers when every stored row is a scene.
+
+        Scenes have no pixel size, so dropping the decoded pixmaps is enough. False
+        when the store is missing or holds PNGs, which must be drawn again.
+        """
+        model = self._table_model
+        store = model._structure_png_store
+        if store is None or len(store) <= 0 or store.count_pngs() > 0:
+            return False
+        if len(store) < model.rowCount():
+            return False
+        store.trim_decoded_cache()
+        model.apply_structure_pixmaps_batch(
+            [(oid, None) for oid in list(model._pixmaps)], emit=False
+        )
+        self._apply_scene_zoom_overrides()
+        model.notify_structure_column_changed()
+        return True
+
+    def _stored_scene(self, oid: int) -> bytes | None:
+        """The row's stored depiction scene, or ``None`` when it has a PNG or nothing."""
+        store = self._table_model._structure_png_store
+        raw = store.png_bytes(int(oid)) if store is not None else None
+        return raw if is_scene_blob(raw) else None
+
+    def _show_scene_zoom(self, oid: int, zoomed: bool) -> bool:
+        """Paint a row's stored scene at 2x, or back at 1x, without a worker.
+
+        False when the row has no stored scene, so the caller re-renders instead.
+        """
+        blob = self._stored_scene(oid)
+        if blob is None:
+            return False
+        w, h = structure_depict_width(), structure_depict_height()
+        if zoomed:
+            w, h = w * 2, h * 2
+            self._table_model.set_structure_pixmap(oid, pixmap_from_structure_image(blob, w, h))
+        else:
+            self._table_model.set_structure_pixmap(oid, None)
+        view_row = self._resolve_structure_row_for_oid(int(oid))
+        if view_row != -1:
+            self.table.setRowHeight(int(view_row), h)
+        self._sync_structure_column_width_for_zoom_state()
+        return True
+
+    def _apply_scene_zoom_overrides(self) -> None:
+        """Draw every zoomed row that has a stored scene at 2x (after a store is attached)."""
+        for oid in list(getattr(self, "zoomed_ids", None) or ()):
+            self._show_scene_zoom(int(oid), True)
 
     def _sync_structure_column_width_for_zoom_state(self) -> None:
         """Set Structure column width from zoom state (O(1), no full-table scan)."""

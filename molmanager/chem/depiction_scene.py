@@ -44,7 +44,7 @@ MAX_COLOUR_ROLE = 118
 # Em size of subscript and superscript pieces relative to normal label text.
 SCRIPT_SCALE = 0.66
 
-_MAGIC = b"MS"
+SCENE_MAGIC = b"MS"
 _HEADER = struct.Struct("<2sBBHHff4fIII")
 _ATOM = struct.Struct("<2f")
 _STROKE = struct.Struct("<4fBBH")
@@ -210,7 +210,7 @@ def pack_scene(scene: DepictionScene) -> bytes:
     out = bytearray()
     try:
         out += _HEADER.pack(
-            _MAGIC,
+            SCENE_MAGIC,
             SCENE_VERSION,
             scene.flags,
             n_atoms,
@@ -314,7 +314,7 @@ def _decode(raw: bytes) -> DepictionScene:
         n_fills,
         n_labels,
     ) = reader.take(_HEADER)
-    if magic != _MAGIC or version != SCENE_VERSION:
+    if magic != SCENE_MAGIC or version != SCENE_VERSION:
         raise ValueError("not a depiction scene of this version")
     if n_atoms >= NO_INDEX or bond_count >= NO_INDEX:
         raise ValueError("atom or bond count out of range")
@@ -379,7 +379,7 @@ def _decode(raw: bytes) -> DepictionScene:
 
 def is_scene_blob(blob: bytes | None) -> bool:
     """True when *blob* starts like a packed scene, as opposed to PNG bytes."""
-    return bool(blob) and bytes(blob[:2]) == _MAGIC
+    return bool(blob) and bytes(blob[:2]) == SCENE_MAGIC
 
 
 def unpack_scene(blob: bytes | None) -> DepictionScene | None:

@@ -24,9 +24,12 @@ from pathlib import Path
 
 from PyQt5.QtGui import QPixmap
 
+from ..chem.depiction_scene import SCENE_MAGIC
 from ..table.structure_depiction_layout import structure_depict_height, structure_depict_width
 from ..table.structure_image import pixmap_from_structure_image
 from .temp_sqlite import close_owned_sqlite, open_owned_sqlite
+
+_IS_SCENE = "substr(blob, 1, 2) = ?"
 
 
 class StructureRenderStore:
@@ -229,6 +232,28 @@ class StructureRenderStore:
         for oid in list(self._lru):
             if oid not in keep:
                 del self._lru[oid]
+
+    def count_pngs(self) -> int:
+        """Stored rows that are PNGs rather than depiction scenes."""
+        row = self._conn.execute(
+            f"SELECT COUNT(*) FROM pngs WHERE NOT {_IS_SCENE}", (SCENE_MAGIC,)
+        ).fetchone()
+        return int(row[0] if row else 0)
+
+    def remove_images(self, *, scenes: bool) -> int:
+        """Delete every stored scene (*scenes* true) or every PNG. Returns rows removed.
+
+        PNGs are drawn for one cell size and scenes by one builder revision, so a
+        sidecar cache read back after either changed keeps only the other kind.
+        """
+        condition = _IS_SCENE if scenes else f"NOT {_IS_SCENE}"
+        cur = self._conn.execute(f"DELETE FROM pngs WHERE {condition}", (SCENE_MAGIC,))
+        self._conn.commit()
+        removed = max(0, int(cur.rowcount))
+        if removed:
+            self._lru.clear()
+            self._count = self._count_rows()
+        return removed
 
     def _upsert(self, oid: int, raw: bytes) -> None:
         existed = self._conn.execute("SELECT 1 FROM pngs WHERE oid = ? LIMIT 1", (oid,)).fetchone()

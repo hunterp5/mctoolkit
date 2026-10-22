@@ -739,24 +739,37 @@ class SessionRestoreMixin:
             self._session_waiting_for_render = False
 
     def _try_load_session_structure_cache(self) -> bool:
-        """Install Structure PNGs from a sidecar cache; True on a full hit (skip auto-render)."""
+        """Install Structure depictions from a sidecar cache; True on a full hit (skip auto-render).
+
+        Scenes survive a depiction size change; PNGs drawn at another size, and scenes
+        from an older builder, are dropped and count as missing rows.
+        """
         path = getattr(self, "_session_source_path", None)
         if not path:
             return False
-        from ...storage.session_structure_cache import read_structure_cache
+        from ...storage.session_structure_cache import (
+            cached_pngs_fit,
+            cached_scenes_current,
+            read_structure_cache,
+        )
         from ...storage.structure_render_store import StructureRenderStore
         from ...table.structure_depiction_layout import (
             structure_depict_height,
             structure_depict_width,
         )
 
-        dw, dh = structure_depict_width(), structure_depict_height()
-        loaded = read_structure_cache(path, depict_width=dw, depict_height=dh)
+        loaded = read_structure_cache(path)
         if loaded is None:
             return False
-        _header, png_bytes = loaded
+        header, png_bytes = loaded
         store = StructureRenderStore()
-        n = store.import_sqlite_bytes(png_bytes)
+        store.import_sqlite_bytes(png_bytes)
+        dw, dh = structure_depict_width(), structure_depict_height()
+        if not cached_pngs_fit(header, depict_width=dw, depict_height=dh):
+            store.remove_images(scenes=False)
+        if not cached_scenes_current(header):
+            store.remove_images(scenes=True)
+        n = len(store)
         if n <= 0:
             store.close()
             return False
@@ -772,6 +785,7 @@ class SessionRestoreMixin:
             return False
         model.set_structure_png_store(store)
         self._session_structure_cache_hit = True
+        self._apply_scene_zoom_overrides()
         refresh = getattr(self, "_refresh_visible_structure_cells", None)
         if callable(refresh):
             refresh()
