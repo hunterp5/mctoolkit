@@ -106,42 +106,11 @@ Do not build new workflows on top of `AppKernel` — that protocol exposes the w
 (stores, table model, undo stack, timers) and depending on it reintroduces the coupling this layer
 removes.
 
-## Target architecture and the ratchet
+## Target architecture
 
-The layering above is the intent; `architecture-ratchet.json` is what enforces it. Two thirds of
-the package is still Qt code, so decisions that belong in `workflows/` and computations that
-belong in `services/` keep landing in dialogs and mixins. The counters below are frozen at the
-values measured when the ratchet landed and may only go **down**
-(`python scripts/architecture_metrics.py`, `--offenders <metric>` to list the files).
-
-| Counter | Frozen at | What it measures |
-|---------|-----------|------------------|
-| `window_typed_params` | 80 | Parameters annotated `app: AppKernel` / `app: Any` — code taking the whole window |
-| `modules_taking_the_window` | 30 | Modules with at least one such parameter |
-| `private_cross_module_access` | 91 | `app._x` / `self._app._x` where `_x` is **not** declared in any `ui/` protocol |
-| `deferred_intra_package_imports` | 590 | First-party imports nested in function bodies, i.e. import cycles |
-| `mixin_modules` | 75 | `*_mixin.py` files |
-| `bind_mixin_methods_sites` | 6 | Legacy binds where a collaborator runs mixin bodies with the window as `self` |
-| `rdkit_in_ui_modules` | 52 | Qt modules importing RDKit — chemistry living in the UI |
-| `app_kernel_members` | 31 | `AppKernel` surface, roles included |
-
-`private_cross_module_access` deliberately ignores members declared in a role or host protocol.
-Otherwise converting a mixin body would raise it every time — a hidden `self._x` becomes a visible
-`self._app._x` without any new coupling. What it still counts is undeclared reach, currently 91 uses
-of 50 distinct names, led by `_table_cell_text`.
-
-Declaring rather than reaching is the sanctioned move, and `protocols_over_member_cap` is what
-keeps it from becoming a loophole: no protocol under `ui/` may declare more than 8 members. That
-bound is the useful signal when converting a collaborator — if what it needs will not fit, the
-responsibility has not been split yet, and declaring 19 window members would only document the
-coupling rather than reduce it.
-
-Invariants that must stay 0: `domain_modules_importing_ui` (`molmanager/app.py` is the
-composition root and exempt), `qt_in_decision_layers`, `ui_in_decision_layers`,
-`protocols_over_member_cap`. The `ui/` share of the package (64.4%) may not drift up by more than
-0.5 points.
-
-The target these counters move toward:
+The layering above is the intent. Two thirds of the package is still Qt code, so decisions that
+belong in `workflows/` and computations that belong in `services/` keep landing in dialogs and
+mixins. The target:
 
 1. **Domain** (`chem/`, `protein/`, `analysis/`, …) — pure computation, no Qt, no app state.
 2. **Decisions** (`services/` + `workflows/`) — services compute a value, workflows branch on
@@ -151,7 +120,7 @@ The target these counters move toward:
 4. **`ui/`** — widgets, dialogs, layout, and thin adapters that read widget state into calls on
    rings 2–3 and render the results.
 
-Two rules make that real, and both are what the counters track. **Per-capability protocols
+Two rules make that real. **Per-capability protocols
 instead of one kernel:** anything accepting all 31 kernel members can reach the whole window, so
 collaborators should take the roles in `ui/app_roles.py` instead (see "Kernel roles" below).
 **One table-reader interface:** domain code must not loop `app._table_cell_text`, which is what

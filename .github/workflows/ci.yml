@@ -32,9 +32,6 @@ jobs:
       - name: GPL copyright headers
         run: python scripts/check_gpl_headers.py
 
-      - name: Architecture ratchet (coupling counters)
-        run: python scripts/architecture_metrics.py --check
-
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

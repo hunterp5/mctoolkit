@@ -62,21 +62,13 @@ CI gates on `ruff check` (correctness / undefined-name rules plus unused imports
 - File logging is on by default (`molmanager/platform_support/app_logging.py`); override with `MOLMANAGER_LOG_DIR`,
   disable with `MOLMANAGER_LOG_TO_FILE=0`. Uncaught exceptions show a crash dialog with the log path.
 
-### Architecture ratchet
+### Layering
 
-- Coupling counters are frozen in [`architecture-ratchet.json`](../architecture-ratchet.json) and gated by
-  `tests/test_architecture_ratchet.py` plus CI. They may only go **down**.
-- Report: `python scripts/architecture_metrics.py`. Blame a metric:
-  `python scripts/architecture_metrics.py --offenders rdkit_in_ui_modules`.
-- After a cleanup lands, re-freeze: `python scripts/architecture_metrics.py --write-baseline`.
-- If a counter grows, the fix is to put the decision in `molmanager/workflows/` or the
-  computation in `molmanager/services/` rather than the Qt layer. See
-  [ARCHITECTURE.md](ARCHITECTURE.md#target-architecture-and-the-ratchet).
-- Reaching into window state (`self._app._x`) counts against `private_cross_module_access` unless
-  `_x` is declared in a role in [`molmanager/ui/app_roles.py`](../molmanager/ui/app_roles.py) or in
-  a host protocol beside the collaborator. Declare what a collaborator needs instead of taking the
-  whole window — but no protocol may declare more than 8 members
-  (`protocols_over_member_cap` must stay 0), so a contract that will not fit means the
+- Put decisions in `molmanager/workflows/` and computations in `molmanager/services/` rather than
+  the Qt layer. See [ARCHITECTURE.md](ARCHITECTURE.md#target-architecture).
+- Instead of reaching into window state (`self._app._x`), declare what a collaborator needs in a
+  role in [`molmanager/ui/app_roles.py`](../molmanager/ui/app_roles.py) or in a host protocol
+  beside it. Keep protocols to 8 members or fewer; a contract that will not fit means the
   responsibility still needs splitting.
 
 ### Git commits
