@@ -31,6 +31,7 @@ does not:
 - Multi-character labels reverse when bonds come only from the right (GR-2.1.6),
   with charges kept at the free end of the label.
 - Bonds stop at padded label boxes measured with the bundled font's metrics.
+- Fragments are slid apart until their labels no longer overlap, so salts read.
 
 Anything this builder cannot draw faithfully is reported by
 :func:`scene_fallback_reason` so the caller keeps the RDKit picture for that row.
@@ -65,6 +66,7 @@ LABEL_EM = 0.55
 LABEL_PADDING = 0.05
 WEDGE_HALF_WIDTH = 0.1
 HASH_SPACING = 0.1
+FRAGMENT_GAP = 0.5
 MIN_HASH_DASHES = 4
 # Fractions of the normal label em size.
 SUBSCRIPT_DROP = 0.25
@@ -236,13 +238,14 @@ class _SceneBuilder:
         self.labels: list[Label] = []
 
     def build(self) -> DepictionScene:
-        for atom in self.mol.GetAtoms():
-            label = self._label(atom)
-            if label is not None:
-                self.labels.append(label)
-                pad = LABEL_PADDING * self.mbl
-                x0, y0, x1, y1 = label.box
-                self.trim_boxes[atom.GetIdx()] = (x0 - pad, y0 - pad, x1 + pad, y1 + pad)
+        labels = self._labels()
+        if self._separate_fragments(labels):
+            labels = self._labels()
+        pad = LABEL_PADDING * self.mbl
+        for index, label in labels.items():
+            self.labels.append(label)
+            x0, y0, x1, y1 = label.box
+            self.trim_boxes[index] = (x0 - pad, y0 - pad, x1 + pad, y1 + pad)
         for bond in self.mol.GetBonds():
             self._bond(bond)
         atoms = tuple(self.pos)
@@ -257,7 +260,61 @@ class _SceneBuilder:
             labels=tuple(self.labels),
         )
 
+    def _separate_fragments(self, labels: dict[int, Label]) -> bool:
+        """Slide fragments right until no two share space, labels included.
+
+        Generated coordinates space fragments by atom position only, so ions without
+        bonds (``[NH4+].[Cl-]``) sit one unit apart and their labels overlap. Fragments
+        are swept left to right; each moves just clear of every fragment already placed
+        that overlaps it vertically. Returns whether any atom moved.
+        """
+        fragments = Chem.GetMolFrags(self.mol)
+        if len(fragments) < 2:
+            return False
+        extents = []
+        for atoms in fragments:
+            boxes = [labels[i].box for i in atoms if i in labels]
+            boxes += [(*self.pos[i], *self.pos[i]) for i in atoms]
+            extents.append(
+                [
+                    min(b[0] for b in boxes),
+                    min(b[1] for b in boxes),
+                    max(b[2] for b in boxes),
+                    max(b[3] for b in boxes),
+                ]
+            )
+        gap = FRAGMENT_GAP * self.mbl
+        placed: list[list[float]] = []
+        moved = False
+        for order in sorted(range(len(fragments)), key=lambda k: extents[k][0]):
+            box = extents[order]
+            shift = max(
+                (
+                    other[2] + gap - box[0]
+                    for other in placed
+                    if other[1] < box[3] and box[1] < other[3]
+                ),
+                default=0.0,
+            )
+            if shift > 1e-9:
+                box[0] += shift
+                box[2] += shift
+                for i in fragments[order]:
+                    self.pos[i] = (self.pos[i][0] + shift, self.pos[i][1])
+                moved = True
+            placed.append(box)
+        return moved
+
     # Labels
+
+    def _labels(self) -> dict[int, Label]:
+        """Label of every atom that needs one, by atom index."""
+        labels = {}
+        for atom in self.mol.GetAtoms():
+            label = self._label(atom)
+            if label is not None:
+                labels[atom.GetIdx()] = label
+        return labels
 
     def _needs_label(self, atom) -> bool:
         if atom.GetAtomicNum() != 6:
