@@ -33,7 +33,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .dockable_plot import handle_floating_plot_close_event
-from .qt_widget_utils import make_window_minimizable
+from .qt_widget_utils import make_window_resizable
 
 if TYPE_CHECKING:
     from .plot import PlotWidget
@@ -74,7 +74,7 @@ class PlotDialog(QDialog):
         esc = QShortcut(QKeySequence(Qt.Key_Escape), self)
         esc.setContext(Qt.WidgetWithChildrenShortcut)
         esc.activated.connect(self.close)
-        make_window_minimizable(self)
+        make_window_resizable(self)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 — Qt API name
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):

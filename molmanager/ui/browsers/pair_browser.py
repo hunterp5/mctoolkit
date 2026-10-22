@@ -38,7 +38,7 @@ from ...table.structure_depiction_layout import (
     BROWSER_STRUCTURE_PREVIEW_MIN_WIDTH,
 )
 from ..dockable_plot import add_centered_browser_nav, style_browser_nav_buttons
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import make_window_resizable
 from .chrome import (
     apply_browser_body_layout,
     install_browser_nav_shortcuts,
@@ -145,7 +145,7 @@ class PairBrowserDialog(QDialog):
         self._resize_timer.setInterval(60)
         self._resize_timer.timeout.connect(self._refresh_previews)
 
-        make_window_minimizable(self)
+        make_window_resizable(self)
         self.setModal(False)
         self.setWindowModality(Qt.NonModal)
         self._refresh_property_columns()

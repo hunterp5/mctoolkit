@@ -38,7 +38,7 @@ from ..protein.structure_components import (
     diff_sequence_edit,
     letter_to_resn,
 )
-from .qt_widget_utils import make_window_minimizable, monospace_text_font
+from .qt_widget_utils import make_window_resizable, monospace_text_font
 
 # Canonical mutate targets (skip ambiguous B/Z/X codes).
 _MUTATE_AMINO_ACIDS = tuple(
@@ -192,7 +192,7 @@ class ProteinSequenceDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Sequence")
         self.resize(640, 280)
-        make_window_minimizable(self)
+        make_window_resizable(self)
         self._chains: list[PolymerChain] = []
         self._syncing = False
 

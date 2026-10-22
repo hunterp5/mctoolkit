@@ -60,7 +60,7 @@ from .protein_viewer_overlays import ProteinViewerOverlayJobMixin
 from .protein_viewer_pharmacophore_mixin import ProteinViewerPharmacophoreMixin
 from .protein_viewer_sequence_mixin import ProteinViewerSequenceMixin
 from .protein_viewer_style_mixin import ProteinViewerStyleMixin
-from .qt_widget_utils import apply_monospace_to_text_edit, make_window_minimizable
+from .qt_widget_utils import apply_monospace_to_text_edit, make_window_resizable
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class ProteinViewerDialog(
     def _init_viewer_state(self, parent) -> None:
         self.setWindowTitle("Protein Viewer")
         self.resize(1180, 760)
-        make_window_minimizable(self)
+        make_window_resizable(self)
 
         self._slots: list[_LoadedSlot] = []
         self._slot_seq = 0

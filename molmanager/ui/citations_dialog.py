@@ -38,7 +38,7 @@ from ..reference.citations_catalog import (
     tool_citation,
     tool_citation_html_fragment,
 )
-from .qt_widget_utils import make_window_minimizable
+from .qt_widget_utils import make_window_resizable
 from .user_guides import _guide_style_sheet
 
 if TYPE_CHECKING:
@@ -133,7 +133,7 @@ def open_citations_dialog(parent: QWidget | None, tool_id: str | None = None) ->
             _show_citations_dialog(dlg, tid)
 
     lst.currentItemChanged.connect(on_pick)
-    make_window_minimizable(dlg)
+    make_window_resizable(dlg)
 
     if host is not None:
         host._citations_dialog = dlg

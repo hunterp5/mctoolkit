@@ -266,10 +266,15 @@ def bootstrap_application_gui(app: QApplication | None = None) -> None:
         return
     ensure_fusion_style(app)
     apply_application_font_pt(load_saved_app_font_pt())
-    from .qt_widget_utils import install_group_box_style, install_unfocused_wheel_passthrough
+    from .qt_widget_utils import (
+        install_dialog_resize_policy,
+        install_group_box_style,
+        install_unfocused_wheel_passthrough,
+    )
 
     install_unfocused_wheel_passthrough(app)
     install_group_box_style(app)
+    install_dialog_resize_policy(app)
 
 
 def is_custom_theme_id(theme: str | None) -> bool:

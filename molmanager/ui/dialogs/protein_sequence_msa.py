@@ -62,7 +62,7 @@ from ...protein.protein_msa import (
     unique_record_name,
 )
 from ...workers.protein_msa import MafftAlignWorker
-from ..qt_widget_utils import make_window_minimizable, qobject_is_deleted
+from ..qt_widget_utils import make_window_resizable, qobject_is_deleted
 
 _POOL_ROLE = Qt.UserRole
 _FASTA_FILTER = "FASTA (*.fa *.fasta *.faa *.txt);;All files (*)"
@@ -98,7 +98,7 @@ class ProteinSequenceMsaDialog(QDialog):
         self.setWindowTitle("Protein Sequence")
         self.setMinimumSize(780, 560)
         self.resize(920, 640)
-        make_window_minimizable(self)
+        make_window_resizable(self)
 
         self._aligned: list[FastaRecord] = []
         self._worker: MafftAlignWorker | None = None

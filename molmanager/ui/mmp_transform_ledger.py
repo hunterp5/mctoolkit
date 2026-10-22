@@ -49,7 +49,7 @@ from ..analysis.mmp_analysis import (
     pairs_for_summary,
     pairs_involving_oid,
 )
-from .qt_widget_utils import make_window_minimizable
+from .qt_widget_utils import make_window_resizable
 from .widgets import NumericTableWidgetItem
 
 logger = logging.getLogger(__name__)
@@ -225,7 +225,7 @@ class MmpTransformLedgerDialog(QDialog):
         self._btn_cliffs.clicked.connect(self._open_activity_cliffs)
         self._btn_network.clicked.connect(self._open_pair_network)
 
-        make_window_minimizable(self)
+        make_window_resizable(self)
         self.setModal(False)
         self.setWindowModality(Qt.NonModal)
         self.set_pairs(pairs, activity_column=activity_column)

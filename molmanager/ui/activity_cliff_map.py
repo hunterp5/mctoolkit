@@ -36,8 +36,8 @@ from ..analysis.mmp_analysis import MmpPair
 from .activity_cliff_plot import build_activity_cliff_figure
 from .dockable_plot import style_plot_footer_text_button
 from .plotly_interactive_view import PlotlyInteractiveView
-from .plot_table_sync import visible_oids_for_plot
-from .qt_widget_utils import make_window_minimizable
+from .plot_table_sync import reindex_retained_point, retained_pair_points
+from .qt_widget_utils import make_window_resizable
 from .result_plot_panel import DockableResultPlotPanel
 
 try:
@@ -180,6 +180,11 @@ class ActivityCliffMapPanel(DockableResultPlotPanel):
             return
         self._x_mode = str(self._x_combo.currentData() or "heavy_atoms")
         points = self._points_for_visible_rows()
+        self._current_index = reindex_retained_point(
+            self._plotted_points, points, self._current_index
+        )
+        if self._current_index is None:
+            self._btn_browse.setEnabled(False)
         self._plotted_points = points
         pairs = [(p.oid_a, p.oid_b) for p in points]
         enc = self._resolved_encoding(oid_pairs=pairs)
@@ -195,10 +200,7 @@ class ActivityCliffMapPanel(DockableResultPlotPanel):
         self._update_spectrum_controls()
 
     def _points_for_visible_rows(self) -> list[ActivityCliffPoint]:
-        keep = visible_oids_for_plot(self.parent_app)
-        if keep is None:
-            return list(self._points)
-        return [p for p in self._points if int(p.oid_a) in keep and int(p.oid_b) in keep]
+        return retained_pair_points(self.parent_app, self._points)
 
     def _on_point_activated(self, point_index: int) -> None:
         plotted = self._plotted_points
@@ -284,7 +286,7 @@ class ActivityCliffMapDialog(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self._panel, 1)
         self._panel._sync_footer_chrome()
-        make_window_minimizable(self)
+        make_window_resizable(self)
 
     def set_pairs(self, *args, **kwargs) -> None:
         if self._panel is not None:

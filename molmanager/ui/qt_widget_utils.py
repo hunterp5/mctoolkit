@@ -26,9 +26,17 @@ from PyQt5.QtWidgets import (
     QAbstractScrollArea,
     QAbstractSpinBox,
     QApplication,
+    QColorDialog,
     QComboBox,
     QDial,
+    QDialog,
+    QErrorMessage,
+    QFileDialog,
+    QFontDialog,
     QGroupBox,
+    QInputDialog,
+    QMessageBox,
+    QProgressDialog,
     QSlider,
     QTextEdit,
     QWidget,
@@ -68,11 +76,97 @@ def append_viewer_log(viewer, text: str) -> None:
         append(text)
 
 
+# Viewers set this so the dialog resize policy leaves their frame alone.
+_ALLOW_RESIZE_ATTR = "_mm_allow_user_resize"
+_RESIZE_POLICY_ATTR = "_mm_dialog_resize_policy"
+_RESIZE_FILTER_NAME = "molmanager_dialog_resize_policy"
+
+# Qt's own pickers stay on the platform's resize behavior.
+_SYSTEM_DIALOGS = (
+    QFileDialog,
+    QColorDialog,
+    QFontDialog,
+    QMessageBox,
+    QInputDialog,
+    QProgressDialog,
+    QErrorMessage,
+)
+
+
+def _disable_size_grip(widget: QWidget) -> None:
+    grip = getattr(widget, "setSizeGripEnabled", None)
+    if callable(grip):
+        grip(False)
+
+
+def make_dialog_non_resizable(widget: QWidget) -> None:
+    """Remove the resize border and maximize button from a dialog.
+
+    ``MSWindowsFixedSizeDialogHint`` drops the thick frame on Windows. The
+    widget's size is not frozen, so later ``resize()`` calls still apply.
+    """
+    setattr(widget, _ALLOW_RESIZE_ATTR, False)
+    setattr(widget, _RESIZE_POLICY_ATTR, True)
+    flags = widget.windowFlags()
+    flags |= Qt.MSWindowsFixedSizeDialogHint
+    flags &= ~Qt.WindowMaximizeButtonHint
+    widget.setWindowFlags(flags)
+    _disable_size_grip(widget)
+
+
 def make_window_minimizable(widget: QWidget) -> None:
-    """Add minimize and maximize buttons to a secondary top-level window (e.g. ``QDialog``)."""
+    """Add a minimize button and keep a dialog from being resized."""
+    setattr(widget, _ALLOW_RESIZE_ATTR, False)
+    setattr(widget, _RESIZE_POLICY_ATTR, True)
+    flags = widget.windowFlags()
+    flags |= Qt.WindowMinimizeButtonHint | Qt.MSWindowsFixedSizeDialogHint
+    flags &= ~Qt.WindowMaximizeButtonHint
+    widget.setWindowFlags(flags)
+    _disable_size_grip(widget)
+
+
+def make_window_resizable(widget: QWidget) -> None:
+    """Add minimize and maximize buttons on a window the user can resize.
+
+    Plots, the protein viewer, the sketcher, and structure browsers use this.
+    Tool dialogs use :func:`make_window_minimizable`.
+    """
+    setattr(widget, _ALLOW_RESIZE_ATTR, True)
+    setattr(widget, _RESIZE_POLICY_ATTR, True)
     flags = widget.windowFlags()
     flags |= Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint
+    flags &= ~Qt.MSWindowsFixedSizeDialogHint
     widget.setWindowFlags(flags)
+
+
+class _DialogResizePolicyFilter(QObject):
+    """Make top-level dialogs fixed-size unless a caller opted into resizing."""
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        if event.type() != QEvent.Polish or not isinstance(obj, QDialog):
+            return False
+        if not obj.isWindow() or isinstance(obj, _SYSTEM_DIALOGS):
+            return False
+        if getattr(obj, _ALLOW_RESIZE_ATTR, False) or getattr(obj, _RESIZE_POLICY_ATTR, False):
+            return False
+        # Polish runs before the window is shown, so replacing flags does not hide it.
+        make_dialog_non_resizable(obj)
+        return False
+
+
+def install_dialog_resize_policy(app: QApplication | None = None) -> QObject | None:
+    """Keep tool dialogs from being resized. Viewers opt out with ``make_window_resizable``."""
+    if app is None:
+        app = QApplication.instance()
+    if app is None:
+        return None
+    existing = app.findChild(_DialogResizePolicyFilter, _RESIZE_FILTER_NAME)
+    if existing is not None and not qobject_is_deleted(existing):
+        return existing
+    filt = _DialogResizePolicyFilter(app)
+    filt.setObjectName(_RESIZE_FILTER_NAME)
+    app.installEventFilter(filt)
+    return filt
 
 
 _WHEEL_STEALERS = (QAbstractSpinBox, QComboBox, QSlider, QDial)

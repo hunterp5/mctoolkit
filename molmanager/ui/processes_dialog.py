@@ -37,7 +37,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .app_log_dialog import SessionLogPanel
-from .qt_widget_utils import make_window_minimizable
+from .qt_widget_utils import make_window_resizable
 
 if TYPE_CHECKING:
     from .main_window import ChemistryWorkspaceWindow
@@ -109,7 +109,7 @@ class ProcessesDialog(QDialog):
         self._timer.start()
 
         self._reload()
-        make_window_minimizable(self)
+        make_window_resizable(self)
 
     def _selection_meta(self) -> dict | None:
         sel = self._table.selectedIndexes()

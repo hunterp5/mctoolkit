@@ -46,7 +46,7 @@ from ...analysis.free_wilson import (
     report_label,
 )
 from ...chem.structure_2d_depiction import render_molecule_png
-from ..qt_widget_utils import make_window_minimizable, qobject_is_deleted
+from ..qt_widget_utils import make_window_resizable, qobject_is_deleted
 from ..strings import TOOL_FREE_WILSON
 
 _DRAW_ERRORS = (RuntimeError, ValueError, TypeError, OSError)
@@ -101,7 +101,7 @@ class FreeWilsonResultsDialog(QDialog):
         tabs.addTab(self._observed_tab(), "Observed")
         tabs.addTab(self._missing_tab(), "Missing")
         root.addWidget(tabs, 1)
-        make_window_minimizable(self)
+        make_window_resizable(self)
 
     def _title(self) -> str:
         column = (self._result.activity_column or "").strip()

@@ -50,7 +50,7 @@ from ...chem.structure_2d_depiction import ReactionDrawSpec
 from ...workers import ExportWorker
 
 from ..mol_viewer_3d import Molecule3DEmbedView
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import make_window_resizable
 from .chem import _parse_periodic_element_symbol
 from .constants import WILDCARD_ELEMENT
 from .rgroups import is_rgroup_element, rgroup_element
@@ -621,7 +621,7 @@ class SketcherDialog(QDialog):
         self._parent_delete_action = None
         self._parent_delete_was_enabled = False
         self._sketch_key_filters_installed = False
-        make_window_minimizable(self)
+        make_window_resizable(self)
 
     @staticmethod
     def _is_sketch_delete_key(event) -> bool:

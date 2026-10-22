@@ -29,7 +29,7 @@ from rdkit import Chem
 from ..conformers.conformer_column_codec import conformer_mol_blocks_b64_json
 from .mol_3d_prepare import prepare_mol_2d, prepare_mol_3d
 from .mol_3d_widget import Molecule3DViewerWidget
-from .qt_widget_utils import make_window_minimizable
+from .qt_widget_utils import make_window_resizable
 
 
 class Molecule3DViewerDialog(QDialog):
@@ -87,7 +87,7 @@ class Molecule3DViewerDialog(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self._viewer_widget, 1)
         self._viewer_widget._sync_footer_chrome()
-        make_window_minimizable(self)
+        make_window_resizable(self)
         min_w = int(self._viewer_widget.embedded_minimum_width())
         self._viewer_widget.setMinimumWidth(min_w)
         self.setMinimumWidth(min_w)

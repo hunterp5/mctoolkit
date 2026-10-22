@@ -43,7 +43,7 @@ from ...table.structure_depiction_layout import (
 )
 from ..dockable_plot import PLOT_BODY_MARGINS, PLOT_BODY_SPACING
 from ..dockable_plot_constants import _BROWSER_NAV_BTN_HEIGHT
-from ..qt_widget_utils import apply_group_box_style, make_window_minimizable
+from ..qt_widget_utils import apply_group_box_style, make_window_resizable
 
 # RDKit depictions sit on white; keep the well white in light and dark app themes.
 BROWSER_PREVIEW_CANVAS_QSS = (
@@ -280,7 +280,7 @@ class BrowserHostDialog(QDialog):
             sync_opts = getattr(self._panel, "_sync_options_chrome", None)
             if callable(sync_opts):
                 sync_opts()
-        make_window_minimizable(self)
+        make_window_resizable(self)
         self.setModal(False)
         self.setWindowModality(Qt.NonModal)
         if self.min_size is not None:

@@ -23,7 +23,9 @@ from PyQt5.QtGui import QWheelEvent
 from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -31,7 +33,10 @@ from PyQt5.QtWidgets import (
 
 from molmanager.ui.qt_widget_utils import (
     append_viewer_log,
+    install_dialog_resize_policy,
     install_unfocused_wheel_passthrough,
+    make_window_minimizable,
+    make_window_resizable,
 )
 
 
@@ -149,3 +154,54 @@ def test_unipka_cuda_hint_shows_once(qapp, monkeypatch):  # noqa: ARG001
     maybe_remind_unipka_cuda_wheel(host)
     assert shown == [1]
     host.close()
+
+
+def _has_flag(widget: QWidget, flag: Qt.WindowType) -> bool:
+    return bool(widget.windowFlags() & flag)
+
+
+def test_make_window_minimizable_drops_the_resize_border(qapp):
+    dialog = QDialog()
+    dialog.resize(320, 200)
+    make_window_minimizable(dialog)
+    assert _has_flag(dialog, Qt.WindowMinimizeButtonHint)
+    assert not _has_flag(dialog, Qt.WindowMaximizeButtonHint)
+    assert _has_flag(dialog, Qt.MSWindowsFixedSizeDialogHint)
+    assert not dialog.isSizeGripEnabled()
+    dialog.resize(410, 260)
+    qapp.processEvents()
+    assert dialog.width() == 410
+    assert dialog.height() == 260
+    dialog.close()
+
+
+def test_make_window_resizable_keeps_maximize(qapp):
+    dialog = QDialog()
+    make_window_resizable(dialog)
+    dialog.show()
+    qapp.processEvents()
+    assert dialog.isVisible()
+    assert _has_flag(dialog, Qt.WindowMinimizeButtonHint)
+    assert _has_flag(dialog, Qt.WindowMaximizeButtonHint)
+    assert not _has_flag(dialog, Qt.MSWindowsFixedSizeDialogHint)
+    dialog.close()
+
+
+def test_plain_dialog_is_non_resizable_and_file_dialog_is_left_alone(qapp):
+    install_dialog_resize_policy(qapp)
+    dialog = QDialog()
+    dialog.resize(300, 180)
+    dialog.show()
+    qapp.processEvents()
+    assert dialog.isVisible()
+    assert _has_flag(dialog, Qt.MSWindowsFixedSizeDialogHint)
+    assert not _has_flag(dialog, Qt.WindowMaximizeButtonHint)
+    assert not _has_flag(dialog, Qt.WindowMinimizeButtonHint)
+    dialog.close()
+
+    picker = QFileDialog()
+    before = picker.windowFlags()
+    picker.ensurePolished()
+    qapp.processEvents()
+    assert picker.windowFlags() == before
+    picker.close()

@@ -66,8 +66,8 @@ from ..medchem_space_plot import (
     build_golden_triangle_figure,
 )
 from ..plotly_interactive_view import PlotlyInteractiveView
-from ..plot_table_sync import visible_oids_for_plot
-from ..qt_widget_utils import make_window_minimizable
+from ..plot_table_sync import retained_snapshot_oids
+from ..qt_widget_utils import make_window_resizable
 from ..result_plot_panel import DockableResultPlotPanel
 from .scope import selection_scope_checked
 
@@ -818,7 +818,9 @@ class MedChemPlotPanel(DockableResultPlotPanel):
     def _displayed_plot_dataset(self) -> MedChemSpaceDataset | None:
         if self._plot_dataset is None:
             return None
-        return self._plot_dataset.subset_oids(visible_oids_for_plot(self.parent_app))
+        return self._plot_dataset.subset_oids(
+            retained_snapshot_oids(self.parent_app, self._plot_dataset.oids)
+        )
 
     def _push_plot_figure(self) -> None:
         dataset = self._displayed_plot_dataset()
@@ -900,7 +902,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             QMessageBox.information(self, self._window_title, "Refresh the plot first.")
             return
         oids = picker(self._full_dataset)
-        keep = visible_oids_for_plot(self.parent_app)
+        keep = retained_snapshot_oids(self.parent_app, oids)
         if keep is not None:
             oids = [int(o) for o in oids if int(o) in keep]
         if not oids:
@@ -979,7 +981,7 @@ class MedChemSpaceDialog(QDialog):
         self.setWindowModality(Qt.NonModal)
         self.setAttribute(Qt.WA_DeleteOnClose, True)
         self._force_close = False
-        make_window_minimizable(self)
+        make_window_resizable(self)
 
     def closeEvent(self, event) -> None:  # noqa: N802 — Qt API name
         handle_floating_plot_close_event(self, event)
