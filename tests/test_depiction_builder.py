@@ -163,6 +163,28 @@ def test_stereo_bonds_become_wedges_or_hashes():
     assert scene.fills or len(hashes) >= 4
 
 
+def test_wedge_wide_end_meets_the_neighbouring_bond():
+    from rdkit.Chem.Draw import rdMolDraw2D
+
+    mol = Chem.MolFromSmiles("OC[C@H]1OC(O)[C@H](O)[C@@H](O)[C@@H]1O")
+    scene, _reason = build_scene(mol)
+    prepared = rdMolDraw2D.PrepareMolForDrawing(mol)
+    met = 0
+    for fill in scene.fills:
+        bond = prepared.GetBondWithIdx(fill.bond)
+        wide = bond.GetEndAtomIdx()
+        here = scene.atoms[wide]
+        for other in bond.GetEndAtom().GetNeighbors():
+            if other.GetIdx() == bond.GetBeginAtomIdx():
+                continue
+            there = scene.atoms[other.GetIdx()]
+            axis = (there[0] - here[0], there[1] - here[1])
+            for x, y in fill.points:
+                cross = axis[0] * (y - here[1]) - axis[1] * (x - here[0])
+                met += abs(cross) < 1e-3
+    assert met >= 1
+
+
 def test_either_double_bond_is_crossed():
     mol = Chem.MolFromSmiles("CC=CC")
     mol.GetBondWithIdx(1).SetStereo(Chem.BondStereo.STEREOANY)

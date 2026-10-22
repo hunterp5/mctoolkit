@@ -600,6 +600,34 @@ class _SceneBuilder:
             return None
         return p, q, normal, span[0], span[1]
 
+    def _wide_corner(self, bond, tip: Point, corner: Point, side: float) -> Point:
+        """*corner* of a wedge's wide end, moved onto the neighbouring bond on *side*.
+
+        The wedge edge from *tip* through *corner* is extended or shortened to meet the
+        nearest other bond at the wide-end atom, so the wedge joins it without a notch
+        or overhang. Unchanged when there is no such bond or the meeting point is far off.
+        """
+        far_atom = bond.GetEndAtomIdx()
+        here = self.pos[far_atom]
+        axis = _sub(here, tip)
+        edge = _sub(corner, tip)
+        best = None
+        for other in self._others(far_atom, bond.GetBeginAtomIdx()):
+            along = _unit(_sub(self.pos[other], here))
+            if _cross(axis, along) * side <= 0:
+                continue
+            denom = _cross(edge, along)
+            if abs(denom) < 1e-9:
+                continue
+            offset = _sub(here, tip)
+            s = _cross(offset, along) / denom
+            u = _cross(offset, edge) / denom
+            if not 0.5 < s < 1.5 or not 0 <= u < 0.5 * self.mbl:
+                continue
+            if best is None or u < best[0]:
+                best = (u, _add(tip, edge, s))
+        return corner if best is None else best[1]
+
     def _wedge(self, bond) -> None:
         """Solid wedge, narrow at the stereocentre (the begin atom)."""
         found = self._wedge_span(bond)
@@ -610,16 +638,22 @@ class _SceneBuilder:
         role_a = self.roles[bond.GetBeginAtomIdx()]
         role_b = self.roles[bond.GetEndAtomIdx()]
         cuts = [(t0, t1, role_a)] if role_a == role_b else [(t0, 0.5, role_a), (0.5, t1, role_b)]
+        tip = _lerp(p, q, t0)
         for start, end, role in cuts:
             if end - start < 1e-6:
                 continue
             near, far = _lerp(p, q, start), _lerp(p, q, end)
+            far_left = _add(far, normal, end * half)
+            far_right = _add(far, normal, -end * half)
+            if end > 1 - 1e-9:
+                far_left = self._wide_corner(bond, tip, far_left, 1.0)
+                far_right = self._wide_corner(bond, tip, far_right, -1.0)
             points = []
             if start * half > 1e-6:
                 points.append(_add(near, normal, start * half))
             points.append(_add(near, normal, -start * half))
-            points.append(_add(far, normal, -end * half))
-            points.append(_add(far, normal, end * half))
+            points.append(far_right)
+            points.append(far_left)
             self.fills.append(Fill(tuple(points), role, bond.GetIdx()))
 
     def _hash(self, bond) -> None:
