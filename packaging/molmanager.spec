@@ -16,6 +16,7 @@ a = Analysis(
     datas=[
         (str(ROOT / "molmanager" / "ui" / "static"), "molmanager/ui/static"),
         (str(ROOT / "molmanager" / "resources" / "README.md"), "molmanager/resources"),
+        (str(ROOT / "molmanager" / "resources" / "fonts"), "molmanager/resources/fonts"),
     ],
     hiddenimports=[
         "rdkit",

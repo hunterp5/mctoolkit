@@ -3,6 +3,7 @@
 ## Static assets (in repository)
 
 - **3Dmol.js** — `molmanager/ui/static/3Dmol-min.js` (offline 3D viewer)
+- **Liberation Sans 2.1.5** — `molmanager/resources/fonts/LiberationSans-Regular.ttf` (SIL OFL 1.1, see `fonts/LiberationSans-LICENSE.txt`). Structure atom labels; Arial-metric, per IUPAC GR-0. After replacing it, run `python scripts/build_font_metrics.py`.
 
 ## Optional CLI binaries (not in git — place locally or use installer)
 

@@ -60,6 +60,7 @@ dev = [
     "pytest>=7.4,<9",
     "ruff>=0.6",
     "pip-audit>=2.7",
+    "fonttools>=4.40",  # scripts/build_font_metrics.py
 ]
 
 [project.gui-scripts]
@@ -76,6 +77,7 @@ molmanager = [
     "ui/protein_viewer.js",
     "ui/web_resize_scheduler.js",
     "resources/README.md",
+    "resources/fonts/*",
     "resources/help/**/*.md",
     "resources/unipka/**",
     "resources/models/**/README.md",

@@ -139,7 +139,7 @@ class DepictionScene:
     """A complete drawing of one molecule in molecule units.
 
     *atoms* holds one position per atom, for hit-testing and highlights.
-    *label_size* is the height of normal label text, and *bounds* covers every
+    *label_size* is the em size of normal label text, and *bounds* covers every
     primitive including label boxes, so a cell fit needs only the header.
     """
 
