@@ -24,6 +24,7 @@ from PyQt5.QtCore import QRunnable
 from rdkit import Chem
 
 from ..table.table_file_formats import write_openbabel_mols, write_xlsx_table
+from ..chem.depiction_coords import apply_depiction_coords
 from ..chem.molecule_conversion import mol_to_canonical_smiles
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ class ExportWorker(QRunnable):
         signals,
         cancel_event: threading.Event | None = None,
         oids: list[int] | None = None,
+        depiction_coords: dict | None = None,
     ):
         super().__init__()
         self.path, self.ext, self.mols, self.headers, self.table_data, self.signals = (
@@ -65,6 +67,7 @@ class ExportWorker(QRunnable):
             self.oids = [int(x) for x in oids]
         else:
             self.oids = [int(k) for k in (table_data or {}).keys()]
+        self._depiction = dict(depiction_coords or {})
 
     def run(self):
         user_cancelled = False
@@ -83,6 +86,8 @@ class ExportWorker(QRunnable):
                     smi = str(row.get("SMILES", "") or "").strip()
                     if smi:
                         mol = Chem.MolFromSmiles(smi)
+                if mol is not None and ext in {".sdf", ".sd", ".mol"}:
+                    mol = apply_depiction_coords(mol, self._depiction.get(int(oid)))
                 return mol, row
 
             if ext in {".csv", ".tsv"}:

@@ -40,8 +40,15 @@ def _flat_ethanol():
 
 
 def _ethanol_3d():
+    """Ethanol with a real z span. RDKit's heavy-atom embed can leave z at zero."""
+    from rdkit.Geometry import Point3D
+
     m = Chem.MolFromSmiles("CCO")
     AllChem.EmbedMolecule(m, randomSeed=0xBEEF)
+    conf = m.GetConformer()
+    for i in range(m.GetNumAtoms()):
+        pos = conf.GetAtomPosition(i)
+        conf.SetAtomPosition(i, Point3D(float(pos.x), float(pos.y), float(i + 1)))
     return m
 
 
@@ -63,6 +70,7 @@ def test_ingest_store_mol_demotes_3d_to_confs(qapp):  # noqa: ARG001
     cells_flat = w._ingest_store_mol(oid_flat, _flat_ethanol())
     assert not (cells_flat.get("confs") or "").strip()
     assert "confs" not in w.headers
+    assert w._depiction_coords.get("Structure", oid_flat)
 
     mol3d = _ethanol_3d()
     oid = w.next_oid
@@ -88,6 +96,7 @@ def test_ingest_store_mol_demotes_3d_to_confs(qapp):  # noqa: ARG001
     )
     assert packed is not None
     assert mol_has_3d_coordinates(packed)
+    assert w._depiction_coords.get("Structure", oid) is None
     w.close()
 
 
@@ -106,7 +115,7 @@ def test_blank_confs_load_stores_structure_coordinates(qapp):  # noqa: ARG001
     mol = _flat_ethanol()
     mol.SetProp("SMILES", "CCO")
     mol.SetProp("confs", "")
-    blob, cells, smiles = _mol_ingest_item(mol, ["SMILES", "confs"])
+    blob, cells, smiles, _depiction = _mol_ingest_item(mol, ["SMILES", "confs"])
     assert smiles == "CCO"
     rebuilt = Chem.Mol(bytes(blob))
     assert rebuilt is not None and rebuilt.GetNumConformers() == 1
@@ -135,7 +144,7 @@ def test_blank_confs_load_stores_structure_coordinates(qapp):  # noqa: ARG001
     kept = _flat_ethanol()
     kept.SetProp("SMILES", "CCO")
     kept.SetProp("confs", payload)
-    kept_blob, kept_cells, _smiles = _mol_ingest_item(kept, ["SMILES", "confs"])
+    kept_blob, kept_cells, _smiles, _kept_depiction = _mol_ingest_item(kept, ["SMILES", "confs"])
     kept_mol = Chem.Mol(bytes(kept_blob))
     assert kept_mol.GetNumConformers() == 0
     assert kept_cells["confs"] == payload
@@ -143,4 +152,50 @@ def test_blank_confs_load_stores_structure_coordinates(qapp):  # noqa: ARG001
     w.next_oid += 1
     kept_stored = w._ingest_store_mol(oid3, kept_mol, precomputed_cells=kept_cells)
     assert kept_stored["confs"] == payload
+    w.close()
+
+
+def test_opened_molfile_keeps_its_2d_orientation(qapp):  # noqa: ARG001
+    """An SDF or molfile's flat coordinates become the Structure orientation."""
+    from rdkit.Geometry import Point3D
+
+    from molmanager.chem.depiction_coords import apply_depiction_coords, unpack_xy
+
+    mol = Chem.MolFromSmiles("c1ccccc1O")
+    assert mol is not None
+    AllChem.Compute2DCoords(mol)
+    conf = mol.GetConformer()
+    for i in range(mol.GetNumAtoms()):
+        pos = conf.GetAtomPosition(i)
+        conf.SetAtomPosition(i, Point3D(-float(pos.y), float(pos.x), 0.0))
+    parsed = Chem.MolFromMolBlock(Chem.MolToMolBlock(mol))
+    assert parsed is not None and parsed.GetNumConformers() == 1
+
+    blob, cells, smiles, depiction = _mol_ingest_item(parsed, [])
+    stripped = Chem.Mol(bytes(blob))
+    assert stripped is not None and stripped.GetNumConformers() == 0
+    kept = unpack_xy(depiction)
+    assert kept is not None and len(kept) == parsed.GetNumAtoms()
+    src = parsed.GetConformer()
+    for i, (x, y) in enumerate(kept):
+        pos = src.GetAtomPosition(i)
+        assert abs(x - float(pos.x)) < 1e-4
+        assert abs(y - float(pos.y)) < 1e-4
+
+    w = ChemistryWorkspaceWindow()
+    rows: list = []
+    w._ingest_append_batch_items([(blob, cells, smiles, depiction)], rows)
+    oid = rows[0][0]
+    stored = w.mols[oid]
+    assert stored.GetNumConformers() == 0
+    placed = apply_depiction_coords(stored, w._depiction_coords.get("Structure", oid))
+    assert placed is not stored and placed.GetNumConformers() == 1
+    drawn = placed.GetConformer()
+    for i, (x, y) in enumerate(kept):
+        pos = drawn.GetAtomPosition(i)
+        assert abs(float(pos.x) - x) < 1e-4
+        assert abs(float(pos.y) - y) < 1e-4
+
+    three_d = _mol_ingest_item(_ethanol_3d(), ["SMILES"])
+    assert three_d[3] == b""
     w.close()

@@ -179,8 +179,9 @@ class IngestLoadMixin:
             return
         # Structures go to the store in one write per batch; see ``_ingest_store_mol``.
         batch: list | None = [] if callable(getattr(self.mols, "ingest_structures", None)) else None
+        depictions: list[tuple[int, bytes]] = []
         for item in items:
-            blob, cells, smiles = self._split_ingest_item(item)
+            blob, cells, smiles, depiction = self._split_ingest_item(item)
             oid = self.next_oid
             self.next_oid += 1
             text = self._ingest_cell_structure_text(cells, source_field) if source_field else ""
@@ -201,8 +202,12 @@ class IngestLoadMixin:
                     ),
                 )
             )
+            # The worker drops flat coordinates from the structure blob. This pack is that pose.
+            if depiction:
+                depictions.append((oid, depiction))
         if batch:
             self.mols.ingest_structures(batch)
+        self._remember_file_depictions(depictions)
         self._ingest_store_structure_texts(texts)
 
     def _ingest_structure_source_field(self) -> str | None:
@@ -235,10 +240,23 @@ class IngestLoadMixin:
 
     @staticmethod
     def _split_ingest_item(item):
-        """Return ``(blob_or_mol, precomputed_cells, canonical_smiles)`` from a worker item."""
+        """Return ``(blob_or_mol, cells, smiles, depiction)`` from a worker item."""
         if isinstance(item, tuple):
-            return item[0], item[1], item[2] if len(item) > 2 else ""
-        return item, None, ""
+            smiles = item[2] if len(item) > 2 else ""
+            depiction = (
+                item[3] if len(item) > 3 and isinstance(item[3], (bytes, bytearray)) else b""
+            )
+            return item[0], item[1], smiles, bytes(depiction)
+        return item, None, "", b""
+
+    def _remember_file_depictions(self, rows: list[tuple[int, bytes]]) -> None:
+        """Keep flat file coordinates as the Structure orientation for these rows."""
+        if not rows:
+            return
+        store = getattr(self, "_depiction_coords", None)
+        if store is None:
+            return
+        store.set_many("Structure", rows)
 
     @staticmethod
     def _coerce_ingest_mol(item) -> Chem.Mol | None:
@@ -276,12 +294,19 @@ class IngestLoadMixin:
         structure, reused so ingest never re-pickles a molecule the worker just pickled.
         *source_text* is the worker's canonical SMILES for *mol*; without it the store
         computes the text the first time the Structure cell asks for it.
+
+        A flat conformer still on *mol* is stored as the Structure orientation. The load
+        worker usually sends that pose separately, because it strips 2D coordinates
+        before this runs.
         """
+        from ...chem.depiction_coords import depiction_blob_from_mol
+
         cells = (
             dict(precomputed_cells)
             if precomputed_cells is not None
             else self._row_cells_from_mol(mol)
         )
+        self._remember_file_depictions([(int(oid), depiction_blob_from_mol(mol))])
         confs_cell = cells.get("confs") if "confs" in cells else None
         if mol is not None and (
             mol_has_3d_coordinates(mol) or mol_coordinates_fill_blank_confs(mol, confs_cell)
