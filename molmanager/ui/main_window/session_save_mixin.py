@@ -462,7 +462,6 @@ class SessionSaveMixin:
                 h for h in getattr(self, "_logarithmic_columns", set()) if h in self.headers
             ),
             "confs_sidecar": serialize_confs_sidecar(self._confs_sidecar_for_session(want)),
-            "depiction_2d": self._depiction_coords_for_session(want),
             "som_browse": self._session_som_browse_payload(oids=want),
             "ionization_sidecar": serialize_ionization_sidecar(),
             "mmp_ledger": self._session_mmp_ledger_payload(),
@@ -487,12 +486,6 @@ class SessionSaveMixin:
             if notepad_payload:
                 doc["notepad"] = notepad_payload
         return doc
-
-    def _depiction_coords_for_session(self, oids: set[int] | None):
-        store = getattr(self, "_depiction_coords", None)
-        if store is None:
-            return None
-        return store.to_session(oids)
 
     def _confs_sidecar_for_session(self, oids: set[int] | None) -> dict[tuple[int, str], str]:
         from ...storage import EnsembleStore

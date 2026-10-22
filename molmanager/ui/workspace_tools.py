@@ -111,8 +111,4 @@ def _load_structure_prep():
             "molmanager.ui.main_window.structure_writeback_mixin",
             "StructureWritebackMixin",
         ),
-        _load(
-            "molmanager.ui.main_window.align_substructure_mixin",
-            "AlignSubstructureMixin",
-        ),
     )

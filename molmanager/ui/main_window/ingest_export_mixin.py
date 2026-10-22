@@ -279,15 +279,11 @@ class IngestExportMixin:
             headers = prep["headers"]
             oids_out = list(prep["oids"])
             mols = self.mols
-            depiction = {}
-            store = getattr(self, "_depiction_coords", None)
-            if store is not None:
-                depiction = store.column_items("Structure", set(oids_out))
             self._export_prep = None
             self.process_queue.enqueue(
                 f"Export to {path}",
-                lambda ev, p=path, e=ext, m=mols, h=headers, d=cells, o=oids_out, s=self.signals, dep=depiction: (
-                    ExportWorker(p, e, m, h, d, s, cancel_event=ev, oids=o, depiction_coords=dep)
+                lambda ev, p=path, e=ext, m=mols, h=headers, d=cells, o=oids_out, s=self.signals: (
+                    ExportWorker(p, e, m, h, d, s, cancel_event=ev, oids=o)
                 ),
             )
         except Exception as e:

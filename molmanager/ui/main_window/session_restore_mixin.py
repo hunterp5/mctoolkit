@@ -636,9 +636,6 @@ class SessionRestoreMixin:
         side = deserialize_confs_sidecar(doc.get("confs_sidecar"))
         if side:
             cs.update(side)
-        depiction = getattr(self, "_depiction_coords", None)
-        if depiction is not None:
-            depiction.load_session(doc.get("depiction_2d"))
         self._pending_session_som_browse = doc.get("som_browse")
         restore_ionization_sidecar(doc.get("ionization_sidecar"))
         from ...analysis.mmp_session import restore_mmp_ledger_for_session

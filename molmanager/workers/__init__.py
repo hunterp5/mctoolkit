@@ -124,7 +124,6 @@ from .signals import (
 from .session_save import SessionSaveWorker
 from .sqlite_rebuild import SqliteRebuildWorker
 from .filter_apply import FilterApplyWorker
-from .substructure_align import SubstructureAlignWorker
 from .substructure_filter import SubstructureFilterWorker
 
 __all__ = [
@@ -182,7 +181,6 @@ __all__ = [
     "SessionSaveWorker",
     "SqliteRebuildSignals",
     "SqliteRebuildWorker",
-    "SubstructureAlignWorker",
     "SubstructureFilterSignals",
     "SubstructureFilterWorker",
     "AddExplicitHydrogensWorker",

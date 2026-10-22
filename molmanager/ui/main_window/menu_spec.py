@@ -378,14 +378,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                     "batch (see Log)."
                 ),
             ),
-            action(
-                "Align to Substructure…",
-                "run_align_substructure",
-                tooltip=(
-                    "Redraw matching structures so a drawn substructure shares one orientation. "
-                    "Rows that do not match are left unchanged."
-                ),
-            ),
             tooltips_visible=True,
         ),
         submenu(

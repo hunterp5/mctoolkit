@@ -222,9 +222,6 @@ class TableUIMixin(
         keep_loading = bool(getattr(self, "_ingest_loading", False))
         reset_confs_sidecar(self)
         reset_mol_store(self)
-        depiction = getattr(self, "_depiction_coords", None)
-        if depiction is not None:
-            depiction.clear()
         self._som_browse_records = []
         clearer = getattr(self, "_store_last_dock_results", None)
         if callable(clearer):

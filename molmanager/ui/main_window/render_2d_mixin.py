@@ -112,11 +112,7 @@ class Render2DMixin:
         for oid, blob, smiles in bulk():
             if not blob and not smiles:
                 continue
-            coord = b""
-            store = getattr(self, "_depiction_coords", None)
-            if store is not None:
-                coord = store.get("Structure", int(oid)) or b""
-            yield oid, (STRUCTURE_PAYLOAD_TAG, blob or b"", smiles.encode("utf-8"), coord)
+            yield oid, (STRUCTURE_PAYLOAD_TAG, blob or b"", smiles.encode("utf-8"))
 
     def _build_render2d_tasks_in_table_order(
         self,
@@ -146,16 +142,7 @@ class Render2DMixin:
                 task_payload: tuple = (REACTION_PAYLOAD_TAG, text.encode("utf-8"))
                 rw, rh = reaction_depict_size(zoomed=zoomed)
             else:
-                coord = b""
-                store = getattr(self, "_depiction_coords", None)
-                if store is not None:
-                    coord = store.get(src, oid) or b""
-                task_payload = (
-                    STRUCTURE_PAYLOAD_TAG,
-                    payload.blob or b"",
-                    text.encode("utf-8"),
-                    coord,
-                )
+                task_payload = (STRUCTURE_PAYLOAD_TAG, payload.blob or b"", text.encode("utf-8"))
                 rw, rh = (zoom_w, zoom_h) if zoomed else (base_w, base_h)
             renders.append((oid, task_payload, rw, rh))
             row_by_oid[oid] = row_for_oid(oid)

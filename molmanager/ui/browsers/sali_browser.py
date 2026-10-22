@@ -402,9 +402,7 @@ class SaliBrowserDialog(PairBrowserDialog):
         app = self._app
         if app is None:
             return None
-        from ...chem.depiction_coords import mol_for_app_depiction
-
-        return mol_for_app_depiction(app, getattr(app, "mols", {}).get(int(oid)), int(oid))
+        return getattr(app, "mols", {}).get(int(oid))
 
     def _signed_text(self, value: float) -> str:
         sign = "+" if value >= 0 else ""
@@ -492,9 +490,7 @@ class SaliBrowserDialog(PairBrowserDialog):
             label.setText("(no structure)")
             return
 
-        from ...chem.depiction_coords import depiction_revision
-
-        cache_key = (int(oid), pw, ph, depiction_revision(self._app))
+        cache_key = (int(oid), pw, ph)
         cached = self._preview_cache.get(cache_key)
         if cached is not None and not cached.isNull():
             pm = cached
