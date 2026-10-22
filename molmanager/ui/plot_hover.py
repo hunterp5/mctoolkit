@@ -23,6 +23,7 @@ import html
 from typing import Any
 
 from ..chem.depiction_coords import mol_for_app_depiction
+from ..chem.depiction_scene import is_scene_blob
 from ..chem.structure_2d_depiction import render_molecule_png
 
 HOVER_THUMB_WIDTH = 140
@@ -106,7 +107,7 @@ def structure_png_data_url_for_oid(
     if model is not None:
         try:
             stored = model.structure_png_bytes(int(oid))
-            if stored:
+            if stored and not is_scene_blob(stored):
                 # Prefer a small dedicated render for hover size when a mol is available.
                 png = stored
         except Exception:

@@ -538,6 +538,7 @@ class Render2DMixin:
                 self.signals,
                 self._render2d_cancel_event,
                 self._render2d_batch_session_tag,
+                want_scenes=structure_column and cfg.structure_vector_depiction,
             )
         )
 

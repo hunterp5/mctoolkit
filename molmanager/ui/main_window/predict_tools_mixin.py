@@ -263,7 +263,7 @@ class PredictToolsMixin:
             structure_depict_height,
             structure_depict_width,
         )
-        from ..structure_pixmap import pixmap_from_structure_render_png
+        from ...table.structure_image import pixmap_from_structure_image
 
         map_col = written[0] if written else SOM_MAP_COLUMN
         if map_col in self.headers:
@@ -273,7 +273,7 @@ class PredictToolsMixin:
         for oid, _cols, png, _atoms, _headers in table_rows:
             if not png:
                 continue
-            pm = pixmap_from_structure_render_png(png, dw, dh)
+            pm = pixmap_from_structure_image(png, dw, dh)
             if pm is not None and not pm.isNull():
                 self._table_model.set_column_pixmap(int(oid), map_col, pm)
                 last_pm = pm

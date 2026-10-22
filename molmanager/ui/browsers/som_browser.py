@@ -362,7 +362,7 @@ def restore_som_maps_for_session(app: Any, sidecar: Any = None) -> int:
     if model is None:
         return 0
     from ...table.structure_depiction_layout import structure_depict_height, structure_depict_width
-    from ..structure_pixmap import pixmap_from_structure_render_png
+    from ...table.structure_image import pixmap_from_structure_image
 
     for header in map_headers:
         model.register_pixmap_column(header)
@@ -396,7 +396,7 @@ def restore_som_maps_for_session(app: Any, sidecar: Any = None) -> int:
         )
         if not png:
             continue
-        pm = pixmap_from_structure_render_png(png, dw, dh)
+        pm = pixmap_from_structure_image(png, dw, dh)
         if pm is None or pm.isNull():
             continue
         for header in map_headers:

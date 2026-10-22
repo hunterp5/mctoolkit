@@ -225,18 +225,22 @@ class Render2DBatchProcessWorker(QRunnable):
         signals: WorkerSignals,
         cancel_event: threading.Event | None,
         batch_session: int,
+        *,
+        want_scenes: bool = False,
     ):
         super().__init__()
         self.items = list(items)
         self.signals = signals
         self.cancel_event = cancel_event
         self.batch_session = int(batch_session or 0)
+        self.want_scenes = bool(want_scenes)
 
     def build_tasks(self) -> list[tuple]:
-        """Serialize the queued mols into ``(rows, w, h)`` child-process tasks.
+        """Serialize the queued mols into ``(rows, w, h, want_scenes)`` child-process tasks.
 
         Rows are grouped by depict size before batching because a task renders every molecule at one
-        size, and zoomed rows are drawn at 2x.
+        size, and zoomed rows are drawn at 2x. *want_scenes* is only set for the Structure column,
+        whose stores can paint depiction scenes.
         """
         ev = self.cancel_event
         by_size: dict[tuple[int, int], list[tuple]] = {}
@@ -260,7 +264,7 @@ class Render2DBatchProcessWorker(QRunnable):
         tasks: list[tuple] = []
         for (w, h), rows in by_size.items():
             for start in range(0, len(rows), batch_size):
-                tasks.append((rows[start : start + batch_size], w, h))
+                tasks.append((rows[start : start + batch_size], w, h, self.want_scenes))
         return tasks
 
     def run(self) -> None:

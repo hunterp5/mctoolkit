@@ -78,7 +78,7 @@ def test_unknown_character_uses_fallback_width():
 def test_qt_draws_the_bundled_font_at_table_widths(qapp):
     from PyQt5.QtGui import QFontInfo, QFontMetricsF
 
-    from molmanager.ui.depiction_font import depiction_label_font
+    from molmanager.table.depiction_font import depiction_label_font
 
     font = depiction_label_font(UPEM)
     assert QFontInfo(font).family() == metrics.FONT_FAMILY

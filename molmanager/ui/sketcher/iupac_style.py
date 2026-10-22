@@ -242,7 +242,7 @@ def iupac_structure_font(
     """
     from PyQt5.QtGui import QFont
 
-    from molmanager.ui.depiction_font import label_font_family
+    from molmanager.table.depiction_font import label_font_family
 
     label_font_family()
     pt = max(5, int(point_size))

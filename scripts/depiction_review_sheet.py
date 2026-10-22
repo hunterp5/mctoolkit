@@ -69,7 +69,7 @@ def _draw_vector(painter, sample, x: int, y: int, cell_w: int, cell_h: int, scal
     from PyQt5.QtCore import QRect, QRectF, Qt
     from PyQt5.QtGui import QColor
 
-    from molmanager.ui.depiction_painter import light_palette, paint_scene
+    from molmanager.table.depiction_painter import light_palette, paint_scene
 
     scene, reason = build_scene(sample.mol)
     if scene is None:

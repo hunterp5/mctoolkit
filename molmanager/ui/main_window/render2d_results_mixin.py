@@ -32,7 +32,7 @@ from ...table.structure_depiction_layout import (
     structure_row_default_height,
 )
 from ...storage.structure_render_store import StructureRenderStore
-from ..structure_pixmap import pixmap_from_structure_render_png
+from ...table.structure_image import pixmap_from_structure_image
 from ..strings import TOOL_RENDER_2D
 
 
@@ -109,7 +109,7 @@ class Render2DResultsMixin:
             elif batch:
                 self._render2d_pending[oid] = (bytes(img), True, int(w), int(h))
             else:
-                pm = pixmap_from_structure_render_png(img, w, h)
+                pm = pixmap_from_structure_image(img, w, h)
                 if pix_target:
                     if getattr(self, "_render2d_column_pixmap_mode", True):
                         self._table_model.register_pixmap_column(pix_target)
@@ -445,7 +445,7 @@ class Render2DResultsMixin:
             if row < 0:
                 decoded.append((oid, None))
                 continue
-            decoded.append((oid, pixmap_from_structure_render_png(img_b, rw, rh)))
+            decoded.append((oid, pixmap_from_structure_image(img_b, rw, rh)))
             if set_heights and self.table.rowHeight(row) != rh:
                 self.table.setRowHeight(row, rh)
         return decoded

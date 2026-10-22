@@ -377,6 +377,11 @@ def _decode(raw: bytes) -> DepictionScene:
     )
 
 
+def is_scene_blob(blob: bytes | None) -> bool:
+    """True when *blob* starts like a packed scene, as opposed to PNG bytes."""
+    return bool(blob) and bytes(blob[:2]) == _MAGIC
+
+
 def unpack_scene(blob: bytes | None) -> DepictionScene | None:
     """Decode :func:`pack_scene`. ``None`` when the blob is missing or unusable."""
     if not blob:

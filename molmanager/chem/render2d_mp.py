@@ -102,18 +102,17 @@ def mp_render_structure_batch(args: tuple) -> list[tuple]:
     ``(oid, (STRUCTURE_PAYLOAD_TAG, mol_bytes, smiles_bytes, coord_bytes))``.
     ``coord_bytes`` is optional; empty bytes keep the usual layout.
 
-    With *want_scenes* every row gains a sixth field, the packed depiction scene. A row
-    with a scene carries no PNG; reactions and molecules the scene builder hands back
-    carry the PNG and an empty scene.
+    With *want_scenes* a molecule's image bytes are its packed depiction scene, which
+    :func:`~molmanager.chem.depiction_scene.is_scene_blob` tells apart from PNG bytes.
+    Reactions and molecules the scene builder hands back still carry a PNG.
     """
     items, w, h = args[:3]
     want_scenes = bool(args[3]) if len(args) > 3 else False
     width, height = int(w), int(h)
     out: list[tuple] = []
 
-    def emit(oid: int, png: bytes, ok: bool, scene: bytes = b"") -> None:
-        row = (oid, png, ok, width, height)
-        out.append(row + (scene,) if want_scenes else row)
+    def emit(oid: int, image: bytes, ok: bool) -> None:
+        out.append((oid, image, ok, width, height))
 
     for item in items:
         oid = int(item[0])
@@ -142,10 +141,7 @@ def mp_render_structure_batch(args: tuple) -> list[tuple]:
             else:
                 mol = Chem.Mol(payload)
             scene = _scene_blob(mol) if want_scenes else b""
-            if scene:
-                emit(oid, b"", True, scene)
-            else:
-                emit(oid, render_molecule_png(mol, width, height), True)
+            emit(oid, scene or render_molecule_png(mol, width, height), True)
         except Exception:  # noqa: BLE001 — per-row draw failures must not abort the batch
             emit(oid, b"", False)
     return out

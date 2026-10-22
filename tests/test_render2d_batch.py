@@ -61,7 +61,7 @@ def test_batch_render_honors_requested_size() -> None:
 
 
 def test_scene_mode_returns_scenes_and_png_only_for_fallbacks() -> None:
-    from molmanager.chem.depiction_scene import unpack_scene
+    from molmanager.chem.depiction_scene import is_scene_blob, unpack_scene
     from molmanager.chem.render2d_mp import REACTION_PAYLOAD_TAG
 
     items = [
@@ -71,19 +71,19 @@ def test_scene_mode_returns_scenes_and_png_only_for_fallbacks() -> None:
         (4, b""),
     ]
     rows = _mp_render_structure_batch((items, 210, 170, True))
-    assert [len(r) for r in rows] == [6, 6, 6, 6]
+    assert [len(r) for r in rows] == [5, 5, 5, 5]
     scene_row, radical_row, reaction_row, empty_row = rows
-    assert scene_row[1] == b"" and scene_row[2] is True
-    assert unpack_scene(scene_row[5]) is not None
+    assert scene_row[2] is True and is_scene_blob(scene_row[1])
+    assert unpack_scene(scene_row[1]) is not None
     for row in (radical_row, reaction_row):
-        assert row[1].startswith(b"\x89PNG") and row[5] == b""
-    assert empty_row[2] is False and empty_row[5] == b""
+        assert row[1].startswith(b"\x89PNG") and not is_scene_blob(row[1])
+    assert empty_row[2] is False
 
 
-def test_scene_mode_off_keeps_five_field_rows() -> None:
+def test_scene_mode_off_draws_pngs() -> None:
     items = [(0, Chem.MolFromSmiles("CCO").ToBinary())]
     (row,) = _mp_render_structure_batch((items, 210, 170, False))
-    assert len(row) == 5 and row[1].startswith(b"\x89PNG")
+    assert row[1].startswith(b"\x89PNG")
 
 
 def test_worker_count_respects_env_override(monkeypatch) -> None:
@@ -107,22 +107,30 @@ def test_build_tasks_batches_rows_and_covers_every_oid(monkeypatch) -> None:
     mol = Chem.MolFromSmiles("CCO")
     items = [(oid, mol, 242, 202) for oid in range(10)]
     tasks = _worker(items).build_tasks()
-    assert [len(rows) for rows, _w, _h in tasks] == [4, 4, 2]
-    assert sorted(oid for rows, _w, _h in tasks for oid, _b in rows) == list(range(10))
-    assert all((w, h) == (242, 202) for _rows, w, h in tasks)
+    assert [len(rows) for rows, _w, _h, _scenes in tasks] == [4, 4, 2]
+    assert sorted(oid for rows, _w, _h, _scenes in tasks for oid, _b in rows) == list(range(10))
+    assert all((w, h) == (242, 202) for _rows, w, h, _scenes in tasks)
 
 
 def test_build_tasks_keeps_zoomed_rows_in_their_own_size_group(monkeypatch) -> None:
     monkeypatch.setenv("MOLMANAGER_RENDER2D_BATCH_SIZE", "64")
     mol = Chem.MolFromSmiles("CCO")
     items = [(1, mol, 242, 202), (2, mol, 484, 404), (3, mol, 242, 202)]
-    sizes = {(w, h): [oid for oid, _b in rows] for rows, w, h in _worker(items).build_tasks()}
+    tasks = _worker(items).build_tasks()
+    sizes = {(w, h): [oid for oid, _b in rows] for rows, w, h, _scenes in tasks}
     assert sizes == {(242, 202): [1, 3], (484, 404): [2]}
 
 
 def test_build_tasks_emits_empty_blob_for_missing_mol() -> None:
     tasks = _worker([(1, None, 242, 202)]).build_tasks()
-    assert tasks == [([(1, b"")], 242, 202)]
+    assert tasks == [([(1, b"")], 242, 202, False)]
+
+
+def test_build_tasks_pass_the_scene_request() -> None:
+    worker = Render2DBatchProcessWorker(
+        [(1, None, 242, 202)], signals=None, cancel_event=None, batch_session=1, want_scenes=True
+    )
+    assert worker.build_tasks() == [([(1, b"")], 242, 202, True)]
 
 
 def test_build_tasks_tags_reaction_smarts() -> None:
@@ -131,7 +139,7 @@ def test_build_tasks_tags_reaction_smarts() -> None:
     spec = ReactionDrawSpec("[C:1]>>[C:1]")
     tasks = _worker([(7, spec, 630, 170)]).build_tasks()
     assert len(tasks) == 1
-    rows, w, h = tasks[0]
+    rows, w, h, _scenes = tasks[0]
     assert (w, h) == (630, 170)
     assert rows == [(7, ("rxn", b"[C:1]>>[C:1]"))]
 

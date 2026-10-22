@@ -22,16 +22,17 @@ import os
 from collections import OrderedDict
 from pathlib import Path
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QPixmap
 
 from ..table.structure_depiction_layout import structure_depict_height, structure_depict_width
+from ..table.structure_image import pixmap_from_structure_image
 from .temp_sqlite import close_owned_sqlite, open_owned_sqlite
 
 
 class StructureRenderStore:
     """
-    Holds rendered structure PNG bytes on disk and decodes to QPixmap on demand.
+    Holds rendered structure image bytes (PNG or depiction scene) on disk and decodes
+    them to QPixmap on demand.
 
     Only a bounded number of QPixmaps are kept in memory (LRU). PNG bytes live in
     a temp SQLite file (optional entry cap, oldest seq evicted).
@@ -208,12 +209,11 @@ class StructureRenderStore:
         raw = self.png_bytes(oid_i)
         if not raw:
             return None
-        pm = QPixmap.fromImage(QImage.fromData(raw))
+        pm = pixmap_from_structure_image(
+            raw, int(structure_depict_width()), int(structure_depict_height())
+        )
         if pm.isNull():
             return None
-        dw, dh = int(structure_depict_width()), int(structure_depict_height())
-        if pm.width() > dw or pm.height() > dh:
-            pm = pm.scaled(dw, dh, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._lru[oid_i] = pm
         self._lru.move_to_end(oid_i)
         while len(self._lru) > self._max_decoded:

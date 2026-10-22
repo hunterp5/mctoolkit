@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 from rdkit import Chem
+from rdkit.Chem.Draw import rdMolDraw2D
 from rdkit.Geometry import Point3D
 
 from molmanager.chem.depiction_builder import build_scene, scene_fallback_reason
@@ -157,6 +158,26 @@ def test_charges_and_isotopes_are_scripts():
     ]
 
 
+def test_salt_fragments_are_slid_clear_of_each_other():
+    for smiles in ("[NH4+].[Cl-]", "[Na+].[Na+].[O-]S(=O)(=O)[O-]", "CC(=O)[O-].[K+]"):
+        scene = _scene(smiles)
+        fragments = Chem.GetMolFrags(Chem.MolFromSmiles(smiles))
+        fragment_of = {atom: k for k, atoms in enumerate(fragments) for atom in atoms}
+        for i, first in enumerate(scene.labels):
+            for second in scene.labels[i + 1 :]:
+                if fragment_of[first.atom] == fragment_of[second.atom]:
+                    continue
+                a, b = first.box, second.box
+                assert a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1], smiles
+
+
+def test_single_fragment_keeps_rdkit_coordinates():
+    mol = Chem.MolFromSmiles("CCO")
+    prepared = rdMolDraw2D.PrepareMolForDrawing(mol)
+    expected = [tuple(prepared.GetConformer().GetAtomPosition(i))[:2] for i in range(3)]
+    assert list(_scene("CCO").atoms) == pytest.approx(expected)
+
+
 def test_stereo_bonds_become_wedges_or_hashes():
     scene = _scene("C[C@@H](C(=O)O)N")
     hashes = [s for s in scene.strokes if s.style == StrokeStyle.HASH]
@@ -237,7 +258,7 @@ def test_painter_draws_a_scene(qapp):
     from PyQt5.QtCore import QRectF
     from PyQt5.QtGui import QColor, QImage, QPainter
 
-    from molmanager.ui.depiction_painter import light_palette, paint_scene
+    from molmanager.table.depiction_painter import light_palette, paint_scene
 
     image = QImage(210, 170, QImage.Format_ARGB32)
     image.fill(QColor(255, 255, 255))

@@ -36,7 +36,7 @@ from molmanager.chem.depiction_scene import (
     PieceKind,
     StrokeStyle,
 )
-from molmanager.ui.depiction_font import depiction_label_font
+from molmanager.table.depiction_font import depiction_label_font
 
 # Label text is drawn at this pixel size and scaled, so unhinted metrics stay exact.
 _REFERENCE_FONT_PX = 128

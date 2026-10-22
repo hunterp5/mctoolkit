@@ -76,7 +76,7 @@ def _measure_decode_and_blit(
 ) -> tuple[list[float], list[float]]:
     from PyQt5.QtGui import QImage, QPainter
 
-    from molmanager.ui.structure_pixmap import pixmap_from_structure_render_png
+    from molmanager.table.structure_image import pixmap_from_structure_image
 
     decode_ms: list[float] = []
     blit_us: list[float] = []
@@ -87,7 +87,7 @@ def _measure_decode_and_blit(
             if not png:
                 continue
             t0 = time.perf_counter()
-            pixmap = pixmap_from_structure_render_png(png, width, height)
+            pixmap = pixmap_from_structure_image(png, width, height)
             decode_ms.append((time.perf_counter() - t0) * 1000.0)
             t0 = time.perf_counter()
             painter.drawPixmap(0, 0, pixmap)
@@ -101,7 +101,7 @@ def _measure_scenes(mols, width: int, height: int) -> dict:
     from PyQt5.QtCore import QRectF
     from PyQt5.QtGui import QImage, QPainter
 
-    from molmanager.ui.depiction_painter import light_palette, paint_scene
+    from molmanager.table.depiction_painter import light_palette, paint_scene
 
     build_ms: list[float] = []
     blob_bytes: list[float] = []
