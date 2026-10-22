@@ -23,9 +23,11 @@ Everything else stays text. Display text round-trips: ``1.50`` is not stored as
 
 from __future__ import annotations
 
+import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -67,6 +69,73 @@ def classify_number(text: str) -> tuple[float, int | None] | None:
     if format_number(value, decimals) != text:
         return None
     return value, decimals
+
+
+def _dump_texts(texts: Sequence[str]) -> bytes:
+    try:
+        import orjson
+
+        return orjson.dumps(list(texts))
+    except ImportError:
+        return json.dumps(list(texts), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def _load_texts(raw: bytes) -> list[str]:
+    try:
+        import orjson
+
+        texts = orjson.loads(raw)
+    except ImportError:
+        texts = json.loads(raw.decode("utf-8"))
+    return [str(text) for text in texts]
+
+
+@dataclass(frozen=True)
+class ColumnBlob:
+    """One column serialized for a session file.
+
+    ``kind`` is ``"float"`` (``data`` holds float64 values and ``valid`` one bool per
+    row) or ``"text"`` (``data`` is a JSON array of strings). ``decimals`` is ``None``
+    for integer float columns.
+    """
+
+    name: str
+    kind: str
+    data: bytes
+    valid: bytes = b""
+    decimals: int | None = None
+    blank_only: bool = False
+
+
+_ANY_DECIMALS = object()
+
+
+def _uniform_numbers(
+    texts: Sequence[str], decimals: object = _ANY_DECIMALS
+) -> tuple[np.ndarray, np.ndarray, int | None] | None:
+    """``(values, valid, decimals)`` when every non-blank text is a number in one format.
+
+    *decimals* pins the format an existing float column already uses. ``None`` is returned
+    when any text has to stay a string, which is the same outcome per-cell
+    :meth:`ColumnStore.set_text` reaches when it demotes the column.
+    """
+    n = len(texts)
+    values = np.zeros(n, dtype=np.float64)
+    valid = np.zeros(n, dtype=np.bool_)
+    want = decimals
+    for index, text in enumerate(texts):
+        if not text:
+            continue
+        parsed = classify_number(text)
+        if parsed is None:
+            return None
+        if want is _ANY_DECIMALS:
+            want = parsed[1]
+        elif parsed[1] != want:
+            return None
+        values[index] = parsed[0]
+        valid[index] = True
+    return values, valid, (None if want is _ANY_DECIMALS else want)  # type: ignore[return-value]
 
 
 class _TextColumn:
@@ -158,6 +227,38 @@ class _FloatColumn:
         self.valid = self.valid[: self.n][keep]
         self.n = int(self.values.shape[0])
         self.cap = self.n
+
+
+def _extend_column(
+    column: _TextColumn | _FloatColumn, start: int, texts: Sequence[str]
+) -> _TextColumn | _FloatColumn:
+    """Append *texts* to a column that holds *start* rows; may promote or demote it."""
+    new = ["" if text is None else str(text) for text in texts]
+    count = len(new)
+    if isinstance(column, _FloatColumn):
+        parsed = _uniform_numbers(new, column.decimals)
+        if parsed is None:
+            old = [column.text_at(i) for i in range(start)]
+            combined = old + new
+            return _TextColumn(combined, blank_only=not any(combined))
+        values, valid, _decimals = parsed
+        column._grow_cap(start + count)
+        column.values[start : start + count] = values
+        column.valid[start : start + count] = valid
+        column.n = start + count
+        return column
+    if column.blank_only and any(new):
+        parsed = _uniform_numbers(new)
+        if parsed is not None:
+            values, valid, decimals = parsed
+            promoted = _FloatColumn(start + count, decimals)
+            promoted.values[start : start + count] = values
+            promoted.valid[start : start + count] = valid
+            return promoted
+    column.texts.extend(new)
+    if any(new):
+        column.blank_only = False
+    return column
 
 
 class _CellView(Mapping[str, str]):
@@ -383,6 +484,102 @@ class ColumnStore:
         if column is None:
             return None
         return column.kind
+
+    def append_columns(self, oids: Sequence[int], columns: Mapping[str, Sequence[str]]) -> None:
+        """Append ``len(oids)`` rows given as one text list per column.
+
+        The resulting column kinds match appending the same rows cell by cell, but each
+        column is classified once instead of once per cell. Columns missing from
+        *columns* get blank cells; new names get blanks for the rows already stored.
+        """
+        count = len(oids)
+        if count == 0:
+            return
+        for name, texts in columns.items():
+            if len(texts) != count:
+                raise ValueError(f"Column {name!r} has {len(texts)} cells for {count} rows.")
+        start = self.n
+        total = start + count
+        if total > self._cap:
+            cap = max(16, total, self._cap * 2)
+            grown = np.empty(cap, dtype=np.int64)
+            if start:
+                grown[:start] = self.oids[:start]
+            self.oids = grown
+            self._cap = cap
+        self.oids[start:total] = np.asarray(oids, dtype=np.int64)
+        for name in list(self.columns):
+            texts = columns.get(name)
+            if texts is None:
+                texts = [""] * count
+            self.columns[name] = _extend_column(self.columns[name], start, texts)
+        for name, texts in columns.items():
+            if name not in self.columns:
+                self.columns[name] = _extend_column(_TextColumn.blanks(start), start, texts)
+        self.n = total
+
+    def to_blobs(self, headers: Iterable[str], keep: np.ndarray | None = None) -> list[ColumnBlob]:
+        """Serialize *headers* in order. *keep* is a per-row bool mask for a subset save."""
+        n = self.n
+        mask = None if keep is None else np.asarray(keep, dtype=np.bool_)[:n]
+        out: list[ColumnBlob] = []
+        for name in headers:
+            column = self.columns.get(name)
+            if isinstance(column, _FloatColumn):
+                values = column.values[:n]
+                valid = column.valid[:n]
+                if mask is not None:
+                    values, valid = values[mask], valid[mask]
+                out.append(
+                    ColumnBlob(
+                        name=name,
+                        kind="float",
+                        data=np.ascontiguousarray(values, dtype="<f8").tobytes(),
+                        valid=np.ascontiguousarray(valid, dtype=np.bool_).tobytes(),
+                        decimals=column.decimals,
+                    )
+                )
+                continue
+            if isinstance(column, _TextColumn):
+                texts = column.texts[:n]
+                if mask is not None:
+                    texts = [text for text, flag in zip(texts, mask) if flag]
+                blank_only = column.blank_only or not any(texts)
+            else:
+                count = n if mask is None else int(mask.sum())
+                texts, blank_only = [""] * count, True
+            out.append(
+                ColumnBlob(name=name, kind="text", data=_dump_texts(texts), blank_only=blank_only)
+            )
+        return out
+
+    def oids_blob(self, keep: np.ndarray | None = None) -> bytes:
+        oids = self.oids[: self.n]
+        if keep is not None:
+            oids = oids[np.asarray(keep, dtype=np.bool_)[: self.n]]
+        return np.ascontiguousarray(oids, dtype="<i8").tobytes()
+
+    @classmethod
+    def from_blobs(cls, oids: bytes, columns: Iterable[ColumnBlob]) -> ColumnStore:
+        """Rebuild a store written by :meth:`oids_blob` and :meth:`to_blobs`."""
+        store = cls()
+        ids = np.frombuffer(oids, dtype="<i8").astype(np.int64)
+        n = int(ids.shape[0])
+        store.oids = ids
+        store._cap = n
+        store.n = n
+        for blob in columns:
+            if blob.kind == "float":
+                column = _FloatColumn(n, blob.decimals)
+                column.values[:n] = np.frombuffer(blob.data, dtype="<f8")[:n]
+                column.valid[:n] = np.frombuffer(blob.valid, dtype=np.bool_)[:n]
+                store.columns[blob.name] = column
+                continue
+            texts = _load_texts(blob.data) if blob.data else []
+            if len(texts) < n:
+                texts.extend([""] * (n - len(texts)))
+            store.columns[blob.name] = _TextColumn(texts[:n], blank_only=bool(blob.blank_only))
+        return store
 
     def analysis_values(self, header: str, indices: list[int] | None) -> np.ndarray | list[str]:
         """Float64 column (blank cells are NaN) or stripped text.

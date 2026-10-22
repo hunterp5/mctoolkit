@@ -236,6 +236,46 @@ class CompoundTableModel(
         self._invalidate_numeric_bounds_all()
         self.endResetModel()
 
+    def install_rows(self, rows: ColumnStore) -> None:
+        """Replace every row with *rows* in one model reset; keeps headers and image stores."""
+        self._silent_append_depth = 0
+        self._silent_append_start_row = 0
+        self.beginResetModel()
+        self._rows = rows
+        self._pixmaps.clear()
+        self._extra_pixmaps.clear()
+        self._highlighted_oids = None
+        self._rebuild_oid_index()
+        for cache in self._column_color_cache.values():
+            cache.clear()
+        self._invalidate_numeric_bounds_all()
+        self.endResetModel()
+
+    def append_columns_batch(self, oids: list[int], columns: dict[str, list[str]]) -> None:
+        """Append rows given as one text list per column (bulk ingest).
+
+        Color caches are left for :meth:`rebuild_column_color_caches_after_bulk_load`, the
+        same as ``append_rows_batch(..., defer_color_cache=True)``.
+        """
+        if not oids:
+            return
+        start = len(self._rows)
+        self._rows.append_columns(oids, columns)
+        for offset, oid in enumerate(oids):
+            self._oid_to_row[int(oid)] = start + offset
+        bh = self._bounds_data_headers()
+        dirty = {name for name in columns if name in bh}
+        if dirty:
+            self._mark_numeric_bounds_dirty(dirty)
+        if self.silent_appending:
+            return
+        self.beginInsertRows(QModelIndex(), start, start + len(oids) - 1)
+        self.endInsertRows()
+
+    def rows_store(self) -> ColumnStore:
+        """The live columnar row store (session save serializes it directly)."""
+        return self._rows
+
     def set_highlighted_oids(self, oids: frozenset[int] | set[int] | None) -> None:
         """Rows whose OID is in *oids* are painted as selected (for large logical selections)."""
         new = None if oids is None else frozenset(int(x) for x in oids)

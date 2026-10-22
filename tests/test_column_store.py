@@ -117,3 +117,80 @@ def test_analysis_reads_packed_numbers_as_floats(qapp) -> None:  # noqa: ARG001
     numeric = frame[["MW"]].apply(pd.to_numeric, errors="coerce")
     assert numeric["MW"].dtype.kind == "f"
     assert list(model.analysis_column_texts(headers, [])) == ["ID_HIDDEN", "MW", "Name"]
+
+
+_APPEND_CASES = [
+    ["1.50", "", "10.00"],
+    ["1.50", "1.5"],
+    ["", "", ""],
+    ["", "7", "8"],
+    ["7", "x"],
+    ["00123", "4"],
+    ["abc", "1"],
+    ["1", "2.0"],
+]
+
+
+def _per_cell(chunks: list[list[str]]) -> ColumnStore:
+    store = ColumnStore()
+    oid = 0
+    for chunk in chunks:
+        for text in chunk:
+            oid += 1
+            store.append(_row(oid, A=text))
+    return store
+
+
+def _columnar(chunks: list[list[str]]) -> ColumnStore:
+    store = ColumnStore()
+    oid = 0
+    for chunk in chunks:
+        oids = list(range(oid + 1, oid + 1 + len(chunk)))
+        oid += len(chunk)
+        store.append_columns(oids, {"A": chunk})
+    return store
+
+
+def test_append_columns_matches_per_cell_appends() -> None:
+    for first in _APPEND_CASES:
+        for second in _APPEND_CASES:
+            chunks = [first, second]
+            expected, actual = _per_cell(chunks), _columnar(chunks)
+            assert actual.column_kind("A") == expected.column_kind("A"), chunks
+            assert [actual.get_text(i, "A") for i in range(actual.n)] == [
+                expected.get_text(i, "A") for i in range(expected.n)
+            ], chunks
+            assert list(actual.oids[: actual.n]) == list(expected.oids[: expected.n])
+
+
+def test_append_columns_blanks_missing_and_new_columns() -> None:
+    store = ColumnStore()
+    store.append_columns([1, 2], {"A": ["x", "y"]})
+    store.append_columns([3], {"B": ["2.5"]})
+    assert [store.get_text(i, "A") for i in range(3)] == ["x", "y", ""]
+    assert [store.get_text(i, "B") for i in range(3)] == ["", "", "2.5"]
+    assert store.column_kind("B") == "float"
+
+
+def test_blob_round_trip_keeps_text_kinds_and_subset() -> None:
+    import numpy as np
+
+    store = ColumnStore()
+    store.append_columns(
+        [10, 20, 30],
+        {"MW": ["1.50", "", "3.25"], "Name": ["a", "b", ""], "Empty": ["", "", ""]},
+    )
+    blobs = store.to_blobs(["MW", "Name", "Empty", "Missing"])
+    back = ColumnStore.from_blobs(store.oids_blob(), blobs)
+    assert list(back.oids) == [10, 20, 30]
+    assert back.column_kind("MW") == "float"
+    assert [back.get_text(i, "MW") for i in range(3)] == ["1.50", "", "3.25"]
+    assert [back.get_text(i, "Name") for i in range(3)] == ["a", "b", ""]
+    assert back.columns["Empty"].blank_only
+    assert [back.get_text(i, "Missing") for i in range(3)] == ["", "", ""]
+
+    keep = np.array([True, False, True])
+    subset = ColumnStore.from_blobs(store.oids_blob(keep), store.to_blobs(["MW", "Name"], keep))
+    assert list(subset.oids) == [10, 30]
+    assert [subset.get_text(i, "MW") for i in range(2)] == ["1.50", "3.25"]
+    assert [subset.get_text(i, "Name") for i in range(2)] == ["a", ""]
