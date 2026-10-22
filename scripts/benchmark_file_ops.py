@@ -76,8 +76,17 @@ METRICS = {
 
 
 def _sdf_records(path: Path) -> list[str]:
-    text = path.read_text(encoding="utf-8", errors="replace")
-    return [rec.strip("\r\n") + "\n" for rec in text.split("$$$$") if rec.strip()]
+    """SD records without their ``$$$$`` line; a blank molfile title line is kept."""
+    records: list[str] = []
+    lines: list[str] = []
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if line.rstrip("\r\n") == "$$$$":
+                records.append("".join(lines))
+                lines = []
+            else:
+                lines.append(line.rstrip("\r\n") + "\n")
+    return [rec for rec in records if rec.strip()]
 
 
 def generate_inputs(rows: int) -> None:
