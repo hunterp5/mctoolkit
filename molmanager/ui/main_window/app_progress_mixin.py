@@ -116,7 +116,8 @@ class AppProgressMixin:
             self._memory_status_timer.setInterval(int(cfg.status_memory_poll_ms))
             if self._status_memory_should_poll():
                 self._memory_status_timer.start()
-            self._refresh_status_memory_label()
+            # The first reading imports psutil and walks child processes; keep it off first paint.
+            QTimer.singleShot(0, self._refresh_status_memory_label)
         elif label is not None:
             label.hide()
 

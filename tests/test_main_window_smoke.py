@@ -1277,6 +1277,7 @@ def test_status_memory_tracker_starts_before_window_shown(qapp, monkeypatch):  #
     assert not w.isVisible()
     assert not w._status_host.isHidden()
     assert w._memory_status_timer.isActive()
+    qapp.processEvents()
     assert w._memory_status_label.text().startswith("Mem: ")
 
 

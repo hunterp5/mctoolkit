@@ -39,7 +39,9 @@ from .table.open_messages import (  # noqa: E402
     no_path_message,
 )
 from .ui.main_window import ChemistryWorkspaceWindow  # noqa: E402
-from .ui.theme import bootstrap_application_gui  # noqa: E402
+
+# A zero-delay prewarm runs before the window's first paint and blocks it on Chromium start-up.
+_WEBENGINE_PREWARM_DELAY_MS = 500
 
 
 def _configure_logging() -> None:
@@ -117,13 +119,12 @@ def main(argv: list[str] | None = None) -> int:
     _preload_qt_webengine()
     argv_qt, load_session, open_file, missing_open = _argv_for_qt(list(argv))
     app = QApplication(argv_qt)
-    bootstrap_application_gui(app)
 
     w = ChemistryWorkspaceWindow()
     w.show()
     from .platform_support.qt_webengine_flags import schedule_qtwebengine_prewarm
 
-    schedule_qtwebengine_prewarm()
+    schedule_qtwebengine_prewarm(delay_ms=_WEBENGINE_PREWARM_DELAY_MS)
     if "session" in missing_open:
         QTimer.singleShot(
             0,
