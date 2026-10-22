@@ -1,0 +1,641 @@
+# This file is part of MolManager.
+# Copyright (C) 2026 Hunter Picard
+#
+# MolManager is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# MolManager is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with MolManager. If not, see <https://www.gnu.org/licenses/>.
+
+"""Build a :class:`DepictionScene` from an RDKit molecule, without Qt.
+
+Molecules are prepared by RDKit's ``PrepareMolForDrawing`` exactly as the PNG
+path does, so coordinates, Kekulé form, wedges and added stereo hydrogens match
+today's pictures. The geometry follows RDKit's drawer where it agrees with the
+IUPAC 2008 recommendations (docs/IUPAC_DRAWING.md) and the IUPAC rule where it
+does not:
+
+- Lengths are fractions of the mean bond length, so a scene has no pixel size.
+- Ring double bonds put the second line inside the preferred ring (GR-1.10),
+  ending on the angle bisectors so it stays parallel inside the ring corner.
+- A double bond to a labelled terminal atom, or with no substituents to lean
+  towards, is centred on the bond axis; any other one is offset towards the
+  side with more substituents.
+- Multi-character labels reverse when bonds come only from the right (GR-2.1.6),
+  with charges kept at the free end of the label.
+- Bonds stop at padded label boxes measured with the bundled font's metrics.
+
+Anything this builder cannot draw faithfully is reported by
+:func:`scene_fallback_reason` so the caller keeps the RDKit picture for that row.
+"""
+
+from __future__ import annotations
+
+import math
+
+from rdkit import Chem
+from rdkit.Chem.Draw import rdMolDraw2D
+
+from molmanager.chem.depiction_scene import (
+    MAX_COLOUR_ROLE,
+    NO_INDEX,
+    SCRIPT_SCALE,
+    DepictionScene,
+    Fill,
+    Label,
+    LabelOrientation,
+    LabelPiece,
+    PieceKind,
+    Stroke,
+    StrokeStyle,
+    scene_bounds,
+)
+from molmanager.chem.depiction_text import cap_height, text_advance, text_ink_bounds
+
+# Fractions of the mean bond length.
+DOUBLE_BOND_OFFSET = 0.15
+LABEL_EM = 0.55
+LABEL_PADDING = 0.05
+WEDGE_HALF_WIDTH = 0.1
+HASH_SPACING = 0.1
+MIN_HASH_DASHES = 4
+# Fractions of the normal label em size.
+SUBSCRIPT_DROP = 0.25
+SUPERSCRIPT_RISE = 0.45
+# Space between the element line and stacked hydrogens above or below it.
+_STACK_GAP = 0.3
+# A bond counts as leaving a label sideways when its unit x exceeds this.
+_SIDEWAYS = 0.1
+# Bond length RDKit uses for generated coordinates, for molecules without bonds.
+DEFAULT_BOND_LENGTH = 1.5
+
+_DRAWABLE_BOND_TYPES = {
+    Chem.BondType.SINGLE,
+    Chem.BondType.DOUBLE,
+    Chem.BondType.TRIPLE,
+    Chem.BondType.AROMATIC,
+}
+# Lone atoms whose hydrogens are written first: H2O, H2S, HF, HCl, ...
+_HYDROGEN_FIRST = {8, 9, 16, 17, 34, 35, 52, 53, 85}
+_MINUS = "\u2212"
+# Bisector ends are only used between these angles; outside them the end is inset.
+_MIN_BISECT_ANGLE = math.radians(20)
+_MAX_BISECT_ANGLE = math.radians(170)
+
+Point = tuple[float, float]
+Box = tuple[float, float, float, float]
+
+
+def _is_placeholder(atom) -> bool:
+    """A molfile ``R`` / ``*`` atom: a dummy whose query matches any atom."""
+    return atom.GetAtomicNum() == 0 and atom.DescribeQuery().startswith("AtomNull")
+
+
+def scene_fallback_reason(mol) -> str | None:
+    """Why *mol* needs the RDKit picture, or ``None`` when a scene can be built.
+
+    Reasons are short stable tokens, so fallback rates can be counted by reason.
+    """
+    if mol is None or mol.GetNumAtoms() == 0:
+        return "empty"
+    if mol.GetNumAtoms() >= NO_INDEX or mol.GetNumBonds() >= NO_INDEX:
+        return "too_large"
+    if Chem.GetMolSubstanceGroups(mol):
+        return "substance_groups"
+    for atom in mol.GetAtoms():
+        if atom.HasQuery() and not _is_placeholder(atom):
+            return "query_atom"
+        if atom.GetAtomicNum() > MAX_COLOUR_ROLE:
+            return "unknown_element"
+        if atom.GetNumRadicalElectrons():
+            return "radical"
+        if atom.HasProp("_displayLabel") or atom.HasProp("_displayLabelW"):
+            return "display_label"
+    for bond in mol.GetBonds():
+        if bond.HasQuery():
+            return "query_bond"
+        if bond.GetBondType() not in _DRAWABLE_BOND_TYPES:
+            return f"bond_{str(bond.GetBondType()).lower()}"
+    return None
+
+
+def build_scene(mol) -> tuple[DepictionScene | None, str | None]:
+    """``(scene, None)`` for a drawable molecule, else ``(None, reason)``."""
+    reason = scene_fallback_reason(mol)
+    if reason is not None:
+        return None, reason
+    try:
+        prepared = rdMolDraw2D.PrepareMolForDrawing(mol)
+    except (RuntimeError, ValueError):
+        return None, "prepare_failed"
+    if any(b.GetBondType() == Chem.BondType.AROMATIC for b in prepared.GetBonds()):
+        return None, "not_kekulized"
+    return _SceneBuilder(prepared).build(), None
+
+
+def _sub(p: Point, q: Point) -> Point:
+    return (p[0] - q[0], p[1] - q[1])
+
+
+def _add(p: Point, q: Point, scale: float = 1.0) -> Point:
+    return (p[0] + q[0] * scale, p[1] + q[1] * scale)
+
+
+def _lerp(p: Point, q: Point, t: float) -> Point:
+    return (p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t)
+
+
+def _length(v: Point) -> float:
+    return math.hypot(v[0], v[1])
+
+
+def _unit(v: Point) -> Point:
+    size = _length(v)
+    if size < 1e-12:
+        return (0.0, 0.0)
+    return (v[0] / size, v[1] / size)
+
+
+def _cross(u: Point, v: Point) -> float:
+    return u[0] * v[1] - u[1] * v[0]
+
+
+def _box_interval(p: Point, q: Point, box: Box) -> tuple[float, float] | None:
+    """Parameter range of segment ``p → q`` inside *box* (Liang–Barsky), or ``None``."""
+    dx = q[0] - p[0]
+    dy = q[1] - p[1]
+    t_in, t_out = 0.0, 1.0
+    for along, room in (
+        (-dx, p[0] - box[0]),
+        (dx, box[2] - p[0]),
+        (-dy, p[1] - box[1]),
+        (dy, box[3] - p[1]),
+    ):
+        if abs(along) < 1e-12:
+            if room < 0:
+                return None
+            continue
+        t = room / along
+        if along < 0:
+            t_in = max(t_in, t)
+        else:
+            t_out = min(t_out, t)
+        if t_in > t_out:
+            return None
+    return t_in, t_out
+
+
+def _trim(p: Point, q: Point, boxes: list[Box]) -> tuple[float, float] | None:
+    """Parameter range of ``p → q`` left after cutting off ends inside *boxes*.
+
+    Only a box covering an end shortens the segment; ``None`` when nothing is left.
+    """
+    t0, t1 = 0.0, 1.0
+    for box in boxes:
+        inside = _box_interval(p, q, box)
+        if inside is None:
+            continue
+        lo, hi = inside
+        if lo <= t0 + 1e-9 < hi:
+            t0 = hi
+        elif lo < t1 - 1e-9 <= hi:
+            t1 = lo
+    if t1 - t0 < 1e-6:
+        return None
+    return t0, t1
+
+
+class _SceneBuilder:
+    """One molecule's scene. Use once: ``_SceneBuilder(prepared_mol).build()``."""
+
+    def __init__(self, mol) -> None:
+        self.mol = mol
+        conf = mol.GetConformer()
+        self.pos: list[Point] = []
+        for index in range(mol.GetNumAtoms()):
+            point = conf.GetAtomPosition(index)
+            self.pos.append((float(point.x), float(point.y)))
+        lengths = [
+            _length(_sub(self.pos[b.GetBeginAtomIdx()], self.pos[b.GetEndAtomIdx()]))
+            for b in mol.GetBonds()
+        ]
+        lengths = [size for size in lengths if size > 1e-6]
+        self.mbl = sum(lengths) / len(lengths) if lengths else DEFAULT_BOND_LENGTH
+        self.em = LABEL_EM * self.mbl
+        self.roles = [atom.GetAtomicNum() for atom in mol.GetAtoms()]
+        self.trim_boxes: dict[int, Box] = {}
+        self.strokes: list[Stroke] = []
+        self.fills: list[Fill] = []
+        self.labels: list[Label] = []
+
+    def build(self) -> DepictionScene:
+        for atom in self.mol.GetAtoms():
+            label = self._label(atom)
+            if label is not None:
+                self.labels.append(label)
+                pad = LABEL_PADDING * self.mbl
+                x0, y0, x1, y1 = label.box
+                self.trim_boxes[atom.GetIdx()] = (x0 - pad, y0 - pad, x1 + pad, y1 + pad)
+        for bond in self.mol.GetBonds():
+            self._bond(bond)
+        atoms = tuple(self.pos)
+        return DepictionScene(
+            atoms=atoms,
+            bond_count=self.mol.GetNumBonds(),
+            mean_bond_length=self.mbl,
+            label_size=self.em,
+            bounds=scene_bounds(atoms, self.strokes, self.fills, self.labels),
+            strokes=tuple(self.strokes),
+            fills=tuple(self.fills),
+            labels=tuple(self.labels),
+        )
+
+    # Labels
+
+    def _needs_label(self, atom) -> bool:
+        if atom.GetAtomicNum() != 6:
+            return True
+        return bool(
+            atom.GetDegree() == 0
+            or atom.GetIsotope()
+            or atom.GetFormalCharge()
+            or atom.GetAtomMapNum()
+            or self._is_cumulated_centre(atom)
+        )
+
+    def _is_cumulated_centre(self, atom) -> bool:
+        """Middle carbon of a straight C=C=C, which would read as one long bond (GR-1.5)."""
+        bonds = atom.GetBonds()
+        if len(bonds) != 2 or any(b.GetBondType() != Chem.BondType.DOUBLE for b in bonds):
+            return False
+        here = self.pos[atom.GetIdx()]
+        u, v = (_unit(_sub(self.pos[b.GetOtherAtomIdx(atom.GetIdx())], here)) for b in bonds)
+        return u[0] * v[0] + u[1] * v[1] < math.cos(_MAX_BISECT_ANGLE)
+
+    @staticmethod
+    def _hydrogen_count(atom) -> int:
+        """Hydrogens written in the label; bonded carbons never show theirs."""
+        if atom.GetAtomicNum() == 0 or (atom.GetAtomicNum() == 6 and atom.GetDegree()):
+            return 0
+        return atom.GetTotalNumHs()
+
+    def _orientation(self, atom) -> LabelOrientation:
+        """Side the hydrogens go on.
+
+        East by default; west when bonds come only from the right (GR-2.1.6); north
+        or south when bonds come from both sides, away from where the bonds point.
+        """
+        here = self.pos[atom.GetIdx()]
+        left = right = False
+        sum_y = 0.0
+        for other in atom.GetNeighbors():
+            dx, dy = _unit(_sub(self.pos[other.GetIdx()], here))
+            sum_y += dy
+            left = left or dx < -_SIDEWAYS
+            right = right or dx > _SIDEWAYS
+        if atom.GetDegree() == 0:
+            hydrogen_first = atom.GetAtomicNum() in _HYDROGEN_FIRST and atom.GetTotalNumHs()
+            return LabelOrientation.WEST if hydrogen_first else LabelOrientation.EAST
+        if left and right:
+            return LabelOrientation.NORTH if sum_y <= 0 else LabelOrientation.SOUTH
+        return LabelOrientation.WEST if right and not left else LabelOrientation.EAST
+
+    @staticmethod
+    def _symbol(atom) -> str:
+        if atom.GetAtomicNum() == 0:
+            if atom.HasProp("dummyLabel") and atom.GetProp("dummyLabel").strip():
+                return atom.GetProp("dummyLabel").strip()
+            if atom.HasProp("_MolFileRLabel"):
+                return f"R{atom.GetUnsignedProp('_MolFileRLabel')}"
+            return atom.GetSymbol() or "*"
+        return atom.GetSymbol()
+
+    @staticmethod
+    def _charge_text(charge: int) -> str:
+        if not charge:
+            return ""
+        sign = "+" if charge > 0 else _MINUS
+        return sign if abs(charge) == 1 else f"{abs(charge)}{sign}"
+
+    def _size(self, kind: PieceKind) -> float:
+        return self.em if kind == PieceKind.NORMAL else self.em * SCRIPT_SCALE
+
+    def _rise(self, kind: PieceKind) -> float:
+        if kind == PieceKind.SUBSCRIPT:
+            return -SUBSCRIPT_DROP * self.em
+        if kind == PieceKind.SUPERSCRIPT:
+            return SUPERSCRIPT_RISE * self.em
+        return 0.0
+
+    def _pens(self, run: list[tuple[str, PieceKind]]) -> list[float]:
+        """Pen start of each piece of *run*, from 0."""
+        pens = []
+        pen = 0.0
+        for text, kind in run:
+            pens.append(pen)
+            pen += text_advance(text, self._size(kind))
+        return pens
+
+    def _place(self, run, pens, shift: float, baseline: float, placed: list, boxes: list) -> None:
+        """Append *run*'s pieces at *baseline*, moved right by *shift*, and their ink boxes."""
+        for (text, kind), start in zip(run, pens):
+            origin = (start + shift, baseline + self._rise(kind))
+            placed.append(LabelPiece(origin[0], origin[1], text, kind))
+            x0, y0, x1, y1 = text_ink_bounds(text, self._size(kind))
+            if x1 > x0:
+                boxes.append((origin[0] + x0, origin[1] + y0, origin[0] + x1, origin[1] + y1))
+
+    def _label(self, atom) -> Label | None:
+        if not self._needs_label(atom):
+            return None
+        orientation = self._orientation(atom)
+        isotope = [(str(atom.GetIsotope()), PieceKind.SUPERSCRIPT)] if atom.GetIsotope() else []
+        element = (self._symbol(atom), PieceKind.NORMAL)
+        hydrogens = []
+        count = self._hydrogen_count(atom)
+        if count:
+            hydrogens.append(("H", PieceKind.NORMAL))
+            if count > 1:
+                hydrogens.append((str(count), PieceKind.SUBSCRIPT))
+        charge_text = self._charge_text(atom.GetFormalCharge())
+        charge = [(charge_text, PieceKind.SUPERSCRIPT)] if charge_text else []
+        mapping = [(f":{atom.GetAtomMapNum()}", PieceKind.NORMAL)] if atom.GetAtomMapNum() else []
+
+        stacked = orientation in (LabelOrientation.NORTH, LabelOrientation.SOUTH)
+        if stacked and not hydrogens:
+            orientation = LabelOrientation.EAST
+            stacked = False
+        if orientation == LabelOrientation.WEST:
+            run = charge + hydrogens + isotope + [element] + mapping
+        elif stacked:
+            run = isotope + [element] + charge + mapping
+        else:
+            run = isotope + [element] + hydrogens + charge + mapping
+        if len(run) == 1 and not stacked:
+            orientation = LabelOrientation.CENTRE
+
+        x, y = self.pos[atom.GetIdx()]
+        pens = self._pens(run)
+        element_index = run.index(element)
+        ink = text_ink_bounds(element[0], self.em)
+        element_centre = (ink[0] + ink[2]) / 2
+        shift = x - (pens[element_index] + element_centre)
+        cap = cap_height(self.em)
+        baseline = y - cap / 2
+        placed: list[LabelPiece] = []
+        boxes: list[Box] = []
+        self._place(run, pens, shift, baseline, placed, boxes)
+        if stacked:
+            h_pens = self._pens(hydrogens)
+            h_ink = text_ink_bounds("H", self.em)
+            h_shift = x - (h_ink[0] + h_ink[2]) / 2
+            gap = cap + _STACK_GAP * self.em
+            h_baseline = baseline + gap if orientation == LabelOrientation.NORTH else baseline - gap
+            self._place(hydrogens, h_pens, h_shift, h_baseline, placed, boxes)
+        if not boxes:
+            return None
+        box = (
+            min(b[0] for b in boxes),
+            min(b[1] for b in boxes),
+            max(b[2] for b in boxes),
+            max(b[3] for b in boxes),
+        )
+        return Label(
+            atom=atom.GetIdx(),
+            anchor=(x, y),
+            orientation=orientation,
+            role=self.roles[atom.GetIdx()],
+            box=box,
+            pieces=tuple(placed),
+        )
+
+    # Bonds
+
+    def _bond(self, bond) -> None:
+        kind = bond.GetBondType()
+        if kind == Chem.BondType.DOUBLE:
+            self._double(bond)
+        elif kind == Chem.BondType.TRIPLE:
+            self._triple(bond)
+        else:
+            direction = bond.GetBondDir()
+            if direction == Chem.BondDir.BEGINWEDGE:
+                self._wedge(bond)
+            elif direction == Chem.BondDir.BEGINDASH:
+                self._hash(bond)
+            elif direction == Chem.BondDir.UNKNOWN:
+                self._line(bond, *self._ends(bond), style=StrokeStyle.WAVY)
+            else:
+                self._line(bond, *self._ends(bond))
+
+    def _ends(self, bond) -> tuple[Point, Point]:
+        return self.pos[bond.GetBeginAtomIdx()], self.pos[bond.GetEndAtomIdx()]
+
+    def _boxes(self, bond) -> list[Box]:
+        found = []
+        for index in (bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()):
+            box = self.trim_boxes.get(index)
+            if box is not None:
+                found.append(box)
+        return found
+
+    def _line(self, bond, p: Point, q: Point, style: StrokeStyle = StrokeStyle.SOLID) -> None:
+        """One trimmed line of *bond*, split at its midpoint when the end colours differ."""
+        span = _trim(p, q, self._boxes(bond))
+        if span is None:
+            return
+        start, end = _lerp(p, q, span[0]), _lerp(p, q, span[1])
+        role_a = self.roles[bond.GetBeginAtomIdx()]
+        role_b = self.roles[bond.GetEndAtomIdx()]
+        index = bond.GetIdx()
+        if role_a == role_b or style == StrokeStyle.WAVY:
+            role = role_a if role_a == role_b else 6
+            self.strokes.append(Stroke(*start, *end, role, style, index))
+            return
+        mid = _lerp(start, end, 0.5)
+        self.strokes.append(Stroke(*start, *mid, role_a, style, index))
+        self.strokes.append(Stroke(*mid, *end, role_b, style, index))
+
+    def _frame(self, bond) -> tuple[Point, Point, Point, Point]:
+        """``(p, q, direction, normal)`` with the normal to the left of ``p → q``."""
+        p, q = self._ends(bond)
+        direction = _unit(_sub(q, p))
+        return p, q, direction, (-direction[1], direction[0])
+
+    def _bisector_end(self, at: int, other: int, toward: int, side: float) -> Point | None:
+        """Inner-line end at atom *at*: on the bisector with neighbour *toward*.
+
+        ``None`` when *toward* is not on *side* of the bond or the angle is too open
+        or too tight for a clean corner.
+        """
+        here = self.pos[at]
+        along = _unit(_sub(self.pos[other], here))
+        branch = _unit(_sub(self.pos[toward], here))
+        if _cross(along, branch) * side <= 0:
+            return None
+        angle = math.acos(max(-1.0, min(1.0, along[0] * branch[0] + along[1] * branch[1])))
+        if not _MIN_BISECT_ANGLE < angle < _MAX_BISECT_ANGLE:
+            return None
+        bisector = _unit(_add(along, branch))
+        return _add(here, bisector, DOUBLE_BOND_OFFSET * self.mbl / math.sin(angle / 2))
+
+    def _inner_end(self, at: int, other: int, candidates, side: float) -> Point:
+        """Bisector end with the first usable neighbour, else an inset point."""
+        for toward in candidates:
+            end = self._bisector_end(at, other, toward, side)
+            if end is not None:
+                return end
+        here = self.pos[at]
+        direction = _unit(_sub(self.pos[other], here))
+        normal = (-direction[1], direction[0])
+        offset = DOUBLE_BOND_OFFSET * self.mbl
+        return _add(_add(here, normal, side * offset), direction, offset)
+
+    def _preferred_ring(self, bond) -> list[int] | None:
+        """Ring the second line goes inside: aromatic, then most double bonds, then six."""
+        rings = [
+            list(ring)
+            for ring in self.mol.GetRingInfo().AtomRings()
+            if bond.GetBeginAtomIdx() in ring and bond.GetEndAtomIdx() in ring
+        ]
+        if not rings:
+            return None
+
+        def rank(ring: list[int]):
+            bonds = [
+                self.mol.GetBondBetweenAtoms(ring[i], ring[(i + 1) % len(ring)])
+                for i in range(len(ring))
+            ]
+            aromatic = all(b.GetIsAromatic() for b in bonds)
+            doubles = sum(b.GetBondType() == Chem.BondType.DOUBLE for b in bonds)
+            return (not aromatic, -doubles, abs(len(ring) - 6), len(ring))
+
+        return min(rings, key=rank)
+
+    def _others(self, at: int, exclude: int) -> list[int]:
+        return [
+            n.GetIdx() for n in self.mol.GetAtomWithIdx(at).GetNeighbors() if n.GetIdx() != exclude
+        ]
+
+    def _double(self, bond) -> None:
+        a, b = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+        p, q, _direction, normal = self._frame(bond)
+        offset = DOUBLE_BOND_OFFSET * self.mbl
+        if bond.GetStereo() == Chem.BondStereo.STEREOANY:
+            half = offset / 2
+            self._line(bond, _add(p, normal, half), _add(q, normal, -half))
+            self._line(bond, _add(p, normal, -half), _add(q, normal, half))
+            return
+        ring = self._preferred_ring(bond)
+        if ring is not None:
+            centre = (
+                sum(self.pos[i][0] for i in ring) / len(ring),
+                sum(self.pos[i][1] for i in ring) / len(ring),
+            )
+            side = 1.0 if _cross(_sub(q, p), _sub(centre, p)) >= 0 else -1.0
+            ring_a = [i for i in self._others(a, b) if i in ring]
+            ring_b = [i for i in self._others(b, a) if i in ring]
+            self._line(bond, p, q)
+            self._line(
+                bond, self._inner_end(a, b, ring_a, side), self._inner_end(b, a, ring_b, -side)
+            )
+            return
+        others_a, others_b = self._others(a, b), self._others(b, a)
+        if self._centred(a, b, others_a, others_b):
+            half = offset / 2
+            self._line(bond, _add(p, normal, half), _add(q, normal, half))
+            self._line(bond, _add(p, normal, -half), _add(q, normal, -half))
+            return
+        side = self._substituent_side(p, q, others_a + others_b)
+        self._line(bond, p, q)
+        self._line(
+            bond, self._inner_end(a, b, others_a, side), self._inner_end(b, a, others_b, -side)
+        )
+
+    def _centred(self, a: int, b: int, others_a: list[int], others_b: list[int]) -> bool:
+        """Centre a chain double bond on its axis instead of offsetting the second line."""
+        for end, others, far_others in ((a, others_a, others_b), (b, others_b, others_a)):
+            if others:
+                continue
+            if end in self.trim_boxes or not far_others or len(far_others) == 2:
+                return True
+        return False
+
+    def _substituent_side(self, p: Point, q: Point, neighbours: list[int]) -> float:
+        """+1 when more substituents sit left of ``p → q``, else -1; ties go to the first."""
+        axis = _sub(q, p)
+        signs = [1 if _cross(axis, _sub(self.pos[n], p)) > 0 else -1 for n in neighbours]
+        total = sum(signs)
+        if total:
+            return 1.0 if total > 0 else -1.0
+        return float(signs[0]) if signs else 1.0
+
+    def _triple(self, bond) -> None:
+        p, q, _direction, normal = self._frame(bond)
+        offset = DOUBLE_BOND_OFFSET * self.mbl
+        self._line(bond, p, q)
+        self._line(bond, _add(p, normal, offset), _add(q, normal, offset))
+        self._line(bond, _add(p, normal, -offset), _add(q, normal, -offset))
+
+    def _wedge_span(self, bond) -> tuple[Point, Point, Point, float, float] | None:
+        p, q, _direction, normal = self._frame(bond)
+        span = _trim(p, q, self._boxes(bond))
+        if span is None:
+            return None
+        return p, q, normal, span[0], span[1]
+
+    def _wedge(self, bond) -> None:
+        """Solid wedge, narrow at the stereocentre (the begin atom)."""
+        found = self._wedge_span(bond)
+        if found is None:
+            return
+        p, q, normal, t0, t1 = found
+        half = WEDGE_HALF_WIDTH * self.mbl
+        role_a = self.roles[bond.GetBeginAtomIdx()]
+        role_b = self.roles[bond.GetEndAtomIdx()]
+        cuts = [(t0, t1, role_a)] if role_a == role_b else [(t0, 0.5, role_a), (0.5, t1, role_b)]
+        for start, end, role in cuts:
+            if end - start < 1e-6:
+                continue
+            near, far = _lerp(p, q, start), _lerp(p, q, end)
+            points = []
+            if start * half > 1e-6:
+                points.append(_add(near, normal, start * half))
+            points.append(_add(near, normal, -start * half))
+            points.append(_add(far, normal, -end * half))
+            points.append(_add(far, normal, end * half))
+            self.fills.append(Fill(tuple(points), role, bond.GetIdx()))
+
+    def _hash(self, bond) -> None:
+        """Hashed wedge: dashes widen from the stereocentre (the begin atom)."""
+        found = self._wedge_span(bond)
+        if found is None:
+            return
+        p, q, normal, t0, t1 = found
+        half = WEDGE_HALF_WIDTH * self.mbl
+        count = max(
+            MIN_HASH_DASHES, round(_length(_sub(q, p)) * (t1 - t0) / (HASH_SPACING * self.mbl))
+        )
+        role_a = self.roles[bond.GetBeginAtomIdx()]
+        role_b = self.roles[bond.GetEndAtomIdx()]
+        for step in range(1, count + 1):
+            t = t0 + (t1 - t0) * step / count
+            centre = _lerp(p, q, t)
+            width = max(t * half, 0.15 * half)
+            role = role_a if t < 0.5 else role_b
+            self.strokes.append(
+                Stroke(
+                    *_add(centre, normal, width),
+                    *_add(centre, normal, -width),
+                    role,
+                    StrokeStyle.HASH,
+                    bond.GetIdx(),
+                )
+            )

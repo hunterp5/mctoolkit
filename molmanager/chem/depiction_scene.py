@@ -41,6 +41,8 @@ from enum import IntEnum
 SCENE_VERSION = 1
 NO_INDEX = 0xFFFF
 MAX_COLOUR_ROLE = 118
+# Em size of subscript and superscript pieces relative to normal label text.
+SCRIPT_SCALE = 0.66
 
 _MAGIC = b"MS"
 _HEADER = struct.Struct("<2sBBHHff4fIII")
