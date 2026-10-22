@@ -224,7 +224,8 @@ def iupac_ring_vertex_offset(n_atoms: int) -> float:
 
 
 # Preferred structure fonts (IUPAC GR-0): plain roman / sans; Helvetica & Arial cited.
-IUPAC_LABEL_FONT_FAMILIES = ("Helvetica", "Arial", "DejaVu Sans", "Sans Serif")
+# Liberation Sans is bundled with Arial's metrics, so labels match the table on every OS.
+IUPAC_LABEL_FONT_FAMILIES = ("Liberation Sans", "Helvetica", "Arial", "DejaVu Sans", "Sans Serif")
 
 
 def iupac_structure_font(
@@ -241,6 +242,9 @@ def iupac_structure_font(
     """
     from PyQt5.QtGui import QFont
 
+    from molmanager.ui.depiction_font import label_font_family
+
+    label_font_family()
     pt = max(5, int(point_size))
     font = QFont(IUPAC_LABEL_FONT_FAMILIES[0], pt)
     if hasattr(font, "setFamilies"):
