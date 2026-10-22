@@ -90,6 +90,7 @@ def test_weights_checkpoint_drops_optimizer_state(tmp_path) -> None:
     importlib.util.find_spec("unipkainfer") is None,
     reason="unipkainfer is not installed",
 )
+@pytest.mark.slow
 def test_preprocess_record_matches_unipkainfer() -> None:
     pytest.importorskip("unipkainfer")
     from unipkainfer import UnipkaFreeEnergyConfig

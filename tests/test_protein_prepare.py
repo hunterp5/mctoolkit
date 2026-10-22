@@ -1507,6 +1507,7 @@ def test_prepare_dialogs_use_manager_or_file_source(qapp, tmp_path):  # noqa: AR
     dlg.close()
 
 
+@pytest.mark.slow
 def test_prepare_protein_structure_ala_optional_extras(tmp_path):
     pytest.importorskip("pdbfixer")
     pytest.importorskip("openmm")
@@ -1854,6 +1855,7 @@ def test_highest_occupancy_altloc_preserves_cif_poly_seq():
     assert fixer.missingResidues[(0, 1)] == ["ALA"]
 
 
+@pytest.mark.slow
 def test_4agc_cif_sequence_gaps_survive_altloc_pass():
     from pathlib import Path
 

@@ -103,6 +103,26 @@ python -m ruff check molmanager tests scripts
 python -m ruff format --check molmanager tests scripts
 ```
 
+### Keeping a local run within the machine's limits
+
+`tests/conftest.py` caps MolManager's worker pools and the BLAS/OpenMP thread counts for the
+test process (one Render 2D child, one pKa worker, a two-thread pool, and so on), and kills any
+process pool a test module started once that module finishes. An uncapped run starts pools
+sized to the machine, and on a desktop that can saturate every core and exhaust RAM. A
+`MOLMANAGER_*` value already set in your environment overrides the cap.
+
+Tests marked `slow` (live Uni-pKa inference, full OpenMM protein preparation) are skipped by
+default; add `--run-slow` to include them.
+
+On a workstation, prefer the batch runner. It runs the suite as a series of short pytest
+processes, so memory is returned between batches, and it runs the WebEngine viewer module alone:
+
+```bash
+python scripts/run_tests_in_batches.py                 # all batches
+python scripts/run_tests_in_batches.py --stop-on-fail  # stop at the first failing batch
+python scripts/run_tests_in_batches.py -- --run-slow   # extra pytest arguments after --
+```
+
 CI (`.github/workflows/ci.yml`) runs on **Ubuntu, macOS, and Windows**: lint/header checks, pytest, Linux perf gate, and a dependency audit that **fails on CRITICAL/HIGH/malware** findings (see [dependency-audit-exceptions.md](dependency-audit-exceptions.md)).
 
 ### Qt WebEngine is disabled under `offscreen`

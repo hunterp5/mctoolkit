@@ -326,6 +326,7 @@ def test_unipka_tempdir_cleanup_swallows_permission_error(monkeypatch) -> None:
     importlib.util.find_spec("unipkainfer") is None,
     reason="unipkainfer is not installed",
 )
+@pytest.mark.slow
 def test_unipkainfer_spike_when_weights_present() -> None:
     """Optional live inference: skip unless fold 1 is already on disk (no download in CI)."""
     pytest.importorskip("unipkainfer")
@@ -351,6 +352,7 @@ def test_unipkainfer_spike_when_weights_present() -> None:
     importlib.util.find_spec("unipkainfer") is None,
     reason="unipkainfer is not installed",
 )
+@pytest.mark.slow
 def test_live_acetic_and_aniline_pka_in_aqueous_range() -> None:
     """2D SMILES through Uni-pKa should land near experimental aqueous pKas."""
     pytest.importorskip("unipkainfer")

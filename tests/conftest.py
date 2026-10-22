@@ -19,8 +19,69 @@
 from __future__ import annotations
 
 import os
+import sys
 
 import pytest
+
+# Worker caps for the test process. The app sizes its pools to the machine (up to 12 Render 2D
+# children, pKa and protomer pools, CPU-wide thread pools), and each child loads RDKit or
+# PyTorch. Many tests start real pools, so uncapped a full run can saturate every core and
+# exhaust RAM. These must be set before ``molmanager`` reads its config; an explicit value in
+# the environment still wins.
+_TEST_WORKER_CAPS = {
+    "MOLMANAGER_MAX_THREADPOOL": "2",
+    "MOLMANAGER_RENDER_THREADPOOL": "1",
+    "MOLMANAGER_RENDER2D_PROCESS_WORKERS": "1",
+    "MOLMANAGER_PKA_PROCESS_WORKERS": "1",
+    "MOLMANAGER_PROTOMER_PROCESSES": "1",
+    "MOLMANAGER_DESCRIPTOR_THREADS": "1",
+    "MOLMANAGER_CONFORMER_THREADS": "1",
+    "MOLMANAGER_SESSION_MOL_WORKERS": "1",
+    "MOLMANAGER_UNIPKA_MMFF_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+}
+for _name, _value in _TEST_WORKER_CAPS.items():
+    os.environ.setdefault(_name, _value)
+
+
+def pytest_addoption(parser) -> None:
+    parser.addoption(
+        "--run-slow",
+        action="store_true",
+        default=False,
+        help="Also run tests marked slow (live model inference, full protein preparation).",
+    )
+
+
+def pytest_collection_modifyitems(config, items) -> None:
+    if config.getoption("--run-slow"):
+        return
+    skip_slow = pytest.mark.skip(reason="slow test; pass --run-slow to include it")
+    for item in items:
+        if "slow" in item.keywords:
+            item.add_marker(skip_slow)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _release_worker_pools() -> None:
+    """Kill process pools a test module started so idle children do not pile up across modules.
+
+    Only modules a test already imported are touched, so a light test module never pays for
+    importing the pool code.
+    """
+    yield
+    render_pool = sys.modules.get("molmanager.workers.render2d_pool")
+    if render_pool is not None:
+        render_pool.release_render2d_process_pool(kill_workers=True)
+    pools = sys.modules.get("molmanager.workers.process_pool_utils")
+    if pools is not None:
+        pools.shutdown_all_process_pools(kill_workers=True)
+    score_host = sys.modules.get("molmanager.ionization.unipka_score_host")
+    if score_host is not None:
+        score_host.shutdown_unipka_score_host()
 
 
 @pytest.fixture(autouse=True)
