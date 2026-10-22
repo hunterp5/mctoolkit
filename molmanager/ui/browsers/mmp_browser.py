@@ -21,16 +21,20 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QImage, QPainter, QPixmap
+from PyQt5.QtGui import QPainter, QPixmap
 from PyQt5.QtWidgets import QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 from rdkit import Chem
-from rdkit.Chem.Draw import rdMolDraw2D
 
 from ...analysis.mmp_analysis import MmpPair, canonicalize_pair_direction
 from ...analysis.mmp_depict import highlight_atoms_for_pair
 from ...analysis.mmp_table import assemble_mmp_table_annotations
-from .chrome import configure_browser_mol_drawer, style_browser_emphasis_label
+from ...chem.depiction_scene import atom_set_highlight
+from ...table.structure_image import molecule_pixmap
+from .chrome import style_browser_emphasis_label
 from .pair_browser import PairBrowserDialog
+
+# Highlight for the atoms a transform changes.
+_CHANGED_ATOM_RGB = (0.95, 0.55, 0.15)
 
 
 class MmpBrowserDialog(PairBrowserDialog):
@@ -323,21 +327,7 @@ class MmpBrowserDialog(PairBrowserDialog):
         highlight_atoms: list[int],
     ) -> QPixmap | None:
         try:
-            drawer = rdMolDraw2D.MolDraw2DCairo(pw, ph)
-            configure_browser_mol_drawer(drawer, pw)
-            highlight_set = set(int(i) for i in highlight_atoms)
-            colors = {i: (0.95, 0.55, 0.15) for i in highlight_set}
-            if highlight_set:
-                rdMolDraw2D.PrepareAndDrawMolecule(
-                    drawer,
-                    mol,
-                    highlightAtoms=list(highlight_set),
-                    highlightAtomColors=colors,
-                )
-            else:
-                rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol)
-            drawer.FinishDrawing()
-            img = QImage.fromData(drawer.GetDrawingText())
-            return QPixmap.fromImage(img)
+            highlight = atom_set_highlight(mol, highlight_atoms, _CHANGED_ATOM_RGB)
+            return molecule_pixmap(mol, pw, ph, highlight=highlight)
         except Exception:
             return None
