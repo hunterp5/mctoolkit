@@ -41,6 +41,7 @@ from ..table.structure_depiction_layout import structure_depict_height, structur
 from ..platform_support.config import load_config
 from ..chem.render2d_mp import (
     REACTION_PAYLOAD_TAG,
+    molecule_image_bytes,
     STRUCTURE_PAYLOAD_TAG,
     mp_render_structure_batch,
 )
@@ -517,7 +518,10 @@ class RenderWorker(QRunnable):
         cancel_event: threading.Event | None = None,
         skip_mol_props: bool = False,
         render_batch_session: int = 0,
+        want_scene: bool = False,
     ):
+        """Draw one Structure cell. With *want_scene* a molecule is emitted as its packed
+        depiction scene when the builder can draw it, as Render 2D batches do."""
         super().__init__()
         self.compound_oid = int(compound_oid)
         self.mol = mol
@@ -528,6 +532,7 @@ class RenderWorker(QRunnable):
         self.cancel_event = cancel_event
         self.skip_mol_props = skip_mol_props
         self.render_batch_session = int(render_batch_session or 0)
+        self.want_scene = bool(want_scene)
 
     def run(self):
         sid = self.render_batch_session
@@ -545,8 +550,11 @@ class RenderWorker(QRunnable):
                 p = self.props
             else:
                 p = {n: safe_mol_prop_string(self.mol, n) for n in self.mol.GetPropNames()}
-            png = render_depict_payload_png(self.mol, int(self.w), int(self.h))
-            self.signals.rendered.emit(oid, p, png, True, self.w, self.h, sid)
+            if isinstance(self.mol, ReactionDrawSpec):
+                image = render_depict_payload_png(self.mol, self.w, self.h)
+            else:
+                image = molecule_image_bytes(self.mol, self.w, self.h, want_scene=self.want_scene)
+            self.signals.rendered.emit(oid, p, image, True, self.w, self.h, sid)
         except Exception:
             self.signals.rendered.emit(oid, {}, b"", False, self.w, self.h, sid)
 

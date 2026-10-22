@@ -116,7 +116,7 @@ class Render2DResultsMixin:
                         self._table_model.set_column_pixmap(oid, pix_target, pm)
                     else:
                         self._table_model.set_cell_pixmap(oid, pix_target, pm)
-                else:
+                elif not self._store_structure_scene(oid, img):
                     self._table_model.set_structure_pixmap(oid, pm)
                 if self.table.rowHeight(row) != h:
                     self.table.setRowHeight(row, h)

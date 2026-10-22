@@ -145,6 +145,22 @@ class StructureLayoutMixin:
         self._sync_structure_column_width_for_zoom_state()
         return True
 
+    def _store_structure_scene(self, oid: int, image: bytes) -> bool:
+        """Keep a scene drawn for one row (after an edit) in the Structure store.
+
+        Batch rows already live there; without this an edited row would only exist as a
+        pixmap, so it would miss resizes and the session cache. False when *image* is
+        not a scene or no store is attached, so the caller keeps the pixmap instead.
+        """
+        store = self._table_model._structure_png_store
+        if store is None or not is_scene_blob(image):
+            return False
+        store.ingest_png(int(oid), bytes(image))
+        self._table_model.set_structure_pixmap(int(oid), None)
+        if int(oid) in (getattr(self, "zoomed_ids", None) or ()):
+            self._show_scene_zoom(int(oid), True)
+        return True
+
     def _apply_scene_zoom_overrides(self) -> None:
         """Draw every zoomed row that has a stored scene at 2x (after a store is attached)."""
         for oid in list(getattr(self, "zoomed_ids", None) or ()):

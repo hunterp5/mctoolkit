@@ -531,6 +531,7 @@ class ChemistryWorkspaceWindow(
                 cancel_event=cancel_event,
                 skip_mol_props=skip_mol_props,
                 render_batch_session=render_batch_session,
+                want_scene=load_config().structure_vector_depiction,
             )
         )
 
