@@ -26,9 +26,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
-import pandas as pd
-
 if TYPE_CHECKING:
+    import pandas as pd
+
     from .main_window import ChemistryWorkspaceWindow
 
 __all__ = [
@@ -104,6 +104,8 @@ def table_to_dataframe(
     only_selected: bool = False,
 ) -> tuple[pd.DataFrame, list[int]]:
     """Build a DataFrame from the main table (skips Structure) and parallel source row indices."""
+    import pandas as pd
+
     bulk = getattr(app._table_model, "analysis_column_texts", None)
     if callable(bulk):
         source_rows = scoped_table_analysis_row_indices(
@@ -169,6 +171,8 @@ def selected_table_column_headers(app: ChemistryWorkspaceWindow) -> list[str]:
 
 def numeric_subset(df: pd.DataFrame, *, exclude_id: bool = True) -> pd.DataFrame:
     """Columns that have at least one finite numeric value; optionally drop ID_HIDDEN."""
+    import pandas as pd
+
     if df.empty:
         return df
     cols = [c for c in df.columns if not (exclude_id and c == "ID_HIDDEN")]
