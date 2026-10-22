@@ -24,6 +24,9 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+# Default for controls that cap how many rows or pairs a plot draws.
+DEFAULT_MAX_PLOTTED = 25_000
+
 
 def _env_str(name: str, default: str) -> str:
     raw = (os.environ.get(name) or "").strip()
@@ -388,7 +391,10 @@ def load_config() -> MolManagerConfig:
             "MOLMANAGER_MEMORY_GUARD_ENUM_MAX_PRODUCTS", 10_000, lo=10, hi=50_000
         ),
         memory_guard_dimred_max_points=_env_int(
-            "MOLMANAGER_MEMORY_GUARD_DIMRED_MAX_POINTS", 25_000, lo=100, hi=50_000
+            "MOLMANAGER_MEMORY_GUARD_DIMRED_MAX_POINTS",
+            DEFAULT_MAX_PLOTTED,
+            lo=100,
+            hi=50_000,
         ),
         recomp_constraint_candidate_multiplier=_env_int(
             "MOLMANAGER_RECOMP_CONSTRAINT_CANDIDATE_MULT", 100, lo=10, hi=10_000

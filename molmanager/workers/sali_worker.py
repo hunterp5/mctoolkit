@@ -25,12 +25,13 @@ import time
 from PyQt5.QtCore import QRunnable
 from rdkit import Chem, DataStructs
 
-from ..chem.rdkit_fingerprints import fingerprint_bitvect_for_row, fingerprint_bitvect_for_ui_choice
 from ..analysis.sali_analysis import (
     accumulate_sali_candidate,
     as_sali_activity,
     finalize_sali_points,
 )
+from ..chem.rdkit_fingerprints import fingerprint_bitvect_for_row, fingerprint_bitvect_for_ui_choice
+from ..platform_support.config import DEFAULT_MAX_PLOTTED
 from ..platform_support.tool_progress import report_tool_progress
 from .fingerprint_similarity import SIMILARITY_METRIC_LABELS, pairwise_fingerprint_similarity
 from .signals import WorkerSignals
@@ -50,7 +51,7 @@ class SaliAnalysisWorker(QRunnable):
         metric: str = "Tanimoto",
         min_similarity: float = 0.0,
         min_activity_difference: float = 0.0,
-        max_pairs: int = 10000,
+        max_pairs: int = DEFAULT_MAX_PLOTTED,
         off_by_oid: dict[int, float] | None = None,
         off_target_column: str = "",
         treat_logarithmically: bool = False,

@@ -45,4 +45,4 @@ Feature columns and/or fingerprints from a structure source; optional **Selected
 
 ## Tips and limits
 
-Parameter changes alter tightness of clusters - tune deliberately. Requires the UMAP dependency where applicable. Subsampling via **Max points** affects rare chemotypes (cap 25,000; default 2,500). Wide inputs (typical fingerprints) are PCA-compressed before embedding unless you uncheck that option; raise **PCA components** or set a variance target if 50 PCs drop too much structure. Table filters hide points after Run; the embedding is fit on all rows (or **Selected Rows Only**).
+Parameter changes alter tightness of clusters - tune deliberately. Requires the UMAP dependency where applicable. Subsampling via **Max points** affects rare chemotypes (default and cap 25,000). Wide inputs (typical fingerprints) are PCA-compressed before embedding unless you uncheck that option; raise **PCA components** or set a variance target if 50 PCs drop too much structure. Table filters hide points after Run; the embedding is fit on all rows (or **Selected Rows Only**).

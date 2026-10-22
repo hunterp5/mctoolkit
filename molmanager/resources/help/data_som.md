@@ -46,4 +46,4 @@ Feature columns and/or fingerprints from a structure source; optional **Selected
 
 ## Tips and limits
 
-Grid size vs library size matters - too small collapses distinctions. Training epochs increase cost. **Max points** subsamples large sets (cap 25,000; default 2,500). Wide inputs (typical fingerprints) are PCA-compressed before training unless you uncheck that option; raise **PCA components** or set a variance target if 50 PCs drop too much structure. Jitter helps separate overlapping points visually but is not chemical distance. Table filters hide points after Run; the embedding is fit on all rows (or **Selected Rows Only**).
+Grid size vs library size matters - too small collapses distinctions. Training epochs increase cost. **Max points** subsamples large sets (default and cap 25,000). Wide inputs (typical fingerprints) are PCA-compressed before training unless you uncheck that option; raise **PCA components** or set a variance target if 50 PCs drop too much structure. Jitter helps separate overlapping points visually but is not chemical distance. Table filters hide points after Run; the embedding is fit on all rows (or **Selected Rows Only**).

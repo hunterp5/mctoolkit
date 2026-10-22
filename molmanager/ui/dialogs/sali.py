@@ -35,14 +35,13 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ...chem.rdkit_fingerprints import select_default_fingerprint
+from ...platform_support.config import DEFAULT_MAX_PLOTTED
 from ...workers import SIMILARITY_FP_TYPE_LABELS, SIMILARITY_METRIC_LABELS
 from ..qt_widget_utils import make_window_minimizable
 from ..strings import TOOL_SALI_MAP
 from .mmp import activity_columns_for_mmp, select_preferred_activity_column
 from .scope import selection_scope_checked
-
-# Radius 3 / 2048 bits, so close analogs are less likely to share one fingerprint.
-_DEFAULT_SALI_FINGERPRINT = "Morgan (r=3, n=2048)"
 
 _LOG_TIP = (
     "Treat each positive value as −log10 (pIC50 or pKi). "
@@ -154,13 +153,10 @@ class SaliDialog(QDialog):
         sim_form = QFormLayout(similarity)
         self.fp_combo = QComboBox()
         self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
-        default_fp = self.fp_combo.findText(_DEFAULT_SALI_FINGERPRINT)
-        if default_fp >= 0:
-            self.fp_combo.setCurrentIndex(default_fp)
+        select_default_fingerprint(self.fp_combo)
         self.fp_combo.setToolTip(
             "Fingerprint for pairwise chemical similarity. "
-            "Morgan radius 3 with 2048 bits is the default so close analogs "
-            "are less likely to share an identical fingerprint."
+            "Morgan radius 2 with 2048 bits is the default."
         )
         sim_form.addRow("Fingerprint:", self.fp_combo)
 
@@ -195,7 +191,7 @@ class SaliDialog(QDialog):
 
         self.max_pairs_sb = QSpinBox()
         self.max_pairs_sb.setRange(100, 200000)
-        self.max_pairs_sb.setValue(10000)
+        self.max_pairs_sb.setValue(DEFAULT_MAX_PLOTTED)
         self.max_pairs_sb.setSingleStep(500)
         self.max_pairs_sb.setToolTip(
             "Maximum pairs to plot (highest SALI kept when more pairs qualify)."

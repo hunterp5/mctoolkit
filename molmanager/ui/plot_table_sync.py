@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
 from .layout_perf import perf_span
@@ -37,6 +38,73 @@ def visible_oids_for_plot(app: ChemistryWorkspaceWindow | None) -> frozenset[int
     if oids is None:
         return None
     return frozenset(int(x) for x in oids)
+
+
+def retained_snapshot_oids(
+    app: ChemistryWorkspaceWindow | None,
+    snapshot_oids: Iterable[int],
+    *,
+    respect_filters: bool = True,
+) -> frozenset[int] | None:
+    """OIDs from a stored plot that should still be drawn.
+
+    ``None`` means every snapshot OID is still in the table and, when
+    ``respect_filters`` is set, the current table filters are not hiding any of
+    them. Otherwise the frozenset is the subset to keep, which may be empty.
+    Analysis plots keep their computed points, so a row delete has to drop OIDs
+    that are gone even when no filter is active (that case reports every
+    remaining row as visible).
+    """
+    if app is None:
+        return None
+    snap: set[int] = set()
+    for oid in snapshot_oids:
+        try:
+            snap.add(int(oid))
+        except (TypeError, ValueError):
+            continue
+    if not snap:
+        return None
+    snap_fs = frozenset(snap)
+    model = getattr(app, "_table_model", None)
+    present_fn = getattr(model, "present_oids", None) if model is not None else None
+    present = present_fn(snap_fs) if callable(present_fn) else snap_fs
+    if respect_filters:
+        visible = visible_oids_for_plot(app)
+        if visible is not None:
+            present = present & visible
+    if len(present) == len(snap_fs):
+        return None
+    return present
+
+
+def retained_pair_points(app: ChemistryWorkspaceWindow | None, points: Sequence) -> list:
+    """Pair points whose both endpoints are still in the table and visible.
+
+    Items expose ``oid_a`` and ``oid_b``. The input order is kept. When nothing
+    is dropped, a copy of ``points`` is returned.
+    """
+    if not points:
+        return []
+    snap: list[int] = []
+    for point in points:
+        snap.append(int(point.oid_a))
+        snap.append(int(point.oid_b))
+    keep = retained_snapshot_oids(app, snap)
+    if keep is None:
+        return list(points)
+    return [point for point in points if int(point.oid_a) in keep and int(point.oid_b) in keep]
+
+
+def reindex_retained_point(previous: Sequence, points: Sequence, index: int | None) -> int | None:
+    """Index of the previously current point after a filter or row delete, or None."""
+    if index is None or not (0 <= int(index) < len(previous)):
+        return None
+    current = previous[int(index)]
+    try:
+        return points.index(current)
+    except ValueError:
+        return None
 
 
 def selection_visual_push_key(indices: set[int] | frozenset[int]) -> tuple[int, int]:

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 class AppLifecycleMixin:
     def _wire_table_plot_refresh(self) -> None:
-        """Replot open Plotly views when table cell data changes."""
+        """Replot open Plotly views when table cells or rows change."""
         model = getattr(self, "_table_model", None)
         if model is None:
             return
@@ -43,7 +43,16 @@ class AppLifecycleMixin:
                 return
             self._schedule_active_plots_replot()
 
+        def _on_rows_changed(*_args) -> None:
+            # Row delete/undo must refresh every open plot, including during a
+            # background job. ``force`` matches filter apply: a dropped schedule
+            # would leave deleted points on analysis maps.
+            self._schedule_active_plots_replot(force=True)
+
         model.dataChanged.connect(_on_data_changed)
+        model.rowsInserted.connect(_on_rows_changed)
+        model.rowsRemoved.connect(_on_rows_changed)
+        model.modelReset.connect(_on_rows_changed)
 
     def _wire_sqlite_store_dirty_tracking(self) -> None:
         model = getattr(self, "_table_model", None)

@@ -20,7 +20,7 @@ from molmanager.analysis.sali_analysis import build_sali_points, sali_index
 from molmanager.ui.sali_plot import build_sali_figure
 
 
-def test_sali_dialog_defaults_to_finer_morgan(qapp):  # noqa: ARG001
+def test_sali_dialog_defaults_to_morgan_r2_2048(qapp):  # noqa: ARG001
     from PyQt5.QtWidgets import QGroupBox
 
     from molmanager.ui.dialogs.sali import SaliDialog
@@ -30,8 +30,9 @@ def test_sali_dialog_defaults_to_finer_morgan(qapp):  # noqa: ARG001
         activity_columns=["pIC50"],
         selected_row_count=0,
     )
-    assert dlg.fp_combo.currentText() == "Morgan (r=3, n=2048)"
-    assert dlg.params().fp_choice == "Morgan (r=3, n=2048)"
+    assert dlg.fp_combo.currentText() == "Morgan (r=2, n=2048)"
+    assert dlg.params().fp_choice == "Morgan (r=2, n=2048)"
+    assert dlg.params().max_pairs == 25_000
     assert [box.title() for box in dlg.findChildren(QGroupBox)] == [
         "Activity",
         "Similarity",

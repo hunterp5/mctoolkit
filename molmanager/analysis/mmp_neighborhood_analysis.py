@@ -356,3 +356,27 @@ def build_mmp_network_graph(
         activities=activities,
         edges=tuple(edges),
     )
+
+
+def subset_mmp_network_graph(graph: MmpNetworkGraph, keep: frozenset[int]) -> MmpNetworkGraph:
+    """Drop nodes that left the table, keeping the layout of the nodes that remain."""
+    keep_nodes = {int(oid) for oid in graph.node_oids if int(oid) in keep}
+    if len(keep_nodes) == len(graph.node_oids):
+        return graph
+    edges = tuple(
+        edge
+        for edge in graph.edges
+        if int(edge.oid_a) in keep_nodes and int(edge.oid_b) in keep_nodes
+    )
+    degrees: dict[int, int] = {oid: 0 for oid in keep_nodes}
+    for edge in edges:
+        degrees[int(edge.oid_a)] = degrees.get(int(edge.oid_a), 0) + 1
+        degrees[int(edge.oid_b)] = degrees.get(int(edge.oid_b), 0) + 1
+    node_oids = tuple(sorted(keep_nodes))
+    return MmpNetworkGraph(
+        node_oids=node_oids,
+        positions={oid: graph.positions[oid] for oid in node_oids if oid in graph.positions},
+        degrees=degrees,
+        activities={oid: graph.activities[oid] for oid in node_oids if oid in graph.activities},
+        edges=edges,
+    )

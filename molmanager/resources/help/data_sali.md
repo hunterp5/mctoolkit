@@ -34,7 +34,7 @@ Use pIC50, pKi, or another higher-is-more-potent scale. **Treat Logarithmically*
 **Pairs**
 
 - **Minimum activity difference** or **Minimum |Δselectivity|** - drop weak deltas.
-- **Max pairs to plot** - keep the highest-SALI pairs when many qualify.
+- **Max pairs to plot** - keep the highest-SALI pairs when many qualify (default 25,000).
 
 ## Workflow
 

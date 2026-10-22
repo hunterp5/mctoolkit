@@ -27,7 +27,12 @@ from molmanager.analysis.dimensionality_reduction import (
     subset_dimension_reduction_result,
 )
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
-from molmanager.ui.plot_table_sync import visible_oids_for_plot
+from molmanager.ui.plot_table_sync import (
+    reindex_retained_point,
+    retained_pair_points,
+    retained_snapshot_oids,
+    visible_oids_for_plot,
+)
 from molmanager.ui.widgets import FilterCard
 
 
@@ -134,6 +139,80 @@ def test_unchanged_filter_visibility_skips_forced_replot(qapp):  # noqa: ARG001
     w._apply_filters_impl_sync(None)
     assert not w._plot_replot_timer.isActive()
     w.close()
+
+
+def _two_row_table(w: ChemistryWorkspaceWindow) -> None:
+    w.headers = ["ID_HIDDEN", "Structure", "SMILES", "MW"]
+    w._table_model.set_headers(list(w.headers))
+    w._table_model.append_row(0, {"SMILES": "C", "MW": "10"})
+    w._table_model.append_row(1, {"SMILES": "CC", "MW": "50"})
+
+
+def test_deleting_a_row_schedules_every_open_plot(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _two_row_table(w)
+    host = _CountingPlotHost()
+    w._plot_dialogs = [_FakePlotDialog(host)]
+    w._plot_replot_timer.stop()
+    w._table_model.remove_row_at(1)
+    assert w._plot_replot_timer.isActive()
+    w._plot_replot_timer.stop()
+    w._replot_active_plots()
+    assert host.calls == 1
+    w.close()
+
+
+def test_bulk_delete_schedules_every_open_plot(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _two_row_table(w)
+    w._plot_replot_timer.stop()
+    w._table_model.remove_rows_by_oids(frozenset({0, 1}))
+    assert w._plot_replot_timer.isActive()
+    w.close()
+
+
+def test_retained_snapshot_oids_drops_deleted_rows(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _two_row_table(w)
+    assert retained_snapshot_oids(w, [0, 1]) is None
+    assert retained_snapshot_oids(w, [0, 1, 9]) == frozenset({0, 1})
+    w._table_model.remove_row_at(0)
+    assert retained_snapshot_oids(w, [0, 1]) == frozenset({1})
+    w.close()
+
+
+def test_retained_snapshot_oids_can_ignore_filters(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _setup_two_row_mw_table(w)
+    w._apply_filters_impl_sync(None)
+    assert visible_oids_for_plot(w) == frozenset({0})
+    assert retained_snapshot_oids(w, [0, 1]) == frozenset({0})
+    assert retained_snapshot_oids(w, [0, 1], respect_filters=False) is None
+    w.close()
+
+
+def test_retained_pair_points_drop_a_deleted_endpoint(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    _two_row_table(w)
+
+    class _Pair:
+        def __init__(self, oid_a: int, oid_b: int) -> None:
+            self.oid_a = oid_a
+            self.oid_b = oid_b
+
+    kept_pair = _Pair(0, 1)
+    gone_pair = _Pair(1, 9)
+    assert retained_pair_points(w, [kept_pair, gone_pair]) == [kept_pair]
+    w._table_model.remove_row_at(1)
+    assert retained_pair_points(w, [kept_pair, gone_pair]) == []
+    w.close()
+
+
+def test_reindex_retained_point() -> None:
+    points = ["a", "b", "c"]
+    assert reindex_retained_point(points, ["a", "c"], 2) == 1
+    assert reindex_retained_point(points, ["a", "c"], 1) is None
+    assert reindex_retained_point(points, points, None) is None
 
 
 def test_structure_paint_data_change_does_not_schedule_replot(qapp):  # noqa: ARG001

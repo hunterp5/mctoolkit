@@ -31,7 +31,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ..dockable_plot import handle_floating_plot_close_event
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import make_window_resizable
 from .dimred_panel import DimensionReductionPanel
 
 if TYPE_CHECKING:
@@ -47,13 +47,15 @@ def _plain_form() -> QFormLayout:
 
 def _max_points_spin() -> QSpinBox:
     """Row cap shared by t-SNE, UMAP, and SOM."""
-    from ...platform_support.config import load_config
+    from ...platform_support.config import DEFAULT_MAX_PLOTTED, load_config
 
     spin = QSpinBox()
     cap = int(load_config().memory_guard_dimred_max_points)
     spin.setRange(100, cap)
-    spin.setValue(min(2500, cap))
-    spin.setToolTip("Subsample to this many rows when the table is larger (cap 25,000).")
+    spin.setValue(min(DEFAULT_MAX_PLOTTED, cap))
+    spin.setToolTip(
+        f"Subsample to this many rows when the table is larger (default {DEFAULT_MAX_PLOTTED:,})."
+    )
     return spin
 
 
@@ -101,7 +103,7 @@ class DimensionReductionDialog(QDialog):
         self.setWindowModality(Qt.NonModal)
         self.setAttribute(Qt.WA_DeleteOnClose, True)
         self._force_close = False
-        make_window_minimizable(self)
+        make_window_resizable(self)
 
     def closeEvent(self, event) -> None:  # noqa: N802 — Qt API name
         handle_floating_plot_close_event(self, event)

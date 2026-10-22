@@ -64,7 +64,7 @@ from ...plotting.plot_marker_color import (
 )
 from ..dimred_plot import build_dimension_reduction_figure, dimension_reduction_result_with_color
 from ..plotly_interactive_view import PlotlyInteractiveView
-from ..plot_table_sync import visible_oids_for_plot
+from ..plot_table_sync import retained_snapshot_oids
 from ..result_plot_panel import DockableResultPlotPanel
 from .scope import selection_scope_checked
 
@@ -675,7 +675,8 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         if self._last_result is None:
             return None
         return subset_dimension_reduction_result(
-            self._last_result, visible_oids_for_plot(self.parent_app)
+            self._last_result,
+            retained_snapshot_oids(self.parent_app, self._last_result.oids),
         )
 
     def _refresh_plot_colors(self) -> None:

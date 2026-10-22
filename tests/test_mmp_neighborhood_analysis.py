@@ -20,16 +20,45 @@ from rdkit import Chem
 
 from molmanager.analysis.mmp_analysis import find_matched_molecular_pairs
 from molmanager.analysis.mmp_neighborhood_analysis import (
+    MmpNetworkEdge,
+    MmpNetworkGraph,
     build_mmp_network_graph,
     build_network_edges,
     neighborhood_oids,
     spring_layout_positions,
+    subset_mmp_network_graph,
 )
 from molmanager.ui.mmp_neighborhood_plot import build_mmp_neighborhood_figure
 
 
 def _rec(oid: int, smiles: str, activity: float):
     return oid, Chem.MolFromSmiles(smiles), activity
+
+
+def test_subset_mmp_network_graph_keeps_remaining_layout():
+    edges = (
+        MmpNetworkEdge(1, 2, 1.0, 1.0, "a", 0),
+        MmpNetworkEdge(2, 3, 0.5, -0.5, "b", 1),
+    )
+    graph = MmpNetworkGraph(
+        node_oids=(1, 2, 3),
+        positions={1: (0.0, 0.0), 2: (1.0, 0.0), 3: (2.0, 1.0)},
+        degrees={1: 1, 2: 2, 3: 1},
+        activities={1: 1.0, 2: 2.0, 3: 3.0},
+        edges=edges,
+    )
+    assert subset_mmp_network_graph(graph, frozenset({1, 2, 3})) is graph
+    kept = subset_mmp_network_graph(graph, frozenset({1, 2}))
+    assert kept.node_oids == (1, 2)
+    assert len(kept.edges) == 1
+    assert kept.edges[0].oid_a == 1 and kept.edges[0].oid_b == 2
+    assert kept.positions[2] == (1.0, 0.0)
+    assert kept.degrees[2] == 1
+    orphaned = subset_mmp_network_graph(graph, frozenset({1, 3}))
+    assert orphaned.node_oids == (1, 3)
+    assert orphaned.edges == ()
+    assert orphaned.positions[3] == (2.0, 1.0)
+    assert orphaned.degrees[1] == 0
 
 
 def test_spring_layout_and_neighborhood():

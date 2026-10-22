@@ -25,6 +25,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ..platform_support.config import DEFAULT_MAX_PLOTTED
+
 
 @dataclass(frozen=True)
 class DimensionReductionResult:
@@ -342,7 +344,7 @@ def run_tsne(
     learning_rate: float = 200.0,
     max_iter: int = 1000,
     random_state: int = 42,
-    max_points: int | None = 2500,
+    max_points: int | None = DEFAULT_MAX_PLOTTED,
     pca_dim: int | None = None,
     pca_min_variance: float = 0.0,
     pca_whiten: bool = False,
@@ -411,7 +413,7 @@ def run_umap(
     n_neighbors: int = 15,
     min_dist: float = 0.1,
     random_state: int = 42,
-    max_points: int | None = 2500,
+    max_points: int | None = DEFAULT_MAX_PLOTTED,
     pca_dim: int | None = None,
     pca_min_variance: float = 0.0,
     pca_whiten: bool = False,
@@ -538,7 +540,7 @@ def run_som(
     learning_rate: float = 0.5,
     sigma: float | None = None,
     random_state: int = 42,
-    max_points: int | None = 2500,
+    max_points: int | None = DEFAULT_MAX_PLOTTED,
     jitter: float = 0.35,
     pca_dim: int | None = None,
     pca_min_variance: float = 0.0,

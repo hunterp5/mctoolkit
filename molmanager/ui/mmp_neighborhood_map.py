@@ -33,11 +33,16 @@ from PyQt5.QtWidgets import (
 )
 
 from ..analysis.mmp_analysis import MmpPair, pairs_involving_oid
-from ..analysis.mmp_neighborhood_analysis import MmpNetworkGraph, build_mmp_network_graph
+from ..analysis.mmp_neighborhood_analysis import (
+    MmpNetworkGraph,
+    build_mmp_network_graph,
+    subset_mmp_network_graph,
+)
 from .dockable_plot import style_plot_footer_text_button
 from .mmp_neighborhood_plot import _MMP_MARKER_OPACITY, build_mmp_neighborhood_figure
+from .plot_table_sync import retained_snapshot_oids
 from .plotly_interactive_view import PlotlyInteractiveView
-from .qt_widget_utils import make_window_minimizable
+from .qt_widget_utils import make_window_resizable
 from .result_plot_panel import DockableResultPlotPanel
 
 logger = logging.getLogger(__name__)
@@ -111,6 +116,7 @@ class MmpNeighborhoodMapPanel(DockableResultPlotPanel):
         )
         self._pairs: list[MmpPair] = []
         self._graph: MmpNetworkGraph | None = None
+        self._displayed_graph: MmpNetworkGraph | None = None
         self._activity_column = activity_column or ""
         self._current_oid: int | None = None
         self._layout_generation = 0
@@ -265,17 +271,34 @@ class MmpNeighborhoodMapPanel(DockableResultPlotPanel):
         self._graph = graph
         self._rebuild_figure()
 
+    def _displayed_network_graph(self) -> MmpNetworkGraph | None:
+        """Laid-out graph with nodes that are no longer in the table removed."""
+        graph = self._graph
+        if graph is None:
+            return None
+        keep = retained_snapshot_oids(self.parent_app, graph.node_oids, respect_filters=False)
+        if keep is None:
+            return graph
+        return subset_mmp_network_graph(graph, keep)
+
     def _rebuild_figure(self) -> None:
         if self._plot_view is None or self._graph is None:
             return
+        graph = self._displayed_network_graph()
+        if graph is None:
+            return
+        self._displayed_graph = graph
+        if self._current_oid is not None and int(self._current_oid) not in graph.node_oids:
+            self._current_oid = None
+            self._btn_browse.setEnabled(False)
         try:
-            enc = self._resolved_encoding(oids=list(self._graph.node_oids))
+            enc = self._resolved_encoding(oids=list(graph.node_oids))
             fig = build_mmp_neighborhood_figure(
-                self._graph,
+                graph,
                 activity_column=self._activity_column,
                 **enc,
             )
-            self._plot_view.push_figure(fig, list(self._graph.node_oids))
+            self._plot_view.push_figure(fig, list(graph.node_oids))
             self._update_spectrum_controls()
         except Exception:
             logger.exception("Failed to render MMP neighborhood figure")
@@ -292,13 +315,14 @@ class MmpNeighborhoodMapPanel(DockableResultPlotPanel):
             app.status_label.setText(f"MMP network: {message or 'layout failed.'}")
 
     def _on_point_activated(self, point_index: int) -> None:
-        if self._graph is None:
+        graph = self._displayed_graph if self._displayed_graph is not None else self._graph
+        if graph is None:
             return
-        if not (0 <= point_index < len(self._graph.node_oids)):
+        if not (0 <= point_index < len(graph.node_oids)):
             self._current_oid = None
             self._btn_browse.setEnabled(False)
             return
-        oid = int(self._graph.node_oids[point_index])
+        oid = int(graph.node_oids[point_index])
         self._current_oid = oid
         self._btn_browse.setEnabled(True)
         # Table selection is applied by the plot view.
@@ -364,7 +388,7 @@ class MmpNeighborhoodMapDialog(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self._panel, 1)
         self._panel._sync_footer_chrome()
-        make_window_minimizable(self)
+        make_window_resizable(self)
 
     def set_pairs(self, *args, **kwargs) -> None:
         if self._panel is not None:

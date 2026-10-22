@@ -97,7 +97,7 @@ def test_umap_max_points_spinbox_caps_at_25k(qapp):
     panel = UMAPPlotPanel(None)
     try:
         assert panel.umap_max_points.maximum() == 25_000
-        assert panel.umap_max_points.value() == 2500
+        assert panel.umap_max_points.value() == 25_000
     finally:
         _close_dimred_panel(panel, qapp)
 
