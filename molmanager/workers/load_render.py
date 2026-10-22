@@ -63,7 +63,10 @@ from ..table.table_file_formats import (
     logical_suffix,
     open_text_maybe_gzip,
 )
-from ..conformers.conformer_column_codec import mol_has_3d_coordinates
+from ..conformers.conformer_column_codec import (
+    mol_coordinates_fill_blank_confs,
+    mol_has_3d_coordinates,
+)
 from ..chem.fragment_disconnect import largest_fragment_and_rest
 from ..chem.structure_2d_depiction import (
     ReactionDrawSpec,
@@ -114,7 +117,7 @@ def _emit_structure_tool_progress(
     )
 
 
-def mol_to_ingest_blob(mol: "Chem.Mol") -> bytes:
+def mol_to_ingest_blob(mol: "Chem.Mol", *, keep_conformers: bool = False) -> bytes:
     """Serialize a parsed molecule's structure for cross-thread ingest transfer.
 
     Passing live RDKit Mol objects across the load worker → GUI thread boundary causes multi-second
@@ -125,9 +128,10 @@ def mol_to_ingest_blob(mol: "Chem.Mol") -> bytes:
 
     Depiction-only 2D conformers are dropped here as well. The molecule store keeps connection
     tables, so shipping those coordinates only made the GUI thread strip them one row at a time.
-    3D coordinates are kept: ingest packs them into the ``confs`` sidecar.
+    3D coordinates are kept: ingest packs them into the ``confs`` sidecar. 2D coordinates are kept
+    only when *keep_conformers* is set, so a blank ``confs`` cell can store that structure.
     """
-    if mol.GetNumConformers() and not mol_has_3d_coordinates(mol):
+    if not keep_conformers and mol.GetNumConformers() and not mol_has_3d_coordinates(mol):
         mol = Chem.Mol(mol)
         mol.RemoveAllConformers()
     return mol.ToBinary()
@@ -137,8 +141,13 @@ def _mol_ingest_item(mol: "Chem.Mol", data_headers: list[str]) -> tuple[bytes, d
     """Ingest payload for one mol: structure blob (rebuilt into ``self.mols``) plus pre-built row cells.
 
     Extracting cells here keeps property reads off the GUI thread and in parallel with parsing.
+    A structure with coordinates and an empty ``confs`` cell keeps those coordinates so ingest can
+    store the structure as that conformation instead of a blank cell.
     """
-    return mol_to_ingest_blob(mol), row_cells_from_mol(mol, data_headers)
+    cells = row_cells_from_mol(mol, data_headers)
+    confs_cell = cells.get("confs") if "confs" in cells else None
+    keep = mol_coordinates_fill_blank_confs(mol, confs_cell)
+    return mol_to_ingest_blob(mol, keep_conformers=keep), cells
 
 
 # Re-export for call sites / tests that still import the private name from this module.

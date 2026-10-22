@@ -31,6 +31,7 @@ from ...platform_support.config import load_config
 from ...conformers.conformer_column_codec import (
     is_packed_ensemble_header,
     make_sidecar_cell,
+    mol_coordinates_fill_blank_confs,
     mol_has_3d_coordinates,
 )
 from ...storage import ensure_confs_sidecar
@@ -239,6 +240,8 @@ class IngestLoadMixin:
 
         When the molecule carries 3D coordinates, pack them into ``confs`` (for View
         Conformers) and keep a 2D depiction in ``self.mols`` for the Structure column.
+        A 2D structure is packed the same way when the file already has a ``confs``
+        column and that cell is empty, so a structure with no ensemble is not blank.
 
         *precomputed_cells* are row cells built off the GUI thread by the load worker; when
         provided they are used verbatim (avoids re-reading every property on the GUI thread).
@@ -252,7 +255,10 @@ class IngestLoadMixin:
             if precomputed_cells is not None
             else self._row_cells_from_mol(mol)
         )
-        if mol is not None and mol_has_3d_coordinates(mol):
+        confs_cell = cells.get("confs") if "confs" in cells else None
+        if mol is not None and (
+            mol_has_3d_coordinates(mol) or mol_coordinates_fill_blank_confs(mol, confs_cell)
+        ):
             from ..mol_viewer_3d import prepare_mol_2d
 
             self._ensure_columns(["confs"])

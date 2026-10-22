@@ -87,6 +87,23 @@ def mol_has_3d_coordinates(mol: Chem.Mol | None, *, z_eps: float = 1e-3) -> bool
     return False
 
 
+def mol_coordinates_fill_blank_confs(mol: Chem.Mol | None, confs_cell: str | None) -> bool:
+    """True when a structure's coordinates should occupy an empty ``confs`` cell.
+
+    Structure files such as SDF can carry a ``confs`` column with no ensemble.
+    The mol block is still one conformation. ``confs_cell`` is ``None`` when the
+    file has no ``confs`` column; those rows are left alone.
+    """
+    if confs_cell is None or str(confs_cell).strip():
+        return False
+    if mol is None or mol_has_3d_coordinates(mol):
+        return False
+    try:
+        return int(mol.GetNumConformers()) > 0
+    except Exception:
+        return False
+
+
 _META_KEYS = (
     "ok",
     "n_requested",
