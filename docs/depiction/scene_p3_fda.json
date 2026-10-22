@@ -1,0 +1,74 @@
+{
+  "input": "C:\\Users\\hunte\\Documents\\Coding\\Projects\\MolManager\\samples\\fda_approved.sdf",
+  "molecules": 3024,
+  "failed_draws": 0,
+  "depict_size": [
+    210,
+    170
+  ],
+  "screen_device_pixel_ratio": 1.0,
+  "environment": {
+    "rdkit": "2026.03.6",
+    "rdkit_release_ok": true,
+    "qt": "5.15.2",
+    "python": "3.11.0",
+    "cpu_count": 12
+  },
+  "draw_ms_per_molecule": {
+    "mean": 2.592,
+    "median": 2.495,
+    "p95": 3.713,
+    "max": 7.994
+  },
+  "png_bytes_per_row": {
+    "mean": 6386.6,
+    "median": 6273.0,
+    "p95": 9250.0,
+    "max": 15275.0
+  },
+  "png_total_mb": 18.42,
+  "decode_ms_per_row": {
+    "mean": 0.307,
+    "median": 0.279,
+    "p95": 0.457,
+    "max": 7.317
+  },
+  "blit_us_per_row": {
+    "mean": 5.5,
+    "median": 4.6,
+    "p95": 8.6,
+    "max": 255.1
+  },
+  "scene": {
+    "built": 3024,
+    "fallbacks": {},
+    "fallback_rate": 0.0,
+    "build_ms_per_molecule": {
+      "mean": 1.247,
+      "median": 1.114,
+      "p95": 2.396,
+      "max": 51.244
+    },
+    "blob_bytes_per_row": {
+      "mean": 1599.8,
+      "median": 1443.0,
+      "p95": 3133.0,
+      "max": 5671.0
+    },
+    "blob_total_mb": 4.61,
+    "paint_us_per_row_uncached": {
+      "mean": 397.5,
+      "median": 274.3,
+      "p95": 603.3,
+      "max": 281454.0
+    }
+  },
+  "sidecar": {
+    "path": "samples\\fda_approved.cms.mctcache",
+    "usable": true,
+    "file_mb": 19.31,
+    "rows": 2501,
+    "bytes_per_row_mean": 7297.1,
+    "bytes_per_row_max": 12928
+  }
+}
