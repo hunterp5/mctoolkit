@@ -26,7 +26,7 @@ from rdkit import Chem
 
 from .depiction_builder import build_scene
 from .depiction_coords import apply_depiction_coords
-from .depiction_scene import pack_scene
+from .depiction_scene import SceneHighlight, pack_scene
 from .molecule_conversion import parse_molecule_from_cell_text
 from .structure_2d_depiction import render_molecule_png, render_reaction_png
 
@@ -89,6 +89,23 @@ def _scene_blob(mol) -> bytes:
         return b""
 
 
+def molecule_image_bytes(
+    mol,
+    width: int,
+    height: int,
+    *,
+    want_scene: bool,
+    highlight: SceneHighlight | None = None,
+) -> bytes:
+    """Stored image bytes for *mol*: its packed scene when wanted and drawable, else a PNG.
+
+    Scenes never contain *highlight*, since the painter adds it at draw time; only the
+    PNG fallback has it drawn in.
+    """
+    scene = _scene_blob(mol) if want_scene else b""
+    return scene or render_molecule_png(mol, int(width), int(height), highlight=highlight)
+
+
 def mp_render_structure_batch(args: tuple) -> list[tuple]:
     """Render many structures per child-process task.
 
@@ -140,8 +157,7 @@ def mp_render_structure_batch(args: tuple) -> list[tuple]:
                 mol = apply_depiction_coords(mol, _coord_blob(payload))
             else:
                 mol = Chem.Mol(payload)
-            scene = _scene_blob(mol) if want_scenes else b""
-            emit(oid, scene or render_molecule_png(mol, width, height), True)
+            emit(oid, molecule_image_bytes(mol, width, height, want_scene=want_scenes), True)
         except Exception:  # noqa: BLE001 — per-row draw failures must not abort the batch
             emit(oid, b"", False)
     return out
