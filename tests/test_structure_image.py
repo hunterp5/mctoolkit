@@ -80,6 +80,50 @@ def test_garbage_bytes_give_a_null_pixmap(qapp) -> None:
     assert pixmap_from_structure_image(b"not an image", 210, 170).isNull()
 
 
+_HIGHLIGHT_RGB = (0.0, 0.8, 0.0)
+
+
+def _has_highlight_colour(image) -> bool:
+    for x in range(image.width()):
+        for y in range(image.height()):
+            colour = image.pixelColor(x, y)
+            if colour.green() > 150 and colour.red() < 80 and colour.blue() < 80:
+                return True
+    return False
+
+
+def test_highlight_is_painted_under_a_scene(qapp) -> None:
+    from molmanager.chem.depiction_scene import atom_set_highlight
+    from molmanager.table.structure_image import molecule_pixmap
+
+    mol = Chem.MolFromSmiles("c1ccccc1CC")
+    plain = molecule_pixmap(mol, 210, 170).toImage()
+    highlight = atom_set_highlight(mol, [6, 7], _HIGHLIGHT_RGB)
+    assert set(highlight.bonds) == {(6, 7)}
+    marked = molecule_pixmap(mol, 210, 170, highlight=highlight).toImage()
+    assert not _has_highlight_colour(plain)
+    assert _has_highlight_colour(marked)
+
+
+def test_highlight_reaches_the_rdkit_fallback() -> None:
+    from PyQt5.QtGui import QImage
+
+    from molmanager.chem.depiction_scene import atom_set_highlight
+
+    mol = Chem.MolFromSmiles("c1ccccc1CC")
+    highlight = atom_set_highlight(mol, [6, 7], _HIGHLIGHT_RGB)
+    png = render_molecule_png(mol, 210, 170, highlight=highlight)
+    assert _has_highlight_colour(QImage.fromData(png))
+
+
+def test_highlight_ignores_atoms_outside_the_scene(qapp) -> None:
+    from molmanager.chem.depiction_scene import SceneHighlight
+    from molmanager.table.structure_image import molecule_pixmap
+
+    highlight = SceneHighlight(atoms={99: _HIGHLIGHT_RGB}, bonds={(0, 99): _HIGHLIGHT_RGB})
+    assert not molecule_pixmap(Chem.MolFromSmiles("CCO"), 210, 170, highlight=highlight).isNull()
+
+
 def test_render_store_decodes_scenes(qapp) -> None:
     from molmanager.storage.structure_render_store import StructureRenderStore
 
