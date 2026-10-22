@@ -1,0 +1,42 @@
+{
+  "input": "C:\\Users\\hunte\\Documents\\Coding\\Projects\\MolManager\\tests\\data\\depiction_golden.tsv",
+  "molecules": 48,
+  "failed_draws": 0,
+  "depict_size": [
+    210,
+    170
+  ],
+  "screen_device_pixel_ratio": 1.0,
+  "environment": {
+    "rdkit": "2026.03.6",
+    "rdkit_release_ok": true,
+    "qt": "5.15.2",
+    "python": "3.11.0",
+    "cpu_count": 12
+  },
+  "draw_ms_per_molecule": {
+    "mean": 1.868,
+    "median": 1.778,
+    "p95": 2.843,
+    "max": 3.081
+  },
+  "png_bytes_per_row": {
+    "mean": 4771.6,
+    "median": 4577.0,
+    "p95": 6782.0,
+    "max": 10029.0
+  },
+  "png_total_mb": 0.22,
+  "decode_ms_per_row": {
+    "mean": 0.435,
+    "median": 0.261,
+    "p95": 0.427,
+    "max": 7.751
+  },
+  "blit_us_per_row": {
+    "mean": 5.2,
+    "median": 4.4,
+    "p95": 7.4,
+    "max": 17.3
+  }
+}
