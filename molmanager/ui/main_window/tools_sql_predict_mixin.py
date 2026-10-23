@@ -20,19 +20,13 @@ from __future__ import annotations
 
 from .dock_tools_mixin import DockToolsMixin
 from .external_records_mixin import ExternalRecordsMixin
-from .predict_tools_mixin import (
-    PredictToolsMixin,
-    save_som_map_pixmap,
-    som_map_export_filename,
-)
+from .predict_tools_mixin import PredictToolsMixin
 from .sql_load_mixin import SqlLoadMixin
 from .table_calc_mixin import TableCalcMixin
 from .viewer_openers_mixin import ViewerOpenersMixin
 
 __all__ = [
     "ToolsSqlPredictMixin",
-    "save_som_map_pixmap",
-    "som_map_export_filename",
 ]
 
 
