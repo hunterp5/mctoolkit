@@ -24,6 +24,7 @@ from molmanager.services.chemistry_columns import (
     data_headers_confirmed_for_chemistry_tools,
     is_smiles_named_header,
     ordered_headers_for_molecule_lookup,
+    is_legacy_som_map_header,
     skip_chemistry_tool_column_dropdown,
     should_skip_chemical_scan_column,
 )
@@ -44,6 +45,13 @@ def test_skip_chemistry_tool_column_dropdown():
     assert not skip_chemistry_tool_column_dropdown("SMILES")
     assert not skip_chemistry_tool_column_dropdown("Protonated")
     assert not skip_chemistry_tool_column_dropdown("Structure (Copy)")
+
+
+def test_is_legacy_som_map_header():
+    assert is_legacy_som_map_header("SOM Map")
+    assert is_legacy_som_map_header("SOM Map 2")
+    assert not is_legacy_som_map_header("SOM Sites")
+    assert not is_legacy_som_map_header("Protonated")
 
 
 def test_is_smiles_named_header():
