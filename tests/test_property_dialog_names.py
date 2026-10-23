@@ -18,8 +18,33 @@
 
 from __future__ import annotations
 
+from PyQt5.QtWidgets import QApplication, QProxyStyle, QStyle, QStyleOptionTab, QWidget
+
 from molmanager.descriptors.catalog import DESCRIPTOR_TAB_ORDER, iter_descriptor_tab_items
 from molmanager.ui.dialogs.properties import PropertyDialog
+
+
+def _painted_tab_positions(bar) -> dict[int, QStyleOptionTab.TabPosition]:
+    """Tab index → shape position from the last paint. The end marker is private."""
+    found: dict[int, QStyleOptionTab.TabPosition] = {}
+
+    class _Probe(QProxyStyle):
+        def drawControl(self, element, option, painter, widget=None):  # noqa: ANN001
+            if element == QStyle.CE_TabBarTab and widget is bar:
+                for index in range(bar.count()):
+                    if bar.tabRect(index) == option.rect:
+                        found[index] = option.position
+                        break
+            super().drawControl(element, option, painter, widget)
+
+    probe = _Probe()
+    bar.setStyle(probe)
+    try:
+        bar.repaint()
+        QApplication.instance().processEvents()
+    finally:
+        bar.setStyle(None)
+    return found
 
 
 def test_property_dialog_name_tab_is_local_only(qapp) -> None:  # noqa: ARG001
@@ -58,6 +83,37 @@ def test_property_dialog_opens_wide_enough_for_every_tab(qapp) -> None:  # noqa:
         qapp.processEvents()
         gap = bar.tabRect(complexity).left() - bar.tabRect(atom).right()
         assert gap <= 2
+    finally:
+        dlg.close()
+
+
+def test_descriptor_tabs_stay_even_when_another_tab_is_inserted(qapp) -> None:  # noqa: ARG001
+    """The last tab must paint as the end tab, including after a mid-bar insert.
+
+    Qt 5.15 otherwise keeps the previous end tab's shape, and Fusion draws an
+    extra border before the real last tab (the Complexity / Electronic gap).
+    """
+    dlg = PropertyDialog(["Structure"], selected_row_count=0)
+    try:
+        dlg.show()
+        qapp.processEvents()
+        bar = dlg.tabs.tabBar()
+        last = bar.count() - 1
+        positions = _painted_tab_positions(bar)
+        assert positions[last] == QStyleOptionTab.End
+        assert positions[last - 1] == QStyleOptionTab.Middle
+
+        dlg.tabs.insertTab(last, QWidget(), "Extra")
+        qapp.processEvents()
+        stale = _painted_tab_positions(bar)
+        assert stale[last] == QStyleOptionTab.End
+        assert stale[last + 1] == QStyleOptionTab.Middle
+
+        dlg._repair_tab_bar_end_marker()
+        qapp.processEvents()
+        fixed = _painted_tab_positions(bar)
+        assert fixed[bar.count() - 1] == QStyleOptionTab.End
+        assert fixed[bar.count() - 2] == QStyleOptionTab.Middle
     finally:
         dlg.close()
 
