@@ -16,9 +16,9 @@
 
 """Terminal-group abbreviations for structure scenes.
 
-The first set is CF3, OMe, Boc and Ph (IUPAC GR-2.3). When abbreviations are on,
-the builder writes the short label on the group's attachment atom and leaves the
-rest of the group out of the drawing. Atom indexes stay as they are, so highlights
+The set is CF3, CN, N3, CO2H, SO3H, PO3H2, OMe, Boc and Ph (IUPAC GR-2.3). When abbreviations
+are on, the builder writes the short label on the group's attachment atom and leaves
+the rest of the group out of the drawing. Atom indexes stay as they are, so highlights
 still name the original atoms. The attachment atom is kept, and the covered atoms
 are moved onto it so the cell fit and a highlight land on the label.
 
@@ -36,6 +36,12 @@ from molmanager.chem.depiction_scene import PieceKind
 
 # Cache revisions pack layout options into the low 3 bits and this toggle into bit 3.
 ABBREVIATION_REVISION_BIT = 3
+# Label colours are atomic numbers. CF3, CN, N3, CO2H, SO3H and PO3H2 use the heteroatom.
+_FLUORINE = 9
+_NITROGEN = 7
+_OXYGEN = 8
+_PHOSPHORUS = 15
+_SULFUR = 16
 
 
 @dataclass(frozen=True)
@@ -47,26 +53,38 @@ class Abbreviation:
     forward: tuple[tuple[str, PieceKind], ...]
     reverse: tuple[tuple[str, PieceKind], ...] | None
     attachment: str
+    role: int | None = None
 
 
 def abbreviations_enabled() -> bool:
-    """True when scenes should contract CF3, OMe, Boc and Ph."""
+    """True when scenes should contract CF3, CN, N3, CO2H, SO3H, PO3H2, OMe, Boc and Ph."""
     from molmanager.platform_support.config import load_config
 
     return bool(load_config().structure_abbreviations)
 
 
 def find_abbreviations(mol) -> dict[int, Abbreviation]:
-    """Terminal CF3, OMe, Boc and Ph groups, keyed by the atom that keeps the label.
+    """Terminal groups, keyed by the atom that keeps the label.
 
     Longer groups win when two would cover the same atom. A group is skipped when
     one of its atoms is charged, isotopically labelled, mapped, radical or chiral,
-    or when an internal bond is wedged or hashed.
+    or when an internal bond is wedged or hashed. An azide's own charges are part
+    of the group and do not skip it.
     """
     if mol is None or mol.GetNumAtoms() == 0:
         return {}
     _ensure_rings(mol)
-    candidates = (*_boc_groups(mol), *_phenyl_groups(mol), *_methoxy_groups(mol), *_cf3_groups(mol))
+    candidates = (
+        *_boc_groups(mol),
+        *_phenyl_groups(mol),
+        *_carboxylic_acid_groups(mol),
+        *_sulfonic_acid_groups(mol),
+        *_phosphonic_acid_groups(mol),
+        *_methoxy_groups(mol),
+        *_cf3_groups(mol),
+        *_azide_groups(mol),
+        *_nitrile_groups(mol),
+    )
     used: set[int] = set()
     found: dict[int, Abbreviation] = {}
     for group in candidates:
@@ -86,11 +104,16 @@ def _ensure_rings(mol) -> None:
 
 
 def _plain(atom) -> bool:
-    return not (
-        atom.GetFormalCharge()
-        or atom.GetIsotope()
-        or atom.GetAtomMapNum()
-        or atom.GetNumRadicalElectrons()
+    return _charged_plain(atom, 0)
+
+
+def _charged_plain(atom, charge: int) -> bool:
+    """No isotope, map or radical, and exactly the formal charge the group expects."""
+    return (
+        atom.GetFormalCharge() == charge
+        and not atom.GetIsotope()
+        and not atom.GetAtomMapNum()
+        and not atom.GetNumRadicalElectrons()
     )
 
 
@@ -120,7 +143,7 @@ def _has_drawn_stereo(mol, atom_ids: set[int]) -> bool:
 
 
 def _with_hydrogens(mol, hidden: set[int]) -> frozenset[int]:
-    """Hydrogens on covered atoms are part of the abbreviation, including added stereo H."""
+    """Hydrogens on covered atoms are part of the abbreviation."""
     extra: set[int] = set()
     for index in hidden:
         for other in mol.GetAtomWithIdx(index).GetNeighbors():
@@ -135,8 +158,9 @@ def _group(
     forward: tuple[tuple[str, PieceKind], ...],
     reverse: tuple[tuple[str, PieceKind], ...] | None,
     attachment: str,
+    role: int | None = None,
 ) -> Abbreviation:
-    return Abbreviation(anchor, hidden, forward, reverse, attachment)
+    return Abbreviation(anchor, hidden, forward, reverse, attachment, role)
 
 
 def _cf3_groups(mol) -> list[Abbreviation]:
@@ -164,7 +188,315 @@ def _cf3_groups(mol) -> list[Abbreviation]:
         if len(fluorines) != 3 or len(outside) != 1:
             continue
         found.append(
-            _group(atom.GetIdx(), _with_hydrogens(mol, set(fluorines)), forward, reverse, "C")
+            _group(
+                atom.GetIdx(),
+                _with_hydrogens(mol, set(fluorines)),
+                forward,
+                reverse,
+                "C",
+                _FLUORINE,
+            )
+        )
+    return found
+
+
+def _nitrile_groups(mol) -> list[Abbreviation]:
+    """A terminal C≡N. The carbon keeps the label, coloured as nitrogen."""
+    found = []
+    forward = (("C", PieceKind.NORMAL), ("N", PieceKind.NORMAL))
+    reverse = (("N", PieceKind.NORMAL), ("C", PieceKind.NORMAL))
+    for atom in mol.GetAtoms():
+        if atom.GetAtomicNum() != 6 or not _plain(atom) or len(_heavy_neighbors(atom)) != 2:
+            continue
+        nitrogen = None
+        parent = None
+        for other in _heavy_neighbors(atom):
+            bond = mol.GetBondBetweenAtoms(atom.GetIdx(), other.GetIdx())
+            if (
+                other.GetAtomicNum() == _NITROGEN
+                and _plain(other)
+                and len(_heavy_neighbors(other)) == 1
+                and bond is not None
+                and bond.GetBondType() == Chem.BondType.TRIPLE
+            ):
+                nitrogen = other
+            else:
+                parent = other
+        if nitrogen is None or parent is None:
+            continue
+        found.append(
+            _group(
+                atom.GetIdx(),
+                _with_hydrogens(mol, {nitrogen.GetIdx()}),
+                forward,
+                reverse,
+                "C",
+                _NITROGEN,
+            )
+        )
+    return found
+
+
+def _azide_groups(mol) -> list[Abbreviation]:
+    """A terminal azide. The attached nitrogen keeps the N3 label, coloured as nitrogen.
+
+    Both common drawings are accepted, ``N=[N+]=[N-]`` and ``[N-]-[N+]#N``. The
+    charges belong to the group.
+    """
+    found = []
+    forward = (("N", PieceKind.NORMAL), ("3", PieceKind.SUBSCRIPT))
+    reverse = (("3", PieceKind.SUBSCRIPT), ("N", PieceKind.NORMAL))
+    forms = (
+        (0, 1, -1, Chem.BondType.DOUBLE, Chem.BondType.DOUBLE),
+        (-1, 1, 0, Chem.BondType.SINGLE, Chem.BondType.TRIPLE),
+    )
+    for anchor in mol.GetAtoms():
+        if anchor.GetAtomicNum() != _NITROGEN or anchor.IsInRing():
+            continue
+        if len(_heavy_neighbors(anchor)) != 2:
+            continue
+        for anchor_charge, central_charge, terminal_charge, first_bond, second_bond in forms:
+            if not _charged_plain(anchor, anchor_charge):
+                continue
+            tail = _azide_tail(
+                mol, anchor, central_charge, terminal_charge, first_bond, second_bond
+            )
+            if tail is None:
+                continue
+            found.append(
+                _group(
+                    anchor.GetIdx(),
+                    _with_hydrogens(mol, set(tail)),
+                    forward,
+                    reverse,
+                    "N",
+                    _NITROGEN,
+                )
+            )
+            break
+    return found
+
+
+def _azide_tail(mol, anchor, central_charge, terminal_charge, first_bond, second_bond):
+    """``(central, terminal)`` atom indexes when *anchor* heads this azide form."""
+    for other in _heavy_neighbors(anchor):
+        bond = mol.GetBondBetweenAtoms(anchor.GetIdx(), other.GetIdx())
+        if (
+            other.GetAtomicNum() != _NITROGEN
+            or other.IsInRing()
+            or not _charged_plain(other, central_charge)
+            or len(_heavy_neighbors(other)) != 2
+            or bond is None
+            or bond.GetBondType() != first_bond
+        ):
+            continue
+        terminal = next(
+            (atom for atom in _heavy_neighbors(other) if atom.GetIdx() != anchor.GetIdx()),
+            None,
+        )
+        if terminal is None:
+            continue
+        terminal_bond = mol.GetBondBetweenAtoms(other.GetIdx(), terminal.GetIdx())
+        if (
+            terminal.GetAtomicNum() == _NITROGEN
+            and not terminal.IsInRing()
+            and _charged_plain(terminal, terminal_charge)
+            and len(_heavy_neighbors(terminal)) == 1
+            and terminal_bond is not None
+            and terminal_bond.GetBondType() == second_bond
+        ):
+            return other.GetIdx(), terminal.GetIdx()
+    return None
+
+
+def _carboxylic_acid_groups(mol) -> list[Abbreviation]:
+    """A terminal CO2H. The carbon keeps the label, coloured as oxygen."""
+    found = []
+    forward = (
+        ("C", PieceKind.NORMAL),
+        ("O", PieceKind.NORMAL),
+        ("2", PieceKind.SUBSCRIPT),
+        ("H", PieceKind.NORMAL),
+    )
+    reverse = (
+        ("H", PieceKind.NORMAL),
+        ("O", PieceKind.NORMAL),
+        ("2", PieceKind.SUBSCRIPT),
+        ("C", PieceKind.NORMAL),
+    )
+    for carbon in mol.GetAtoms():
+        if carbon.GetAtomicNum() != 6 or not _plain(carbon) or len(_heavy_neighbors(carbon)) != 3:
+            continue
+        carbonyl = None
+        hydroxyl = None
+        parent = None
+        for bond in carbon.GetBonds():
+            other = bond.GetOtherAtom(carbon)
+            if other.GetAtomicNum() == 1:
+                continue
+            if (
+                bond.GetBondType() == Chem.BondType.DOUBLE
+                and other.GetAtomicNum() == _OXYGEN
+                and len(_heavy_neighbors(other)) == 1
+                and _plain(other)
+            ):
+                carbonyl = other
+            elif (
+                bond.GetBondType() == Chem.BondType.SINGLE
+                and other.GetAtomicNum() == _OXYGEN
+                and len(_heavy_neighbors(other)) == 1
+                and _plain(other)
+                and other.GetTotalNumHs() == 1
+            ):
+                hydroxyl = other
+            else:
+                parent = other
+        if carbonyl is None or hydroxyl is None or parent is None:
+            continue
+        parent_bond = mol.GetBondBetweenAtoms(carbon.GetIdx(), parent.GetIdx())
+        if parent_bond is None or parent_bond.GetBondType() != Chem.BondType.SINGLE:
+            continue
+        found.append(
+            _group(
+                carbon.GetIdx(),
+                _with_hydrogens(mol, {carbonyl.GetIdx(), hydroxyl.GetIdx()}),
+                forward,
+                reverse,
+                "C",
+                _OXYGEN,
+            )
+        )
+    return found
+
+
+def _terminal_oxo(bond, atom) -> bool:
+    """A terminal =O on *bond*."""
+    return (
+        bond.GetBondType() == Chem.BondType.DOUBLE
+        and atom.GetAtomicNum() == _OXYGEN
+        and len(_heavy_neighbors(atom)) == 1
+        and _plain(atom)
+    )
+
+
+def _terminal_hydroxy(bond, atom) -> bool:
+    """A terminal OH on *bond*."""
+    return (
+        bond.GetBondType() == Chem.BondType.SINGLE
+        and atom.GetAtomicNum() == _OXYGEN
+        and len(_heavy_neighbors(atom)) == 1
+        and _plain(atom)
+        and atom.GetTotalNumHs() == 1
+    )
+
+
+def _sulfonic_acid_groups(mol) -> list[Abbreviation]:
+    """A terminal SO3H. The sulfur keeps the label, coloured as sulfur."""
+    found = []
+    forward = (
+        ("S", PieceKind.NORMAL),
+        ("O", PieceKind.NORMAL),
+        ("3", PieceKind.SUBSCRIPT),
+        ("H", PieceKind.NORMAL),
+    )
+    reverse = (
+        ("H", PieceKind.NORMAL),
+        ("O", PieceKind.NORMAL),
+        ("3", PieceKind.SUBSCRIPT),
+        ("S", PieceKind.NORMAL),
+    )
+    for sulfur in mol.GetAtoms():
+        if sulfur.GetAtomicNum() != _SULFUR or not _plain(sulfur):
+            continue
+        if len(_heavy_neighbors(sulfur)) != 4:
+            continue
+        oxo = []
+        hydroxyl = None
+        parent = None
+        spare = False
+        for bond in sulfur.GetBonds():
+            other = bond.GetOtherAtom(sulfur)
+            if other.GetAtomicNum() == 1:
+                continue
+            if _terminal_oxo(bond, other):
+                oxo.append(other)
+            elif _terminal_hydroxy(bond, other):
+                if hydroxyl is not None:
+                    spare = True
+                hydroxyl = other
+            elif parent is not None:
+                spare = True
+                parent = other
+            else:
+                parent = other
+        if spare or len(oxo) != 2 or hydroxyl is None or parent is None:
+            continue
+        parent_bond = mol.GetBondBetweenAtoms(sulfur.GetIdx(), parent.GetIdx())
+        if parent_bond is None or parent_bond.GetBondType() != Chem.BondType.SINGLE:
+            continue
+        hidden = {atom.GetIdx() for atom in oxo}
+        hidden.add(hydroxyl.GetIdx())
+        found.append(
+            _group(sulfur.GetIdx(), _with_hydrogens(mol, hidden), forward, reverse, "S", _SULFUR)
+        )
+    return found
+
+
+def _phosphonic_acid_groups(mol) -> list[Abbreviation]:
+    """A terminal PO3H2. The phosphorus keeps the label, coloured as phosphorus."""
+    found = []
+    forward = (
+        ("P", PieceKind.NORMAL),
+        ("O", PieceKind.NORMAL),
+        ("3", PieceKind.SUBSCRIPT),
+        ("H", PieceKind.NORMAL),
+        ("2", PieceKind.SUBSCRIPT),
+    )
+    reverse = (
+        ("H", PieceKind.NORMAL),
+        ("2", PieceKind.SUBSCRIPT),
+        ("O", PieceKind.NORMAL),
+        ("3", PieceKind.SUBSCRIPT),
+        ("P", PieceKind.NORMAL),
+    )
+    for phosphorus in mol.GetAtoms():
+        if phosphorus.GetAtomicNum() != _PHOSPHORUS or not _plain(phosphorus):
+            continue
+        if len(_heavy_neighbors(phosphorus)) != 4:
+            continue
+        oxo = []
+        hydroxyls = []
+        parent = None
+        spare = False
+        for bond in phosphorus.GetBonds():
+            other = bond.GetOtherAtom(phosphorus)
+            if other.GetAtomicNum() == 1:
+                continue
+            if _terminal_oxo(bond, other):
+                oxo.append(other)
+            elif _terminal_hydroxy(bond, other):
+                hydroxyls.append(other)
+            elif parent is not None:
+                spare = True
+                parent = other
+            else:
+                parent = other
+        if spare or len(oxo) != 1 or len(hydroxyls) != 2 or parent is None:
+            continue
+        parent_bond = mol.GetBondBetweenAtoms(phosphorus.GetIdx(), parent.GetIdx())
+        if parent_bond is None or parent_bond.GetBondType() != Chem.BondType.SINGLE:
+            continue
+        hidden = {atom.GetIdx() for atom in oxo}
+        hidden.update(atom.GetIdx() for atom in hydroxyls)
+        found.append(
+            _group(
+                phosphorus.GetIdx(),
+                _with_hydrogens(mol, hidden),
+                forward,
+                reverse,
+                "P",
+                _PHOSPHORUS,
+            )
         )
     return found
 
