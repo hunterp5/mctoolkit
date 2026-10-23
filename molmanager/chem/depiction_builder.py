@@ -16,9 +16,10 @@
 
 """Build a :class:`DepictionScene` from an RDKit molecule, without Qt.
 
-Coordinates come from :func:`~molmanager.chem.depiction_layout.layout_for_drawing`,
-then RDKit's ``PrepareMolForDrawing`` sets the Kekulé form, wedges and added stereo
-hydrogens as the PNG path does. The geometry follows RDKit's drawer where it agrees with the
+Coordinates come from :func:`~molmanager.chem.depiction_layout.layout_for_drawing`
+and are drawn where they are, so a file drawing looks as it does in the 3Dmol 2D
+viewer. RDKit's ``PrepareMolForDrawing`` sets the Kekulé form and wedges; it adds
+no hydrogens. The geometry follows RDKit's drawer where it agrees with the
 IUPAC 2008 recommendations (docs/IUPAC_DRAWING.md) and the IUPAC rule where it
 does not:
 
@@ -30,7 +31,9 @@ does not:
   side with more substituents.
 - Multi-character labels reverse when bonds come only from the right (GR-2.1.6),
   with charges kept at the free end of the label.
-- Terminal CF3, OMe, Boc and Ph are written as abbreviations when that option is on.
+- Terminal CF3, CN, N3, CO2H, SO3H, PO3H2, OMe, Boc and Ph are written as abbreviations
+  when that option is on. CF3 is fluorine coloured, CN and N3 are nitrogen blue, CO2H is
+  oxygen red, SO3H is sulfur yellow, and PO3H2 is phosphorus orange.
 - Bonds stop at padded label boxes measured with the bundled font's metrics.
 - Fragments are slid apart until their labels no longer overlap, so salts read.
 
@@ -73,7 +76,7 @@ from molmanager.chem.depiction_text import cap_height, text_advance, text_ink_bo
 
 # Bump whenever the builder draws the same molecule differently, so cached scenes
 # (saved in session files) are rebuilt instead of showing the old picture.
-BUILDER_REVISION = 5
+BUILDER_REVISION = 12
 # LayoutOptions.token uses the low 3 bits. Bit 3 is the abbreviation toggle.
 _REVISION_STRIDE = 1 << (ABBREVIATION_REVISION_BIT + 1)
 
@@ -84,7 +87,6 @@ LABEL_PADDING = 0.05
 WEDGE_HALF_WIDTH = 0.1
 HASH_SPACING = 0.1
 FRAGMENT_GAP = 0.5
-STEREO_H_LENGTH = 0.8
 MIN_HASH_DASHES = 4
 # Fractions of the normal label em size.
 SUBSCRIPT_DROP = 0.25
@@ -164,12 +166,14 @@ def build_scene(
     if reason is not None:
         return None, reason
     try:
-        prepared = rdMolDraw2D.PrepareMolForDrawing(layout_for_drawing(mol, layout))
+        prepared = rdMolDraw2D.PrepareMolForDrawing(
+            layout_for_drawing(mol, layout), addChiralHs=False
+        )
     except (RuntimeError, ValueError):
         return None, "prepare_failed"
     if any(b.GetBondType() == Chem.BondType.AROMATIC for b in prepared.GetBonds()):
         return None, "not_kekulized"
-    return _SceneBuilder(prepared, first_added_atom=mol.GetNumAtoms()).build(), None
+    return _SceneBuilder(prepared).build(), None
 
 
 def _sub(p: Point, q: Point) -> Point:
@@ -197,30 +201,6 @@ def _unit(v: Point) -> Point:
 
 def _cross(u: Point, v: Point) -> float:
     return u[0] * v[1] - u[1] * v[0]
-
-
-def _segment_distance(point: Point, p: Point, q: Point) -> float:
-    """Distance from *point* to the segment ``p → q``."""
-    seg = _sub(q, p)
-    size = seg[0] * seg[0] + seg[1] * seg[1]
-    if size < 1e-12:
-        return _length(_sub(point, p))
-    t = max(0.0, min(1.0, ((point[0] - p[0]) * seg[0] + (point[1] - p[1]) * seg[1]) / size))
-    return _length(_sub(point, _lerp(p, q, t)))
-
-
-def _gap_bisectors(angles: list[float]) -> list[Point]:
-    """Unit vectors bisecting each gap between bond *angles* (radians) around an atom."""
-    if not angles:
-        return []
-    ordered = sorted(angles)
-    out = []
-    for k, start in enumerate(ordered):
-        end = ordered[(k + 1) % len(ordered)]
-        gap = (end - start) % (2 * math.pi) or 2 * math.pi
-        mid = start + gap / 2
-        out.append((math.cos(mid), math.sin(mid)))
-    return out
 
 
 def _box_interval(p: Point, q: Point, box: Box) -> tuple[float, float] | None:
@@ -269,15 +249,10 @@ def _trim(p: Point, q: Point, boxes: list[Box]) -> tuple[float, float] | None:
 
 
 class _SceneBuilder:
-    """One molecule's scene. Use once: ``_SceneBuilder(prepared_mol).build()``.
+    """One molecule's scene. Use once: ``_SceneBuilder(prepared_mol).build()``."""
 
-    Atoms from *first_added_atom* on are the stereo hydrogens drawing preparation
-    added; they are re-placed and left out of the mean bond length.
-    """
-
-    def __init__(self, mol, first_added_atom: int | None = None) -> None:
+    def __init__(self, mol) -> None:
         self.mol = mol
-        self.first_added = mol.GetNumAtoms() if first_added_atom is None else first_added_atom
         conf = mol.GetConformer()
         self.pos: list[Point] = []
         for index in range(mol.GetNumAtoms()):
@@ -286,17 +261,14 @@ class _SceneBuilder:
         lengths = [
             _length(_sub(self.pos[b.GetBeginAtomIdx()], self.pos[b.GetEndAtomIdx()]))
             for b in mol.GetBonds()
-            if max(b.GetBeginAtomIdx(), b.GetEndAtomIdx()) < self.first_added
         ]
         lengths = [size for size in lengths if size > 1e-6]
         self.mbl = sum(lengths) / len(lengths) if lengths else DEFAULT_BOND_LENGTH
         self.em = LABEL_EM * self.mbl
         self._abbreviations = {}
         self._hidden: set[int] = set()
-        self._place_added_hydrogens()
         self.roles = [atom.GetAtomicNum() for atom in mol.GetAtoms()]
         self.trim_boxes: dict[int, Box] = {}
-        self._stereo_double_bonds: set[int] | None = None
         self.strokes: list[Stroke] = []
         self.fills: list[Fill] = []
         self.labels: list[Label] = []
@@ -336,47 +308,6 @@ class _SceneBuilder:
             anchor = self.pos[group.anchor]
             for index in group.hidden:
                 self.pos[index] = anchor
-
-    def _place_added_hydrogens(self) -> None:
-        """Put each added stereo hydrogen where it has the most room.
-
-        Drawing preparation adds them one unit from their atom whatever the drawing's
-        bond length, often towards a neighbouring hydrogen or substituent (two ring
-        fusion hydrogens can land half a unit apart). Candidates are RDKit's direction
-        and the bisector of every gap between the atom's other bonds, at
-        ``STEREO_H_LENGTH`` of the mean bond length; the one farthest from other
-        atoms and bonds wins. With three other bonds in the plane the wedge reads the
-        same in any gap, so the stereo is unchanged.
-        """
-        for index in range(self.first_added, self.mol.GetNumAtoms()):
-            atom = self.mol.GetAtomWithIdx(index)
-            if atom.GetAtomicNum() != 1 or atom.GetDegree() != 1:
-                continue
-            parent = atom.GetNeighbors()[0].GetIdx()
-            here = self.pos[parent]
-            reach = STEREO_H_LENGTH * self.mbl
-            others = [_sub(self.pos[i], here) for i in self._others(parent, index) if i < index]
-            directions = [_unit(_sub(self.pos[index], here))]
-            directions += _gap_bisectors([math.atan2(v[1], v[0]) for v in others])
-            candidates = [_add(here, d, reach) for d in directions if d != (0.0, 0.0)]
-            if candidates:
-                self.pos[index] = max(candidates, key=lambda q: self._clearance(q, index))
-
-    def _clearance(self, point: Point, hydrogen: int) -> float:
-        """Distance from *point* to the nearest atom or bond placed before *hydrogen*.
-
-        Hydrogens are placed in index order, so lower indices are heavy atoms and
-        hydrogens already moved; later ones are still at RDKit's positions and ignored.
-        """
-        best = min(
-            (_length(_sub(point, self.pos[i])) for i in range(hydrogen)),
-            default=math.inf,
-        )
-        for bond in self.mol.GetBonds():
-            a, b = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
-            if max(a, b) < hydrogen:
-                best = min(best, _segment_distance(point, self.pos[a], self.pos[b]))
-        return best
 
     def _separate_fragments(self, labels: dict[int, Label]) -> bool:
         """Slide fragments right until no two share space, labels included.
@@ -581,7 +512,7 @@ class _SceneBuilder:
                 run = list(group.forward)
                 orientation = LabelOrientation.EAST
         attachment = next(piece for piece in run if piece[0] == group.attachment)
-        return self._finish_label(atom, run, attachment, orientation)
+        return self._finish_label(atom, run, attachment, orientation, role=group.role)
 
     def _finish_label(
         self,
@@ -590,6 +521,7 @@ class _SceneBuilder:
         attachment: tuple[str, PieceKind],
         orientation: LabelOrientation,
         stacked_hydrogens: list[tuple[str, PieceKind]] | None = None,
+        role: int | None = None,
     ) -> Label | None:
         """Place *run* with *attachment* centred on *atom*, then any stacked hydrogens."""
         x, y = self.pos[atom.GetIdx()]
@@ -622,7 +554,7 @@ class _SceneBuilder:
             atom=atom.GetIdx(),
             anchor=(x, y),
             orientation=orientation,
-            role=self.roles[atom.GetIdx()],
+            role=self.roles[atom.GetIdx()] if role is None else role,
             box=box,
             pieces=tuple(placed),
         )
@@ -746,18 +678,11 @@ class _SceneBuilder:
         a, b = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
         p, q, _direction, normal = self._frame(bond)
         offset = DOUBLE_BOND_OFFSET * self.mbl
-        if bond.GetStereo() == Chem.BondStereo.STEREOANY and self._can_be_stereo(bond):
-            half = offset / 2
-            self._line(bond, _add(p, normal, half), _add(q, normal, -half))
-            self._line(bond, _add(p, normal, -half), _add(q, normal, half))
-            return
         ring = self._preferred_ring(bond)
         if ring is not None:
             ring_a = [i for i in self._others(a, b) if i in ring]
             ring_b = [i for i in self._others(b, a) if i in ring]
-            # The next ring atom marks the inside; a ring centre misleads in puckered macrocycles.
-            inside = self.pos[(ring_a or ring_b)[0]]
-            side = 1.0 if _cross(_sub(q, p), _sub(inside, p)) >= 0 else -1.0
+            side = self._double_bond_side(bond, p, q)
             self._line(bond, p, q)
             self._line(
                 bond, self._inner_end(a, b, ring_a, side), self._inner_end(b, a, ring_b, -side)
@@ -769,25 +694,27 @@ class _SceneBuilder:
             self._line(bond, _add(p, normal, half), _add(q, normal, half))
             self._line(bond, _add(p, normal, -half), _add(q, normal, -half))
             return
-        side = self._substituent_side(p, q, others_a + others_b)
+        side = self._double_bond_side(bond, p, q)
         self._line(bond, p, q)
         self._line(
             bond, self._inner_end(a, b, others_a, side), self._inner_end(b, a, others_b, -side)
         )
 
-    def _can_be_stereo(self, bond) -> bool:
-        """Whether *bond* could be E or Z, so an "either" flag on it means something.
+    def _double_bond_side(self, bond, p: Point, q: Point) -> float:
+        """+1 when the second line goes left of ``p → q``.
 
-        Files flag bonds as either-stereo that have two identical groups on one end
-        (malotilate's dithiole ylidene); drawn crossed they look twisted for nothing.
+        In a ring that is the inside, taken from the next ring atom. A ring centre
+        misleads in puckered macrocycles. Outside a ring it is the side with more
+        substituents.
         """
-        if self._stereo_double_bonds is None:
-            self._stereo_double_bonds = {
-                int(info.centeredOn)
-                for info in Chem.FindPotentialStereo(Chem.Mol(self.mol))
-                if info.type == Chem.StereoType.Bond_Double
-            }
-        return bond.GetIdx() in self._stereo_double_bonds
+        a, b = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+        ring = self._preferred_ring(bond)
+        if ring is not None:
+            inside_atoms = [i for i in self._others(a, b) + self._others(b, a) if i in ring]
+            if inside_atoms:
+                inside = self.pos[inside_atoms[0]]
+                return 1.0 if _cross(_sub(q, p), _sub(inside, p)) >= 0 else -1.0
+        return self._substituent_side(p, q, self._others(a, b) + self._others(b, a))
 
     def _centred(self, a: int, b: int, others_a: list[int], others_b: list[int]) -> bool:
         """Centre a chain double bond on its axis instead of offsetting the second line.

@@ -107,7 +107,7 @@ def test_macrocycle_uses_coordgen_with_substituents_outside():
     plain = layout_for_drawing(mol, PLAIN)
     coordgen = layout_for_drawing(mol, LayoutOptions(rotate_to_cell=False))
     assert _positions(coordgen) != pytest.approx(_positions(plain))
-    unflipped = layout._coordgen_layout(layout._with_stereo_hydrogens(mol))
+    unflipped = layout._coordgen_layout(Chem.Mol(mol))
     assert _inward_substituents(coordgen) < _inward_substituents(unflipped)
     assert _drawn_smiles(rdMolDraw2D.PrepareMolForDrawing(coordgen)) == Chem.MolToSmiles(mol)
 
@@ -120,11 +120,12 @@ def test_coordgen_is_dropped_when_it_draws_the_wrong_double_bond_shape(monkeypat
     assert _drawn_smiles(rdMolDraw2D.PrepareMolForDrawing(drawn)) == Chem.MolToSmiles(mol)
 
 
-def test_stereocentre_hydrogens_match_rdkits_drawer():
+def test_generated_layout_adds_no_atoms():
     mol = Chem.MolFromSmiles("CC[C@H]1CN2CC[C@H]1C[C@@H]2[C@@H](O)c1ccnc2ccc(OC)cc12")
-    drawn = rdMolDraw2D.PrepareMolForDrawing(layout_for_drawing(mol, LayoutOptions()))
-    assert drawn.GetNumAtoms() == rdMolDraw2D.PrepareMolForDrawing(mol).GetNumAtoms()
-    assert _drawn_smiles(drawn) == Chem.MolToSmiles(mol)
+    drawn = layout_for_drawing(mol, LayoutOptions())
+    assert drawn.GetNumAtoms() == mol.GetNumAtoms()
+    prepared = rdMolDraw2D.PrepareMolForDrawing(drawn, addChiralHs=False)
+    assert _drawn_smiles(prepared) == Chem.MolToSmiles(mol)
 
 
 def test_tall_layout_is_turned_to_fit_the_cell():
@@ -179,7 +180,7 @@ def test_scene_atoms_keep_their_indices():
     mol = Chem.MolFromSmiles(RAPAMYCIN)
     scene, reason = build_scene(mol, LayoutOptions())
     assert scene is not None, reason
-    assert len(scene.atoms) >= mol.GetNumAtoms()
+    assert len(scene.atoms) == mol.GetNumAtoms()
 
 
 def test_scene_revision_follows_the_layout_options():

@@ -114,7 +114,8 @@ def layout_for_drawing(mol, options: LayoutOptions | None = None):
     if has_drawing_coordinates(mol):
         return mol
     opts = options if options is not None else current_layout_options()
-    base = _with_stereo_hydrogens(mol)
+    base = Chem.Mol(mol)
+    base.RemoveAllConformers()
     macrocycles = [ring for ring in _atom_rings(base) if len(ring) >= MACROCYCLE_RING_SIZE]
     layout = _rdkit_layout(base)
     if macrocycles:
@@ -128,28 +129,6 @@ def layout_for_drawing(mol, options: LayoutOptions | None = None):
     if opts.rotate_to_cell:
         _rotate_to_cell(layout)
     return layout
-
-
-def _with_stereo_hydrogens(mol):
-    """Copy of *mol* without conformers, with the explicit stereo H RDKit's drawer adds.
-
-    ``PrepareMolForDrawing`` gives every stereocentre shared by two or more rings an
-    explicit H before it lays a molecule out, so the layout leaves room for it; adding
-    it after the layout can leave a bridgehead H where no wedge shows its
-    configuration. The hydrogens are appended, so heavy-atom indices are unchanged,
-    and ``PrepareMolForDrawing`` then adds no more.
-    """
-    base = Chem.Mol(mol)
-    base.RemoveAllConformers()
-    rings = base.GetRingInfo()
-    centres = [
-        atom.GetIdx()
-        for atom in base.GetAtoms()
-        if atom.GetChiralTag()
-        in (Chem.ChiralType.CHI_TETRAHEDRAL_CW, Chem.ChiralType.CHI_TETRAHEDRAL_CCW)
-        and rings.NumAtomRings(atom.GetIdx()) > 1
-    ]
-    return Chem.AddHs(base, onlyOnAtoms=centres) if centres else base
 
 
 def _atom_rings(mol) -> list[tuple[int, ...]]:

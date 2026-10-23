@@ -81,9 +81,9 @@ def _packed_scene(mol, stored_blob: bytes, layout: LayoutOptions | None) -> tupl
     """``(scene, xy)`` for the molecule that will actually be stored.
 
     The scene is built from *stored_blob* plus the float32 coordinates a later Render 2D will
-    reapply, so that redraw is the same picture. ``xy`` is empty when the layout added atoms
-    (stereo hydrogens) and no longer matches the stored connection table; the scene is then built
-    from the laid-out molecule and a later redraw generates coordinates again.
+    reapply, so that redraw is the same picture. ``xy`` is empty when the laid-out molecule no
+    longer matches the stored connection table; the scene is then built from the laid-out
+    molecule and a later redraw generates coordinates again.
     """
     options = layout if layout is not None else current_layout_options()
     laid = layout_for_drawing(mol, options)
