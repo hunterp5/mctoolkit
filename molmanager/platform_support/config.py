@@ -136,6 +136,7 @@ class MolManagerConfig:
     structure_layout_macrocycle_coordgen: bool
     structure_layout_flip_inward_substituents: bool
     structure_layout_rotate_to_cell: bool
+    structure_abbreviations: bool
     fingerprint_cache_max_entries: int
     tool_progress_poll_ms: int
     status_memory_enabled: bool
@@ -327,6 +328,7 @@ def load_config() -> MolManagerConfig:
         structure_layout_rotate_to_cell=_env_bool(
             "MOLMANAGER_STRUCTURE_LAYOUT_ROTATE_TO_CELL", True
         ),
+        structure_abbreviations=_env_bool("MOLMANAGER_STRUCTURE_ABBREVIATIONS", True),
         fingerprint_cache_max_entries=_env_int(
             "MOLMANAGER_FINGERPRINT_CACHE_MAX_ENTRIES", 50_000, lo=0, hi=5_000_000
         ),
