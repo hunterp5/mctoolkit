@@ -56,6 +56,7 @@ from ..platform_support.config import load_config
 from ..descriptors.descriptors_3d import DESCRIPTOR_3D_FNS, int_fns_need_3d, mol_for_3d_descriptors
 from ..descriptors.medchem_descriptors import (
     ab_mps_score,
+    bbb_score,
     cns_mpo_score,
     esol_logS_intrinsic,
     lipinski_violations,
@@ -193,6 +194,8 @@ def descriptor_callable_for_int_fn(i_f, smarts_cache, row_ctx=None):
         return lambda m: logs74_value(m, ctx.get("ionization_states"))
     if i_f == "AB_MPS":
         return lambda m: ab_mps_score(m, ctx.get("ionization_states")) if m is not None else 0.0
+    if i_f == "BBB_SCORE":
+        return lambda m: bbb_score(m, ctx.get("ionization_states")) if m is not None else 0.0
     if i_f == "CNS_MPO":
         return lambda m: cns_mpo_score(m, ctx.get("ionization_states")) if m is not None else 0.0
     if i_f == "QED":
