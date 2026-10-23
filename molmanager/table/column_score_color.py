@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Traffic-light coloring for drug-likeness score columns (QED, AB-MPS, CNS MPO)."""
+"""Traffic-light coloring for drug-likeness score columns (QED, AB-MPS, BBB, CNS MPO)."""
 
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ class FavorableScoreColorSpec:
 _SCORE_SPECS: dict[str, FavorableScoreColorSpec] = {
     "qed score": FavorableScoreColorSpec(0.0, 0.5, 1.0, True),
     "ab mps score": FavorableScoreColorSpec(0.0, 14.0, 28.0, False),
+    "bbb score": FavorableScoreColorSpec(0.0, 4.0, 6.0, True),
     "cns mpo score": FavorableScoreColorSpec(0.0, 3.0, 6.0, True),
 }
 
@@ -57,5 +58,5 @@ def normalize_score_color_header(header_name: str) -> str:
 
 
 def favorable_score_color_spec(header_name: str) -> FavorableScoreColorSpec | None:
-    """Return the auto-color spec for a calculated QED / AB-MPS / CNS MPO column, if any."""
+    """Return the auto-color spec for a calculated QED / AB-MPS / BBB / CNS MPO column, if any."""
     return _SCORE_SPECS.get(normalize_score_color_header(header_name))
