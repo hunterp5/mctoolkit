@@ -606,3 +606,35 @@ def test_compound_table_headers_resize_with_table_font(qapp):  # noqa: ARG001
     assert int(view.horizontalHeader().height()) == h_small
     assert int(view.verticalHeader().width()) == w_small
     view.deleteLater()
+
+
+def test_row_number_column_width_matches_final_count_on_bulk_insert(qapp):  # noqa: ARG001
+    """A silent file-load insert must widen the row numbers before any later font pass."""
+    from PyQt5.QtGui import QFont
+
+    from molmanager.ui.compound_table_model import CompoundTableModel
+    from molmanager.ui.compound_table_view import CompoundTableView, header_bar_extent_for_font
+    from molmanager.ui.filter_proxy_model import FilterProxyModel
+
+    model = CompoundTableModel(["ID_HIDDEN", "Structure", "SMILES"])
+    view = CompoundTableView()
+    proxy = FilterProxyModel()
+    proxy.setSourceModel(model)
+    view.setModel(proxy)
+    font = QFont(view.font())
+    font.setPointSize(10)
+    view.apply_table_font(font)
+    empty_width = int(view.verticalHeader().width())
+
+    model.begin_silent_appends()
+    model.append_columns_batch(list(range(1, 5001)), {"SMILES": ["C"] * 5000})
+    assert int(view.verticalHeader().width()) == empty_width
+    model.end_silent_appends()
+
+    vh = view.verticalHeader()
+    fitted = header_bar_extent_for_font(vh, vh.font())
+    assert fitted > empty_width
+    assert int(vh.width()) == fitted
+    assert int(vh.minimumWidth()) == fitted
+    assert int(vh.maximumWidth()) == fitted
+    view.deleteLater()
