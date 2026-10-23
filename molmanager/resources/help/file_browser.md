@@ -23,7 +23,7 @@ The active selection in the compound table (and associated structures/properties
 ## Workflow
 
 1. Select rows in the table (or via filters/search).
-2. Open **Tools → Browser** (Selection Browser) to inspect the set.
+2. Open **Data → Browser** (Selection Browser) to inspect the set.
 3. Adjust selection in the table if needed.
 4. Run a **Selected Rows Only** tool or **File → Save Selected**.
 
