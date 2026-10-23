@@ -48,7 +48,7 @@ def _seeded_window() -> ChemistryWorkspaceWindow:
 
 
 def _run_fast_prepare_inline(
-    win: ChemistryWorkspaceWindow, src: str, *, neutralize: bool = False
+    win: ChemistryWorkspaceWindow, src: str, *, neutralize: bool = False, want_scene: bool = False
 ) -> None:
     """Run the worker synchronously on the real collected items, then the real GUI handler."""
     items = win._collect_fast_prepare_items(src, None)
@@ -63,6 +63,7 @@ def _run_fast_prepare_inline(
 
     class _Recorder:
         fast_prepared = _Sig(captured.append)
+        fast_prepared_batch = _Sig(lambda rows, is_last: win.on_fast_prepare_batch(rows, is_last))
         tool_progress = _Sig(lambda *_a: None)
         partial_results = _Sig(lambda *_a: None)
 
@@ -73,9 +74,12 @@ def _run_fast_prepare_inline(
             need_smiles=True,
             neutralize=neutralize,
             process_pool_min_rows=10**9,
+            want_scene=want_scene,
         ),
         _Recorder(),
     ).run()
+    if want_scene:
+        return
     assert captured, "worker emitted no results"
     win.on_fast_prepare_finished(captured[0])
 
@@ -188,6 +192,41 @@ def test_fast_prepare_pixmap_column_target_keeps_structure(qapp):  # noqa: ARG00
             parsed = Chem.MolFromSmiles(text)
             assert parsed is not None
             assert len(Chem.GetMolFrags(parsed)) == 1
+    finally:
+        win.close()
+
+
+def test_fast_prepare_structure_scenes_skip_the_second_render(qapp):  # noqa: ARG001
+    from molmanager.chem.depiction_builder import build_scene
+    from molmanager.chem.depiction_coords import apply_depiction_coords
+    from molmanager.chem.depiction_layout import current_layout_options
+    from molmanager.chem.depiction_scene import is_scene_blob, pack_scene
+
+    win = _seeded_window()
+    started: list = []
+    try:
+        win._fast_prepare_source = "Structure"
+        win._fast_prepare_fragments_col = "Fragments"
+        win._fast_prepare_update_target = True
+        win._fast_prepare_allowed_oids = None
+        win._start_render_2d_batch = lambda *args, **kwargs: started.append(args)
+
+        _run_fast_prepare_inline(win, "Structure", neutralize=True, want_scene=True)
+
+        assert started == []
+        assert not win._render2d_batch_active
+        store = win._table_model._structure_png_store
+        assert store is not None and len(store) == len(SALTS)
+        options = current_layout_options()
+        for oid in win._all_oids_in_table_order():
+            raw = store.png_bytes(oid)
+            assert is_scene_blob(raw)
+            xy = win._depiction_coords.get("Structure", oid)
+            assert xy
+            laid = apply_depiction_coords(win.mols[oid], xy)
+            scene, reason = build_scene(laid, options)
+            assert reason is None
+            assert pack_scene(scene) == raw
     finally:
         win.close()
 
