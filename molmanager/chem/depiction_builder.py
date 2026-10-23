@@ -30,6 +30,7 @@ does not:
   side with more substituents.
 - Multi-character labels reverse when bonds come only from the right (GR-2.1.6),
   with charges kept at the free end of the label.
+- Terminal CF3, OMe, Boc and Ph are written as abbreviations when that option is on.
 - Bonds stop at padded label boxes measured with the bundled font's metrics.
 - Fragments are slid apart until their labels no longer overlap, so salts read.
 
@@ -44,6 +45,11 @@ import math
 from rdkit import Chem
 from rdkit.Chem.Draw import rdMolDraw2D
 
+from molmanager.chem.depiction_abbreviations import (
+    ABBREVIATION_REVISION_BIT,
+    abbreviations_enabled,
+    find_abbreviations,
+)
 from molmanager.chem.depiction_scene import (
     MAX_COLOUR_ROLE,
     NO_INDEX,
@@ -67,7 +73,9 @@ from molmanager.chem.depiction_text import cap_height, text_advance, text_ink_bo
 
 # Bump whenever the builder draws the same molecule differently, so cached scenes
 # (saved in session files) are rebuilt instead of showing the old picture.
-BUILDER_REVISION = 4
+BUILDER_REVISION = 5
+# LayoutOptions.token uses the low 3 bits. Bit 3 is the abbreviation toggle.
+_REVISION_STRIDE = 1 << (ABBREVIATION_REVISION_BIT + 1)
 
 # Fractions of the mean bond length.
 DOUBLE_BOND_OFFSET = 0.15
@@ -139,9 +147,10 @@ def scene_fallback_reason(mol) -> str | None:
 
 
 def scene_revision(layout: LayoutOptions | None = None) -> int:
-    """Cache revision of scenes built now: the builder revision plus the layout options."""
+    """Cache revision of scenes built now: builder, layout options and abbreviations."""
     options = layout if layout is not None else current_layout_options()
-    return BUILDER_REVISION * 8 + options.token
+    abbrev = int(abbreviations_enabled()) << ABBREVIATION_REVISION_BIT
+    return BUILDER_REVISION * _REVISION_STRIDE + options.token + abbrev
 
 
 def build_scene(
@@ -282,6 +291,8 @@ class _SceneBuilder:
         lengths = [size for size in lengths if size > 1e-6]
         self.mbl = sum(lengths) / len(lengths) if lengths else DEFAULT_BOND_LENGTH
         self.em = LABEL_EM * self.mbl
+        self._abbreviations = {}
+        self._hidden: set[int] = set()
         self._place_added_hydrogens()
         self.roles = [atom.GetAtomicNum() for atom in mol.GetAtoms()]
         self.trim_boxes: dict[int, Box] = {}
@@ -291,6 +302,12 @@ class _SceneBuilder:
         self.labels: list[Label] = []
 
     def build(self) -> DepictionScene:
+        if abbreviations_enabled():
+            self._abbreviations = find_abbreviations(self.mol)
+            self._hidden = {
+                index for group in self._abbreviations.values() for index in group.hidden
+            }
+            self._collapse_abbreviations()
         labels = self._labels()
         if self._separate_fragments(labels):
             labels = self._labels()
@@ -312,6 +329,13 @@ class _SceneBuilder:
             fills=tuple(self.fills),
             labels=tuple(self.labels),
         )
+
+    def _collapse_abbreviations(self) -> None:
+        """Park covered atoms on the label so the fit and highlights use that point."""
+        for group in self._abbreviations.values():
+            anchor = self.pos[group.anchor]
+            for index in group.hidden:
+                self.pos[index] = anchor
 
     def _place_added_hydrogens(self) -> None:
         """Put each added stereo hydrogen where it has the most room.
@@ -405,9 +429,15 @@ class _SceneBuilder:
         """Label of every atom that needs one, by atom index."""
         labels = {}
         for atom in self.mol.GetAtoms():
-            label = self._label(atom)
+            index = atom.GetIdx()
+            if index in self._hidden:
+                continue
+            group = self._abbreviations.get(index)
+            label = (
+                self._abbreviation_label(atom, group) if group is not None else self._label(atom)
+            )
             if label is not None:
-                labels[atom.GetIdx()] = label
+                labels[index] = label
         return labels
 
     def _needs_label(self, atom) -> bool:
@@ -447,6 +477,8 @@ class _SceneBuilder:
         left = right = False
         sum_y = 0.0
         for other in atom.GetNeighbors():
+            if other.GetIdx() in self._hidden:
+                continue
             dx, dy = _unit(_sub(self.pos[other.GetIdx()], here))
             sum_y += dy
             left = left or dx < -_SIDEWAYS
@@ -532,10 +564,38 @@ class _SceneBuilder:
         if len(run) == 1 and not stacked:
             orientation = LabelOrientation.CENTRE
 
+        return self._finish_label(
+            atom, run, element, orientation, stacked_hydrogens=hydrogens if stacked else None
+        )
+
+    def _abbreviation_label(self, atom, group) -> Label | None:
+        """Short label on the group's attachment atom, reversed when the bond is on the right."""
+        if group.reverse is None:
+            run = list(group.forward)
+            orientation = LabelOrientation.CENTRE
+        else:
+            orientation = self._orientation(atom)
+            if orientation == LabelOrientation.WEST:
+                run = list(group.reverse)
+            else:
+                run = list(group.forward)
+                orientation = LabelOrientation.EAST
+        attachment = next(piece for piece in run if piece[0] == group.attachment)
+        return self._finish_label(atom, run, attachment, orientation)
+
+    def _finish_label(
+        self,
+        atom,
+        run: list[tuple[str, PieceKind]],
+        attachment: tuple[str, PieceKind],
+        orientation: LabelOrientation,
+        stacked_hydrogens: list[tuple[str, PieceKind]] | None = None,
+    ) -> Label | None:
+        """Place *run* with *attachment* centred on *atom*, then any stacked hydrogens."""
         x, y = self.pos[atom.GetIdx()]
         pens = self._pens(run)
-        element_index = run.index(element)
-        ink = text_ink_bounds(element[0], self.em)
+        element_index = run.index(attachment)
+        ink = text_ink_bounds(attachment[0], self.em)
         element_centre = (ink[0] + ink[2]) / 2
         shift = x - (pens[element_index] + element_centre)
         cap = cap_height(self.em)
@@ -543,13 +603,13 @@ class _SceneBuilder:
         placed: list[LabelPiece] = []
         boxes: list[Box] = []
         self._place(run, pens, shift, baseline, placed, boxes)
-        if stacked:
-            h_pens = self._pens(hydrogens)
+        if stacked_hydrogens:
+            h_pens = self._pens(stacked_hydrogens)
             h_ink = text_ink_bounds("H", self.em)
             h_shift = x - (h_ink[0] + h_ink[2]) / 2
             gap = cap + _STACK_GAP * self.em
             h_baseline = baseline + gap if orientation == LabelOrientation.NORTH else baseline - gap
-            self._place(hydrogens, h_pens, h_shift, h_baseline, placed, boxes)
+            self._place(stacked_hydrogens, h_pens, h_shift, h_baseline, placed, boxes)
         if not boxes:
             return None
         box = (
@@ -570,6 +630,8 @@ class _SceneBuilder:
     # Bonds
 
     def _bond(self, bond) -> None:
+        if bond.GetBeginAtomIdx() in self._hidden or bond.GetEndAtomIdx() in self._hidden:
+            return
         kind = bond.GetBondType()
         if kind == Chem.BondType.DOUBLE:
             self._double(bond)
@@ -675,7 +737,9 @@ class _SceneBuilder:
 
     def _others(self, at: int, exclude: int) -> list[int]:
         return [
-            n.GetIdx() for n in self.mol.GetAtomWithIdx(at).GetNeighbors() if n.GetIdx() != exclude
+            n.GetIdx()
+            for n in self.mol.GetAtomWithIdx(at).GetNeighbors()
+            if n.GetIdx() != exclude and n.GetIdx() not in self._hidden
         ]
 
     def _double(self, bond) -> None:
