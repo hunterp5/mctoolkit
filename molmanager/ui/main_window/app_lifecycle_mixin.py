@@ -215,7 +215,6 @@ class AppLifecycleMixin:
             "_processes_dialog",
             "_selection_browser_dialog",
             "_pose_browser_dialog",
-            "_som_browser_dialog",
             "_metabolite_browser_dialog",
             "_mmp_browser_dialog",
             "_mmp_ledger_dialog",
