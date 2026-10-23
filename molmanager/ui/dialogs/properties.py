@@ -83,6 +83,7 @@ class PropertyDialog(QDialog):
         bar.setDrawBase(True)
 
         self.cbs = {}
+        alerts_placed = False
         for cat_name, items in iter_descriptor_tab_items():
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
@@ -98,7 +99,14 @@ class PropertyDialog(QDialog):
             tab_lyt.addStretch()
             scroll.setWidget(tab)
             self.tabs.addTab(scroll, cat_name)
-        self._add_structural_alerts_tab()
+            # Alerts sit after Drug-likeness. Append them here so every later
+            # category is added after them; inserting into a finished bar leaves
+            # a gap before the real last tab (see _repair_tab_bar_end_marker).
+            if cat_name == "Drug-likeness":
+                alerts_placed = self._add_structural_alerts_tab()
+        if not alerts_placed:
+            self._add_structural_alerts_tab()
+        self._repair_tab_bar_end_marker()
 
         root.addWidget(self.tabs, 1)
         self._button_box = QDialogButtonBox(QDialogButtonBox.Ok)
@@ -119,11 +127,16 @@ class PropertyDialog(QDialog):
         self._button_box.accepted.connect(self.accept)
         make_window_minimizable(self)
 
-    def _add_structural_alerts_tab(self) -> None:
-        """Catalog checkboxes. Each checked set writes a count column and a name column."""
+    def _add_structural_alerts_tab(self) -> bool:
+        """Append catalog checkboxes. Each checked set writes a count and a name column.
+
+        Append only. ``QTabBar.insertTab`` in Qt 5.15 does not advance the private
+        end-tab index when the new tab is after the current one, so the old end tab
+        keeps the end shape and an extra border appears before the real last tab.
+        """
         catalogs = available_alert_catalogs()
         if not catalogs:
-            return
+            return False
         self._alert_catalogs = catalogs
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -138,12 +151,23 @@ class PropertyDialog(QDialog):
             self._alert_checks[spec.key] = cb
         tab_lyt.addStretch()
         scroll.setWidget(tab)
-        insert_at = self.tabs.count()
-        for index in range(self.tabs.count()):
-            if self.tabs.tabText(index) == "Drug-likeness":
-                insert_at = index + 1
-                break
-        self.tabs.insertTab(insert_at, scroll, "Structural Alerts")
+        self.tabs.addTab(scroll, "Structural Alerts")
+        return True
+
+    def _repair_tab_bar_end_marker(self) -> None:
+        """Point the tab bar's end marker at the last tab.
+
+        Qt 5.15 leaves that marker on the previous end tab after ``insertTab`` past
+        the current index. Fusion then draws both borders between the last two tabs.
+        Hiding and showing the last tab runs the update ``insertTab`` skips, so a tab
+        added in the middle later still matches the spacing of the others.
+        """
+        bar = self.tabs.tabBar()
+        last = bar.count() - 1
+        if last < 1:
+            return
+        bar.setTabVisible(last, False)
+        bar.setTabVisible(last, True)
 
     def get_selected(self):
         sel_disp, sel_int = [], []
