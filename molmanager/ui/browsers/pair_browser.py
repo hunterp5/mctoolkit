@@ -21,14 +21,20 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtGui import QBrush, QPixmap
 from PyQt5.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
-    QComboBox,
     QDialog,
+    QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QPushButton,
+    QSizePolicy,
+    QStyle,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -40,16 +46,23 @@ from ...table.structure_depiction_layout import (
 from ..dockable_plot import add_centered_browser_nav, style_browser_nav_buttons
 from ..qt_widget_utils import make_window_resizable
 from .chrome import (
+    BrowserIndexSpinBox,
     apply_browser_body_layout,
     install_browser_nav_shortcuts,
     make_pair_mol_panel,
-    make_pair_prop_box,
-    make_pair_prop_value_row,
+    style_browser_data_table,
+    style_browser_emphasis_label,
+    style_browser_group_box,
 )
+
+_PAIR_TABLE_ROW_HEIGHT = 28
+
+# Atoms that differ between the two molecules (outside the MCS).
+_CHANGED_ATOM_RGB = (0.95, 0.55, 0.15)
 
 
 class PairBrowserDialog(QDialog):
-    """Two-molecule pair browser with the same preview wells, props, and nav as other browsers."""
+    """Two-molecule pair browser: depictions, a summary, the pair's table rows, and nav."""
 
     window_title = "Pairs"
     select_status = "pair"
@@ -60,7 +73,11 @@ class PairBrowserDialog(QDialog):
         self._activity_column = activity_column
         self._idx = getattr(self, "_idx", 0)
         self._preview_cache: dict[tuple, QPixmap] = getattr(self, "_preview_cache", {})
+        self._highlight_cache: dict[tuple, tuple[list[int], list[int]]] = getattr(
+            self, "_highlight_cache", {}
+        )
         self._prefer_keys: tuple[int, int] | None = getattr(self, "_prefer_keys", None)
+        self._pair_index_syncing = False
 
         self.setWindowTitle(self.window_title)
         self.resize(920, 620)
@@ -154,31 +171,142 @@ class PairBrowserDialog(QDialog):
     def _populate_header(self, root: QVBoxLayout) -> None:
         """Optional widgets between the caption and the pair cards."""
 
+    def _shows_pair_summary(self) -> bool:
+        """False omits the summary group under the depictions."""
+        return True
+
+    def _populate_metrics(self, layout: QVBoxLayout) -> None:
+        """Centered pair summary. Subclasses may add widgets above the label."""
+        self._metrics_label = QLabel(self._metrics_box)
+        self._metrics_label.setAlignment(Qt.AlignCenter)
+        self._metrics_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._metrics_label.setWordWrap(True)
+        style_browser_emphasis_label(self._metrics_label)
+        layout.addWidget(self._metrics_label)
+
     def _add_comparison_section(self, root: QVBoxLayout) -> None:
-        """Column pickers under the pair cards. Subclasses may show a data table instead."""
-        self._prop_box, self._prop_form = make_pair_prop_box()
-        self._prop_combo_1 = QComboBox()
-        self._prop_combo_2 = QComboBox()
-        self._prop_combo_3 = QComboBox()
-        for cb in (self._prop_combo_1, self._prop_combo_2, self._prop_combo_3):
-            cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-            cb.currentIndexChanged.connect(lambda _i: self._update_property_values())
-        self._prop_value_1 = make_pair_prop_value_row()
-        self._prop_value_2 = make_pair_prop_value_row()
-        self._prop_value_3 = make_pair_prop_value_row()
-        self._prop_form.addRow(self._prop_combo_1, self._prop_value_1["host"])
-        self._prop_form.addRow(self._prop_combo_2, self._prop_value_2["host"])
-        self._prop_form.addRow(self._prop_combo_3, self._prop_value_3["host"])
-        root.addWidget(self._prop_box)
+        """Summary under the depictions, then a two-row table of the current pair."""
+        if self._shows_pair_summary():
+            self._metrics_box = QGroupBox()
+            style_browser_group_box(self._metrics_box)
+            metrics_layout = QVBoxLayout(self._metrics_box)
+            metrics_layout.setContentsMargins(8, 8, 8, 8)
+            self._populate_metrics(metrics_layout)
+            root.addWidget(self._metrics_box)
+
+        self._row_table = QTableWidget(0, 0, self)
+        self._row_table.setObjectName("BrowserRowTable")
+        self._row_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._row_table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._row_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._row_table.setFocusPolicy(Qt.NoFocus)
+        self._row_table.verticalHeader().setVisible(True)
+        self._row_table.verticalHeader().setDefaultAlignment(Qt.AlignCenter)
+        self._row_table.verticalHeader().setDefaultSectionSize(_PAIR_TABLE_ROW_HEIGHT)
+        self._row_table.horizontalHeader().setHighlightSections(False)
+        self._row_table.horizontalHeader().setStretchLastSection(True)
+        self._row_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self._row_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._row_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._row_table.setWordWrap(False)
+        self._row_table.setShowGrid(True)
+        self._row_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        style_browser_data_table(self._row_table)
+        bar = self._row_table.horizontalScrollBar()
+        if bar is not None:
+            bar.rangeChanged.connect(lambda *_a: self._fit_pair_table_height())
+        self._fit_pair_table_height()
+        root.addWidget(self._row_table)
+        self._place_side_names_with_activity()
+
+    def _place_side_names_with_activity(self) -> None:
+        """Put Molecule A / B on the activity line under each depiction."""
+        for panel, side in (
+            (self._left_panel, "Molecule A"),
+            (self._right_panel, "Molecule B"),
+        ):
+            box = panel["box"]
+            activity: QLabel = panel["activity"]
+            layout = box.layout()
+            layout.removeWidget(activity)
+            name = QLabel(side, box)
+            name.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            name.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            style_browser_emphasis_label(name)
+            activity.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            host = QWidget(box)
+            row = QHBoxLayout(host)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(12)
+            row.addStretch(1)
+            row.addWidget(name)
+            row.addWidget(activity)
+            row.addStretch(1)
+            layout.addWidget(host)
+            panel["name"] = name
+            panel["caption_host"] = host
+            box.setTitle("")
+            style_browser_group_box(box)
 
     def _prepare_nav_extras(self) -> None:
-        """Create extra nav widgets before the nav row is assembled."""
+        """Pair number field on the leading side of the nav row."""
+        host = QWidget()
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 10, 0)
+        row.setSpacing(4)
+        pair_label = QLabel("Pair")
+        pair_label.setAlignment(Qt.AlignVCenter)
+        self._pair_index = BrowserIndexSpinBox(host)
+        self._pair_index.setToolTip("Type a pair number and press Enter to jump to that pair.")
+        n = self._item_count()
+        if n > 0:
+            self._pair_index.setRange(1, n)
+            self._pair_index.setValue(min(self._idx + 1, n))
+        self._pair_count_label = QLabel("/ 0" if n <= 0 else f"/ {n}")
+        self._pair_count_label.setAlignment(Qt.AlignVCenter)
+        row.addWidget(pair_label)
+        row.addWidget(self._pair_index)
+        row.addWidget(self._pair_count_label)
+        self._pair_index_host = host
+        self._pair_index.valueChanged.connect(self._on_pair_index_changed)
 
     def _nav_leading_widgets(self) -> list[QWidget]:
-        return []
+        return [self._pair_index_host]
 
     def _nav_trailing_widgets(self) -> list[QWidget]:
         return [self._cb_selected_only]
+
+    def _on_pair_index_changed(self, value: int) -> None:
+        if self._pair_index_syncing:
+            return
+        n = self._item_count()
+        if n <= 0:
+            return
+        target = max(0, min(int(value) - 1, n - 1))
+        if target == self._idx:
+            return
+        self._idx = target
+        self._update_ui()
+
+    def _sync_pair_index(self, count: int) -> None:
+        spin = self._pair_index
+        self._pair_index_syncing = True
+        spin.blockSignals(True)
+        try:
+            if count <= 0:
+                spin.setRange(1, 1)
+                spin.setValue(1)
+                spin.setEnabled(False)
+                self._pair_count_label.setText("/ 0")
+            else:
+                shown = max(1, min(self._idx + 1, count))
+                spin.setEnabled(True)
+                spin.setRange(1, count)
+                spin.setValue(shown)
+                self._pair_count_label.setText(f"/ {count}")
+        finally:
+            spin.blockSignals(False)
+            self._pair_index_syncing = False
 
     def _item_count(self) -> int:
         raise NotImplementedError
@@ -249,41 +377,100 @@ class PairBrowserDialog(QDialog):
             panel["struct"].setPixmap(QPixmap())
             panel["activity"].setText("—")
 
-    def _refresh_property_columns(self) -> None:
-        """Populate the 3 column pickers from current table headers, preserving selections."""
+    def _visible_data_columns(self) -> list[tuple[int, str]]:
+        """Visible non-structure table columns in visual order."""
+        app = self._app
+        if app is None:
+            return []
+        headers = list(getattr(app, "headers", []) or [])
+        table = getattr(app, "table", None)
+        vis_fn = getattr(app, "_visual_logical_columns", None)
+        logical = vis_fn() if callable(vis_fn) else list(range(len(headers)))
+        out: list[tuple[int, str]] = []
+        for i in logical:
+            if i < 0 or i >= len(headers):
+                continue
+            name = str(headers[i])
+            if name in ("ID_HIDDEN", "Structure"):
+                continue
+            if table is not None:
+                try:
+                    if table.isColumnHidden(i):
+                        continue
+                except RuntimeError:
+                    pass
+            out.append((i, name))
+        return out
+
+    def _pair_table_item(self, oid: int, col: int, header: str) -> QTableWidgetItem:
+        item = QTableWidgetItem()
+        item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        text = self._cell_text_for_oid(int(oid), header)
+        item.setText(text)
+        if text:
+            item.setToolTip(text)
+        app = self._app
+        model = getattr(app, "_table_model", None) if app is not None else None
+        if model is None:
+            return item
         try:
-            headers = list(getattr(self._app, "headers", []) or [])
+            row = app.logical_row_for_oid(int(oid))
         except Exception:
-            headers = []
-        choices = [h for h in headers if h not in ("ID_HIDDEN", "Structure")]
-        combos = (self._prop_combo_1, self._prop_combo_2, self._prop_combo_3)
-        prev = [cb.currentText() for cb in combos]
-        for cb in combos:
-            cb.blockSignals(True)
-            cb.clear()
-            cb.addItem("—", userData=None)
-            for h in choices:
-                cb.addItem(h, userData=h)
-            cb.blockSignals(False)
-        for cb, p in zip(combos, prev, strict=False):
-            if p and p != "—":
-                j = cb.findText(p)
-                if j >= 0:
-                    cb.setCurrentIndex(j)
+            return item
+        if row is None or int(row) < 0:
+            return item
+        try:
+            index = model.index(int(row), int(col))
+            bg = model.data(index, Qt.BackgroundRole)
+        except Exception:
+            return item
+        if bg is not None:
+            item.setBackground(bg if isinstance(bg, QBrush) else QBrush(bg))
+        return item
 
-        def _set_default(cb: QComboBox, prefer: list[str]) -> None:
-            if cb.currentData() is not None:
-                return
-            for h in prefer:
-                j = cb.findText(h)
-                if j >= 0:
-                    cb.setCurrentIndex(j)
-                    return
+    def _fit_pair_table_height(self) -> None:
+        table = getattr(self, "_row_table", None)
+        if table is None:
+            return
+        hdr_h = int(table.horizontalHeader().sizeHint().height())
+        frame = 2 * int(table.frameWidth())
+        style = table.style()
+        extent = int(style.pixelMetric(QStyle.PM_ScrollBarExtent, None, table))
+        bar = table.horizontalScrollBar()
+        hinted = int(bar.sizeHint().height()) if bar is not None else 0
+        scroll = max(extent, hinted, 16)
+        table.setFixedHeight(hdr_h + 2 * _PAIR_TABLE_ROW_HEIGHT + frame + scroll + 4)
 
-        act = self._activity_column
-        _set_default(self._prop_combo_1, [act, "SMILES", "Name", "CompoundName", "ID"])
-        _set_default(self._prop_combo_2, ["Name", "CompoundName", "CAS", "InChIKey", "SMILES"])
-        _set_default(self._prop_combo_3, ["MW", "MolWt", "cLogP", "LogP", "TPSA"])
+    def _fill_pair_table(self) -> None:
+        table = getattr(self, "_row_table", None)
+        if table is None:
+            return
+        cols = self._visible_data_columns()
+        names = [name for _col, name in cols]
+        current = []
+        for i in range(table.columnCount()):
+            header_item = table.horizontalHeaderItem(i)
+            current.append("" if header_item is None else header_item.text())
+        table.blockSignals(True)
+        if current != names:
+            table.setColumnCount(len(names))
+            if names:
+                table.setHorizontalHeaderLabels(names)
+        oids = self._current_pair_oids()
+        if oids is None:
+            table.setRowCount(0)
+        else:
+            table.setRowCount(2)
+            table.setVerticalHeaderLabels(["A", "B"])
+            for row, oid in enumerate(oids):
+                for i, (col, name) in enumerate(cols):
+                    table.setItem(row, i, self._pair_table_item(int(oid), col, name))
+                table.setRowHeight(row, _PAIR_TABLE_ROW_HEIGHT)
+        table.blockSignals(False)
+        self._fit_pair_table_height()
+
+    def _refresh_property_columns(self) -> None:
+        self._fill_pair_table()
 
     def _cell_text_for_oid(self, oid: int, header: str) -> str:
         app = self._app
@@ -308,31 +495,84 @@ class PairBrowserDialog(QDialog):
             return ""
 
     def _update_property_values(self) -> None:
-        oids = self._current_pair_oids()
-        rows = [
-            (self._prop_combo_1, self._prop_value_1),
-            (self._prop_combo_2, self._prop_value_2),
-            (self._prop_combo_3, self._prop_value_3),
-        ]
-        if oids is None:
-            for _cb, vals in rows:
-                vals["a"].setText("—")
-                vals["b"].setText("—")
-            return
-        oid_a, oid_b = oids
-        for cb, vals in rows:
-            h = cb.currentData()
-            if not h:
-                vals["a"].setText("—")
-                vals["b"].setText("—")
-                continue
-            va = self._cell_text_for_oid(oid_a, str(h))
-            vb = self._cell_text_for_oid(oid_b, str(h))
-            vals["a"].setText(f"A: {va}" if va else "A: —")
-            vals["b"].setText(f"B: {vb}" if vb else "B: —")
+        self._fill_pair_table()
 
     def _preview_pixel_size(self, label: QLabel) -> tuple[int, int, float]:
         dpr = max(1.0, float(self.devicePixelRatioF()))
         lw = max(label.width(), BROWSER_STRUCTURE_PREVIEW_MIN_WIDTH // 2)
         lh = max(label.height(), BROWSER_STRUCTURE_PREVIEW_MIN_HEIGHT // 2)
         return int(lw * dpr), int(lh * dpr), dpr
+
+    def _variable_highlights(
+        self,
+        key: tuple[int, int],
+        mol_a: Any,
+        mol_b: Any,
+    ) -> tuple[list[int], list[int]]:
+        """Atoms outside the shared MCS, cached per molecule pair."""
+        cached = self._highlight_cache.get(key)
+        if cached is not None:
+            return cached
+        if mol_a is None or mol_b is None:
+            return [], []
+        from ...analysis.mmp_depict import highlight_atoms_for_pair
+
+        found = highlight_atoms_for_pair(mol_a, mol_b)
+        self._highlight_cache[key] = found
+        return found
+
+    def _render_highlighted(
+        self,
+        mol: Any,
+        pw: int,
+        ph: int,
+        highlight_atoms: list[int],
+    ) -> QPixmap | None:
+        """Draw *mol* with the atoms that differ from its partner marked."""
+        try:
+            from ...chem.depiction_scene import atom_set_highlight
+            from ...table.structure_image import molecule_pixmap
+
+            highlight = atom_set_highlight(mol, highlight_atoms, _CHANGED_ATOM_RGB)
+            return molecule_pixmap(mol, pw, ph, highlight=highlight)
+        except Exception:
+            return None
+
+    def _show_molecule(
+        self,
+        panel: dict[str, Any],
+        caption: str,
+        mol: Any,
+        highlight_atoms: list[int],
+        cache_token: tuple,
+    ) -> None:
+        """Caption and depiction for one side, with variable atoms highlighted."""
+        panel["activity"].setText(caption)
+        label: QLabel = panel["struct"]
+        pw, ph, dpr = self._preview_pixel_size(label)
+        if mol is None:
+            label.clear()
+            label.setPixmap(QPixmap())
+            label.setText("(no structure)")
+            return
+
+        from ...chem.depiction_coords import depiction_revision
+
+        cache_key = (cache_token, pw, ph, depiction_revision(self._app))
+        cached = self._preview_cache.get(cache_key)
+        if cached is not None and not cached.isNull():
+            pm = cached
+        else:
+            pm = self._render_highlighted(mol, pw, ph, highlight_atoms)
+            if pm is not None and not pm.isNull():
+                self._preview_cache[cache_key] = pm
+        if pm is None or pm.isNull():
+            label.clear()
+            label.setPixmap(QPixmap())
+            label.setText("(render failed)")
+            return
+        if pm.width() != pw or pm.height() != ph:
+            pm = pm.scaled(pw, ph, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        pm.setDevicePixelRatio(dpr)
+        label.setPixmap(pm)
+        label.setText("")
