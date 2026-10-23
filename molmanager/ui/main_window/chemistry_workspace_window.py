@@ -19,7 +19,7 @@ import sys
 import threading
 
 from PyQt5.QtCore import QThreadPool, QTimer, Qt, pyqtSlot
-from PyQt5.QtGui import QCloseEvent
+from PyQt5.QtGui import QCloseEvent, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent
 from PyQt5.QtWidgets import (
     QApplication,
     QFrame,
@@ -36,6 +36,13 @@ from PyQt5.QtWidgets import (
 )
 
 from ..app_log_dialog import StatusLogLabel
+from ..file_drop import (
+    IdleFileDropPage,
+    handle_file_drag_enter,
+    handle_file_drag_leave,
+    handle_file_drag_move,
+    handle_file_drop,
+)
 
 from ...platform_support.config import load_config
 
@@ -360,8 +367,6 @@ class ChemistryWorkspaceWindow(
         self._plot_table_sync_pending = False
         self._selection_browser_dialog = None
         self._pose_browser_dialog = None
-        self._som_browser_dialog = None
-        self._som_browse_records = []
         self._metabolite_browser_dialog = None
         self._metabolite_browse_records = []
         self._mmp_browser_dialog = None
@@ -535,12 +540,13 @@ class ChemistryWorkspaceWindow(
         )
 
     def init_ui(self):
+        self.setAcceptDrops(True)
         cw = QWidget()
         self.setCentralWidget(cw)
         main_v = QVBoxLayout(cw)
         main_v.setContentsMargins(0, 0, 0, 0)
         main_v.setSpacing(0)
-        self._loading_page = QWidget()
+        self._loading_page = IdleFileDropPage(self)
         load_lyt = QVBoxLayout(self._loading_page)
         load_lyt.setContentsMargins(0, 0, 0, 0)
         load_lyt.addStretch()
@@ -717,6 +723,18 @@ class ChemistryWorkspaceWindow(
         # QMainWindow precedes mixins in the MRO, so Qt virtuals must be declared
         # on this shell (or they resolve to the C++ base and never run).
         AppLifecycleMixin.closeEvent(self, event)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 — Qt API name
+        handle_file_drag_enter(self, event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:  # noqa: N802 — Qt API name
+        handle_file_drag_move(self, event)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:  # noqa: N802 — Qt API name
+        handle_file_drag_leave(self, event)
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802 — Qt API name
+        handle_file_drop(self, event)
 
     def _on_table_double_clicked(self, index) -> None:
         if index.isValid():
