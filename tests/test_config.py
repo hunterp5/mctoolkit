@@ -110,11 +110,9 @@ def test_sqlite_backend_page_size_default():
 
 
 def test_structure_render_limits_env(monkeypatch):
-    monkeypatch.setenv("MOLMANAGER_AUTO_RENDER_2D_MAX_ROWS", "12000")
     monkeypatch.setenv("MOLMANAGER_STRUCTURE_RENDER_LAZY_MIN_ROWS", "6000")
     monkeypatch.setenv("MOLMANAGER_STRUCTURE_RENDER_PIXMAP_LRU", "128")
     cfg = load_config()
-    assert cfg.auto_render_2d_max_rows == 12000
     assert cfg.structure_render_lazy_min_rows == 6000
     assert cfg.structure_render_pixmap_lru == 128
 

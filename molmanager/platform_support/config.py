@@ -131,7 +131,6 @@ class MolManagerConfig:
     perf_metrics_enabled: bool
     perf_log_every: int
     sqlite_backend_page_size: int
-    auto_render_2d_max_rows: int
     structure_render_lazy_min_rows: int
     structure_render_pixmap_lru: int
     structure_layout_macrocycle_coordgen: bool
@@ -307,9 +306,6 @@ def load_config() -> MolManagerConfig:
         perf_log_every=_env_int("MOLMANAGER_PERF_LOG_EVERY", 25, lo=1, hi=10_000),
         sqlite_backend_page_size=_env_int(
             "MOLMANAGER_SQLITE_BACKEND_PAGE_SIZE", 5000, lo=100, hi=200_000
-        ),
-        auto_render_2d_max_rows=_env_int(
-            "MOLMANAGER_AUTO_RENDER_2D_MAX_ROWS", 25_000, lo=0, hi=10_000_000
         ),
         structure_render_lazy_min_rows=_env_int(
             # 0 = same PNG store for Chemistry → Render 2D, not one decoded QPixmap per row.

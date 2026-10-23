@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import threading
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QMessageBox
 
 from rdkit import Chem
@@ -45,6 +45,8 @@ from .column_write_mixin import cell_looks_uncalculated
 
 # PNG bytes for cancel. Above this, redrawing costs less than retaining every image.
 _RENDER2D_UNDO_SNAPSHOT_MAX_ROWS = 5000
+# How often a running batch re-reads the viewport to draw newly visible rows first.
+_RENDER2D_PRIORITY_POLL_MS = 150
 
 
 def _draws_on_write(header: str) -> bool:
@@ -184,19 +186,14 @@ class Render2DMixin:
         )
 
     def _try_auto_render_all_structures_after_ingest(self) -> bool:
-        """Queue 2D renders for every row with an in-memory Structure mol (file ingest, SQL, or session)."""
+        """Queue 2D renders for every stored structure (file ingest, SQL, or session).
+
+        There is no row limit: the batch draws the viewport first and fills the remaining
+        rows in the background (see :meth:`_update_render2d_priority`).
+        """
         if getattr(self, "_render2d_batch_active", False):
             return False
         if not self.headers or self._table_model.rowCount() == 0:
-            return False
-        n_rows = self._table_model.rowCount()
-        cfg = load_config()
-        max_auto = int(cfg.auto_render_2d_max_rows)
-        if max_auto > 0 and n_rows > max_auto:
-            self.status_label.setText(
-                f"Loaded {n_rows:,} rows — auto 2D render skipped (limit {max_auto:,}). "
-                "Use Chemistry → Render 2D for visible or selected rows."
-            )
             return False
         self.status_label.setText(f"{TOOL_RENDER_2D}: collecting structures…")
         base_w, base_h = structure_depict_width(), structure_depict_height()
@@ -234,6 +231,7 @@ class Render2DMixin:
 
     def _restore_render2d_batch_environment(self) -> None:
         """Re-enable sorting and thread pool after a Render 2D run (or if cleared mid-batch)."""
+        self._stop_render2d_priority()
         self._render2d_accept_session = None
         self._render2d_pending = {}
         self._render2d_batch_oids_ordered = []
@@ -247,6 +245,8 @@ class Render2DMixin:
         self._render2d_pixmap_target = None
         self._render2d_column_pixmap_mode = True
         self._resize_columns_after_render2d(pix_target)
+        self._render2d_keeps_session_layout = False
+        self._render2d_landed_oids = None
         finishing_batch = bool(getattr(self, "_render2d_batch_active", False))
         if finishing_batch:
             pending = getattr(self, "_pending_session_table_layout", None)
@@ -495,6 +495,10 @@ class Render2DMixin:
         self.table.setSortingEnabled(False)
         self._render2d_batch_active = True
         self._render2d_row_by_oid = row_by_oid
+        self._render2d_landed_oids = set()
+        self._render2d_keeps_session_layout = bool(
+            getattr(self, "_pending_session_table_layout", None)
+        )
         oids = [oid for oid, _, _, _ in renders]
         self._render2d_batch_oids_ordered = oids
         self._render2d_pending = {}
@@ -539,6 +543,11 @@ class Render2DMixin:
         self._open_render2d_stream_store(
             0 if reuse_store or not lazy_structure else len(oids), reuse=reuse_store
         )
+        stream_store = getattr(self, "_render2d_stream_store", None)
+        if lazy_structure and stream_store is not None and not reuse_store:
+            # Attached now so on-screen rows show their images while the rest still draw.
+            self._table_model.set_structure_png_store(stream_store)
+            self._render2d_stream_store_owned = False
         if structure_column and not lazy_structure:
             self._table_model.notify_structure_column_changed()
         self._render2d_progress_last_emit = 0.0
@@ -555,15 +564,77 @@ class Render2DMixin:
         hub = getattr(self, "background_activity", None)
         if hub is not None:
             hub.notify_changed()
-        self._render_threadpool.start(
-            Render2DBatchProcessWorker(
-                renders,
-                self.signals,
-                self._render2d_cancel_event,
-                self._render2d_batch_session_tag,
-                want_scenes=structure_column,
-            )
+        worker = Render2DBatchProcessWorker(
+            renders,
+            self.signals,
+            self._render2d_cancel_event,
+            self._render2d_batch_session_tag,
+            want_scenes=structure_column,
         )
+        self._render2d_worker = worker
+        self._render2d_priority_key = None
+        self._update_render2d_priority()
+        self._start_render2d_priority_timer()
+        self._render_threadpool.start(worker)
+
+    def _start_render2d_priority_timer(self) -> None:
+        timer = getattr(self, "_render2d_priority_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setInterval(_RENDER2D_PRIORITY_POLL_MS)
+            timer.timeout.connect(self._update_render2d_priority)
+            self._render2d_priority_timer = timer
+        timer.start()
+
+    def _stop_render2d_priority(self) -> None:
+        timer = getattr(self, "_render2d_priority_timer", None)
+        if timer is not None:
+            timer.stop()
+        self._render2d_worker = None
+        self._render2d_priority_key = None
+
+    def _update_render2d_priority(self) -> None:
+        """Move the rows on screen, plus one screen below and above, to the render's front.
+
+        Polled while a batch runs, so scrolling, filtering, or resizing the table all
+        redirect the remaining work to whatever is visible.
+        """
+        worker = getattr(self, "_render2d_worker", None)
+        if worker is None or not getattr(self, "_render2d_batch_active", False):
+            self._stop_render2d_priority()
+            return
+        view = self.table
+        proxy = view.model()
+        n_view = proxy.rowCount() if proxy is not None else self._table_model.rowCount()
+        viewport = view.viewport()
+        height = viewport.height() if viewport is not None else 0
+        top = max(0, view.rowAt(0))
+        key = (top, int(height), int(n_view))
+        if key == getattr(self, "_render2d_priority_key", None):
+            return
+        self._render2d_priority_key = key
+        if n_view <= 0:
+            return
+        bottom = view.rowAt(max(0, int(height) - 1))
+        if bottom < 0:
+            bottom = n_view - 1
+        span = bottom - top + 1
+        view_rows = [
+            *range(top, bottom + 1),
+            *range(bottom + 1, min(n_view, bottom + 1 + span)),
+            *range(top - 1, max(-1, top - 1 - span), -1),
+        ]
+        model = self._table_model
+        oids: list[int] = []
+        for view_row in view_rows:
+            source_row = self._view_row_to_source_row(view_row)
+            if source_row >= 0:
+                oids.append(int(model.row_oid(source_row)))
+        worker.prioritize(oids)
+
+    def structure_render_idle(self) -> bool:
+        """True when no Render 2D batch is drawing or waiting to apply its results."""
+        return not getattr(self, "_render2d_batch_active", False)
 
     def _render2d_source_header_for_column(self, col: int) -> str:
         """Header used as Render 2D source and pixmap target (clicked column, else Structure)."""

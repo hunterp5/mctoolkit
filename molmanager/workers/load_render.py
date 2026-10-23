@@ -21,6 +21,7 @@ import logging
 import os
 import threading
 from collections import deque
+from collections.abc import Iterable
 from concurrent.futures import FIRST_COMPLETED, wait
 from concurrent.futures import TimeoutError as FutureTimeoutError
 
@@ -34,6 +35,7 @@ from .render2d_pool import (
     release_render2d_process_pool,
     render2d_process_worker_count,
 )
+from .render2d_plan import PriorityRenderPlan
 
 from PyQt5.QtCore import QRunnable
 from rdkit import Chem
@@ -96,6 +98,10 @@ _OPENABLE_TABLE_EXTS = STRUCTURE_MOL_EXTS | SMI_LINE_EXTS | TABULAR_EXTS | RXN_E
 #: Below this size an SDF or MOL2 is parsed on the load thread; worker processes would
 #: cost more to feed than they save.
 _PARALLEL_PARSE_MIN_BYTES = 4 << 20
+
+#: Rows per task for on-screen rows, small enough that every process draws part of the
+#: viewport.
+_PRIORITY_RENDER_BATCH_SIZE = 8
 
 
 def _parallel_parse_kind(path: str, ext: str) -> str | None:
@@ -212,16 +218,31 @@ class Render2DBatchProcessWorker(QRunnable):
         self.cancel_event = cancel_event
         self.batch_session = int(batch_session or 0)
         self.want_scenes = bool(want_scenes)
+        self._plan_lock = threading.Lock()
+        self._plan: PriorityRenderPlan | None = None
+        self._priority_request: list[int] = []
+
+    def prioritize(self, oids: Iterable[int]) -> None:
+        """Draw *oids* next (GUI thread). Safe to call before the worker starts."""
+        request = [int(oid) for oid in oids]
+        with self._plan_lock:
+            self._priority_request = request
+            plan = self._plan
+        if plan is not None:
+            plan.prioritize(request)
 
     def build_tasks(self) -> list[tuple]:
-        """Serialize the queued mols into ``(rows, w, h, want_scenes)`` child-process tasks.
+        """Every child-process task in submission order (see :meth:`build_plan`)."""
+        return list(iter(self.build_plan().next_task, None))
 
-        Rows are grouped by depict size before batching because a task renders every molecule at one
-        size, and zoomed rows are drawn at 2x. *want_scenes* is only set for the Structure column,
-        whose stores can paint depiction scenes.
+    def build_plan(self) -> PriorityRenderPlan:
+        """Serialize the queued mols into a :class:`PriorityRenderPlan` of render tasks.
+
+        *want_scenes* is only set for the Structure column, whose stores can paint
+        depiction scenes.
         """
         ev = self.cancel_event
-        by_size: dict[tuple[int, int], list[tuple]] = {}
+        rows: list[tuple[int, object, int, int]] = []
         for oid, mol, w, h in self.items:
             if ev is not None and ev.is_set():
                 break
@@ -236,25 +257,27 @@ class Render2DBatchProcessWorker(QRunnable):
                     blob = mol.ToBinary() if mol is not None else b""
                 except Exception:
                     blob = b""
-            by_size.setdefault((int(w), int(h)), []).append((int(oid), blob))
-
-        batch_size = max(1, int(load_config().render2d_batch_size))
-        tasks: list[tuple] = []
-        for (w, h), rows in by_size.items():
-            for start in range(0, len(rows), batch_size):
-                tasks.append((rows[start : start + batch_size], w, h, self.want_scenes))
-        return tasks
+            rows.append((int(oid), blob, int(w), int(h)))
+        return PriorityRenderPlan(
+            rows,
+            batch_size=load_config().render2d_batch_size,
+            priority_batch_size=_PRIORITY_RENDER_BATCH_SIZE,
+            want_scenes=self.want_scenes,
+        )
 
     def run(self) -> None:
         ev = self.cancel_event
-        tasks = self.build_tasks()
-        if not tasks:
+        plan = self.build_plan()
+        with self._plan_lock:
+            self._plan = plan
+            plan.prioritize(self._priority_request)
+        if not len(plan):
             return
 
         proc_workers = render2d_process_worker_count()
-        max_inflight = min(48, max(proc_workers * 4, proc_workers))
+        # Few tasks wait in the pool so rows scrolled into view are drawn soon after.
+        max_inflight = proc_workers * 2
 
-        it = iter(tasks)
         pending = set()
         ex = ensure_render2d_process_pool(max_workers=proc_workers)
         if ex is None:
@@ -263,7 +286,7 @@ class Render2DBatchProcessWorker(QRunnable):
 
         def _fill() -> None:
             while len(pending) < max_inflight:
-                t = next(it, None)
+                t = plan.next_task()
                 if t is None:
                     break
                 pending.add(ex.submit(mp_render_structure_batch, t))

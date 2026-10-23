@@ -57,6 +57,9 @@ class Render2DResultsMixin:
         # getattr: unit tests invoke this on a stand-in that only buffers ``_render2d_pending``.
         writer = getattr(self, "_render2d_write_png_rows", None)
         if callable(writer) and writer(rows):
+            release = getattr(self, "_release_session_wait_when_viewport_drawn", None)
+            if callable(release):
+                release(rows)
             self._advance_render2d_batch_progress(len(rows))
             return
         pending = self._render2d_pending
@@ -67,6 +70,27 @@ class Render2DResultsMixin:
             else:
                 pending[oid] = (b"", False, int(w), int(h))
         self._advance_render2d_batch_progress(len(rows))
+
+    def _release_session_wait_when_viewport_drawn(self, rows) -> None:
+        """Reveal an opening session once every on-screen row of the batch has landed.
+
+        Rows off screen keep drawing behind the revealed workspace. Rows that failed to
+        draw count as landed, so one bad structure cannot hold the overlay up.
+        """
+        if not getattr(self, "_session_waiting_for_render", False):
+            return
+        landed = getattr(self, "_render2d_landed_oids", None)
+        if landed is None:
+            landed = self._render2d_landed_oids = set()
+        landed.update(int(row[0]) for row in rows)
+        batch = getattr(self, "_render2d_row_by_oid", None) or {}
+        model = self._table_model
+        source_rows, _keep = self._visible_structure_source_rows()
+        for source_row in source_rows:
+            oid = int(model.row_oid(source_row))
+            if oid in batch and oid not in landed:
+                return
+        self._session_on_render2d_batch_finished()
 
     def _advance_render2d_batch_progress(self, n_done: int) -> None:
         """Report render progress and finish the batch once every row has landed."""
@@ -141,8 +165,10 @@ class Render2DResultsMixin:
 
     def _resize_columns_after_render2d(self, pix_target: str | None) -> None:
         """Set structure / pixmap column width from depict size (O(1), safe for huge tables)."""
-        # Session restore owns column widths until chrome is fully reapplied.
-        if getattr(self, "_pending_session_table_layout", None):
+        # Session restore owns column widths, also when it revealed before the batch ended.
+        if getattr(self, "_pending_session_table_layout", None) or getattr(
+            self, "_render2d_keeps_session_layout", False
+        ):
             return
         pad = STRUCTURE_COLUMN_HORIZONTAL_PADDING
         hint = int(getattr(self, "_render2d_flush_max_width", 0) or 0)
@@ -229,6 +255,10 @@ class Render2DResultsMixin:
             keep = getattr(self, "_keep_structure_fallbacks", None)
             if callable(keep):
                 keep(fallbacks)
+            repaint = getattr(self, "_repaint_visible_rendered_rows", None)
+            model = getattr(self, "_table_model", None)
+            if callable(repaint) and getattr(model, "_structure_png_store", None) is store:
+                repaint({oid for oid, _raw in scenes} | {item[0] for item in fallbacks})
             return True
         if not items:
             return True
@@ -301,21 +331,11 @@ class Render2DResultsMixin:
         if vr1 < 0:
             vr1 = max(0, (proxy.rowCount() if proxy is not None else src.rowCount()) - 1)
 
-        def _source_row(view_row: int) -> int:
-            if proxy is None or proxy is src:
-                return int(view_row)
-            mapper = getattr(proxy, "mapToSource", None)
-            if not callable(mapper):
-                return int(view_row)
-            idx = proxy.index(int(view_row), 0)
-            mapped = mapper(idx)
-            return int(mapped.row()) if mapped.isValid() else -1
-
         source_rows: list[int] = []
         keep: set[int] = set()
         store = getattr(src, "_structure_png_store", None)
         for vr in range(vr0, vr1 + 1):
-            sr = _source_row(vr)
+            sr = self._view_row_to_source_row(vr)
             if sr < 0:
                 continue
             source_rows.append(sr)
@@ -323,6 +343,28 @@ class Render2DResultsMixin:
             if store is not None and store.has_png(oid):
                 keep.add(int(oid))
         return source_rows, keep
+
+    def _view_row_to_source_row(self, view_row: int) -> int:
+        """Model row behind *view_row* of the table view, or -1 when it maps to none."""
+        src = self._table_model
+        proxy = self.table.model()
+        if proxy is None or proxy is src:
+            return int(view_row)
+        mapper = getattr(proxy, "mapToSource", None)
+        if not callable(mapper):
+            return int(view_row)
+        mapped = mapper(proxy.index(int(view_row), 0))
+        return int(mapped.row()) if mapped.isValid() else -1
+
+    def _repaint_visible_rendered_rows(self, oids: set[int]) -> None:
+        """Repaint the Structure cells on screen when any of *oids* just got an image."""
+        if not oids:
+            return
+        source_rows, _keep = self._visible_structure_source_rows()
+        model = self._table_model
+        hit = [row for row in source_rows if int(model.row_oid(row)) in oids]
+        if hit:
+            model.notify_structure_column_changed(min(hit), max(hit))
 
     def _trim_visible_structure_pixmap_cache(self) -> None:
         """Drop decoded Structure pixmaps that scrolled out of the viewport."""

@@ -392,6 +392,11 @@ class ChemistryWorkspaceWindow(
         self._render2d_batch_active = False
         self._render2d_saved_sort_enabled = None
         self._render2d_row_by_oid = None
+        self._render2d_worker = None
+        self._render2d_priority_timer = None
+        self._render2d_priority_key = None
+        self._render2d_landed_oids = None
+        self._render2d_keeps_session_layout = False
         self._render2d_cancel_event = None
         self._render2d_pixmap_target = None
         self._render2d_column_pixmap_mode = True
