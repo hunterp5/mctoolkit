@@ -173,25 +173,26 @@ def test_on_calc_finished_updates_pka_and_pi_in_place(qapp):  # noqa: ARG001
 
 
 def test_on_calc_finished_reuses_column_for_empty_rows(qapp):  # noqa: ARG001
-    from molmanager.predictions.som_prediction import SOM_MAP_COLUMN, SOM_SITES_COLUMN
     from molmanager.ui.main_window import ChemistryWorkspaceWindow
 
+    score = "Score"
+    detail = "Detail"
     w = ChemistryWorkspaceWindow()
-    w.headers = ["ID_HIDDEN", "Structure", SOM_MAP_COLUMN, SOM_SITES_COLUMN]
+    w.headers = ["ID_HIDDEN", "Structure", score, detail]
     w._table_model.set_headers(list(w.headers))
-    w._table_model.append_row(0, {SOM_MAP_COLUMN: "CCO", SOM_SITES_COLUMN: "0"})
+    w._table_model.append_row(0, {score: "CCO", detail: "0"})
     w._table_model.append_row(1, {})
     w.mols = {}
     w.next_oid = 2
     written = w.on_calc_finished(
-        [(1, {SOM_MAP_COLUMN: "c1ccccc1", SOM_SITES_COLUMN: "1"})],
-        [SOM_MAP_COLUMN, SOM_SITES_COLUMN],
+        [(1, {score: "c1ccccc1", detail: "1"})],
+        [score, detail],
         finish_progress=False,
     )
-    assert written == [SOM_MAP_COLUMN, SOM_SITES_COLUMN]
-    assert f"{SOM_MAP_COLUMN} (1)" not in w.headers
-    assert w._table_model.value_for_header(0, SOM_MAP_COLUMN) == "CCO"
-    assert w._table_model.value_for_header(1, SOM_MAP_COLUMN) == "c1ccccc1"
+    assert written == [score, detail]
+    assert f"{score} (1)" not in w.headers
+    assert w._table_model.value_for_header(0, score) == "CCO"
+    assert w._table_model.value_for_header(1, score) == "c1ccccc1"
     w.close()
 
 
