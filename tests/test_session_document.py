@@ -304,63 +304,22 @@ def test_session_document_roundtrip_restores_logarithmic_columns(qapp):  # noqa:
     assert "MW" in w2._logarithmic_columns
 
 
-def test_session_roundtrip_restores_som_maps(qapp) -> None:  # noqa: ARG001
-    from molmanager.predictions.som_prediction import (
-        SOM_MAP_COLUMN,
-        SOM_PROB_COLUMN,
-        SOM_SITES_COLUMN,
-        SomAtomHit,
-    )
-    from molmanager.ui.som_browser import SomBrowseRecord, records_from_table
-
+def test_session_open_keeps_legacy_som_map_as_text(qapp) -> None:  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
-    w.headers = [
-        "ID_HIDDEN",
-        "Structure",
-        "SMILES",
-        SOM_MAP_COLUMN,
-        SOM_SITES_COLUMN,
-        SOM_PROB_COLUMN,
-    ]
+    w.headers = ["ID_HIDDEN", "Structure", "SMILES", "SOM Map", "SOM Sites"]
     w._table_model.set_headers(list(w.headers))
-    w._table_model.append_row(
-        7,
-        {
-            "SMILES": "CCO",
-            SOM_MAP_COLUMN: "CCO",
-            SOM_SITES_COLUMN: "0",
-            SOM_PROB_COLUMN: "0:0.91; 1:0.12",
-        },
-    )
+    w._table_model.register_pixmap_column("SOM Map")
+    w._table_model.append_row(7, {"SMILES": "CCO", "SOM Map": "CCO", "SOM Sites": "0"})
     w.mols[7] = Chem.MolFromSmiles("CCO")
     w.next_oid = 8
-    w._table_model.register_pixmap_column(SOM_MAP_COLUMN)
-    w._som_browse_records = [
-        SomBrowseRecord(
-            oid=7,
-            smiles="CCO",
-            atoms=(SomAtomHit(0, 0.91, True), SomAtomHit(1, 0.12, False)),
-        )
-    ]
-    assert w._table_model.cell_text(0, w.headers.index(SOM_MAP_COLUMN)) == ""
-    assert w._table_model.backing_value_for_row_header(0, SOM_MAP_COLUMN) == "CCO"
 
     doc = saved_document(w)
-    assert w._table_model.rows_store().get_text(0, SOM_MAP_COLUMN) == "CCO"
-    assert doc["som_browse"][0]["oid"] == 7
-    assert doc["som_browse"][0]["smiles"] == "CCO"
-    assert doc["som_browse"][0]["atoms"][0]["atom_id"] == 0
-
     w2 = ChemistryWorkspaceWindow()
     open_saved(w, w2, doc)
-    assert w2._table_model.is_pixmap_data_column(SOM_MAP_COLUMN)
-    pm = w2._table_model.column_pixmap_copy(7, SOM_MAP_COLUMN)
-    assert pm is not None and not pm.isNull()
-    assert w2._table_model.backing_value_for_row_header(0, SOM_MAP_COLUMN) == "CCO"
-    recs = list(getattr(w2, "_som_browse_records", None) or ())
-    assert recs and recs[0].oid == 7 and recs[0].atoms[0].is_som
-    table_recs = records_from_table(w2)
-    assert table_recs and table_recs[0].smiles == "CCO"
+    assert w2._table_model.is_pixmap_data_column("SOM Map") is False
+    assert w2._table_model.backing_value_for_row_header(0, "SOM Map") == "CCO"
+    assert w2._table_model.cell_text(0, w2.headers.index("SOM Map")) == "CCO"
+    assert w2._table_model.cell_text(0, w2.headers.index("SOM Sites")) == "0"
 
 
 def test_session_roundtrip_restores_mmp_ledger(qapp):  # noqa: ARG001
@@ -398,6 +357,80 @@ def test_session_roundtrip_restores_mmp_ledger(qapp):  # noqa: ARG001
     assert len(restored) == 1
     assert restored[0] == pair
     assert w2._mmp_last_activity_column == "IC50"
+    w.close()
+    w2.close()
+
+
+def test_session_roundtrip_restores_metabolite_viewer(qapp):  # noqa: ARG001
+    from molmanager.predictions.biotransformer_metabolites import (
+        METABOLITE_COUNT_COLUMN,
+        METABOLITE_SMILES_COLUMN,
+    )
+    from molmanager.ui.metabolite_browser import MetaboliteBrowseHit, MetaboliteBrowseRecord
+
+    w = ChemistryWorkspaceWindow()
+    w.headers = [
+        "ID_HIDDEN",
+        "Structure",
+        "SMILES",
+        METABOLITE_COUNT_COLUMN,
+        METABOLITE_SMILES_COLUMN,
+    ]
+    w._table_model.set_headers(list(w.headers))
+    w._table_model.append_row(
+        1,
+        {
+            "SMILES": "c1ccccc1",
+            METABOLITE_COUNT_COLUMN: "1",
+            METABOLITE_SMILES_COLUMN: "Oc1ccccc1",
+        },
+    )
+    w._table_model.append_row(
+        2,
+        {"SMILES": "CCO", METABOLITE_COUNT_COLUMN: "1", METABOLITE_SMILES_COLUMN: "CC=O"},
+    )
+    w.mols[1] = Chem.MolFromSmiles("c1ccccc1")
+    w.mols[2] = Chem.MolFromSmiles("CCO")
+    w.next_oid = 3
+    w._metabolite_browse_records = [
+        MetaboliteBrowseRecord(
+            oid=1,
+            smiles="c1ccccc1",
+            metabolites=(
+                MetaboliteBrowseHit(
+                    smiles="Oc1ccccc1",
+                    reaction="Hydroxylation",
+                    enzyme="CYP3A4",
+                    generation=1,
+                    precursor_smiles="c1ccccc1",
+                ),
+            ),
+        ),
+        MetaboliteBrowseRecord(
+            oid=2,
+            smiles="CCO",
+            metabolites=(
+                MetaboliteBrowseHit(
+                    smiles="CC=O",
+                    reaction="Oxidation",
+                    enzyme="ADH",
+                    generation=2,
+                ),
+            ),
+        ),
+    ]
+    doc = saved_document(w)
+    assert doc["metabolite_browse"][0]["metabolites"][0]["enzyme"] == "CYP3A4"
+    selected = w._session_metabolite_browse_payload(oids={2})
+    assert [item["oid"] for item in selected] == [2]
+
+    w2 = ChemistryWorkspaceWindow()
+    open_saved(w, w2, doc)
+    recs = list(w2._metabolite_browse_records)
+    assert [(rec.oid, rec.metabolites[0].enzyme) for rec in recs] == [(1, "CYP3A4"), (2, "ADH")]
+    assert recs[0].metabolites[0].generation == 1
+    assert recs[0].metabolites[0].precursor_smiles == "c1ccccc1"
+    assert recs[0].metabolites[0].reaction == "Hydroxylation"
     w.close()
     w2.close()
 
