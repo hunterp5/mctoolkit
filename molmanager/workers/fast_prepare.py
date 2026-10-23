@@ -38,6 +38,10 @@ from dataclasses import dataclass
 from PyQt5.QtCore import QRunnable
 from rdkit import Chem
 
+from ..chem.depiction_builder import build_scene
+from ..chem.depiction_coords import apply_depiction_coords, depiction_blob_from_mol
+from ..chem.depiction_layout import LayoutOptions, current_layout_options, layout_for_drawing
+from ..chem.depiction_scene import pack_scene
 from ..chem.fragment_disconnect import largest_fragment_and_rest
 from ..chem.structure_neutralize import neutralize_mol
 from ..chem.molecule_conversion import (
@@ -68,6 +72,47 @@ class FastPrepareParams:
     neutralize: bool = False
     batch_size: int = 64
     process_pool_min_rows: int = 250
+    # Structure output only. The scene is built here, while the molecule still has coordinates,
+    # so the GUI does not start a second render pass that would lay every row out again.
+    want_scene: bool = False
+
+
+def _packed_scene(mol, stored_blob: bytes, layout: LayoutOptions | None) -> tuple[bytes, bytes]:
+    """``(scene, xy)`` for the molecule that will actually be stored.
+
+    The scene is built from *stored_blob* plus the float32 coordinates a later Render 2D will
+    reapply, so that redraw is the same picture. ``xy`` is empty when the layout added atoms
+    (stereo hydrogens) and no longer matches the stored connection table; the scene is then built
+    from the laid-out molecule and a later redraw generates coordinates again.
+    """
+    options = layout if layout is not None else current_layout_options()
+    laid = layout_for_drawing(mol, options)
+    xy = b""
+    draw = laid
+    try:
+        same_atoms = int(laid.GetNumAtoms()) == int(mol.GetNumAtoms())
+    except (AttributeError, TypeError, ValueError):
+        same_atoms = False
+    if same_atoms:
+        xy = depiction_blob_from_mol(laid)
+    if xy and stored_blob:
+        restored = Chem.Mol(bytes(stored_blob))
+        if restored is not None and int(restored.GetNumAtoms()) == int(mol.GetNumAtoms()):
+            applied = apply_depiction_coords(restored, xy)
+            if applied is not restored:
+                draw = applied
+            else:
+                xy = b""
+    else:
+        xy = b""
+    scene, _reason = build_scene(draw, options)
+    packed = b""
+    if scene is not None:
+        try:
+            packed = pack_scene(scene)
+        except ValueError:
+            packed = b""
+    return packed, xy
 
 
 def _prepare_one(
@@ -77,11 +122,15 @@ def _prepare_one(
     is_text: bool,
     need_smiles: bool,
     neutralize: bool = False,
-) -> tuple[bytes, str, str] | None:
+    want_scene: bool = False,
+    layout: LayoutOptions | None = None,
+) -> tuple | None:
     """Disconnect the largest fragment, then optionally neutralize it.
 
     Returns ``(mol_blob, smaller_fragments_text, canonical_smiles)``, or ``None`` when the row has
     no usable structure. If neutralization is requested and fails, the disconnected parent is kept.
+    With *want_scene* the tuple also carries ``(packed_scene, packed_xy)``, built before the
+    connection-table blob drops the conformer.
     """
     if is_text:
         raw = str(blob_or_text or "").strip()
@@ -100,12 +149,18 @@ def _prepare_one(
     if neutralize:
         out = neutralize_mol(parent) or parent
     smiles = mol_to_canonical_smiles(out) if need_smiles else ""
-    return mol_graph_binary(out) or out.ToBinary(), fragments, smiles
+    blob = mol_graph_binary(out) or out.ToBinary()
+    if not want_scene:
+        return blob, fragments, smiles
+    scene, xy = _packed_scene(out, blob, layout)
+    return blob, fragments, smiles, scene, xy
 
 
 def _mp_fast_prepare_batch(args: tuple) -> list[tuple]:
     """Run :func:`_prepare_one` over one batch inside a child process (picklable args)."""
-    items, is_text, need_smiles, neutralize = args
+    items, is_text, need_smiles, neutralize = args[:4]
+    want_scene = bool(args[4]) if len(args) > 4 else False
+    layout = current_layout_options() if want_scene else None
     out: list[tuple] = []
     for oid, payload, source_text in items:
         try:
@@ -115,13 +170,14 @@ def _mp_fast_prepare_batch(args: tuple) -> list[tuple]:
                 is_text=bool(is_text),
                 need_smiles=bool(need_smiles),
                 neutralize=bool(neutralize),
+                want_scene=want_scene,
+                layout=layout,
             )
         except Exception:
             res = None
         if res is None:
             continue
-        blob, fragments, smiles = res
-        out.append((int(oid), blob, fragments, smiles))
+        out.append((int(oid), *res))
     return out
 
 
@@ -130,9 +186,12 @@ class FastPrepareWorker(QRunnable):
 
     ``items`` are ``(oid, structure, source_text)`` tuples, where ``structure`` is a stored mol
     blob (preferred: the GUI thread never has to hydrate it) or a live mol, or
-    ``(oid, cell_text)`` when ``params.is_smiles``. Emits ``signals.fast_prepared`` with
-    ``(oid, mol_blob, fragments_text, canonical_smiles)`` rows; blobs are connection-table only,
-    matching what :class:`~molmanager.storage.mol_store.MolStore` stores.
+    ``(oid, cell_text)`` when ``params.is_smiles``. Without scenes, emits ``signals.fast_prepared``
+    once with ``(oid, mol_blob, fragments_text, canonical_smiles)`` rows. With scenes, emits
+    ``signals.fast_prepared_batch`` per completed chunk as
+    ``(oid, mol_blob, fragments_text, canonical_smiles, scene, xy)``, then an empty last batch.
+    Blobs are connection-table only, matching what :class:`~molmanager.storage.mol_store.MolStore`
+    stores.
     """
 
     def __init__(
@@ -151,6 +210,8 @@ class FastPrepareWorker(QRunnable):
         self.cancel_event = cancel_event
         self.progress_state = progress_state
         self._progress_throttle = [0, 0.0]
+        self._buffered: list[tuple] = []
+        self._streamed = False
 
     def _emit_progress(self, done: int, total: int) -> None:
         report_tool_progress(
@@ -182,17 +243,39 @@ class FastPrepareWorker(QRunnable):
             tasks.append((oid, blob, source_text))
         return tasks
 
+    def _accept_rows(self, rows: list[tuple]) -> None:
+        """Hand one completed chunk to the GUI, or hold it for the single finish signal."""
+        if not rows:
+            return
+        signal = None
+        if self.params.want_scene:
+            signal = getattr(self.signals, "fast_prepared_batch", None)
+        if signal is None:
+            self._buffered.extend(rows)
+            return
+        signal.emit(list(rows), False)
+        self._streamed = True
+
+    def _emit_finished(self, done: int, total: int, cancelled: bool) -> None:
+        self._emit_progress(done, total)
+        delivered = done if self._streamed else len(self._buffered)
+        emit_partial_results_if_cancelled(self.signals, TOOL_LABEL, delivered, total, cancelled)
+        if self._streamed:
+            self.signals.fast_prepared_batch.emit([], True)
+            return
+        self.signals.fast_prepared.emit(self._buffered)
+
     def run(self) -> None:
         tasks = self._tasks()
         total = max(len(tasks), 1)
         if not tasks:
-            self.signals.fast_prepared.emit([])
+            self._emit_finished(0, total, False)
             return
 
         p = self.params
         batch_size = max(1, int(p.batch_size))
         batches = [
-            (tasks[s : s + batch_size], p.is_smiles, p.need_smiles, p.neutralize)
+            (tasks[s : s + batch_size], p.is_smiles, p.need_smiles, p.neutralize, p.want_scene)
             for s in range(0, len(tasks), batch_size)
         ]
         from ..platform_support.worker_budget import rdkit_process_workers
@@ -200,31 +283,30 @@ class FastPrepareWorker(QRunnable):
         workers = rdkit_process_workers(hard_cap=6)
         use_pool = len(tasks) >= max(2, int(p.process_pool_min_rows)) and workers > 1
 
-        results: list[tuple] = []
         done = 0
         cancelled = False
         self._emit_progress(0, total)
 
         if use_pool:
             try:
-                results, done, cancelled = self._run_pool(batches, total, workers)
+                done, cancelled = self._run_pool(batches, total, workers)
             except Exception:
                 logger.exception("Process-pool fast prepare failed; falling back to in-process")
-                results, done, cancelled = [], 0, False
-                use_pool = False
+                if self._streamed or self._buffered:
+                    cancelled = True
+                else:
+                    use_pool = False
+                    done, cancelled = 0, False
         if not use_pool:
-            results, done, cancelled = self._run_inline(batches, total)
+            done, cancelled = self._run_inline(batches, total)
 
-        self._emit_progress(done, total)
-        emit_partial_results_if_cancelled(self.signals, TOOL_LABEL, len(results), total, cancelled)
-        self.signals.fast_prepared.emit(results)
+        self._emit_finished(done, total, cancelled)
 
     def _run_pool(self, batches: list[tuple], total: int, workers: int):
         """Batch the work across child processes, streaming progress as futures land."""
         max_inflight = min(48, max(workers * 4, workers))
         it = iter(batches)
         pending: set = set()
-        results: list[tuple] = []
         done = 0
         cancelled = False
         ev = self.cancel_event
@@ -255,7 +337,7 @@ class FastPrepareWorker(QRunnable):
                     except Exception:
                         logger.exception("Fast prepare subprocess batch failed")
                         continue
-                    results.extend(rows)
+                    self._accept_rows(rows)
                     done += len(rows)
                 if completed:
                     self._emit_progress(min(done, total), total)
@@ -267,11 +349,10 @@ class FastPrepareWorker(QRunnable):
                 _fill()
         finally:
             shutdown_process_pool_executor(ex, kill_workers=should_terminate_process_pool(ev))
-        return results, done, cancelled
+        return done, cancelled
 
     def _run_inline(self, batches: list[tuple], total: int):
         """Same work in this thread — used for small jobs and as a process-pool fallback."""
-        results: list[tuple] = []
         done = 0
         cancelled = False
         for batch in batches:
@@ -279,7 +360,7 @@ class FastPrepareWorker(QRunnable):
                 cancelled = True
                 break
             rows = _mp_fast_prepare_batch(batch)
-            results.extend(rows)
+            self._accept_rows(rows)
             done += len(batch[0])
             self._emit_progress(min(done, total), total)
-        return results, done, cancelled
+        return done, cancelled
