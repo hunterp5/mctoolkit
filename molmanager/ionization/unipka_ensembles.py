@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 LN10 = math.log(10.0)
 # Uni-pKa ``mol_pka`` / ``unimol_mlm`` task: dwar_8228 full-set mean (std = 1).
 UNIPKA_DWAR_PKA_MEAN = 6.504894871171601
-INT_FNS_NEED_IONIZATION = frozenset({"LOGD74", "LOGS74", "CNS_MPO", "AB_MPS"})
+INT_FNS_NEED_IONIZATION = frozenset({"LOGD74", "LOGS74", "CNS_MPO", "AB_MPS", "BBB_SCORE"})
 
 UNIPKA_MISSING_MESSAGE = (
     "Could not load Uni-pKa (install the pka extra: pip install 'molmanager[pka]' "
