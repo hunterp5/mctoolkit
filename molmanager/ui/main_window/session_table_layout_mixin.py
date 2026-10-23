@@ -22,6 +22,8 @@ from contextlib import suppress
 
 from PyQt5.QtCore import QByteArray
 
+from ...services.chemistry_columns import is_legacy_som_map_header
+
 
 class SessionTableLayoutMixin:
     @staticmethod
@@ -155,6 +157,7 @@ class SessionTableLayoutMixin:
                     isinstance(name, str)
                     and name in self.headers
                     and name not in ("ID_HIDDEN", "Structure")
+                    and not is_legacy_som_map_header(name)
                 ):
                     self._table_model.register_pixmap_column(name)
         try:
