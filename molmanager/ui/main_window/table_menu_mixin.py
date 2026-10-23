@@ -419,29 +419,8 @@ class TableMenuMixin:
         row, col = mapped
         t0 = self._table_model.cell_text(row, 0)
         oid = int(t0) if t0.isdigit() else None
-        som_map_col = False
-        som_header = ""
-        if 0 <= col < len(self.headers):
-            from ...predictions.som_prediction import is_som_map_header
-
-            som_header = self.headers[col]
-            som_map_col = is_som_map_header(som_header)
 
         menu = QMenu(self)
-        browse_act = export_act = None
-        if som_map_col:
-            browse_act = menu.addAction("Browse")
-            browse_act.setEnabled(
-                oid is not None and callable(getattr(self, "open_som_browser_for_oid", None))
-            )
-            export_act = menu.addAction("Export")
-            has_map = False
-            if oid is not None:
-                pm = self._table_model.column_pixmap_copy(int(oid), som_header)
-                has_map = pm is not None and not pm.isNull()
-            export_act.setEnabled(has_map)
-            menu.addSeparator()
-
         packed_confs_b64 = None
         pose_column = False
         if 0 <= col < len(self.headers):
@@ -522,15 +501,7 @@ class TableMenuMixin:
                 )
 
         action = menu.exec_(self.table.viewport().mapToGlobal(pos))
-        if browse_act is not None and action == browse_act and oid is not None:
-            opener = getattr(self, "open_som_browser_for_oid", None)
-            if callable(opener):
-                opener(int(oid))
-        elif export_act is not None and action == export_act and oid is not None:
-            exporter = getattr(self, "export_som_map_for_oid", None)
-            if callable(exporter):
-                exporter(int(oid), som_header)
-        elif action == sketch_act and mol_ctx is not None:
+        if action == sketch_act and mol_ctx is not None:
             self.open_sketcher(sketch_mol, source_oid=oid)
         elif view_poses_act is not None and action == view_poses_act and oid is not None:
             column = self.headers[col] if 0 <= col < len(self.headers) else ""
