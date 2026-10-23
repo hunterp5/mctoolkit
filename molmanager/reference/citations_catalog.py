@@ -260,25 +260,6 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 notes="See molmanager/resources/unipka/NOTICE.md. These files are third-party data, not MolManager GPL source.",
             ),
             _t(
-                "fame3r",
-                "FAME3R",
-                "Predict SOM (sites of metabolism) via the NERDD FAME3R web service.",
-                (
-                    (
-                        "Jacob, R. A.; et al. FAME3R: an efficient, practical and reliable open-source "
-                        "tool for predicting phase 1 and phase 2 sites of metabolism. J. Cheminform. 2026.",
-                        "https://doi.org/10.1186/s13321-026-01161-1",
-                    ),
-                ),
-                ("See FAME3R / MetaQSAR terms", "https://nerdd.univie.ac.at/fame3r"),
-                homepage="https://nerdd.univie.ac.at/fame3r",
-                notes=(
-                    "Pre-trained MetaQSAR models are free for non-commercial research. "
-                    "Commercial use requires a license from the University of Milan. "
-                    "Confirm current terms with the FAME3R authors before commercial deployment."
-                ),
-            ),
-            _t(
                 "biotransformer",
                 "BioTransformer",
                 "Predict Metabolites via a local BioTransformer 3 JAR (CYP450, Phase II, gut, allHuman).",
@@ -451,6 +432,23 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 ),
                 LIC_GPL3,
                 notes="Implemented in MolManager; ionization from Uni-pKa. Values ≤ 14 are often associated with higher oral/PK success in bRo5 space.",
+            ),
+            _t(
+                "bbb_score",
+                "BBB Score (Gupta)",
+                "Blood–brain barrier score (Calculate Descriptors → Drug-likeness).",
+                (
+                    (
+                        "Gupta, M.; Lee, H. J.; Barden, C. J.; Weaver, D. F. The Blood–Brain Barrier "
+                        "(BBB) Score. J. Med. Chem. 2019, 62, 9824–9836.",
+                        "https://doi.org/10.1021/acs.jmedchem.9b01220",
+                    ),
+                ),
+                LIC_GPL3,
+                notes=(
+                    "Score implemented in MolManager (this GPL program) from Table 1 and Table 4. "
+                    "pKa is the highest Uni-pKa macro pKa; H-bond counts use RDKit Lipinski definitions."
+                ),
             ),
             _t(
                 "pharm2d_gobbi",
