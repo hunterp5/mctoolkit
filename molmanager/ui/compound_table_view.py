@@ -477,6 +477,7 @@ class CompoundTableView(QTableView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._row_selection: TableRowSelectionController | None = None
+        self._row_number_width_model = None
         self.setVerticalHeader(CompoundTableRowHeaderView(self))
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableView.SelectItems)
@@ -662,6 +663,45 @@ class CompoundTableView(QTableView):
             self.setColumnWidth(logical_index, min_w)
         finally:
             hh.blockSignals(False)
+
+    def setModel(self, model) -> None:  # noqa: N802
+        """Keep the row-number column width tied to whichever model the view shows."""
+        super().setModel(model)
+        # Connect after the view so this runs once the row count has already landed.
+        self._bind_row_number_column_width(model)
+        self.sync_row_number_column_width()
+
+    def _bind_row_number_column_width(self, model) -> None:
+        previous = self._row_number_width_model
+        if previous is model:
+            return
+        if previous is not None:
+            for signal in (previous.modelReset, previous.rowsInserted, previous.rowsRemoved):
+                with suppress(TypeError, RuntimeError):
+                    signal.disconnect(self.sync_row_number_column_width)
+        self._row_number_width_model = model
+        if model is None:
+            return
+        model.modelReset.connect(self.sync_row_number_column_width)
+        model.rowsInserted.connect(self.sync_row_number_column_width)
+        model.rowsRemoved.connect(self.sync_row_number_column_width)
+
+    def sync_row_number_column_width(self, *_args) -> None:
+        """Size the row-number column for the current row count.
+
+        The width is fixed from the font while the table is still empty (wide enough
+        for two digits). A file load then inserts every row at once. Updating here,
+        in the same turn as that insert, means the first paint already has the final
+        width instead of snapping wider after the table is shown.
+        """
+        vh = self.verticalHeader()
+        if vh is None:
+            return
+        extent = header_bar_extent_for_font(vh, vh.font())
+        if int(vh.minimumWidth()) == extent and int(vh.maximumWidth()) == extent:
+            return
+        vh.setFixedWidth(extent)
+        self.updateGeometries()
 
     def set_compound_model(self, model) -> None:
         self._compound_model = model
