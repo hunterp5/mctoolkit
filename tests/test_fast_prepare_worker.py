@@ -178,6 +178,55 @@ def test_worker_reports_progress_and_empty_input() -> None:
     assert sig.progress[-1][2] == len(items)
 
 
+def test_prepare_one_scene_matches_a_rebuild_from_the_stored_coordinates() -> None:
+    from molmanager.chem.depiction_builder import build_scene
+    from molmanager.chem.depiction_coords import apply_depiction_coords
+    from molmanager.chem.depiction_layout import current_layout_options
+    from molmanager.chem.depiction_scene import is_scene_blob, pack_scene
+
+    options = current_layout_options()
+    for smiles in ("c1ccccc1", "CC(=O)Oc1ccccc1C(=O)[O-].[Na+]"):
+        res = _prepare_one(smiles, None, is_text=True, need_smiles=True, want_scene=True)
+        assert res is not None
+        blob, _fragments, _canonical, scene, xy = res
+        assert xy and is_scene_blob(scene)
+        laid = apply_depiction_coords(Chem.Mol(blob), xy)
+        rebuilt, reason = build_scene(laid, options)
+        assert reason is None
+        assert pack_scene(rebuilt) == scene
+
+
+def test_prepare_one_radical_keeps_the_blob_without_a_scene() -> None:
+    mol = Chem.MolFromSmiles("[CH3]")
+    assert mol is not None and mol.GetAtomWithIdx(0).GetNumRadicalElectrons() > 0
+    res = _prepare_one(mol.ToBinary(), "[CH3]", is_text=False, need_smiles=True, want_scene=True)
+    assert res is not None
+    blob, _fragments, _canonical, scene, _xy = res
+    assert blob and scene == b""
+    assert Chem.Mol(blob) is not None
+
+
+def test_worker_streams_scene_batches() -> None:
+    sig = _Recorder()
+    sig.batches = []
+    sig.fast_prepared_batch = sig.fast_prepared.__class__(
+        lambda o, rows, is_last: o.batches.append((list(rows), is_last))
+    )
+    items = [(i, smiles) for i, smiles in enumerate(("c1ccccc1", "CCO", "CCN", "CCC"))]
+    FastPrepareWorker(
+        items,
+        FastPrepareParams(
+            is_smiles=True, want_scene=True, batch_size=2, process_pool_min_rows=10**9
+        ),
+        sig,
+    ).run()
+    assert sig.results is None
+    assert sig.batches[-1] == ([], True)
+    rows = [row for batch, is_last in sig.batches if not is_last for row in batch]
+    assert [row[0] for row in rows] == [0, 1, 2, 3]
+    assert all(len(row) == 6 and row[4] for row in rows)
+
+
 def test_worker_cancellation_emits_partial_results() -> None:
     ev = threading.Event()
     ev.set()
