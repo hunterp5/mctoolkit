@@ -85,26 +85,18 @@ def test_dock_menu_includes_smina(qapp):  # noqa: ARG001
     pred_labels = [a.text() for a in predict.actions() if a.text()]
     assert any("pKa" in t for t in pred_labels)
     assert any("Permeability" in t for t in pred_labels)
-    som = None
+    assert not any(t.replace("&", "") == "SOM" for t in pred_labels)
     mets = None
     for act in predict.actions():
         menu = act.menu()
         label = act.text().replace("&", "")
-        if menu is not None and label == "SOM":
-            som = menu
         if menu is not None and label == "Metabolites":
             mets = menu
-    assert som is not None
     assert mets is not None
-    som_labels = [a.text().replace("&", "") for a in som.actions() if a.text()]
     met_labels = [a.text().replace("&", "") for a in mets.actions() if a.text()]
-    assert som_labels[0].startswith("Predict")
-    assert "Viewer" in som_labels
     assert met_labels[0].startswith("Predict")
     assert "Viewer" in met_labels
-    som_viewer = next(a for a in som.actions() if a.text().replace("&", "") == "Viewer")
     met_viewer = next(a for a in mets.actions() if a.text().replace("&", "") == "Viewer")
-    assert som_viewer.isEnabled() is False
     assert met_viewer.isEnabled() is False
     prepare = None
     for act in dock.actions():
@@ -121,19 +113,12 @@ def test_dock_menu_includes_smina(qapp):  # noqa: ARG001
 
 def test_predict_viewers_enable_when_table_has_results(qapp):  # noqa: ARG001
     from molmanager.predictions.biotransformer_metabolites import METABOLITE_SMILES_COLUMN
-    from molmanager.predictions.som_prediction import SOM_MAP_COLUMN
     from molmanager.ui.main_window import ChemistryWorkspaceWindow
 
     w = ChemistryWorkspaceWindow()
     w._sync_predict_viewer_actions()
-    assert w._act_som_viewer.isEnabled() is False
     assert w._act_metabolite_viewer.isEnabled() is False
-    w.headers = ["ID_HIDDEN", "Structure", SOM_MAP_COLUMN]
-    w._table_model.set_headers(list(w.headers))
-    w._sync_predict_viewer_actions()
-    assert w._act_som_viewer.isEnabled() is True
-    assert w._act_metabolite_viewer.isEnabled() is False
-    w.headers.append(METABOLITE_SMILES_COLUMN)
+    w.headers = ["ID_HIDDEN", "Structure", METABOLITE_SMILES_COLUMN]
     w._table_model.set_headers(list(w.headers))
     w._sync_predict_viewer_actions()
     assert w._act_metabolite_viewer.isEnabled() is True
