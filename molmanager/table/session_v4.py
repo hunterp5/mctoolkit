@@ -22,8 +22,9 @@ Tables:
   (little-endian int64), and the scene revision of stored depictions.
 - ``columns``: one row per data column. Float columns are raw float64 values plus one
   bool per row; text columns are a JSON array of strings.
-- ``sidecars(name, data)``: large workspace payloads (ionization cache, SOM maps, docking
-  results...) stored as zlib JSON next to the manifest instead of inside it.
+- ``sidecars(name, data)``: large workspace payloads (ionization cache, SOM maps,
+  metabolite browser, docking results...) stored as zlib JSON next to the manifest
+  instead of inside it.
 - ``mols``, ``pngs`` and ``ensembles``: the same schemas as :class:`MolStore`,
   :class:`StructureRenderStore` and :class:`EnsembleStore`, so save and open copy rows
   with SQL instead of encoding them.
@@ -59,7 +60,9 @@ SIDECAR_KEYS = frozenset(
     {
         "ionization_sidecar",
         "confs_sidecar",
+        # Legacy site-of-metabolism payload. Old sessions still load; new saves omit it.
         "som_browse",
+        "metabolite_browse",
         "depiction_2d",
         "dock_results",
         "mmp_ledger",
