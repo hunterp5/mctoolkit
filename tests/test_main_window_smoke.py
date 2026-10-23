@@ -796,6 +796,29 @@ def test_select_table_rows_updates_status(qapp):  # noqa: ARG001
     w.close()
 
 
+def test_user_table_selection_reports_entry_count(qapp):  # noqa: ARG001
+    """Row-header clicks and select-all report the entry count; column select does not."""
+    from PyQt5.QtCore import Qt
+
+    w = ChemistryWorkspaceWindow()
+    _seed_rows(w, 6)
+    ctl = w.table.row_selection_controller()
+
+    ctl.press_row(1, Qt.NoModifier)
+    assert w.status_label.text() == "Selected 1 of 6 row(s)."
+    ctl.press_row(3, Qt.ShiftModifier)
+    assert w.status_label.text() == "Selected 3 of 6 row(s)."
+    ctl.select_all()
+    assert w.status_label.text() == "Selected 6 of 6 row(s)."
+    ctl.clear_for_cell_input()
+    assert w.status_label.text() == "Selected 0 of 6 row(s)."
+
+    ctl.press_row(0, Qt.NoModifier)
+    w._select_columns([3])
+    assert w.status_label.text() == "Selected 6 of 6 row(s). 1 column."
+    w.close()
+
+
 def test_invert_table_selection_updates_status(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     _seed_two_rows(w)

@@ -107,8 +107,9 @@ class TableSelectionMixin:
             self.table.setSelectionBehavior(prev_behavior)
             self.table.setAutoScroll(was_auto_scroll)
             self._restore_table_scroll_pos(scroll_pos)
-        # Column selection replaces any entry selection.
-        self.selection_store.clear(origin=ORIGIN_TABLE)
+        # Column selection replaces any entry selection. This clear is not a user
+        # entry selection: the column status below is the message to show.
+        self.selection_store.clear()
         focus_col = (
             int(anchor_col)
             if anchor_col is not None and int(anchor_col) in seen
@@ -311,15 +312,18 @@ class TableSelectionMixin:
         if row_header is not None:
             row_header.viewport().update()
 
-    def _on_selection_store_changed(self, _origin: object) -> None:
+    def _on_selection_store_changed(self, origin: object) -> None:
         """Window-side fan-out for every entry-selection change, whoever made it.
 
-        Paints table highlights and pushes the selection to open plots. Browsers subscribe
-        to ``selection_store.changed`` themselves.
+        Paints table highlights and pushes the selection to open plots. A change made in
+        the compound table (``ORIGIN_TABLE``) also reports how many entries are selected.
+        Browsers subscribe to ``selection_store.changed`` themselves.
         """
         with perf_span("selection.store_changed"):
             self._sync_table_selection_highlight()
             self._schedule_sync_active_plots_from_table_selection()
+            if origin is ORIGIN_TABLE:
+                self._report_table_selection_status(self.selection_store.count(), pump=False)
 
     def _prune_selection_store(self, *_args) -> None:
         """Forget selected OIDs whose rows were deleted or replaced."""
