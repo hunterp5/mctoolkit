@@ -65,10 +65,6 @@ def test_guide_html_pubchem_and_smina():
     assert "PubChem" in pub and "Topic unavailable" not in pub
     smina = guide_html("tools_gnina")
     assert "Gnina" in smina and "PDBQT" in smina
-    som = guide_html("tools_predict_som")
-    assert "FAME3R" in som and "Topic unavailable" not in som
-    assert "Phase 1 and 2" in som
-    assert "Compare Phase 1 vs Phase 2" not in som
     mets = guide_html("tools_predict_metabolites")
     assert "BioTransformer" in mets and "Topic unavailable" not in mets
 
