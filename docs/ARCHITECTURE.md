@@ -64,7 +64,7 @@ subpackage reads as its table of contents.
 | `ionization/` | `unipka_ensembles.py`, `unipka_enumerator.py`, `microstate_cache.py` |
 | `protein/` | Crystallographic structures and overlays: `structure_cif.py`, `structure_atoms.py`, `structure_inventory.py`, `structure_component_types.py`, `hydrogen_bonds.py`, `protein_interactions.py`, `protein_msa.py`, `pharmacophore*.py` |
 | `docking/` | `gnina_job.py`, `gnina_launch.py`, `pose_file_io.py`, `search_box.py`, `redock_validation.py` |
-| `predictions/` | `som_prediction.py`, `permeability_prediction.py`, `biotransformer_metabolites.py`, `biotransformer_install.py` |
+| `predictions/` | `permeability_prediction.py`, `biotransformer_metabolites.py`, `biotransformer_install.py` |
 | `sources/` | External compound providers: `chembl_random_compounds.py`, `pubchem_names.py`, `surechembl_api.py`, `random_molecule_sources.py` |
 | `analysis/` | `mmp_analysis.py` (pair/transform core), `mmp_session.py`, `mmp_table.py`, `mmp_depict.py`, `mmp_neighborhood_analysis.py`, `activity_cliff_analysis.py`, `sali_analysis.py`, `qsar_models.py`, `mpo_scoring.py`, `medchem_space.py`, `dimensionality_reduction.py`, `table_statistics.py` |
 | `plotting/` | Chart computation, no Qt widgets: `plot_axes.py`, `plot_series_collect.py`, `plot_marker_color.py`, `plot_heatmap.py`, `plot_labels.py`, `plot_radar.py`, `plot_statistics_fits.py`, `plotly_legend.py` |
@@ -235,7 +235,7 @@ predict, `GuiSettingsMixin`). Empty composition roots (`ChemistryMixin`, `Sessio
 
 **SQLite mirror rebuild:** GUI only chunk-exports cell text into memory; `SqliteRebuildWorker` streams inserts + oid index off the GUI (`Indexing table…` progress). Sync `_rebuild_sqlite_store_from_model` remains for tiny/test paths.
 
-**Tool writeback:** `on_calc_finished` inserts columns immediately, then for large result sets chunks `apply_columns_values_bulk` / `set_column_text_by_oids` with `Writing results…` status; coloring and bounds run after the last chunk (`on_complete` for Protonate/fragment/SOM follow-ups). Fingerprint similarity uses the same chunked fill for large tables.
+**Tool writeback:** `on_calc_finished` inserts columns immediately, then for large result sets chunks `apply_columns_values_bulk` / `set_column_text_by_oids` with `Writing results…` status; coloring and bounds run after the last chunk (`on_complete` for Protonate and fragment follow-ups). Fingerprint similarity uses the same chunked fill for large tables.
 
 Tool mixins that remain on the window (fragments, MMP/SALI, dock, predict) are thin adapters over `analysis_job_support` and the kernel. Structure-prep (protonate, Fast Prepare, disconnect/neutralize/explicit H) lives on `WorkspaceTools.structure_prep`. Ingest/render/sqlite live on `TableBuildPipeline`; column writeback on `TableWriteService`.
 
@@ -279,7 +279,7 @@ Progress: `WorkerSignals.tool_progress` + `ToolProgressState` polling → bottom
 - **Result maps:** `ui/result_plot_panel.py` (`DockableResultPlotPanel`) is the shared dock chrome for SALI / MMP / cliffs / dimred / MedChem
 - **Docked-plot chrome:** `ui/dockable_plot.py` re-exports glyphs, floating titles, footer buttons, and pane embed (`dockable_plot_glyphs.py`, `_title.py`, `_chrome.py`, `_embed.py`)
 - **Workspace panes:** `ui/main_window/plot_pane.py` (`PlotPane`); `ui/main_window/workspace_layout.py` (`WorkspaceLayoutManager`)
-- **Result browsers:** `ui/browsers/` (SOM, selection, MMP, SALI, metabolites) with shims at `ui/*_browser.py`
+- **Result browsers:** `ui/browsers/` (selection, MMP, SALI, metabolites) with shims at `ui/*_browser.py`
 - **Filters:** `FilterPanelMixin` is a file-split of the window filter panel (cards/apply/substructure/bounds) under `ui/filters/`. True mixins are card chrome only (`card_chrome.py`); `cards.py` is the barrel.
 - **Conformer writeback:** `ui/main_window/conformer_writeback.py` (table append / packed ensemble / superpose mol lookup); `ConformersToolsMixin` stays the UI adapter
 - **Table → plot:** `selection_store.changed` drives `_schedule_sync_active_plots_from_table_selection`, a leading-edge throttle (one fan-out per ~33 ms frame); the plot shell mutes its bridge only while it applies programmatic selections, so there are no echoes
@@ -326,7 +326,7 @@ Pure helpers live under `molmanager/services/` (e.g. `chemistry_columns.py`, `sq
 MMP / Activity Cliff / Pair Network / SALI share `ui/analysis_job_support.py` for scoped
 activity-record prep, process-queue enqueue (`start_scoped_activity_job`), dialog open/finish
 helpers (`ensure_activity_analysis_ready`, `finish_analysis_pairs`, `report_analysis_failure`).
-Cluster / pKa / SOM / protomer / permeability reuse the same module for table readiness
+Cluster / pKa / protomer / permeability reuse the same module for table readiness
 (`ensure_table_ready_for_tool`), structure-scoped mol collect (`prepare_scoped_structure_mols`),
 enqueue (`enqueue_process_queue_job` / `start_scoped_structure_job`), and cancellable failure
 reporting (`report_cancellable_job_failure`). Tool adapters and dialogs stay thin over those helpers.
