@@ -2,15 +2,15 @@
 
 Predict Metabolites runs **BioTransformer 3** on a local Java JAR to enumerate likely **metabolite structures** (products of CYP450, Phase II, gut, or combined human metabolism).
 
-This is **not** Predict SOM. FAME3R scores atoms as sites of metabolism; BioTransformer proposes product molecules.
+BioTransformer proposes metabolite product structures.
 
 ## Goal
 
-See first-generation (or short multi-step) metabolites of table compounds without sending structures to NERDD.
+See first-generation (or short multi-step) metabolites of table compounds on this machine.
 
 ## When to use
 
-Use when you need candidate metabolite SMILES for design, MS annotation, or soft-spot follow-up. Keep Predict SOM if you want atom maps instead.
+Use when you need candidate metabolite SMILES for design, MS annotation, or soft-spot follow-up.
 
 ## Inputs / scope
 
@@ -36,7 +36,7 @@ Run `python scripts/bootstrap_biotransformer.py`, use **Browse JAR…** / **Inst
 2. Choose table rows or paste SMILES.
 3. Pick metabolism, steps, and the product cap.
 4. Run **Predict** and wait on **Processes**.
-5. Review parent columns (**Metabolite Count**, **Metabolite Reactions**, **Metabolite SMILES**) and the **Predict Metabolites Browser**. The table lists the parent first, then metabolites (structure, reaction, enzyme, step); click a row to show that structure on the canvas. **Browse Only Selected** is in the footer. Reopen it from **Chemistry → Predict → Metabolites → Viewer** when those columns are already in the table.
+5. Review parent columns (**Metabolite Count**, **Metabolite Reactions**, **Metabolite SMILES**) and the **Predict Metabolites Browser**. The table lists the parent first, then metabolites (structure, reaction, enzyme, step); click a row to show that structure on the canvas. **Browse Only Selected** is in the footer. Reopen it from **Chemistry → Predict → Metabolites → Viewer**. A saved session keeps the browser records (reaction, enzyme, generation, and every product SMILES), so Viewer shows the same results after Open. Parent-row columns alone keep a shorter SMILES list when no browser records were saved.
 
 ## Use cases
 
