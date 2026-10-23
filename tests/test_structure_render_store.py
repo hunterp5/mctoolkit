@@ -44,3 +44,11 @@ def test_structure_render_store_batch_expands_cap_to_fit():
     store.ingest_batch(items)
     assert len(store) == 5
     assert store.has_png(1) and store.has_png(5)
+
+
+def test_batch_replaces_existing_rows_and_keeps_the_count() -> None:
+    store = StructureRenderStore(max_decoded_pixmaps=8)
+    store.ingest_batch([(1, b"a"), (2, b"b")])
+    store.ingest_batch([(2, b"B"), (3, b"c"), (3, b"C")])
+    assert len(store) == 3
+    assert store._png == {1: b"a", 2: b"B", 3: b"C"}

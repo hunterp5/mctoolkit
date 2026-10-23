@@ -25,7 +25,7 @@ from pathlib import Path
 
 from rdkit import Chem
 
-from .temp_sqlite import close_owned_sqlite, open_owned_sqlite
+from .temp_sqlite import close_owned_sqlite, connect_owned_sqlite, open_owned_sqlite
 
 _DEFAULT_LRU = 256
 _AUTOCOMMIT_EVERY = 64
@@ -135,9 +135,7 @@ class MolStore(MutableMapping[int, Chem.Mol]):
         close_owned_sqlite(self._path, self._conn, owns_path=self._owns_path)
         self._path = Path(path)
         self._owns_path = True
-        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        self._conn.execute("PRAGMA temp_store=MEMORY")
+        self._conn = connect_owned_sqlite(self._path)
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS mols (oid INTEGER PRIMARY KEY, blob BLOB, smiles TEXT)"
         )

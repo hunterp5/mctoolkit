@@ -27,9 +27,11 @@ from PyQt5.QtGui import QPixmap
 from ..chem.depiction_scene import SCENE_MAGIC
 from ..table.structure_depiction_layout import structure_depict_height, structure_depict_width
 from ..table.structure_image import pixmap_from_structure_image
-from .temp_sqlite import close_owned_sqlite, open_owned_sqlite
+from .temp_sqlite import close_owned_sqlite, connect_owned_sqlite, open_owned_sqlite
 
 _IS_SCENE = "substr(blob, 1, 2) = ?"
+# SQLite's default bound-parameter limit is 999 on older builds.
+_SQLITE_IN_CHUNK = 900
 
 
 class StructureRenderStore:
@@ -99,14 +101,11 @@ class StructureRenderStore:
 
     def adopt_file(self, path: str | Path) -> None:
         """Replace this store's scenes with the ``pngs`` table in *path* and own that file."""
-        import sqlite3
-
         self._lru.clear()
         close_owned_sqlite(self._path, self._conn, owns_path=self._owns_path)
         self._path = Path(path)
         self._owns_path = True
-        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
-        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn = connect_owned_sqlite(self._path)
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS pngs ("
             "oid INTEGER PRIMARY KEY, blob BLOB NOT NULL, seq INTEGER NOT NULL)"
@@ -167,9 +166,26 @@ class StructureRenderStore:
             return
         if self._max_png_entries > 0:
             self._max_png_entries = max(self._max_png_entries, self._count + len(items))
-        for oid, png_bytes in items:
-            self._upsert(int(oid), bytes(png_bytes))
+        latest = {int(oid): bytes(png_bytes) for oid, png_bytes in items}
+        existing = 0
+        oids = list(latest)
+        for start in range(0, len(oids), _SQLITE_IN_CHUNK):
+            chunk = oids[start : start + _SQLITE_IN_CHUNK]
+            marks = ",".join("?" * len(chunk))
+            row = self._conn.execute(
+                f"SELECT COUNT(*) FROM pngs WHERE oid IN ({marks})", chunk
+            ).fetchone()
+            existing += int(row[0] if row else 0)
+        first_seq = self._seq + 1
+        self._seq += len(latest)
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO pngs (oid, blob, seq) VALUES (?, ?, ?)",
+            [(oid, raw, first_seq + i) for i, (oid, raw) in enumerate(latest.items())],
+        )
         self._conn.commit()
+        for oid in oids:
+            self._lru.pop(oid, None)
+        self._count += len(latest) - existing
         self._trim_png_entries()
 
     def export_sqlite_bytes(self) -> bytes:

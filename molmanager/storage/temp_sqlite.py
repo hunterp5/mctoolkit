@@ -28,10 +28,19 @@ def open_owned_sqlite(prefix: str) -> tuple[Path, sqlite3.Connection]:
     handle = tempfile.NamedTemporaryFile(prefix=prefix, suffix=".sqlite3", delete=False)
     handle.close()
     path = Path(handle.name)
+    return path, connect_owned_sqlite(path)
+
+
+def connect_owned_sqlite(path: str | Path) -> sqlite3.Connection:
+    """Connect to a workspace temp file that is discarded when the session closes.
+
+    Nothing survives a crash in these files, so commits skip the disk sync; with it,
+    each commit cost about 3 ms and large loads spent seconds of GUI time in them.
+    """
     conn = sqlite3.connect(str(path), check_same_thread=False)
-    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA synchronous=OFF")
     conn.execute("PRAGMA temp_store=MEMORY")
-    return path, conn
+    return conn
 
 
 def close_owned_sqlite(path: Path, conn: sqlite3.Connection, *, owns_path: bool) -> None:

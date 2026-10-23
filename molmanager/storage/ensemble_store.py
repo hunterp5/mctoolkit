@@ -33,7 +33,7 @@ from ..conformers.ensemble_binary_codec import (
     pack_ensemble_mol,
     unpack_ensemble_mol,
 )
-from .temp_sqlite import close_owned_sqlite, open_owned_sqlite
+from .temp_sqlite import close_owned_sqlite, connect_owned_sqlite, open_owned_sqlite
 
 KIND_COMPACT = "compact"
 KIND_LEGACY = "legacy"
@@ -110,9 +110,7 @@ class EnsembleStore(MutableMapping[tuple[int, str], str]):
         self.close()
         self._path = Path(path)
         self._owns_path = True
-        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        self._conn.execute("PRAGMA temp_store=MEMORY")
+        self._conn = connect_owned_sqlite(self._path)
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS ensembles ("
             "oid INTEGER NOT NULL, col TEXT NOT NULL, kind TEXT NOT NULL, "
