@@ -618,6 +618,9 @@ class IngestLoadMixin:
         """Switch from the loading page to the table once rows and filter bounds are ready."""
         self._ingest_prep_before_reveal = False
         self._ingest_waiting_for_render = False
+        sync_numbers = getattr(self.table, "sync_row_number_column_width", None)
+        if callable(sync_numbers):
+            sync_numbers()
         self._set_ingest_loading(False)
         self._set_workspace_stack_index(1)
         finish_clean = getattr(self, "_finish_session_clean_if_pending", None)
