@@ -1,6 +1,6 @@
 # Existing silent-exception sites for BLE001, S110, and SIM105.
 # Shrink this list when a file is cleaned; never add files.
-# ratchet-max-files = 222
+# ratchet-max-files = 219
 
 [lint.per-file-ignores]
 "molmanager/analysis/activity_cliff_analysis.py" = ["BLE001"]
@@ -44,7 +44,6 @@
 "molmanager/plotting/plot_statistics_fits.py" = ["BLE001"]
 "molmanager/predictions/biotransformer_metabolites.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/predictions/permeability_prediction.py" = ["BLE001"]
-"molmanager/predictions/som_prediction.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/protein/pharmacophore.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/protein/pharmacophore_screen.py" = ["BLE001"]
 "molmanager/protein/protein_interactions.py" = ["BLE001", "S110", "SIM105"]
@@ -70,7 +69,6 @@
 "molmanager/ui/browsers/random_molecule_browser.py" = ["BLE001", "SIM105"]
 "molmanager/ui/browsers/sali_browser.py" = ["BLE001"]
 "molmanager/ui/browsers/selection_browser.py" = ["BLE001", "SIM105"]
-"molmanager/ui/browsers/som_browser.py" = ["BLE001", "SIM105"]
 "molmanager/ui/compound_table_model.py" = ["BLE001"]
 "molmanager/ui/dialogs/biotransformer.py" = ["BLE001"]
 "molmanager/ui/dialogs/data_analysis.py" = ["BLE001"]
@@ -210,7 +208,6 @@
 "molmanager/workers/rgroup_decomposition.py" = ["BLE001", "S110", "SIM105"]
 "molmanager/workers/sali_worker.py" = ["BLE001"]
 "molmanager/workers/signals.py" = ["BLE001", "S110", "SIM105"]
-"molmanager/workers/som_worker.py" = ["BLE001", "SIM105"]
 "molmanager/workers/sql_load_worker.py" = ["BLE001", "SIM105"]
 "molmanager/workers/strain_energy.py" = ["BLE001"]
 "molmanager/workers/substructure_filter.py" = ["BLE001", "S110"]
