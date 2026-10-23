@@ -296,7 +296,10 @@ class SessionSaveMixin:
             mols.flush()
             mol_db = mols.db_path
         ensembles = getattr(self, "_confs_blocks_sidecar", None)
-        ensembles_db = ensembles.db_path if isinstance(ensembles, EnsembleStore) else None
+        ensembles_db = None
+        if isinstance(ensembles, EnsembleStore):
+            ensembles.flush()
+            ensembles_db = ensembles.db_path
         render = getattr(self._table_model, "_structure_png_store", None)
         render_db = render.db_path if render is not None and len(render) > 0 else None
         return SessionSaveSnapshot(

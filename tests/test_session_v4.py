@@ -70,6 +70,8 @@ def stores(tmp_path):
 
 def _snapshot(rows, mols, ensembles, render, keep=None, sidecars=None) -> SessionSaveSnapshot:
     mask = keep_mask(rows.oids[: rows.n], keep)
+    mols.flush()
+    ensembles.flush()
     return SessionSaveSnapshot(
         manifest={"headers": ["ID_HIDDEN", "Structure", "SMILES", "MW"], "next_oid": 4},
         oids=rows.oids_blob(mask),

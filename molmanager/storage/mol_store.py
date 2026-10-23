@@ -29,6 +29,9 @@ from .temp_sqlite import close_owned_sqlite, open_owned_sqlite
 
 _DEFAULT_LRU = 256
 _AUTOCOMMIT_EVERY = 64
+# Only this connection reads the table before an explicit flush, so bulk ingest can
+# leave rows uncommitted between batches.
+_BULK_COMMIT_ROWS = 8192
 # SQLite's default bound-parameter limit is 999 on older builds.
 _SQLITE_IN_CHUNK = 900
 
@@ -288,12 +291,13 @@ class MolStore(MutableMapping[int, Chem.Mol]):
             rows.append((int(oid), blob_b, smi))
         if not rows:
             return
-        self._flush()
         self._conn.executemany(
             "INSERT OR REPLACE INTO mols (oid, blob, smiles) VALUES (?, ?, ?)",
             rows,
         )
-        self._conn.commit()
+        self._pending += len(rows)
+        if self._pending >= _BULK_COMMIT_ROWS:
+            self._flush()
         if self._lru:
             for oid, _blob, _smiles in rows:
                 self._lru.pop(oid, None)
