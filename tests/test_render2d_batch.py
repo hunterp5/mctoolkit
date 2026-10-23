@@ -386,3 +386,85 @@ def test_refresh_visible_structure_cells_notifies_once() -> None:
     model.dataChanged.connect(lambda *_a: changes.append(1))
     host._refresh_visible_structure_cells()
     assert changes == [1]
+
+
+class _WidthTable:
+    def __init__(self) -> None:
+        self._width = 40
+        self.widths: list[tuple[int, int]] = []
+
+    def columnWidth(self, _col: int) -> int:
+        return self._width
+
+    def setColumnWidth(self, col: int, width: int) -> None:
+        self._width = int(width)
+        self.widths.append((int(col), int(width)))
+
+
+def _column_app(rows_in_table: set[int], goal: int):
+    from molmanager.ui.main_window.render2d_results_mixin import Render2DResultsMixin
+
+    app = _App(rows_in_table, goal)
+    app.table = _WidthTable()
+    app._render2d_pixmap_target = None
+    app._render2d_flush_max_width = 0
+    app._render2d_column_widened_to = 0
+    app._pending_session_table_layout = None
+    app._render2d_keeps_session_layout = False
+    app._widen_render2d_column_for_first_structure = lambda: (
+        Render2DResultsMixin._widen_render2d_column_for_first_structure(app)
+    )
+    app._apply_render2d_column_width = (
+        lambda target, hint: Render2DResultsMixin._apply_render2d_column_width(app, target, hint)
+    )
+    return app
+
+
+def test_column_widens_when_the_first_structure_is_stored() -> None:
+    from molmanager.storage.structure_render_store import StructureRenderStore
+    from molmanager.table.structure_depiction_layout import (
+        STRUCTURE_COLUMN_HORIZONTAL_PADDING,
+        structure_depict_width,
+    )
+    from molmanager.ui.main_window.render2d_results_mixin import Render2DResultsMixin
+
+    items = [
+        (1, Chem.MolFromSmiles("CCO").ToBinary()),
+        (2, Chem.MolFromSmiles("CCC").ToBinary()),
+    ]
+    rows = _mp_render_structure_batch((items, 210, 170, True))
+    app = _column_app({1, 2}, goal=2)
+    store = StructureRenderStore(max_decoded_pixmaps=4, max_png_entries=0)
+    try:
+        app._render2d_stream_store = store
+        app._render2d_write_png_rows = lambda ready: Render2DResultsMixin._render2d_write_png_rows(
+            app, ready
+        )
+        app.on_render2d_rows_ready(rows[:1], 7)
+        expected = max(structure_depict_width(), 210) + STRUCTURE_COLUMN_HORIZONTAL_PADDING
+        assert app.table.widths == [(1, expected)]
+        assert not app.flushed
+        app.on_render2d_rows_ready(rows[1:], 7)
+        assert app.table.widths == [(1, expected)]
+    finally:
+        store.close()
+
+
+def test_column_stays_put_while_a_session_layout_is_pending() -> None:
+    from molmanager.storage.structure_render_store import StructureRenderStore
+    from molmanager.ui.main_window.render2d_results_mixin import Render2DResultsMixin
+
+    rows = _mp_render_structure_batch(([(1, Chem.MolFromSmiles("CCO").ToBinary())], 210, 170, True))
+    app = _column_app({1}, goal=2)
+    app._render2d_keeps_session_layout = True
+    store = StructureRenderStore(max_decoded_pixmaps=4, max_png_entries=0)
+    try:
+        app._render2d_stream_store = store
+        app._render2d_write_png_rows = lambda ready: Render2DResultsMixin._render2d_write_png_rows(
+            app, ready
+        )
+        app.on_render2d_rows_ready(rows, 7)
+        assert app.table.widths == []
+        assert app.table.columnWidth(1) == 40
+    finally:
+        store.close()
