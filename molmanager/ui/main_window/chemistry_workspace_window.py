@@ -248,6 +248,7 @@ class ChemistryWorkspaceWindow(
         self.signals.neutralized.connect(self.on_neutralize_finished, _qc)
         self.signals.substructure_aligned.connect(self.on_substructure_aligned, _qc)
         self.signals.fast_prepared.connect(self.on_fast_prepare_finished, _qc)
+        self.signals.fast_prepared_batch.connect(self.on_fast_prepare_batch, _qc)
         self.signals.explicit_hydrogens_added.connect(self.on_add_explicit_hydrogens_finished, _qc)
         self.signals.explicit_hydrogens_removed.connect(
             self.on_remove_explicit_hydrogens_finished, _qc
