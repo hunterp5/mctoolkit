@@ -143,3 +143,56 @@ def test_metabolite_browser_opens_large_enough_for_2d(qapp) -> None:  # noqa: AR
     assert host.minimumWidth() >= BROWSER_STRUCTURE_PREVIEW_MIN_WIDTH
     assert host.minimumHeight() >= BROWSER_STRUCTURE_PREVIEW_MIN_HEIGHT
     dlg.close()
+
+
+def test_metabolite_browse_session_payload_roundtrip() -> None:
+    from molmanager.predictions.biotransformer_metabolites import BIOTRANSFORMER_CANCELLED
+    from molmanager.ui.metabolite_browser import (
+        deserialize_metabolite_browse_records,
+        restore_metabolite_browse_for_session,
+        serialize_metabolite_browse_records,
+    )
+
+    recs = [
+        MetaboliteBrowseRecord(
+            oid=4,
+            smiles="c1ccccc1",
+            metabolites=(
+                MetaboliteBrowseHit(
+                    smiles="Oc1ccccc1",
+                    reaction="Hydroxylation",
+                    enzyme="CYP3A4",
+                    biosystem="Human",
+                    generation=1,
+                    precursor_smiles="c1ccccc1",
+                ),
+            ),
+        )
+    ]
+    raw = serialize_metabolite_browse_records(recs)
+    back = deserialize_metabolite_browse_records(raw)
+    assert len(back) == 1
+    hit = back[0].metabolites[0]
+    assert back[0].oid == 4
+    assert hit.enzyme == "CYP3A4"
+    assert hit.generation == 1
+    assert hit.biosystem == "Human"
+    assert hit.precursor_smiles == "c1ccccc1"
+
+    class _App:
+        pass
+
+    app = _App()
+    kept = restore_metabolite_browse_for_session(
+        app,
+        [
+            {
+                "oid": 1,
+                "smiles": "C",
+                "error": BIOTRANSFORMER_CANCELLED,
+                "metabolites": [],
+            }
+        ],
+    )
+    assert kept == 0
+    assert app._metabolite_browse_records == []
