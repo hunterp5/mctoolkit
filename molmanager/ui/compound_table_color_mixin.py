@@ -110,7 +110,7 @@ class CompoundTableColorMixin:
         self._emit_color_refresh_for_header(header_name)
 
     def apply_favorable_score_column_coloring(self, header_name: str) -> bool:
-        """Color QED / AB-MPS / CNS MPO columns green (favorable) → yellow → red."""
+        """Color QED / AB-MPS / BBB / CNS MPO columns green (favorable) → yellow → red."""
         spec = favorable_score_color_spec(header_name)
         if spec is None:
             return False
