@@ -57,6 +57,7 @@ from ..table.text_file_ingest import (
 from ..table.open_messages import message_for_read_failure
 from ..table.table_file_formats import (
     MOL2_EXTS,
+    OPENABLE_TABLE_EXTS,
     RXN_EXTS,
     SDF_EXTS,
     SMI_LINE_EXTS,
@@ -92,8 +93,6 @@ from ..platform_support.tool_progress import ToolProgressState, report_tool_prog
 from .signals import WorkerSignals, emit_partial_results_if_cancelled
 
 logger = logging.getLogger(__name__)
-
-_OPENABLE_TABLE_EXTS = STRUCTURE_MOL_EXTS | SMI_LINE_EXTS | TABULAR_EXTS | RXN_EXTS
 
 #: Below this size an SDF or MOL2 is parsed on the load thread; worker processes would
 #: cost more to feed than they save.
@@ -413,7 +412,7 @@ class UniversalLoadWorker(QRunnable):
         cfg = load_config()
         text_first = bool(cfg.ingest_csv_text_first)
         try:
-            if ext not in _OPENABLE_TABLE_EXTS:
+            if ext not in OPENABLE_TABLE_EXTS:
                 raise ValueError(f"Unsupported file type: {ext or '(none)'}")
             headers = ["ID_HIDDEN", "Structure"]
             first_emit = True
