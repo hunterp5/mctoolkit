@@ -25,6 +25,7 @@ from unittest.mock import patch
 from rdkit import Chem
 
 from molmanager.descriptors.medchem_descriptors import (
+    bbb_score,
     cns_mpo_score,
     esol_logS_intrinsic,
     lipinski_violations,
@@ -82,6 +83,35 @@ def test_cns_mpo_in_range(_mock_ms: object) -> None:
     assert 0.0 <= s <= 6.0
 
 
+def test_bbb_score_matches_gupta_table3() -> None:
+    """Table 3 of Gupta et al., J. Med. Chem. 2019, with each drug's reported pKa."""
+    from types import SimpleNamespace
+
+    cases = (
+        (
+            "C1CN(CCC1(C2=CC(=C(C=C2)Cl)C(F)(F)F)O)CCCC(C3=CC=C(C=C3)F)C4=CC=C(C=C4)F",
+            8.96,
+            4.65,
+        ),
+        ("C1CN(CCN1CC=CC2=CC=CC=C2)C(C3=CC=CC=C3)C4=CC=CC=C4", 8.1, 5.04),
+        ("CC1(C(N2C(S1(=O)=O)CC2=O)C(=O)O)CN3C=CN=N3", 2.86, 1.82),
+        ("CCCCCN(C)CCC(O)(P(=O)(O)O)P(=O)(O)O", 9.92, 1.80),
+    )
+    for smiles, pka, expected in cases:
+        mol = Chem.MolFromSmiles(smiles)
+        assert mol is not None
+        score = bbb_score(mol, SimpleNamespace(macro_pkas=(pka,)))
+        assert abs(score - expected) < 0.02
+
+
+@patch("molmanager.descriptors.medchem_descriptors.microstates_for_mol", return_value=None)
+def test_bbb_score_without_microstates(_mock_ms: object) -> None:
+    mol = Chem.MolFromSmiles("c1ccccc1CCN")
+    assert mol is not None
+    score = bbb_score(mol)
+    assert 0.0 <= score <= 6.0
+
+
 @patch("molmanager.descriptors.medchem_descriptors.microstates_for_mol", return_value=None)
 def test_descriptor_dispatch_custom_ids(_mock_ms: object) -> None:
     cache: dict = {}
@@ -92,6 +122,7 @@ def test_descriptor_dispatch_custom_ids(_mock_ms: object) -> None:
     assert descriptor_callable_for_int_fn("RO5_VIOLATIONS", cache)(mol) == 0
     assert descriptor_callable_for_int_fn("RO5_PASS", cache)(mol) == "Yes"
     assert isinstance(descriptor_callable_for_int_fn("CNS_MPO", cache)(mol), float)
+    assert isinstance(descriptor_callable_for_int_fn("BBB_SCORE", cache)(mol), float)
     assert isinstance(descriptor_callable_for_int_fn("LOGS_ESOL", cache)(mol), float)
 
 
@@ -99,6 +130,7 @@ def test_int_fns_need_ionization() -> None:
     assert int_fns_need_ionization(("MolWt", "LOGD74"))
     assert int_fns_need_ionization(("LOGS74",))
     assert int_fns_need_ionization(("CNS_MPO",))
+    assert int_fns_need_ionization(("BBB_SCORE",))
     assert not int_fns_need_ionization(("QED", "MolWt", "LOGS_ESOL"))
 
 
