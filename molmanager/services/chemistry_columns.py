@@ -39,6 +39,7 @@ def skip_chemistry_tool_column_dropdown(header: str) -> bool:
         return True
     if nl == "pi":
         return True
+    # Columns written by the removed site-of-metabolism predictor.
     if nl.startswith("som "):
         return True
     if nl == "cluster" or nl.startswith("cluster ("):
@@ -46,6 +47,16 @@ def skip_chemistry_tool_column_dropdown(header: str) -> bool:
     if "inchikey" in nl and "smiles" not in nl and "inchi" not in nl and "mol" not in nl:
         return True
     return False
+
+
+def is_legacy_som_map_header(header: str) -> bool:
+    """Map column left by the removed site-of-metabolism predictor.
+
+    Old sessions stored a highlighted image here. The cell text is the parent
+    SMILES, so these names stay ordinary text columns.
+    """
+    name = (header or "").strip().lower()
+    return name == "som map" or name.startswith("som map ")
 
 
 def should_skip_chemical_scan_column(
