@@ -42,6 +42,7 @@ PDB_EXTS = frozenset({".pdb"})
 PDBQT_EXTS = frozenset({".pdbqt"})
 RXN_EXTS = frozenset({".rxn", ".rdf"})
 STRUCTURE_MOL_EXTS = SDF_EXTS | MOL2_EXTS | TDT_EXTS | PDB_EXTS | PDBQT_EXTS
+OPENABLE_TABLE_EXTS = STRUCTURE_MOL_EXTS | SMI_LINE_EXTS | TABULAR_EXTS | RXN_EXTS
 
 _MOL2_MARKER = "@<TRIPOS>MOLECULE"
 
@@ -79,6 +80,11 @@ def table_path_parts(path: str | Path) -> tuple[str, bool]:
 def logical_suffix(path: str | Path) -> str:
     """File type suffix with a trailing ``.gz`` stripped (``.csv.gz`` → ``.csv``)."""
     return table_path_parts(path)[0]
+
+
+def is_openable_table_path(path: str | Path) -> bool:
+    """True when File → Open can read *path* (``.sdf.gz`` counts as SDF)."""
+    return logical_suffix(path) in OPENABLE_TABLE_EXTS
 
 
 def default_table_delimiter(ext: str) -> str:
