@@ -153,7 +153,7 @@ class SessionSaveMixin:
             return True
         if getattr(self, "_mmp_last_pairs", None):
             return True
-        if getattr(self, "_som_browse_records", None):
+        if getattr(self, "_metabolite_browse_records", None):
             return True
         return False
 
@@ -420,9 +420,9 @@ class SessionSaveMixin:
             ),
             "confs_sidecar": serialize_confs_sidecar(self._confs_sidecar_for_session(want)),
             "depiction_2d": self._depiction_coords_for_session(want),
-            "som_browse": self._session_som_browse_payload(oids=want),
             "ionization_sidecar": partial(serialize_ionization_sidecar, ionization_snapshot()),
             "mmp_ledger": self._session_mmp_ledger_payload(),
+            "metabolite_browse": self._session_metabolite_browse_payload(oids=want),
             "dock_results": self._session_dock_results_payload(oids=want),
             "pose_column_contexts": self._session_pose_column_contexts(),
             "protein_viewer": self._collect_protein_viewer(),
@@ -460,14 +460,17 @@ class SessionSaveMixin:
             return store
         return {k: v for k, v in store.items() if int(k[0]) in oids}
 
-    def _session_som_browse_payload(self, *, oids: set[int] | None = None) -> list[dict]:
-        """Atom-level SOM maps for session restore (redraws table images on open)."""
-        from ..som_browser import records_from_table, serialize_som_browse_records
+    def _session_metabolite_browse_payload(self, *, oids: set[int] | None = None) -> list[dict]:
+        """BioTransformer browser records so Viewer reopens after a session open."""
+        from ..metabolite_browser import (
+            records_from_table,
+            serialize_metabolite_browse_records,
+        )
 
-        records = list(getattr(self, "_som_browse_records", None) or ())
+        records = list(getattr(self, "_metabolite_browse_records", None) or ())
         if not records:
             records = records_from_table(self)
-        payload = serialize_som_browse_records(records)
+        payload = serialize_metabolite_browse_records(records)
         if oids is None:
             return payload
         kept: list[dict] = []
