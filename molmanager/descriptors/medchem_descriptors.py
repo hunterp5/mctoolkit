@@ -19,16 +19,17 @@
 Canonical citations (plain text, copy-paste friendly) live in ``molmanager.reference.method_citations``.
 
 * **CNS MPO** — Wager et al., ACS Chem. Neurosci. 2010 (doi:10.1021/cn100008c); Table 1 / PMC3368654.
+* **BBB Score** — Gupta et al., J. Med. Chem. 2019 (doi:10.1021/acs.jmedchem.9b01220); Table 1 / Table 4.
 * **AB-MPS** — DeGoey et al., J. Med. Chem. 2018 (doi:10.1021/acs.jmedchem.7b00717); |cLogD7.4 − 3| + NAR + NRB.
 * **ESOL intrinsic log S** — Delaney, J. Chem. Inf. Comput. Sci. 2004 (doi:10.1021/ci034243x).
 * **Uni-pKa microstates** — Luo et al., JACS Au 2024 (doi:10.1021/jacsau.4c00271); runtime unipkainfer.
 * **MolGpKa SMARTS** (Uni-pKa enumerator templates) — Pan et al., J. Chem. Inf. Model. 2021
   (doi:10.1021/acs.jcim.1c00075).
 
-When a Uni-pKa ionization ensemble is available (``molmanager.ionization``), LogD 7.4, LogS 7.4, and the
-CNS MPO cLogD / pKa legs use those predictions plus RDKit ``Crippen.MolLogP``; otherwise cLogD / pKa fall back
-to simple heuristics. LogD 7.4 and LogS 7.4 prefer Uni-pKa Boltzmann populations at pH 7.4 and fall back to
-heuristics when none are returned.
+When a Uni-pKa ionization ensemble is available (``molmanager.ionization``), LogD 7.4, LogS 7.4, the
+CNS MPO cLogD / pKa legs, and the BBB Score pKa leg use those predictions plus RDKit descriptors;
+otherwise cLogD / pKa fall back to simple heuristics. LogD 7.4 and LogS 7.4 prefer Uni-pKa
+Boltzmann populations at pH 7.4 and fall back to heuristics when none are returned.
 
 **LogS intrinsic** uses the original Delaney ESOL equation (log10 mol L⁻¹). **LogS 7.4** augments that with
 −log10(f_neutral) from Uni-pKa populations (same f_neutral as LogD 7.4).
@@ -195,6 +196,111 @@ def cns_mpo_score(mol: Chem.Mol, states: list | None = None) -> float:
     t0_hbd = _mono_dec(hbd, 0.5, 3.5)
     t0_pka = _mono_dec(pka_mb, 8.0, 10.0)
     return t0_p + t0_d + t0_mw + t0_tpsa + t0_hbd + t0_pka
+
+
+# Gupta et al., J. Med. Chem. 2019, Table 1. Aromatic-ring term is stepwise; the rest are
+# polynomials normalized by the reported local maximum on (low, high].
+_BBB_ARO_P = {
+    0: 0.336376,
+    1: 0.816016,
+    2: 1.0,
+    3: 0.691115,
+    4: 0.199399,
+}
+
+
+def _bbb_piecewise(
+    x: float,
+    low: float,
+    high: float,
+    norm: float,
+    coeffs: tuple[float, ...],
+) -> float:
+    """Normalized polynomial on ``(low, high]``; 0 outside. ``coeffs`` are highest degree first."""
+    if x <= low or x > high:
+        return 0.0
+    acc = 0.0
+    for coeff in coeffs:
+        acc = acc * x + coeff
+    value = acc / norm
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
+
+
+def bbb_score_from_descriptors(
+    aromatic_rings: float,
+    heavy_atoms: float,
+    mol_wt: float,
+    hbd: float,
+    hba: float,
+    tpsa: float,
+    pka: float,
+) -> float:
+    """Gupta BBB Score from aromatic rings, heavy atoms, MWHBN, TPSA, and pKa.
+
+    ``MWHBN = (HBD + HBA) / sqrt(MW)``. Table 4 of Gupta et al., J. Med. Chem. 2019,
+    62, 9824–9836 defines the score as
+
+    ``P(Aro_R) + P(HA) + 1.5 P(MWHBN) + 2 P(TPSA) + 0.5 P(pKa)``.
+
+    The weights sum to 6. The paper treats scores in ``[4, 6]`` as CNS-like and
+    scores in ``[0, 4)`` as non-CNS. https://doi.org/10.1021/acs.jmedchem.9b01220
+    """
+    if mol_wt > 0.0:
+        mwhbn = (float(hbd) + float(hba)) / math.sqrt(float(mol_wt))
+    else:
+        mwhbn = 0.0
+    p_aro = _BBB_ARO_P.get(int(aromatic_rings), 0.0)
+    p_ha = _bbb_piecewise(
+        float(heavy_atoms),
+        5.0,
+        45.0,
+        0.624231,
+        (0.0000443, -0.004556, 0.12775, -0.463),
+    )
+    p_mwhbn = _bbb_piecewise(
+        mwhbn,
+        0.05,
+        0.45,
+        0.72258,
+        (26.733, -31.495, 9.5202, -0.1358),
+    )
+    p_tpsa = _bbb_piecewise(float(tpsa), 0.0, 120.0, 0.9598, (-0.0067, 0.9598))
+    p_pka = _bbb_piecewise(
+        float(pka),
+        3.0,
+        11.0,
+        0.597488,
+        (0.00045068, -0.016331, 0.18618, -0.71043, 0.8579),
+    )
+    return p_aro + p_ha + 1.5 * p_mwhbn + 2.0 * p_tpsa + 0.5 * p_pka
+
+
+def bbb_score(mol: Chem.Mol, states: list | None = None) -> float:
+    """BBB Score for one structure (Gupta et al., J. Med. Chem. 2019, Table 1).
+
+    RDKit supplies aromatic-ring count, heavy-atom count, average molecular weight,
+    Lipinski H-bond donor and acceptor counts, and TPSA. pKa is the highest Uni-pKa
+    macro pKa when an ensemble is available, and the CNS MPO basic-pKa heuristic
+    otherwise. The paper fit H-bond counts with ChemAxon; Lipinski acceptors can be
+    lower for phosphonates, which changes the score only when MWHBN is inside (0.05, 0.45].
+    """
+    st = states if states is not None else microstates_for_mol(mol)
+    pka = most_basic_pka_from_states(st) if st else None
+    if pka is None:
+        pka = _approx_pka_most_basic(mol)
+    return bbb_score_from_descriptors(
+        float(rdMolDescriptors.CalcNumAromaticRings(mol)),
+        float(mol.GetNumHeavyAtoms()),
+        float(Descriptors.MolWt(mol)),
+        float(Lipinski.NumHDonors(mol)),
+        float(Lipinski.NumHAcceptors(mol)),
+        float(Descriptors.TPSA(mol)),
+        float(pka),
+    )
 
 
 def mol_net_formal_charge(mol: Chem.Mol) -> int:
