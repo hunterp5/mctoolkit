@@ -211,7 +211,7 @@ Revisit these on the PyQt5 tree. Do not require PySide6.
 - R-group SAR matrix (R1 × R2 heatmap of pIC50, Free-Wilson / MMP additive)
 - Selectivity indices from two or more assay columns
 - Bioisostere / MMP analog generator (“what should I make next?”)
-- Soft-spot blocking from SOM + BioTransformer, scored with MPO
+- Soft-spot blocking from BioTransformer metabolites, scored with MPO
 - Shape / 3D similarity (USRCAT / RDKit shape; ROSHAMBO chat)
 - Purchasable analog search (Enamine REAL / ZINC / Mcule)
 - Dock-time tautomer + unspecified-stereo expansion (cap ~16 forms/parent),
