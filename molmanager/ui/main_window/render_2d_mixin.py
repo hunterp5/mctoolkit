@@ -38,11 +38,8 @@ from ...chem.structure_source_headers import (
     is_common_core_structure_header,
     is_murcko_structure_header,
 )
-from ...workers import (
-    STRUCTURE_PAYLOAD_TAG,
-    Render2DBatchHeldJob,
-    Render2DBatchProcessWorker,
-)
+from ...chem.render2d_mp import STRUCTURE_PAYLOAD_TAG
+from ...workers import Render2DBatchHeldJob, Render2DBatchProcessWorker
 from ..strings import TOOL_RENDER_2D
 from .column_write_mixin import cell_looks_uncalculated
 
