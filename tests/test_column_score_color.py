@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Auto green–red coloring for QED, AB-MPS, and CNS MPO score columns."""
+"""Auto green–red coloring for QED, AB-MPS, BBB, and CNS MPO score columns."""
 
 from __future__ import annotations
 
@@ -30,15 +30,20 @@ def test_score_header_matching() -> None:
     assert favorable_score_color_spec("AB-MPS score") is not None
     assert favorable_score_color_spec("AB-MPS score (2)") is not None
     assert favorable_score_color_spec("CNS MPO score") is not None
+    assert favorable_score_color_spec("BBB Score") is not None
+    assert favorable_score_color_spec("BBB Score (2)") is not None
     assert favorable_score_color_spec("CNS-MPO score") is not None
     assert favorable_score_color_spec("QED") is None
     assert favorable_score_color_spec("MolWt") is None
     qed = favorable_score_color_spec("QED Score")
     ab = favorable_score_color_spec("AB-MPS score")
     cns = favorable_score_color_spec("CNS MPO score")
+    bbb = favorable_score_color_spec("BBB Score")
     assert qed is not None and qed.higher_is_better
     assert ab is not None and not ab.higher_is_better
     assert cns is not None and cns.higher_is_better
+    assert bbb is not None and bbb.higher_is_better
+    assert bbb.mid_value == 4.0
 
 
 def test_qed_and_cns_mpo_high_values_are_greener(qapp):  # noqa: ARG001
@@ -57,6 +62,18 @@ def test_qed_and_cns_mpo_high_values_are_greener(qapp):  # noqa: ARG001
     assert qed_low.red() > qed_high.red()
     assert cns_high.green() > cns_low.green()
     assert cns_low.red() > cns_high.red()
+
+
+def test_bbb_high_values_are_greener(qapp):  # noqa: ARG001
+    model = CompoundTableModel(["ID_HIDDEN", "Structure", "BBB Score"])
+    model.append_row(1, {"BBB Score": "1.5"})
+    model.append_row(2, {"BBB Score": "5.5"})
+    assert model.apply_favorable_score_column_coloring("BBB Score")
+    col = model._headers.index("BBB Score")
+    low = model.data(model.index(0, col), Qt.BackgroundRole)
+    high = model.data(model.index(1, col), Qt.BackgroundRole)
+    assert high.green() > low.green()
+    assert low.red() > high.red()
 
 
 def test_ab_mps_low_values_are_greener(qapp):  # noqa: ARG001
