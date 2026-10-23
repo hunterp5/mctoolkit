@@ -14,40 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Browse SALI pairs side-by-side with a data table for the current pair."""
+"""Browse SALI pairs side-by-side, highlighting atoms outside the shared core."""
 
 from __future__ import annotations
 
-from typing import Any
-
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QBrush, QPixmap
-from PyQt5.QtWidgets import (
-    QAbstractItemView,
-    QGroupBox,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QSizePolicy,
-    QStyle,
-    QTableWidget,
-    QTableWidgetItem,
-    QVBoxLayout,
-    QWidget,
-)
 from rdkit import Chem
 
 from ...analysis.sali_analysis import SaliPoint, as_sali_activity
-from ...table.structure_image import molecule_pixmap
-from .chrome import (
-    BrowserIndexSpinBox,
-    style_browser_data_table,
-    style_browser_emphasis_label,
-    style_browser_group_box,
-)
 from .pair_browser import PairBrowserDialog
-
-_PAIR_TABLE_ROW_HEIGHT = 28
 
 
 class SaliBrowserDialog(PairBrowserDialog):
@@ -58,7 +32,7 @@ class SaliBrowserDialog(PairBrowserDialog):
 
     def __init__(
         self,
-        parent: Any,
+        parent,
         points: list[SaliPoint],
         *,
         activity_column: str,
@@ -78,135 +52,7 @@ class SaliBrowserDialog(PairBrowserDialog):
         if self._all_points and 0 <= self._idx < len(self._all_points):
             p0 = self._all_points[self._idx]
             self._prefer_keys = (int(p0.oid_a), int(p0.oid_b))
-        self._pair_index_syncing = False
         super().__init__(parent, activity_column=activity_column)
-
-    def _add_comparison_section(self, root: QVBoxLayout) -> None:
-        """Pair metrics, then a two-row table of the current pair."""
-        self._metrics_box = QGroupBox()
-        style_browser_group_box(self._metrics_box)
-        metrics_layout = QVBoxLayout(self._metrics_box)
-        metrics_layout.setContentsMargins(8, 8, 8, 8)
-        self._metrics_label = QLabel(self._metrics_box)
-        self._metrics_label.setAlignment(Qt.AlignCenter)
-        self._metrics_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self._metrics_label.setWordWrap(True)
-        style_browser_emphasis_label(self._metrics_label)
-        metrics_layout.addWidget(self._metrics_label)
-        root.addWidget(self._metrics_box)
-
-        self._row_table = QTableWidget(0, 0, self)
-        self._row_table.setObjectName("BrowserRowTable")
-        self._row_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self._row_table.setSelectionBehavior(QAbstractItemView.SelectItems)
-        self._row_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self._row_table.setFocusPolicy(Qt.NoFocus)
-        self._row_table.verticalHeader().setVisible(True)
-        self._row_table.verticalHeader().setDefaultAlignment(Qt.AlignCenter)
-        self._row_table.verticalHeader().setDefaultSectionSize(_PAIR_TABLE_ROW_HEIGHT)
-        self._row_table.horizontalHeader().setHighlightSections(False)
-        self._row_table.horizontalHeader().setStretchLastSection(True)
-        self._row_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        self._row_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self._row_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._row_table.setWordWrap(False)
-        self._row_table.setShowGrid(True)
-        self._row_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        style_browser_data_table(self._row_table)
-        bar = self._row_table.horizontalScrollBar()
-        if bar is not None:
-            bar.rangeChanged.connect(lambda *_a: self._fit_pair_table_height())
-        self._fit_pair_table_height()
-        root.addWidget(self._row_table)
-        self._place_side_names_with_activity()
-
-    def _place_side_names_with_activity(self) -> None:
-        """Put Molecule A / B on the activity line under each depiction."""
-        for panel, side in (
-            (self._left_panel, "Molecule A"),
-            (self._right_panel, "Molecule B"),
-        ):
-            box = panel["box"]
-            activity: QLabel = panel["activity"]
-            layout = box.layout()
-            layout.removeWidget(activity)
-            name = QLabel(side, box)
-            name.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            name.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            style_browser_emphasis_label(name)
-            activity.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            host = QWidget(box)
-            row = QHBoxLayout(host)
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(12)
-            row.addStretch(1)
-            row.addWidget(name)
-            row.addWidget(activity)
-            row.addStretch(1)
-            layout.addWidget(host)
-            panel["name"] = name
-            panel["caption_host"] = host
-            box.setTitle("")
-            style_browser_group_box(box)
-
-    def _prepare_nav_extras(self) -> None:
-        host = QWidget()
-        row = QHBoxLayout(host)
-        row.setContentsMargins(0, 0, 10, 0)
-        row.setSpacing(4)
-        pair_label = QLabel("Pair")
-        pair_label.setAlignment(Qt.AlignVCenter)
-        self._pair_index = BrowserIndexSpinBox(host)
-        self._pair_index.setToolTip("Type a pair number and press Enter to jump to that pair.")
-        n = len(self._points)
-        if n > 0:
-            self._pair_index.setRange(1, n)
-            self._pair_index.setValue(min(self._idx + 1, n))
-        self._pair_count_label = QLabel("/ 0" if n <= 0 else f"/ {n}")
-        self._pair_count_label.setAlignment(Qt.AlignVCenter)
-        row.addWidget(pair_label)
-        row.addWidget(self._pair_index)
-        row.addWidget(self._pair_count_label)
-        self._pair_index_host = host
-        self._pair_index.valueChanged.connect(self._on_pair_index_changed)
-
-    def _nav_leading_widgets(self) -> list[QWidget]:
-        return [self._pair_index_host]
-
-    def _nav_trailing_widgets(self) -> list[QWidget]:
-        return [self._cb_selected_only]
-
-    def _on_pair_index_changed(self, value: int) -> None:
-        if self._pair_index_syncing:
-            return
-        n = self._item_count()
-        if n <= 0:
-            return
-        target = max(0, min(int(value) - 1, n - 1))
-        if target == self._idx:
-            return
-        self._idx = target
-        self._update_ui()
-
-    def _sync_pair_index(self, count: int) -> None:
-        spin = self._pair_index
-        self._pair_index_syncing = True
-        spin.blockSignals(True)
-        try:
-            if count <= 0:
-                spin.setRange(1, 1)
-                spin.setValue(1)
-                spin.setEnabled(False)
-                self._pair_count_label.setText("/ 0")
-            else:
-                shown = max(1, min(self._idx + 1, count))
-                spin.setEnabled(True)
-                spin.setRange(1, count)
-                spin.setValue(shown)
-                self._pair_count_label.setText(f"/ {count}")
-        finally:
-            spin.blockSignals(False)
-            self._pair_index_syncing = False
 
     def _item_count(self) -> int:
         return len(self._points)
@@ -249,6 +95,7 @@ class SaliBrowserDialog(PairBrowserDialog):
             prefer = (int(self._all_points[0].oid_a), int(self._all_points[0].oid_b))
         self._prefer_keys = prefer
         self._preview_cache.clear()
+        self._highlight_cache.clear()
         self._refresh_property_columns()
         self._rebuild_filtered_points(update_ui=True)
 
@@ -298,10 +145,23 @@ class SaliBrowserDialog(PairBrowserDialog):
         point = self._current_point()
         if point is None:
             return
-        act_a = self._activity_for_oid(point.oid_a)
-        act_b = self._activity_for_oid(point.oid_b)
-        self._update_molecule_panel(self._left_panel, point.oid_a, act_a)
-        self._update_molecule_panel(self._right_panel, point.oid_b, act_b)
+        mol_a = self._mol_for_oid(point.oid_a)
+        mol_b = self._mol_for_oid(point.oid_b)
+        ha, hb = self._variable_highlights((int(point.oid_a), int(point.oid_b)), mol_a, mol_b)
+        self._show_molecule(
+            self._left_panel,
+            self._activity_caption(point.oid_a, self._activity_for_oid(point.oid_a)),
+            mol_a,
+            ha,
+            (int(point.oid_a), int(point.oid_b), tuple(sorted(ha))),
+        )
+        self._show_molecule(
+            self._right_panel,
+            self._activity_caption(point.oid_b, self._activity_for_oid(point.oid_b)),
+            mol_b,
+            hb,
+            (int(point.oid_b), int(point.oid_a), tuple(sorted(hb))),
+        )
 
     def _update_ui(self) -> None:
         n = len(self._points)
@@ -326,104 +186,6 @@ class SaliBrowserDialog(PairBrowserDialog):
         self._metrics_label.setText(self._metrics_text(point))
         self._refresh_previews()
         self._update_property_values()
-
-    def _refresh_property_columns(self) -> None:
-        self._fill_pair_table()
-
-    def _update_property_values(self) -> None:
-        self._fill_pair_table()
-
-    def _visible_data_columns(self) -> list[tuple[int, str]]:
-        """Visible non-structure table columns in visual order."""
-        app = self._app
-        if app is None:
-            return []
-        headers = list(getattr(app, "headers", []) or [])
-        table = getattr(app, "table", None)
-        vis_fn = getattr(app, "_visual_logical_columns", None)
-        logical = vis_fn() if callable(vis_fn) else list(range(len(headers)))
-        out: list[tuple[int, str]] = []
-        for i in logical:
-            if i < 0 or i >= len(headers):
-                continue
-            name = str(headers[i])
-            if name in ("ID_HIDDEN", "Structure"):
-                continue
-            if table is not None:
-                try:
-                    if table.isColumnHidden(i):
-                        continue
-                except RuntimeError:
-                    pass
-            out.append((i, name))
-        return out
-
-    def _pair_table_item(self, oid: int, col: int, header: str) -> QTableWidgetItem:
-        item = QTableWidgetItem()
-        item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-        text = self._cell_text_for_oid(int(oid), header)
-        item.setText(text)
-        if text:
-            item.setToolTip(text)
-        app = self._app
-        model = getattr(app, "_table_model", None) if app is not None else None
-        if model is None:
-            return item
-        try:
-            row = app.logical_row_for_oid(int(oid))
-        except Exception:
-            return item
-        if row is None or int(row) < 0:
-            return item
-        try:
-            index = model.index(int(row), int(col))
-            bg = model.data(index, Qt.BackgroundRole)
-        except Exception:
-            return item
-        if bg is not None:
-            item.setBackground(bg if isinstance(bg, QBrush) else QBrush(bg))
-        return item
-
-    def _fit_pair_table_height(self) -> None:
-        table = getattr(self, "_row_table", None)
-        if table is None:
-            return
-        hdr_h = int(table.horizontalHeader().sizeHint().height())
-        frame = 2 * int(table.frameWidth())
-        style = table.style()
-        extent = int(style.pixelMetric(QStyle.PM_ScrollBarExtent, None, table))
-        bar = table.horizontalScrollBar()
-        hinted = int(bar.sizeHint().height()) if bar is not None else 0
-        scroll = max(extent, hinted, 16)
-        table.setFixedHeight(hdr_h + 2 * _PAIR_TABLE_ROW_HEIGHT + frame + scroll + 4)
-
-    def _fill_pair_table(self) -> None:
-        table = getattr(self, "_row_table", None)
-        if table is None:
-            return
-        cols = self._visible_data_columns()
-        names = [name for _col, name in cols]
-        current = []
-        for i in range(table.columnCount()):
-            header_item = table.horizontalHeaderItem(i)
-            current.append("" if header_item is None else header_item.text())
-        table.blockSignals(True)
-        if current != names:
-            table.setColumnCount(len(names))
-            if names:
-                table.setHorizontalHeaderLabels(names)
-        oids = self._current_pair_oids()
-        if oids is None:
-            table.setRowCount(0)
-        else:
-            table.setRowCount(2)
-            table.setVerticalHeaderLabels(["A", "B"])
-            for row, oid in enumerate(oids):
-                for i, (col, name) in enumerate(cols):
-                    table.setItem(row, i, self._pair_table_item(int(oid), col, name))
-                table.setRowHeight(row, _PAIR_TABLE_ROW_HEIGHT)
-        table.blockSignals(False)
-        self._fit_pair_table_height()
 
     def _mol_for_oid(self, oid: int) -> Chem.Mol | None:
         app = self._app
@@ -501,47 +263,4 @@ class SaliBrowserDialog(PairBrowserDialog):
         try:
             return float(str(text).strip().replace(",", ""))
         except ValueError:
-            return None
-
-    def _update_molecule_panel(
-        self,
-        panel: dict[str, Any],
-        oid: int,
-        activity: float | None,
-    ) -> None:
-        label: QLabel = panel["struct"]
-        panel["activity"].setText(self._activity_caption(oid, activity))
-        mol = self._mol_for_oid(oid)
-        pw, ph, dpr = self._preview_pixel_size(label)
-        if mol is None:
-            label.clear()
-            label.setPixmap(QPixmap())
-            label.setText("(no structure)")
-            return
-
-        from ...chem.depiction_coords import depiction_revision
-
-        cache_key = (int(oid), pw, ph, depiction_revision(self._app))
-        cached = self._preview_cache.get(cache_key)
-        if cached is not None and not cached.isNull():
-            pm = cached
-        else:
-            pm = self._render_mol(mol, pw, ph)
-            if pm is not None and not pm.isNull():
-                self._preview_cache[cache_key] = pm
-        if pm is None or pm.isNull():
-            label.clear()
-            label.setPixmap(QPixmap())
-            label.setText("(render failed)")
-            return
-        if pm.width() != pw or pm.height() != ph:
-            pm = pm.scaled(pw, ph, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        pm.setDevicePixelRatio(dpr)
-        label.setPixmap(pm)
-        label.setText("")
-
-    def _render_mol(self, mol: Chem.Mol, pw: int, ph: int) -> QPixmap | None:
-        try:
-            return molecule_pixmap(mol, pw, ph)
-        except Exception:
             return None
