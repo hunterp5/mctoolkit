@@ -26,6 +26,7 @@ def test_plain_citations_contain_dois() -> None:
     assert "10.1021/acs.jcim.1c00075" in sc.MOLGPKA
     assert "10.1021/ci034243x" in sc.ESOL_DELANEY
     assert "10.1021/cn100008c" in sc.WAGER_CNS_MPO
+    assert "10.1021/acs.jmedchem.9b01220" in sc.GUPTA_BBB
     assert "10.1186/1758-2946-3-8" in sc.CONFAB
     assert "10.1021/acs.jcim.3c00563" in sc.CONFORGE
 
@@ -44,6 +45,7 @@ def test_descriptor_checkbox_citations() -> None:
     assert sc.descriptor_checkbox_citation_html("FP_Pharm2D_Gobbi") is not None
     assert sc.descriptor_checkbox_citation_html("AB_MPS") is not None
     assert "DeGoey" in (sc.descriptor_checkbox_citation_html("AB_MPS") or "")
+    assert "Gupta" in (sc.descriptor_checkbox_citation_html("BBB_SCORE") or "")
     assert sc.descriptor_checkbox_citation_html("MolWt") is None
     assert sc.descriptor_checkbox_citation_html("PMI1") is not None
     assert "Sauer" in (sc.descriptor_checkbox_citation_html("NPR1") or "")
