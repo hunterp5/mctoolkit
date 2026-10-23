@@ -24,9 +24,7 @@ from PyQt5.QtCore import QSize, Qt, QTimer
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import (
     QDialog,
-    QFormLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QLayout,
     QShortcut,
@@ -83,7 +81,7 @@ def style_browser_structure_label(label: QLabel) -> None:
 
 
 def style_browser_data_table(table: QTableWidget) -> None:
-    """Rounded well used by pose/selection row tables and SOM/metabolite lists."""
+    """Rounded well used by pose, selection, and metabolite lists."""
     table.setStyleSheet(BROWSER_DATA_TABLE_QSS)
 
 
@@ -133,37 +131,6 @@ def make_pair_mol_panel(title: str, parent: QWidget | None = None) -> dict[str, 
     layout.addWidget(struct, 1)
     layout.addWidget(activity)
     return {"box": box, "struct": struct, "activity": activity}
-
-
-def make_pair_prop_value_row() -> dict[str, Any]:
-    """A | B property values for the three shared pair-browser pickers."""
-    row = QHBoxLayout()
-    row.setContentsMargins(0, 0, 0, 0)
-    row.setSpacing(10)
-    lab_a = QLabel("—")
-    lab_b = QLabel("—")
-    for lab in (lab_a, lab_b):
-        lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        lab.setWordWrap(True)
-        lab.setMinimumWidth(120)
-    row.addWidget(lab_a, 1)
-    row.addWidget(lab_b, 1)
-    field = QWidget()
-    field.setLayout(row)
-    return {"host": field, "a": lab_a, "b": lab_b}
-
-
-def make_pair_prop_box(parent: QWidget | None = None) -> tuple[QGroupBox, QFormLayout]:
-    """Three column-picker rows comparing molecule A and B."""
-    box = QGroupBox(parent)
-    style_browser_group_box(box)
-    form = QFormLayout(box)
-    form.setLabelAlignment(Qt.AlignRight)
-    form.setFormAlignment(Qt.AlignTop)
-    form.setContentsMargins(12, 12, 12, 10)
-    form.setVerticalSpacing(8)
-    form.setHorizontalSpacing(10)
-    return box, form
 
 
 class BrowserIndexSpinBox(QSpinBox):
