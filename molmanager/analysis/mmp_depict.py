@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Atom highlights for matched molecular pair drawings."""
+"""Atom highlights for pair drawings (MMP and SALI): atoms outside the MCS."""
 
 from __future__ import annotations
 
