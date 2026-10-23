@@ -23,9 +23,9 @@ from PyQt5.QtGui import QKeyEvent, QPixmap
 from PyQt5.QtWidgets import QLineEdit, QPlainTextEdit
 from rdkit import Chem
 
+from molmanager.chem.ingest_records import ingest_record_from_mol
 from molmanager.ui.compound_table_model import STRUCTURE_COLUMN_PENDING_HINT, CompoundTableModel
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
-from molmanager.workers.load_render import _mol_ingest_item
 
 MOL_BLOCK = Chem.MolToMolBlock(Chem.MolFromSmiles("CCO"))
 
@@ -97,7 +97,7 @@ def test_chosen_structure_column_keeps_structure_file_fields(qapp):  # noqa: ARG
     w = _window(["Alt", "Name"])
     w._ingest_structure_field = "Alt"
     try:
-        rows = _ingest(w, [_mol_ingest_item(mol, ["Alt", "Name"])])
+        rows = _ingest(w, [ingest_record_from_mol(mol, ["Alt", "Name"])])
         oid, cells = rows[0]
         assert cells == {"Alt": "c1ccccc1", "Name": "ethanol"}
         assert w._structure_text_for_oid(oid) == "c1ccccc1"
@@ -110,7 +110,7 @@ def test_structure_file_ingest_stores_canonical_smiles(qapp):  # noqa: ARG001
     mol.SetProp("SMILES", "not the structure")
     w = _window(["SMILES"])
     try:
-        rows = _ingest(w, [_mol_ingest_item(mol, ["SMILES"])])
+        rows = _ingest(w, [ingest_record_from_mol(mol, ["SMILES"])])
         assert w._structure_text_for_oid(rows[0][0]) == "CCO"
         assert rows[0][1]["SMILES"] == "not the structure"
     finally:

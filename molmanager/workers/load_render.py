@@ -20,11 +20,12 @@ import csv
 import logging
 import os
 import threading
+from collections import deque
 from concurrent.futures import FIRST_COMPLETED, wait
+from concurrent.futures import TimeoutError as FutureTimeoutError
 
 from .process_pool_utils import (
     should_terminate_process_pool,
-    shutdown_process_pool_executor,
 )
 from .render2d_pool import (
     ensure_render2d_process_pool,
@@ -42,7 +43,6 @@ from ..platform_support.config import load_config
 from ..chem.render2d_mp import (
     REACTION_PAYLOAD_TAG,
     molecule_image_bytes,
-    STRUCTURE_PAYLOAD_TAG,
     mp_render_structure_batch,
 )
 from ..chem.structure_source_headers import needs_structure_source_picker
@@ -54,7 +54,9 @@ from ..table.text_file_ingest import (
 )
 from ..table.open_messages import message_for_read_failure
 from ..table.table_file_formats import (
+    MOL2_EXTS,
     RXN_EXTS,
+    SDF_EXTS,
     SMI_LINE_EXTS,
     STRUCTURE_MOL_EXTS,
     TABULAR_EXTS,
@@ -64,23 +66,23 @@ from ..table.table_file_formats import (
     logical_suffix,
     open_text_maybe_gzip,
 )
-from ..conformers.conformer_column_codec import (
-    mol_coordinates_fill_blank_confs,
-    mol_has_3d_coordinates,
+from ..chem.ingest_records import (
+    IngestRecord,
+    ingest_record_from_mol,
+    iter_chunk_mols,
+    parse_structure_chunk,
+    structure_file_chunks,
 )
 from ..chem.fragment_disconnect import largest_fragment_and_rest
 from ..chem.structure_2d_depiction import (
     ReactionDrawSpec,
     render_depict_payload_png,
-    render_molecule_png,
-    render_reaction_png,
 )
 from ..chem.structure_neutralize import neutralize_mol
 from ..chem.structure_hydrogens import add_explicit_hydrogens, remove_explicit_hydrogens
 from ..chem.reaction_file_io import RXN_TABLE_HEADERS, load_rxn_file
 from ..chem.molecule_conversion import (
     mol_from_tool_input,
-    row_cells_from_mol,
     safe_mol_prop_string,
     tool_structure_result,
 )
@@ -90,6 +92,24 @@ from .signals import WorkerSignals, emit_partial_results_if_cancelled
 logger = logging.getLogger(__name__)
 
 _OPENABLE_TABLE_EXTS = STRUCTURE_MOL_EXTS | SMI_LINE_EXTS | TABULAR_EXTS | RXN_EXTS
+
+#: Below this size an SDF or MOL2 is parsed on the load thread; worker processes would
+#: cost more to feed than they save.
+_PARALLEL_PARSE_MIN_BYTES = 4 << 20
+
+
+def _parallel_parse_kind(path: str, ext: str) -> str | None:
+    """``"sdf"`` or ``"mol2"`` when *path* is large and seekable enough to parse in processes."""
+    if str(path).lower().endswith(".gz"):
+        return None
+    kind = "sdf" if ext in SDF_EXTS else "mol2" if ext in MOL2_EXTS else None
+    if kind is None:
+        return None
+    try:
+        big = os.path.getsize(path) >= _PARALLEL_PARSE_MIN_BYTES
+    except OSError:
+        return None
+    return kind if big else None
 
 
 def _file_has_bytes(path: str) -> bool:
@@ -116,52 +136,6 @@ def _emit_structure_tool_progress(
         signals=signals,
         throttle=throttle,
     )
-
-
-def mol_to_ingest_blob(mol: "Chem.Mol", *, keep_conformers: bool = False) -> bytes:
-    """Serialize a parsed molecule's structure for cross-thread ingest transfer.
-
-    Passing live RDKit Mol objects across the load worker → GUI thread boundary causes multi-second
-    UI freezes for large files, so batches carry these lightweight binary blobs instead. Properties
-    are intentionally *not* pickled here: they travel in the accompanying cell dict (the table is the
-    source of truth for property values), and dropping them makes serialize/rebuild ~4x faster and
-    the payload ~10x smaller.
-
-    Depiction-only 2D conformers are dropped here as well. The molecule store keeps connection
-    tables, so shipping those coordinates only made the GUI thread strip them one row at a time.
-    3D coordinates are kept: ingest packs them into the ``confs`` sidecar. 2D coordinates are kept
-    only when *keep_conformers* is set, so a blank ``confs`` cell can store that structure.
-    """
-    if not keep_conformers and mol.GetNumConformers() and not mol_has_3d_coordinates(mol):
-        mol = Chem.Mol(mol)
-        mol.RemoveAllConformers()
-    return mol.ToBinary()
-
-
-def _mol_ingest_item(
-    mol: "Chem.Mol", data_headers: list[str]
-) -> tuple[bytes, dict[str, str], str, bytes]:
-    """Ingest payload for one mol: structure blob, cells, SMILES, and flat depiction coordinates.
-
-    Extracting cells and SMILES here keeps that work off the GUI thread and in parallel with
-    parsing. The SMILES is the molecule store's structure text, which the Structure cell shows
-    until the row is drawn. A structure with coordinates and an empty ``confs`` cell keeps those
-    coordinates so ingest can store the structure as that conformation instead of a blank cell.
-
-    Flat 2D coordinates are packed separately. The structure blob still drops them, and the
-    GUI stores the pack as the row's depiction orientation. 3D coordinates are not a depiction.
-    """
-    from ..chem.depiction_coords import depiction_blob_from_mol
-
-    cells = row_cells_from_mol(mol, data_headers)
-    confs_cell = cells.get("confs") if "confs" in cells else None
-    keep = mol_coordinates_fill_blank_confs(mol, confs_cell)
-    try:
-        smiles = Chem.MolToSmiles(mol)
-    except Exception:  # noqa: BLE001 — RDKit raises varied C++ wrap errors
-        smiles = ""
-    depiction = depiction_blob_from_mol(mol)
-    return mol_to_ingest_blob(mol, keep_conformers=keep), cells, smiles, depiction
 
 
 # Re-export for call sites / tests that still import the private name from this module.
@@ -213,8 +187,11 @@ class Render2DBatchHeldJob(QRunnable):
         if done_ev is not None:
             if not getattr(self._app, "render2d_batch_active", lambda: False)():
                 done_ev.set()
-            else:
-                done_ev.wait()
+                return
+            # The GUI sets the event; once the app is closing it never will.
+            while not done_ev.wait(timeout=0.2):
+                if should_terminate_process_pool(self._cancel_event):
+                    return
 
 
 class Render2DBatchProcessWorker(QRunnable):
@@ -359,6 +336,50 @@ class UniversalLoadWorker(QRunnable):
                 ev.set()
                 return False
 
+    def _parse_chunks_in_processes(self, tasks: list[tuple], on_records) -> int:
+        """Parse SDF/MOL2 byte ranges in the shared worker pool; deliver records in file order.
+
+        A task the pool cannot run is parsed on this thread instead. Returns the record count.
+        """
+        pool = ensure_render2d_process_pool()
+        if pool is None:
+            return 0
+        note_render2d_pool_busy()
+        window = max(2, 2 * render2d_process_worker_count())
+        pending: deque = deque()
+        remaining = iter(tasks)
+        n_records = 0
+
+        def _fill() -> None:
+            while len(pending) < window:
+                task = next(remaining, None)
+                if task is None:
+                    return
+                pending.append((task, pool.submit(parse_structure_chunk, task)))
+
+        try:
+            _fill()
+            while pending:
+                if self._cancelled():
+                    for _task, future in pending:
+                        future.cancel()
+                    break
+                task, future = pending[0]
+                try:
+                    records = future.result(timeout=0.2)
+                except FutureTimeoutError:
+                    continue
+                except Exception:  # noqa: BLE001 — a broken pool must not lose the chunk
+                    logger.warning("Parse task failed in the pool; parsing it here", exc_info=True)
+                    records = parse_structure_chunk(task)
+                pending.popleft()
+                _fill()
+                n_records += len(records)
+                on_records(records)
+        finally:
+            note_render2d_pool_idle()
+        return n_records
+
     def run(self):
         try:
             self.signals.tool_progress.emit("Reading file…", -1, -1)
@@ -394,7 +415,7 @@ class UniversalLoadWorker(QRunnable):
                     headers.extend(sorted(str(p) for p in mol.GetPropNames()))
                     if not self._wait_for_structure_source_choice(headers):
                         return False
-                batch.append(_mol_ingest_item(mol, headers[2:]))
+                batch.append(ingest_record_from_mol(mol, headers[2:]))
                 if len(batch) >= batch_size:
                     _flush(last=False)
                 return True
@@ -422,18 +443,46 @@ class UniversalLoadWorker(QRunnable):
                             for h in fieldnames:
                                 if h != smi_col:
                                     m.SetProp(h, str(row[h]))
-                            batch.append(_mol_ingest_item(m, headers[2:]))
+                            batch.append(ingest_record_from_mol(m, headers[2:]))
                     if len(batch) >= batch_size:
                         _flush(last=False)
 
             if ext in STRUCTURE_MOL_EXTS:
                 n_mol = 0
-                for mol in iter_structure_mols(self.path):
-                    if self._cancelled():
-                        break
-                    n_mol += 1
-                    if not _add_mol(mol):
-                        break
+                kind = _parallel_parse_kind(str(self.path), ext)
+                chunks = structure_file_chunks(str(self.path), kind) if kind else []
+                if len(chunks) > 1:
+                    # Headers come from the first molecule, so read on this thread until one parses.
+                    stopped = False
+                    head = 0
+                    with open(self.path, "rb") as fh:
+                        while head < len(chunks) and n_mol == 0 and not stopped:
+                            start, end = chunks[head]
+                            fh.seek(start)
+                            for mol in iter_chunk_mols(fh.read(end - start), kind):
+                                n_mol += 1
+                                if self._cancelled() or not _add_mol(mol):
+                                    stopped = True
+                                    break
+                            head += 1
+                    if not stopped and head < len(chunks):
+                        _flush(last=False)
+
+                        def _add_records(records: list[IngestRecord]) -> None:
+                            batch.extend(records)
+                            _flush(last=False)
+
+                        tasks = [
+                            (str(self.path), kind, a, b, headers[2:]) for a, b in chunks[head:]
+                        ]
+                        n_mol += self._parse_chunks_in_processes(tasks, _add_records)
+                else:
+                    for mol in iter_structure_mols(self.path):
+                        if self._cancelled():
+                            break
+                        n_mol += 1
+                        if not _add_mol(mol):
+                            break
                 if n_mol == 0 and not self._cancelled() and _file_has_bytes(str(self.path)):
                     raise ValueError("No structures could be read.")
             elif ext in SMI_LINE_EXTS and text_first:
@@ -469,7 +518,7 @@ class UniversalLoadWorker(QRunnable):
                 items: list = []
                 for rec in records:
                     if rec.mol is not None:
-                        items.append(_mol_ingest_item(rec.mol, headers[2:]))
+                        items.append(ingest_record_from_mol(rec.mol, headers[2:]))
                     else:
                         items.append(
                             {

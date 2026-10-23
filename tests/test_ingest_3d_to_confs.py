@@ -21,6 +21,7 @@ from __future__ import annotations
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+from molmanager.chem.ingest_records import ingest_record_from_mol
 from molmanager.conformers.conformer_column_codec import (
     mol_coordinates_fill_blank_confs,
     mol_from_packed_confs_cell,
@@ -30,7 +31,6 @@ from molmanager.conformers.conformer_column_codec import (
 )
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
 from molmanager.ui.mol_viewer_3d import prepare_mol_2d
-from molmanager.workers.load_render import _mol_ingest_item
 
 
 def _flat_ethanol():
@@ -115,21 +115,21 @@ def test_blank_confs_load_stores_structure_coordinates(qapp):  # noqa: ARG001
     mol = _flat_ethanol()
     mol.SetProp("SMILES", "CCO")
     mol.SetProp("confs", "")
-    blob, cells, smiles, _depiction = _mol_ingest_item(mol, ["SMILES", "confs"])
-    assert smiles == "CCO"
-    rebuilt = Chem.Mol(bytes(blob))
-    assert rebuilt is not None and rebuilt.GetNumConformers() == 1
-    assert not (cells.get("confs") or "").strip()
+    record = ingest_record_from_mol(mol, ["SMILES", "confs"])
+    assert record.smiles == "CCO"
+    assert Chem.Mol(record.structure).GetNumConformers() == 0
+    assert record.ensemble and record.confs_cell
+    assert not (record.cells.get("confs") or "").strip()
 
     w = ChemistryWorkspaceWindow()
     w.headers = ["ID_HIDDEN", "Structure", "SMILES", "confs"]
     w._table_model.set_headers(list(w.headers))
-    oid = w.next_oid
-    w.next_oid += 1
-    stored = w._ingest_store_mol(oid, rebuilt, precomputed_cells=cells)
+    rows: list = []
+    w._ingest_append_batch_items([record], rows)
+    oid, stored = rows[0]
     w._table_model.append_row(oid, stored)
 
-    assert (stored.get("confs") or "").strip()
+    assert stored["confs"] == record.confs_cell
     light = w._table_model.backing_value_for_row_header(0, "confs")
     sc = getattr(w, "_confs_blocks_sidecar", {})
     packed = mol_from_packed_confs_cell(
@@ -137,21 +137,33 @@ def test_blank_confs_load_stores_structure_coordinates(qapp):  # noqa: ARG001
     )
     assert packed is not None
     assert packed.GetNumConformers() == 1
-    assert packed.GetNumAtoms() == rebuilt.GetNumAtoms()
+    assert packed.GetNumAtoms() == mol.GetNumAtoms()
 
     # A confs payload already on the row is kept; depiction coords are not a second ensemble.
     payload = '{"v":2,"h":"confs","m":{"ok":true,"n_kept":2,"n_packed":2}}'
     kept = _flat_ethanol()
     kept.SetProp("SMILES", "CCO")
     kept.SetProp("confs", payload)
-    kept_blob, kept_cells, _smiles, _kept_depiction = _mol_ingest_item(kept, ["SMILES", "confs"])
-    kept_mol = Chem.Mol(bytes(kept_blob))
-    assert kept_mol.GetNumConformers() == 0
-    assert kept_cells["confs"] == payload
-    oid3 = w.next_oid
-    w.next_oid += 1
-    kept_stored = w._ingest_store_mol(oid3, kept_mol, precomputed_cells=kept_cells)
-    assert kept_stored["confs"] == payload
+    kept_record = ingest_record_from_mol(kept, ["SMILES", "confs"])
+    assert not kept_record.ensemble
+    rows = []
+    w._ingest_append_batch_items([kept_record], rows)
+    assert rows[0][1]["confs"] == payload
+    w.close()
+
+
+def test_3d_file_record_packs_confs_without_a_gui_rebuild(qapp):  # noqa: ARG001
+    record = ingest_record_from_mol(_ethanol_3d(), ["SMILES"])
+    assert record.ensemble and record.depiction == b""
+    w = ChemistryWorkspaceWindow()
+    w.headers = ["ID_HIDDEN", "Structure", "SMILES"]
+    w._table_model.set_headers(list(w.headers))
+    rows: list = []
+    w._ingest_append_batch_items([record], rows)
+    oid, cells = rows[0]
+    assert "confs" in w.headers and cells["confs"] == record.confs_cell
+    assert Chem.MolToSmiles(w.mols[oid]) == "CCO"
+    assert w.mols[oid].GetNumConformers() == 0
     w.close()
 
 
@@ -171,10 +183,10 @@ def test_opened_molfile_keeps_its_2d_orientation(qapp):  # noqa: ARG001
     parsed = Chem.MolFromMolBlock(Chem.MolToMolBlock(mol))
     assert parsed is not None and parsed.GetNumConformers() == 1
 
-    blob, cells, smiles, depiction = _mol_ingest_item(parsed, [])
-    stripped = Chem.Mol(bytes(blob))
+    record = ingest_record_from_mol(parsed, [])
+    stripped = Chem.Mol(record.structure)
     assert stripped is not None and stripped.GetNumConformers() == 0
-    kept = unpack_xy(depiction)
+    kept = unpack_xy(record.depiction)
     assert kept is not None and len(kept) == parsed.GetNumAtoms()
     src = parsed.GetConformer()
     for i, (x, y) in enumerate(kept):
@@ -184,7 +196,7 @@ def test_opened_molfile_keeps_its_2d_orientation(qapp):  # noqa: ARG001
 
     w = ChemistryWorkspaceWindow()
     rows: list = []
-    w._ingest_append_batch_items([(blob, cells, smiles, depiction)], rows)
+    w._ingest_append_batch_items([record], rows)
     oid = rows[0][0]
     stored = w.mols[oid]
     assert stored.GetNumConformers() == 0
@@ -196,6 +208,5 @@ def test_opened_molfile_keeps_its_2d_orientation(qapp):  # noqa: ARG001
         assert abs(float(pos.x) - x) < 1e-4
         assert abs(float(pos.y) - y) < 1e-4
 
-    three_d = _mol_ingest_item(_ethanol_3d(), ["SMILES"])
-    assert three_d[3] == b""
+    assert ingest_record_from_mol(_ethanol_3d(), ["SMILES"]).depiction == b""
     w.close()

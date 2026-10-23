@@ -157,11 +157,12 @@ class IngestLoadMixin:
     def _ingest_append_batch_items(
         self, items: list, new_rows: list[tuple[int, dict[str, str]]]
     ) -> None:
-        """Convert one worker batch (mol blobs or cell dicts) into pending table rows.
+        """Convert one worker batch (structure records or cell dicts) into pending table rows.
 
         Every row's molecule goes to the store here, once. Cells are kept exactly as read.
         When the user picked a structure column at open, that column's text is the row's
         molecule; otherwise it is the file's structure (or the ``SMILES`` cell of a text file).
+        Structure records already hold the stores' bytes, so no molecule is built here.
         """
         source_field = self._ingest_structure_source_field()
         texts: list[tuple[int, str]] = []
@@ -177,38 +178,59 @@ class IngestLoadMixin:
                     texts.append((oid, text))
             self._ingest_store_structure_texts(texts)
             return
-        # Structures go to the store in one write per batch; see ``_ingest_store_mol``.
-        batch: list | None = [] if callable(getattr(self.mols, "ingest_structures", None)) else None
+        structures: list[tuple[int, bytes, str]] = []
+        ensembles: list[tuple[int, bytes]] = []
         depictions: list[tuple[int, bytes]] = []
-        for item in items:
-            blob, cells, smiles, depiction = self._split_ingest_item(item)
+        for record in items:
             oid = self.next_oid
             self.next_oid += 1
+            cells = dict(record.cells)
+            new_rows.append((oid, cells))
             text = self._ingest_cell_structure_text(cells, source_field) if source_field else ""
             if text:
-                new_rows.append((oid, dict(cells)))
                 texts.append((oid, text))
                 continue
-            new_rows.append(
-                (
-                    oid,
-                    self._ingest_store_mol(
-                        oid,
-                        self._coerce_ingest_mol(blob),
-                        precomputed_cells=cells,
-                        source_blob=blob if isinstance(blob, (bytes, bytearray)) else None,
-                        source_text=smiles,
-                        batch=batch,
-                    ),
-                )
-            )
-            # The worker drops flat coordinates from the structure blob. This pack is that pose.
-            if depiction:
-                depictions.append((oid, depiction))
-        if batch:
-            self.mols.ingest_structures(batch)
+            structures.append((oid, record.structure, record.smiles))
+            if record.ensemble:
+                cells["confs"] = record.confs_cell
+                ensembles.append((oid, record.ensemble))
+            if record.depiction:
+                depictions.append((oid, record.depiction))
+        self._ingest_store_structures(structures)
+        if ensembles:
+            self._ensure_columns(["confs"])
+            ensure_confs_sidecar(self).ingest_packed("confs", ensembles)
         self._remember_file_depictions(depictions)
         self._ingest_store_structure_texts(texts)
+
+    def _append_ingest_rows_by_column(self, new_rows: list[tuple[int, dict[str, str]]]) -> None:
+        """Append pending rows as one text list per column, so each column is classified once.
+
+        Conditional-format caches are rebuilt after the load, as with ``defer_color_cache``.
+        """
+        if not new_rows:
+            return
+        names = dict.fromkeys(name for _oid, cells in new_rows for name in cells)
+        columns = {
+            name: [
+                "" if (value := cells.get(name)) is None else str(value) for _oid, cells in new_rows
+            ]
+            for name in names
+        }
+        self._table_model.append_columns_batch([oid for oid, _cells in new_rows], columns)
+
+    def _ingest_store_structures(self, rows: list[tuple[int, bytes, str]]) -> None:
+        """Write ``(oid, structure blob, SMILES)`` rows to the molecule store in one statement."""
+        if not rows:
+            return
+        ingest_jobs = getattr(self.mols, "ingest_jobs", None)
+        if callable(ingest_jobs):
+            ingest_jobs(rows)
+            return
+        for oid, blob, smiles in rows:
+            mol = self._coerce_ingest_mol(blob) if blob else self._mol_from_structure_text(smiles)
+            if mol is not None:
+                self.mols[oid] = mol
 
     def _ingest_structure_source_field(self) -> str | None:
         """The column the user picked as the structure source for this open, if any."""
@@ -237,17 +259,6 @@ class IngestLoadMixin:
             mol = self._mol_from_structure_text(text)
             if mol is not None:
                 self.mols[oid] = mol
-
-    @staticmethod
-    def _split_ingest_item(item):
-        """Return ``(blob_or_mol, cells, smiles, depiction)`` from a worker item."""
-        if isinstance(item, tuple):
-            smiles = item[2] if len(item) > 2 else ""
-            depiction = (
-                item[3] if len(item) > 3 and isinstance(item[3], (bytes, bytearray)) else b""
-            )
-            return item[0], item[1], smiles, bytes(depiction)
-        return item, None, "", b""
 
     def _remember_file_depictions(self, rows: list[tuple[int, bytes]]) -> None:
         """Keep flat file coordinates as the Structure orientation for these rows."""
@@ -448,8 +459,7 @@ class IngestLoadMixin:
             else:
                 self.headers = incoming
                 self.table.setSortingEnabled(False)
-                self._table_model.clear_rows()
-                self._table_model.set_headers(list(self.headers))
+                self._table_model.clear_rows(list(self.headers))
                 self.table.setColumnHidden(0, True)
             if self._table_stack.currentIndex() == 0:
                 self._loading_detail.setText(LOADING_DETAIL_AFTER_FILE_READ)
@@ -491,7 +501,7 @@ class IngestLoadMixin:
                         take = mols_list[:step]
                         new_rows: list[tuple[int, dict[str, str]]] = []
                         self._ingest_append_batch_items(take, new_rows)
-                        self._table_model.append_rows_batch(new_rows, defer_color_cache=True)
+                        self._append_ingest_rows_by_column(new_rows)
                         self._ingest_sqlite_append_batch(new_rows)
                         processed += len(new_rows)
                         del mols_list[:step]

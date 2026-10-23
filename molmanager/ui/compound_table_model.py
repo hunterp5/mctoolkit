@@ -211,17 +211,23 @@ class CompoundTableModel(
 
     def set_headers(self, headers: list[str]) -> None:
         self.beginResetModel()
+        self._apply_headers(headers)
+        self._invalidate_numeric_bounds_all()
+        self.endResetModel()
+
+    def _apply_headers(self, headers: list[str]) -> None:
         self._headers = list(headers)
         self._pixmap_columns &= set(self._headers)
         self._extra_pixmaps.keep_headers(set(self._headers))
         keep = set(self._headers)
         self._column_color_rules = {h: r for h, r in self._column_color_rules.items() if h in keep}
         self._column_color_cache = {h: c for h, c in self._column_color_cache.items() if h in keep}
-        self._invalidate_numeric_bounds_all()
-        self.endResetModel()
 
-    def clear_rows(self) -> None:
-        """Drop all rows and cached structure pixmaps; keep column headers."""
+    def clear_rows(self, headers: list[str] | None = None) -> None:
+        """Drop all rows and cached structure pixmaps in one model reset.
+
+        Column headers are kept unless *headers* replaces them in the same reset.
+        """
         self._silent_append_depth = 0
         self._silent_append_start_row = 0
         self.beginResetModel()
@@ -233,6 +239,8 @@ class CompoundTableModel(
         self._highlighted_oids = None
         for cache in self._column_color_cache.values():
             cache.clear()
+        if headers is not None:
+            self._apply_headers(headers)
         self._invalidate_numeric_bounds_all()
         self.endResetModel()
 

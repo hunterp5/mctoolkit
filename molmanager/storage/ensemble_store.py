@@ -260,6 +260,22 @@ class EnsembleStore(MutableMapping[tuple[int, str], str]):
         self._lru.pop(key, None)
         return True
 
+    def ingest_packed(self, column: str, rows: Iterable[tuple[int, bytes]]) -> None:
+        """Write many already-packed ``(oid, blob)`` ensembles for *column* in one statement."""
+        col = str(column)
+        params = [(int(oid), col, KIND_COMPACT, bytes(blob)) for oid, blob in rows if blob]
+        if not params:
+            return
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO ensembles (oid, col, kind, blob) VALUES (?, ?, ?, ?)",
+            params,
+        )
+        self._pending += len(params)
+        if self._pending >= _AUTOCOMMIT_EVERY:
+            self._flush()
+        for oid, _col, _kind, _blob in params:
+            self._lru.pop((oid, col), None)
+
     def mol_for(self, oid: int, column: str) -> Chem.Mol | None:
         """Decode a stored ensemble without building nested base64."""
         self._flush()
