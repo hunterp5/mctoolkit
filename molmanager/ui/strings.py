@@ -46,7 +46,6 @@ TOOL_RANDOM_MOLECULE = "Random Molecule"
 TOOL_SPLIT_COLUMN = "Split Column"
 TOOL_JOIN_COLUMNS = "Join Columns"
 TOOL_BINNING = "Binning"
-TOOL_PREDICT_SOM = "Predict SOM"
 TOOL_PREDICT_METABOLITES = "Predict Metabolites"
 
 # Column header when importing similarity hits (PubChem, ChEMBL, SureChEMBL) or adding FP similarity scores.
@@ -71,9 +70,10 @@ LOADING_DETAIL_SESSION = (
     "Restoring table, filters, and plots. 2D images continue after the workspace is shown."
 )
 LOADING_DETAIL_IDLE = (
-    "Open a file or session to begin.\n"
+    "Open a file or session to begin, or drop one here.\n"
     "The table and plot panes appear after data is loaded."
 )
+LOADING_DETAIL_DROP = "Release to open.\nThe table and plot panes appear after data is loaded."
 LOADING_DETAIL_PROTEIN_VIEWER = (
     "Loading structures…\nDrawing the 3D view. The window stays open while this finishes."
 )
