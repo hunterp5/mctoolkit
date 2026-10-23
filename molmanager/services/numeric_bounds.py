@@ -70,6 +70,17 @@ def merge_numeric_bounds_rows(
     return {"min": lo, "max": hi, "is_int": int_ok}
 
 
+def merge_numeric_range(acc: dict | None, lo: float, hi: float, is_int: bool) -> dict:
+    """Fold one ``(min, max, all_integers)`` range into the bounds accumulator *acc*."""
+    if not acc:
+        return {"min": lo, "max": hi, "is_int": is_int}
+    return {
+        "min": min(acc["min"], lo),
+        "max": max(acc["max"], hi),
+        "is_int": bool(acc.get("is_int", True)) and is_int,
+    }
+
+
 def scan_numeric_column(rows: Sequence[Any], header: str) -> dict | None:
     """Full-column numeric bounds scan."""
     return merge_numeric_bounds_rows(rows, header, 0, len(rows), None)

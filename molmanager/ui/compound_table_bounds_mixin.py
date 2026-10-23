@@ -21,6 +21,7 @@ from __future__ import annotations
 from ..services.numeric_bounds import (
     is_non_numeric_blob_header,
     merge_numeric_bounds_rows as merge_numeric_bounds_rows_fn,
+    merge_numeric_range,
     scan_numeric_column,
 )
 
@@ -105,8 +106,9 @@ class CompoundTableBoundsMixin:
         if self._numeric_bounds_dirty_cols is not None:
             self._numeric_bounds_dirty_cols -= set(targets)
 
-    @staticmethod
-    def _scan_numeric_column(rows, h: str) -> dict | None:
+    def _scan_numeric_column(self, rows, h: str) -> dict | None:
+        if rows is self._rows:
+            return self.merge_numeric_bounds_chunk(h, 0, len(rows), None)
         return scan_numeric_column(rows, h)
 
     @staticmethod
@@ -126,7 +128,11 @@ class CompoundTableBoundsMixin:
         end_row: int,
         acc: dict | None,
     ) -> dict | None:
-        return self.merge_numeric_bounds_rows(self._rows, header, start_row, end_row, acc)
+        rows = self._rows
+        if getattr(rows, "column_kind", lambda _h: None)(header) == "float":
+            found = rows.float_range(header, start_row, end_row)
+            return merge_numeric_range(acc, *found) if found else acc
+        return self.merge_numeric_bounds_rows(rows, header, start_row, end_row, acc)
 
     def install_numeric_bounds_cache(self, cache: dict[str, dict]) -> None:
         self._numeric_bounds_cache = dict(cache)

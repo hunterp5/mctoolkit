@@ -194,3 +194,31 @@ def test_blob_round_trip_keeps_text_kinds_and_subset() -> None:
     assert list(subset.oids) == [10, 30]
     assert [subset.get_text(i, "MW") for i in range(2)] == ["1.50", "3.25"]
     assert [subset.get_text(i, "Name") for i in range(2)] == ["a", ""]
+
+
+def test_float_range_matches_per_cell_bounds(qapp) -> None:  # noqa: ARG001
+    from molmanager.services.numeric_bounds import merge_numeric_bounds_rows
+
+    model = CompoundTableModel([])
+    model.set_headers(["ID_HIDDEN", "Structure", "pIC50", "Count", "Note"])
+    cells = [
+        {"pIC50": "5.25", "Count": "3", "Note": "1.5"},
+        {"pIC50": "", "Count": "-7", "Note": "n/a"},
+        {"pIC50": "8.75", "Count": "12", "Note": "2"},
+        {"pIC50": "6.00", "Count": "", "Note": ""},
+    ]
+    model.append_rows_batch(list(enumerate(cells)))
+    rows = model._rows
+    assert rows.column_kind("pIC50") == "float" and rows.column_kind("Note") == "text"
+    for header in ("pIC50", "Count", "Note"):
+        for start, end in ((0, 4), (1, 3), (1, 2)):
+            slow = merge_numeric_bounds_rows(
+                [_Row(oid=i, values=c) for i, c in enumerate(cells)], header, start, end, None
+            )
+            assert model.merge_numeric_bounds_chunk(header, start, end, None) == slow
+    acc = model.merge_numeric_bounds_chunk("Count", 0, 2, None)
+    assert model.merge_numeric_bounds_chunk("Count", 2, 4, acc) == {
+        "min": -7.0,
+        "max": 12.0,
+        "is_int": True,
+    }

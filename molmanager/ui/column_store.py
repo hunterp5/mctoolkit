@@ -485,6 +485,19 @@ class ColumnStore:
             return None
         return column.kind
 
+    def float_range(self, header: str, start: int, end: int) -> tuple[float, float, bool] | None:
+        """``(min, max, all_integers)`` over rows ``start:end`` of a float column.
+
+        Returns ``None`` when the range has no numbers. Only valid for a column whose
+        :meth:`column_kind` is ``"float"``; every stored value there is an exact number.
+        """
+        column = self.columns[header]
+        lo, hi = max(0, int(start)), min(self.n, int(end))
+        values = column.values[lo:hi][column.valid[lo:hi]]
+        if values.size == 0:
+            return None
+        return float(values.min()), float(values.max()), bool(np.all(values == np.floor(values)))
+
     def append_columns(self, oids: Sequence[int], columns: Mapping[str, Sequence[str]]) -> None:
         """Append ``len(oids)`` rows given as one text list per column.
 
