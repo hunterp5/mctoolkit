@@ -372,13 +372,23 @@ I/O live in `gnina_job.py` (no Qt). `workers/gnina_dock_worker.py` owns the
 Launch/WSL/GPU probing stays in `gnina_launch.py`. Compat shims remain at
 `ui/gnina_dock.py` / `ui/smina_dock.py`.
 
-Auto Render 2D after ingest/session: the loading overlay stays until filter bounds
-are ready and restored plot views have settled. Auto Structure renders start in the
-background and do not block the workspace. Above `auto_render_2d_max_rows` auto 2D
-is skipped. Lazy PNG store thresholds (`structure_render_lazy_*`) still control how
-images are stored, not when the workspace appears. Session files store 2D mol
-binaries and numeric filter bounds so Open can skip SMILES re-parse and a full
-bounds scan.
+Structure file ingest: SDF and MOL2 files of 4 MB or more are split into
+500-record byte ranges (`chem/ingest_records.py`) and parsed in the shared Render 2D
+process pool. Each range returns `IngestRecord`s in file order, already carrying the
+RDKit binary, canonical SMILES, packed depiction, and packed 3D ensemble, so the GUI
+thread only bulk-inserts them (`MolStore.ingest_jobs`, `EnsembleStore.ingest_packed`,
+`ColumnStore` column appends). Smaller and gzipped files are parsed on the load thread
+into the same records.
+
+Auto Render 2D after ingest/session has no row limit. `Render2DBatchProcessWorker`
+draws from a `PriorityRenderPlan` (`workers/render2d_plan.py`): the window polls the
+viewport every 150 ms and moves the rows on screen, plus one screen below and above,
+to the front in small tasks; the remaining rows follow in table order. The scene store
+is attached to the model when the batch starts, so visible rows repaint as their
+results land. File open never waits for the render; session open lifts its overlay
+once the visible rows have landed. `structure_render_idle()` reports when no batch is
+running. Lazy PNG store thresholds (`structure_render_lazy_*`) control how images are
+stored, not when the workspace appears.
 
 ### Session files (`.cms`, version 4)
 

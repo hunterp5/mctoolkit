@@ -35,4 +35,4 @@ Structure columns for rows in scope; optional **Selected Rows Only**.
 
 ## Tips and limits
 
-Rendering large libraries is CPU-bound - prefer selection scope. Coordinates are 2D only; 3D conformers are separate tools. Invalid molecules still cannot depict. File Open/Import and session restore auto-run Render 2D (up to the auto-2D row limit) after the workspace is shown; use this tool afterward, or when that limit skipped the automatic pass.
+Rendering large libraries is CPU-bound - prefer selection scope. Coordinates are 2D only; 3D conformers are separate tools. Invalid molecules still cannot depict. File Open/Import and session restore auto-run Render 2D for every row, drawing the rows on screen first; use this tool afterward to redraw a column or a selection. While a batch runs, rows you scroll to are drawn next.
