@@ -102,7 +102,6 @@ _EXPORTS: dict[str, str] = {
     "SketcherDialog": "..sketcher",
     "GninaDockDialog": ".gnina_dock",
     "SminaDockDialog": ".smina_dock",
-    "SomPredictorDialog": ".som",
     "SplitColumnDialog": ".split_column",
     "SplitColumnDialogParams": ".split_column",
     "JoinColumnsDialog": ".join_columns",
