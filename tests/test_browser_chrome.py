@@ -37,14 +37,12 @@ from molmanager.ui.random_molecule_browser import (
 )
 from molmanager.ui.sali_browser import SaliBrowserDialog
 from molmanager.ui.selection_browser import SelectionBrowserDialog, SelectionBrowserWidget
-from molmanager.ui.som_browser import SomBrowserDialog, SomBrowserWidget
 
 
 def test_dockable_browser_dialogs_share_host_shell():
     for cls in (
         SelectionBrowserDialog,
         PoseBrowserDialog,
-        SomBrowserDialog,
         MetaboliteBrowserDialog,
         RandomMoleculeBrowserDialog,
     ):
@@ -61,7 +59,6 @@ def test_canvas_browsers_use_shared_preview_theme(qapp):  # noqa: ARG001
 
     widgets = (
         SelectionBrowserWidget(ChemistryWorkspaceWindow()),
-        SomBrowserWidget(None),
         MetaboliteBrowserWidget(None),
         RandomMoleculeBrowserWidget(None),
     )
@@ -102,8 +99,12 @@ def test_pair_browsers_use_shared_group_and_structure_theme(qapp):  # noqa: ARG0
             margins.right(),
             margins.bottom(),
         ) == PLOT_BODY_MARGINS
-    assert mmp._prop_box.styleSheet() == group_box_stylesheet_for(mmp._prop_box)
-    assert sali._row_table.styleSheet() == BROWSER_DATA_TABLE_QSS
+        assert dlg._row_table.styleSheet() == BROWSER_DATA_TABLE_QSS
+        assert dlg._left_panel["box"].title() == ""
+        assert dlg._left_panel["name"].text() == "Molecule A"
+        assert dlg._right_panel["name"].text() == "Molecule B"
+    assert sali._metrics_box.styleSheet() == group_box_stylesheet_for(sali._metrics_box)
+    assert not hasattr(mmp, "_metrics_box")
     mmp.deleteLater()
     sali.deleteLater()
 
@@ -276,3 +277,149 @@ def test_sali_browser_pair_table_and_jump_field(qapp):  # noqa: ARG001
 
     dlg.deleteLater()
     empty.deleteLater()
+
+
+def test_mmp_browser_uses_sali_layout(qapp):  # noqa: ARG001
+    from molmanager.analysis.mmp_analysis import MmpPair
+
+    pair = MmpPair(
+        oid_a=1,
+        oid_b=2,
+        smiles_a="C",
+        smiles_b="CC",
+        activity_a=1.0,
+        activity_b=2.5,
+        delta_activity=1.5,
+        transform="[*:1]C>>[*:1]CC",
+        core="*",
+        sidechain_a="[*:1]C",
+        sidechain_b="[*:1]CC",
+    )
+    dlg = MmpBrowserDialog(None, [pair], activity_column="pIC50")
+    assert not dlg._meta.isVisibleTo(dlg)
+    assert dlg._pair_index.value() == 1
+    assert dlg._pair_count_label.text() == "/ 1"
+    assert dlg._nav_layout.indexOf(dlg._pair_index_host) < dlg._nav_layout.indexOf(dlg._btn_first)
+    assert dlg._nav_layout.indexOf(dlg._btn_write) > dlg._nav_layout.indexOf(dlg._btn_select)
+    assert dlg._nav_layout.indexOf(dlg._cb_selected_only) > dlg._nav_layout.indexOf(dlg._btn_write)
+    assert dlg._left_panel["box"].title() == ""
+    assert dlg._left_panel["name"].text() == "Molecule A"
+    assert dlg._left_panel["activity"].text() == "pIC50: 1"
+    assert dlg._right_panel["activity"].text() == "pIC50: 2.5"
+    assert not hasattr(dlg, "_metrics_box")
+    assert not hasattr(dlg, "_transform_preview")
+    root = dlg.layout()
+    pair_index = next(
+        i
+        for i in range(root.count())
+        if root.itemAt(i).layout() is not None
+        and root.itemAt(i).layout().indexOf(dlg._left_panel["box"]) >= 0
+    )
+    assert pair_index < root.indexOf(dlg._row_table)
+    assert dlg._row_table.rowCount() == 2
+    assert dlg._row_table.verticalHeaderItem(0).text() == "A"
+    assert dlg._row_table.verticalHeaderItem(1).text() == "B"
+
+    empty = MmpBrowserDialog(None, [], activity_column="pIC50")
+    assert empty._meta.isVisibleTo(empty)
+    assert "No matched molecular pairs" in empty._meta.text()
+    assert not empty._pair_index.isEnabled()
+    assert empty._row_table.rowCount() == 0
+    dlg.deleteLater()
+    empty.deleteLater()
+
+
+def test_pair_browsers_highlight_variable_atoms(qapp, monkeypatch):  # noqa: ARG001
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtGui import QPixmap
+    from rdkit import Chem
+
+    from molmanager.analysis.mmp_analysis import MmpPair
+    from molmanager.analysis.mmp_depict import highlight_atoms_for_pair
+    from molmanager.analysis.sali_analysis import SaliPoint
+    from molmanager.ui.browsers.pair_browser import PairBrowserDialog
+
+    phenol = Chem.MolFromSmiles("Oc1ccccc1")
+    anisole = Chem.MolFromSmiles("COc1ccccc1")
+    ha, hb = highlight_atoms_for_pair(phenol, anisole)
+    assert ha or hb
+    captured: list[tuple[int, list[int]]] = []
+
+    def _capture(self, mol, pw, ph, highlight_atoms):  # noqa: ARG001
+        captured.append((int(mol.GetNumAtoms()), [int(i) for i in highlight_atoms]))
+        pm = QPixmap(max(int(pw), 1), max(int(ph), 1))
+        pm.fill(Qt.white)
+        return pm
+
+    monkeypatch.setattr(PairBrowserDialog, "_render_highlighted", _capture)
+
+    class _App:
+        mols = {1: phenol, 2: anisole}
+        headers: list[str] = []
+
+        def logical_row_for_oid(self, _oid: int) -> int:
+            return -1
+
+    sali = SaliBrowserDialog(
+        None,
+        [SaliPoint(0, 1, 2, 0.8, 1.0, 1.0, 5.0)],
+        activity_column="pIC50",
+    )
+    sali._app = _App()
+    sali._update_ui()
+    mol_calls = [atoms for n_atoms, atoms in captured if n_atoms >= phenol.GetNumAtoms()]
+    assert mol_calls[0] == ha
+    assert mol_calls[1] == hb
+
+    captured.clear()
+    pair = MmpPair(
+        oid_a=1,
+        oid_b=2,
+        smiles_a="Oc1ccccc1",
+        smiles_b="COc1ccccc1",
+        activity_a=1.0,
+        activity_b=2.0,
+        delta_activity=1.0,
+        transform="[*:1]O>>[*:1]OC",
+        core="*",
+        sidechain_a="[*:1]O",
+        sidechain_b="[*:1]OC",
+    )
+    mmp = MmpBrowserDialog(None, [pair], activity_column="pIC50")
+    mmp._app = _App()
+    mmp._update_ui()
+    mol_calls = [atoms for n_atoms, atoms in captured if n_atoms >= phenol.GetNumAtoms()]
+    assert mol_calls[0] == ha
+    assert mol_calls[1] == hb
+    sali.deleteLater()
+    mmp.deleteLater()
+
+
+def test_render_highlighted_marks_changed_atoms(qapp, monkeypatch):  # noqa: ARG001
+    from rdkit import Chem
+
+    seen: dict = {}
+
+    def _fake_highlight(mol, atoms, colour):  # noqa: ARG001
+        seen["colour"] = colour
+        seen["atoms"] = [int(i) for i in atoms]
+        from molmanager.chem.depiction_scene import SceneHighlight
+
+        return SceneHighlight()
+
+    def _fake_pixmap(mol, pw, ph, highlight=None):  # noqa: ARG001
+        from PyQt5.QtGui import QPixmap
+
+        seen["highlight"] = highlight
+        return QPixmap(max(int(pw), 1), max(int(ph), 1))
+
+    monkeypatch.setattr("molmanager.chem.depiction_scene.atom_set_highlight", _fake_highlight)
+    monkeypatch.setattr("molmanager.table.structure_image.molecule_pixmap", _fake_pixmap)
+    dlg = SaliBrowserDialog(None, [], activity_column="pIC50")
+    mol = Chem.MolFromSmiles("CCO")
+    pm = dlg._render_highlighted(mol, 40, 30, [0, 2])
+    assert pm is not None and not pm.isNull()
+    assert seen["colour"] == (0.95, 0.55, 0.15)
+    assert seen["atoms"] == [0, 2]
+    assert seen["highlight"] is not None
+    dlg.deleteLater()
