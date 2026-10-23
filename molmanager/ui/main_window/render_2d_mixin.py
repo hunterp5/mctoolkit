@@ -515,6 +515,7 @@ class Render2DMixin:
         self._render2d_lazy_flush = lazy_structure
         self._render2d_merge_structure_store = bool(merge_structure_store) and structure_column
         self._render2d_streamed_column = False
+        self._render2d_column_widened_to = 0
         keep_snapshot = (not after_ingest) and len(oids) <= _RENDER2D_UNDO_SNAPSHOT_MAX_ROWS
         tgt = self._render2d_pixmap_target
         if tgt:
