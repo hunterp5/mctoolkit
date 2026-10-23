@@ -37,6 +37,16 @@ from ...table.structure_image import pixmap_from_structure_image
 from ..strings import TOOL_RENDER_2D
 
 
+def _widen_render2d_column_now(owner) -> None:
+    """Widen on the first drawn structure when *owner* implements it.
+
+    Unit-test stand-ins call the writer without that method; a missing hook is a no-op.
+    """
+    widen = getattr(owner, "_widen_render2d_column_for_first_structure", None)
+    if callable(widen):
+        widen()
+
+
 class Render2DResultsMixin:
     def _render2d_batch_session_accepted(self, batch_session) -> bool:
         """False when a render result belongs to a superseded / cancelled batch."""
@@ -165,24 +175,51 @@ class Render2DResultsMixin:
 
     def _resize_columns_after_render2d(self, pix_target: str | None) -> None:
         """Set structure / pixmap column width from depict size (O(1), safe for huge tables)."""
+        hint = int(getattr(self, "_render2d_flush_max_width", 0) or 0)
+        self._render2d_flush_max_width = 0
+        self._render2d_column_widened_to = 0
         # Session restore owns column widths, also when it revealed before the batch ended.
         if getattr(self, "_pending_session_table_layout", None) or getattr(
             self, "_render2d_keeps_session_layout", False
         ):
             return
-        pad = STRUCTURE_COLUMN_HORIZONTAL_PADDING
+        self._apply_render2d_column_width(pix_target, hint)
+
+    def _widen_render2d_column_for_first_structure(self) -> None:
+        """Grow the column as soon as a structure's width is known.
+
+        The batch used to wait until the last row, so the column stayed narrow
+        while the first structures were already on screen.
+        """
+        if getattr(self, "_pending_session_table_layout", None) or getattr(
+            self, "_render2d_keeps_session_layout", False
+        ):
+            return
         hint = int(getattr(self, "_render2d_flush_max_width", 0) or 0)
-        self._render2d_flush_max_width = 0
-        need = max(1, max(int(structure_depict_width()), hint) + pad)
+        if hint <= 0 or hint <= int(getattr(self, "_render2d_column_widened_to", 0) or 0):
+            return
+        self._render2d_column_widened_to = hint
+        self._apply_render2d_column_width(getattr(self, "_render2d_pixmap_target", None), hint)
+
+    def _apply_render2d_column_width(self, pix_target: str | None, hint: int) -> None:
+        pad = STRUCTURE_COLUMN_HORIZONTAL_PADDING
+        width = max(int(structure_depict_width()), int(hint))
+        need = max(1, width + pad)
         try:
             if pix_target:
                 col = self.headers.index(pix_target)
-                if self.table.columnWidth(col) < need:
+                if int(self.table.columnWidth(col)) < need:
                     self.table.setColumnWidth(col, need)
-            else:
-                self._sync_structure_column_width_for_pixmap(
-                    None, max(int(structure_depict_width()), hint)
-                )
+                return
+            sync = getattr(self, "_sync_structure_column_width_for_pixmap", None)
+            if callable(sync):
+                sync(None, width)
+                return
+            from ..compound_table_model import CompoundTableModel
+
+            col = CompoundTableModel.STRUCTURE_COL
+            if int(self.table.columnWidth(col)) < need:
+                self.table.setColumnWidth(col, need)
         except Exception:
             pass
 
@@ -249,6 +286,7 @@ class Render2DResultsMixin:
             else:
                 items.append((oid_i, raw))
         self._render2d_flush_max_width = max_w
+        _widen_render2d_column_now(self)
         if structure_store:
             if scenes:
                 store.ingest_batch(scenes)
@@ -431,6 +469,7 @@ class Render2DResultsMixin:
                         (int(rec[2]) for rec in pending.values() if rec and rec[1]),
                         default=0,
                     )
+                    _widen_render2d_column_now(self)
                 self._table_model.set_structure_png_store(store)
                 self._keep_structure_fallbacks(fallbacks)
                 self._ensure_structure_lazy_scroll_hook()
@@ -457,6 +496,7 @@ class Render2DResultsMixin:
                     elif not pix_target:
                         eager.append((int(oid), None))
                 self._render2d_flush_max_width = max_w
+                _widen_render2d_column_now(self)
                 self._render2d_eager_flush_queue = eager
                 self._render2d_eager_flush_idx = 0
                 self._render2d_eager_uniform_height = bool(set_uniform_height and not pix_target)
