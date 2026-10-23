@@ -149,8 +149,11 @@ def make_window(*, show: bool = True, webengine: bool = True):
     from PyQt5.QtWidgets import QApplication
 
     from molmanager.ui.main_window.chemistry_workspace_window import ChemistryWorkspaceWindow
+    from molmanager.workers.process_pool_utils import signal_application_shutdown
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
+    # Benchmarks quit without closing the window, which is where the app signals shutdown.
+    app.aboutToQuit.connect(signal_application_shutdown)
     win = ChemistryWorkspaceWindow()
     win._suppress_exit_session_prompt = True
     if show:
