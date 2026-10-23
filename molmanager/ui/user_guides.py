@@ -388,12 +388,6 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Enumerate products from reaction SMARTS.",
             ),
             _e(
-                "tools_predict_som",
-                "Predict SOM",
-                "SOM",
-                "FAME3R sites of metabolism; reopen maps from Predict → SOM → Viewer.",
-            ),
-            _e(
                 "tools_predict_metabolites",
                 "Predict Metabolites",
                 "Metabolites",
