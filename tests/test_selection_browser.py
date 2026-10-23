@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Tools → Browser shows the current table row in a compact table."""
+"""Data → Browser shows the current table row in a compact table."""
 
 from __future__ import annotations
 
