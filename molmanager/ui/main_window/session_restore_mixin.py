@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import QApplication
 from ...chem.depiction_builder import scene_revision
 from ...conformers.conformer_column_codec import deserialize_confs_sidecar
 from ...ionization.microstate_cache import restore_ionization_sidecar
+from ...services.chemistry_columns import is_legacy_som_map_header
 from ...storage import ensure_confs_sidecar, ensure_mol_store, reset_mol_store
 from ...storage.structure_render_store import StructureRenderStore
 from ...table.open_messages import damaged_session_message, message_for_session_read_failure
@@ -186,6 +187,7 @@ class SessionRestoreMixin:
                         isinstance(name, str)
                         and name in self.headers
                         and name not in ("ID_HIDDEN", "Structure")
+                        and not is_legacy_som_map_header(name)
                     ):
                         self._table_model.register_pixmap_column(name)
         self.table.setColumnHidden(0, True)
@@ -459,11 +461,13 @@ class SessionRestoreMixin:
         depiction = getattr(self, "_depiction_coords", None)
         if depiction is not None:
             depiction.load_session(doc.get("depiction_2d"))
-        self._pending_session_som_browse = doc.get("som_browse")
         restore_ionization_sidecar(doc.get("ionization_sidecar"))
         from ...analysis.mmp_session import restore_mmp_ledger_for_session
 
         restore_mmp_ledger_for_session(self, doc.get("mmp_ledger"))
+        from ..metabolite_browser import restore_metabolite_browse_for_session
+
+        restore_metabolite_browse_for_session(self, doc.get("metabolite_browse"))
         from ...docking.pose_file_io import restore_dock_results_for_session
 
         restore_dock_results_for_session(self, doc.get("dock_results"))
@@ -488,6 +492,9 @@ class SessionRestoreMixin:
 
     def _reveal_table_after_session_prep(self) -> None:
         """Leave the loading overlay once session rows, 2D, filters, and plots are ready."""
+        sync_numbers = getattr(self.table, "sync_row_number_column_width", None)
+        if callable(sync_numbers):
+            sync_numbers()
         self._set_ingest_loading(False)
         self._set_workspace_stack_index(1)
         finish_clean = getattr(self, "_finish_session_clean_if_pending", None)
@@ -497,26 +504,6 @@ class SessionRestoreMixin:
             self.table.setUpdatesEnabled(True)
         except Exception:
             pass
-        self._restore_pending_session_som_maps()
-
-    def _restore_pending_session_som_maps(self) -> None:
-        """Redraw SOM Map pixmaps after the overlay lifts so Open is not blocked on depictions."""
-        payload = getattr(self, "_pending_session_som_browse", None)
-        self._pending_session_som_browse = None
-        if not payload:
-            return
-
-        def _apply() -> None:
-            from ..som_browser import restore_som_maps_for_session
-
-            restore_som_maps_for_session(self, payload)
-
-        # Defer past reveal so a large SOM Map redraw does not stall the first paint.
-        # Pytest drains the session load synchronously and asserts maps immediately.
-        if "pytest" in sys.modules:
-            _apply()
-        else:
-            QTimer.singleShot(0, _apply)
 
     def _start_session_auto_render2d(self) -> None:
         """Start auto Render 2D under the overlay; saved scenes for every row skip the wait."""
