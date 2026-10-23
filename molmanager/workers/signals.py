@@ -60,6 +60,8 @@ class WorkerSignals(QObject):
     # Fast Prepare (fused disconnect, optional neutralize): list of
     # (oid, mol_blob_bytes, smaller_fragments_text, canonical_smiles_or_empty)
     fast_prepared = pyqtSignal(list)
+    # Same rows plus (scene, xy), emitted per chunk. The bool is True on the empty final chunk.
+    fast_prepared_batch = pyqtSignal(list, bool)
     explicit_hydrogens_added = pyqtSignal(list)
     explicit_hydrogens_removed = pyqtSignal(list)
     calculated = pyqtSignal(list, list)
