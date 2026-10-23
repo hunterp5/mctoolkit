@@ -14,4 +14,4 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""External and ML predictors (SOM, permeability, metabolites)."""
+"""External and ML predictors (permeability, metabolites)."""
