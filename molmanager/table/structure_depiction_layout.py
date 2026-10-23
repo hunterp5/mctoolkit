@@ -147,7 +147,7 @@ def browser_structure_preview_size() -> tuple[int, int]:
     return browser_structure_preview_width(), browser_structure_preview_height()
 
 
-# Tools → Browser structure preview (tracks Settings → 2D Render; 2× table size).
+# Data → Browser structure preview (tracks Settings → 2D Render; 2× table size).
 BROWSER_STRUCTURE_PREVIEW_MIN_WIDTH = DEFAULT_STRUCTURE_DEPICT_WIDTH * 2
 BROWSER_STRUCTURE_PREVIEW_MIN_HEIGHT = DEFAULT_STRUCTURE_DEPICT_HEIGHT * 2
 
