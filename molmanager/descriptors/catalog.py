@@ -56,6 +56,7 @@ DESCRIPTOR_TAB_ITEMS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "Drug-likeness": (
         ("AB-MPS score", "AB_MPS"),
+        ("BBB Score", "BBB_SCORE"),
         ("CNS MPO score", "CNS_MPO"),
         ("QED Score", "QED"),
         ("Ro5 pass", "RO5_PASS"),
