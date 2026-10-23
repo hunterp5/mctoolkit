@@ -206,7 +206,6 @@ class SessionPlotsMixin:
             "_mmp_neighborhood_map_dialog",
             "_selection_browser_dialog",
             "_pose_browser_dialog",
-            "_som_browser_dialog",
             "_metabolite_browser_dialog",
             "_molecule_3d_viewer_dialog",
         ):
@@ -302,7 +301,6 @@ class SessionPlotsMixin:
             "_mmp_neighborhood_map_dialog",
             "_selection_browser_dialog",
             "_pose_browser_dialog",
-            "_som_browser_dialog",
             "_metabolite_browser_dialog",
             "_molecule_3d_viewer_dialog",
         ):
