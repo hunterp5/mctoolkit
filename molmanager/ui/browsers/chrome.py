@@ -123,7 +123,8 @@ def make_pair_mol_panel(title: str, parent: QWidget | None = None) -> dict[str, 
         BROWSER_STRUCTURE_PREVIEW_MIN_WIDTH // 2,
         BROWSER_STRUCTURE_PREVIEW_MIN_HEIGHT // 2,
     )
-    struct.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    # Ignored: a pixmap at the label size locks later vertical resizes on Windows.
+    struct.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
     struct.setAttribute(Qt.WA_StyledBackground, True)
     activity = QLabel("—", box)
     activity.setAlignment(Qt.AlignCenter)

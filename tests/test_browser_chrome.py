@@ -108,6 +108,78 @@ def test_pair_browsers_use_shared_group_and_structure_theme(qapp):  # noqa: ARG0
     sali.deleteLater()
 
 
+def test_sali_preview_pixmap_does_not_lock_vertical_resize(qapp):
+    """A depiction rendered at the label size must not freeze the window height."""
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtGui import QPixmap
+    from PyQt5.QtWidgets import QSizePolicy
+
+    from molmanager.analysis.sali_analysis import SaliPoint
+
+    dlg = SaliBrowserDialog(
+        None,
+        [SaliPoint(0, 1, 2, 0.8, 2.0, 2.0, 10.0)],
+        activity_column="pIC50",
+    )
+    dlg.resize(920, 620)
+    dlg.show()
+    qapp.processEvents()
+    dlg.resize(920, 860)
+    qapp.processEvents()
+
+    for panel in (dlg._left_panel, dlg._right_panel):
+        label = panel["struct"]
+        policy = label.sizePolicy()
+        assert policy.horizontalPolicy() == QSizePolicy.Ignored
+        assert policy.verticalPolicy() == QSizePolicy.Ignored
+        assert label.height() > label.minimumHeight()
+        pixmap = QPixmap(max(label.width(), 1), max(label.height(), 1))
+        pixmap.fill(Qt.white)
+        label.setPixmap(pixmap)
+    qapp.processEvents()
+
+    layout = dlg.layout()
+    assert layout.totalHeightForWidth(dlg.width()) < dlg.height() - 80
+    assert dlg.sizeHint().height() < dlg.height() - 80
+    grown = dlg.height()
+    dlg.resize(dlg.width(), grown - 140)
+    qapp.processEvents()
+    assert dlg.height() == grown - 140
+    dlg.resize(dlg.width() + 160, dlg.height())
+    qapp.processEvents()
+    assert dlg.width() == 920 + 160
+    dlg.deleteLater()
+
+
+def test_sali_side_name_is_inline_with_activity(qapp):  # noqa: ARG001
+    from molmanager.analysis.sali_analysis import SaliPoint
+
+    dlg = SaliBrowserDialog(
+        None,
+        [SaliPoint(0, 1, 2, 0.8, 2.0, 2.0, 10.0)],
+        activity_column="pIC50",
+    )
+    for panel, name in (
+        (dlg._left_panel, "Molecule A"),
+        (dlg._right_panel, "Molecule B"),
+    ):
+        host = panel["caption_host"]
+        row = host.layout()
+        box = panel["box"].layout()
+        assert panel["box"].title() == ""
+        assert panel["name"].text() == name
+        assert panel["activity"].text() == "pIC50: —"
+        assert row.indexOf(panel["name"]) < row.indexOf(panel["activity"])
+        assert box.indexOf(panel["struct"]) < box.indexOf(host)
+
+    empty = SaliBrowserDialog(None, [], activity_column="pIC50")
+    assert empty._left_panel["name"].text() == "Molecule A"
+    assert empty._right_panel["name"].text() == "Molecule B"
+    assert empty._left_panel["activity"].text() == "—"
+    dlg.deleteLater()
+    empty.deleteLater()
+
+
 def test_sali_browser_pair_table_and_jump_field(qapp):  # noqa: ARG001
     from PyQt5.QtCore import Qt
     from PyQt5.QtTest import QTest

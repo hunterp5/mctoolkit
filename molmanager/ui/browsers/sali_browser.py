@@ -118,6 +118,36 @@ class SaliBrowserDialog(PairBrowserDialog):
             bar.rangeChanged.connect(lambda *_a: self._fit_pair_table_height())
         self._fit_pair_table_height()
         root.addWidget(self._row_table)
+        self._place_side_names_with_activity()
+
+    def _place_side_names_with_activity(self) -> None:
+        """Put Molecule A / B on the activity line under each depiction."""
+        for panel, side in (
+            (self._left_panel, "Molecule A"),
+            (self._right_panel, "Molecule B"),
+        ):
+            box = panel["box"]
+            activity: QLabel = panel["activity"]
+            layout = box.layout()
+            layout.removeWidget(activity)
+            name = QLabel(side, box)
+            name.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            name.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            style_browser_emphasis_label(name)
+            activity.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            host = QWidget(box)
+            row = QHBoxLayout(host)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(12)
+            row.addStretch(1)
+            row.addWidget(name)
+            row.addWidget(activity)
+            row.addStretch(1)
+            layout.addWidget(host)
+            panel["name"] = name
+            panel["caption_host"] = host
+            box.setTitle("")
+            style_browser_group_box(box)
 
     def _prepare_nav_extras(self) -> None:
         host = QWidget()
@@ -294,8 +324,6 @@ class SaliBrowserDialog(PairBrowserDialog):
         self._meta.setVisible(False)
         self._sync_pair_index(n)
         self._metrics_label.setText(self._metrics_text(point))
-        self._left_panel["box"].setTitle(f"Molecule A  (ID {point.oid_a})")
-        self._right_panel["box"].setTitle(f"Molecule B  (ID {point.oid_b})")
         self._refresh_previews()
         self._update_property_values()
 
