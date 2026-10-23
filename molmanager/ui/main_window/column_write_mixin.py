@@ -76,7 +76,7 @@ class ColumnWriteMixin:
         ``pKa`` / ``pI`` always update in place. Other names reuse the existing
         header when any of *result_oids* is still blank / ``N/A`` / cancelled /
         error in that column, so a cancelled job can finish without splitting
-        ``confs``, ``SOM Map``, and similar results across suffixed copies.
+        ``confs`` and similar results across suffixed copies.
         Otherwise a `` (n)`` suffix is added so filled cells are not replaced.
         """
         oids = [int(oid) for oid in (result_oids or ()) if oid is not None]
