@@ -39,6 +39,10 @@ _TOOLTIPS: dict[str, str] = {
     "AB_MPS": (
         "AbbVie MPS: |log D7.4 − 3| + aromatic rings + rotatable bonds (lower is more favorable)."
     ),
+    "BBB_SCORE": (
+        "Gupta blood–brain barrier score (0–6). Higher values are more likely to enter the brain; "
+        "the paper treats 4–6 as CNS-like."
+    ),
     "RO5_VIOLATIONS": "Number of Lipinski Rule of Five property violations.",
     "RO5_PASS": "True when the structure has no Lipinski Rule of Five violations.",
     "CNS_MPO": "Wager CNS multiparameter score (0–6; higher is more CNS-like).",
