@@ -225,7 +225,7 @@ def test_tools_menu_expands_calculator_random_and_notepad():
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(tools.items)]
     assert "Utilities" not in labels
     assert "Calculate Descriptors…" not in labels
-    assert labels[:9] == [
+    assert labels == [
         "Query Database",
         "",
         "Random",
@@ -234,9 +234,7 @@ def test_tools_menu_expands_calculator_random_and_notepad():
         "Notepad",
         "",
         "Sketcher…",
-        "",
     ]
-    assert labels[-1] == "Browser…"
     random = find_submenu(tools.items, "Random")
     assert menu_outline(random.items) == ["Number…", "Molecule…"]
 
@@ -247,10 +245,11 @@ def test_query_database_menu_outline():
     assert "External" not in labels
     assert labels[0] == "Query Database"
     assert labels[1] == ""
-    assert "Browser…" not in [
+    data_labels = [
         x if isinstance(x, str) else next(iter(x))
         for x in menu_outline(find_submenu(MAIN_WINDOW_MENUS, "Data").items)
     ]
+    assert data_labels[-2:] == ["", "Browser…"]
     query = find_submenu(tools.items, "Query Database")
     assert menu_outline(query.items) == [
         "PubChem…",
@@ -269,7 +268,7 @@ def test_data_menu_filter_and_search_group_is_last():
     assert "Search…" not in tools_labels
     data = find_submenu(MAIN_WINDOW_MENUS, "Data")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]
-    assert labels[-3:] == ["", "Filter", "Search…"]
+    assert labels[-5:] == ["", "Filter", "Search…", "", "Browser…"]
     filt = find_submenu(data.items, "Filter")
     assert menu_outline(filt.items)[0] == "Toggle Panel"
 
