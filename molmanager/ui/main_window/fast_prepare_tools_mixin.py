@@ -100,7 +100,8 @@ class FastPrepareToolsMixin:
             return
 
         # The mol store keeps a SMILES beside every blob (session save reads it), so the child
-        # processes always canonicalize; the GUI thread never runs MolToSmiles.
+        # processes always canonicalize; the GUI thread never runs MolToSmiles. Structure output
+        # also comes back with a depiction scene, so drawing does not start a second job.
         cfg = load_config()
         params = FastPrepareParams(
             is_smiles=is_smiles,
@@ -108,6 +109,7 @@ class FastPrepareToolsMixin:
             neutralize=bool(neutralize),
             batch_size=int(cfg.fast_prepare_batch_size),
             process_pool_min_rows=int(cfg.fast_prepare_process_pool_min_rows),
+            want_scene=prepare_col == "Structure",
         )
         enqueue_process_queue_job(
             self,
@@ -119,42 +121,129 @@ class FastPrepareToolsMixin:
             queue_label="Fast prepare: prepare structures",
         )
 
+    def on_fast_prepare_batch(self, rows, is_last: bool) -> None:
+        """Write one streamed Structure batch. The last signal finishes the job."""
+        if rows or not getattr(self, "_fast_prepare_applying", False):
+            self._apply_fast_prepare_rows(rows or [])
+        if is_last:
+            self._finish_fast_prepare(structure_scenes=True)
+
     def on_fast_prepare_finished(self, results) -> None:
-        """Apply fused disconnect + neutralize results, then render the new depictions.
+        """Apply fused disconnect + neutralize results, then render depictions that still need it.
 
         One writeback per row: the old two-job chain wrote the disconnected parent and then
-        immediately overwrote it with the neutralized molecule.
+        immediately overwrote it with the neutralized molecule. A Structure job that already
+        carried scenes is applied as a single streamed batch.
         """
-        self.table.setSortingEnabled(False)
+        if results and len(results[0]) >= 6:
+            self.on_fast_prepare_batch(results, True)
+            return
+        self._apply_fast_prepare_rows(results or [])
+        self._finish_fast_prepare(structure_scenes=False)
+
+    def _fast_prepare_job_columns(self) -> tuple[str, str, bool]:
+        if getattr(self, "_fast_prepare_applying", False):
+            return (
+                self._fast_prepare_apply_col,
+                self._fast_prepare_apply_fragments,
+                self._fast_prepare_apply_update,
+            )
         prepare_col = getattr(self, "_fast_prepare_source", "Structure")
         fragments_col = getattr(self, "_fast_prepare_fragments_col", "Fragments")
         update_target = getattr(self, "_fast_prepare_update_target", True)
-        self._fast_prepare_source = "Structure"
-        self._fast_prepare_allowed_oids = None
-        self._fast_prepare_fragments_col = "Fragments"
-        self._fast_prepare_update_target = True
-
+        self._fast_prepare_apply_col = prepare_col
+        self._fast_prepare_apply_fragments = fragments_col
+        self._fast_prepare_apply_update = update_target
+        self._fast_prepare_fallback_oids = []
+        self._fast_prepare_written_oids = []
+        self._fast_prepare_applying = True
+        self.table.setSortingEnabled(False)
         self._ensure_disconnect_output_column(fragments_col)
         if not update_target:
             self._ensure_disconnect_output_column(prepare_col)
+        return prepare_col, fragments_col, update_target
 
-        prepared = [
-            (int(oid), bytes(blob), fragments, smiles)
-            for oid, blob, fragments, smiles in results
-            if blob
-        ]
+    def _apply_fast_prepare_rows(self, results) -> None:
+        """Write one batch of ``(oid, blob, fragments, smiles[, scene, xy])`` rows."""
+        prepare_col, fragments_col, _update_target = self._fast_prepare_job_columns()
+        prepared: list[tuple[int, bytes, str, str]] = []
+        scenes: list[tuple[int, bytes]] = []
+        coords: list[tuple[int, bytes]] = []
+        for row in results:
+            blob = bytes(row[1]) if row[1] else b""
+            if not blob:
+                continue
+            oid = int(row[0])
+            prepared.append((oid, blob, row[2], row[3]))
+            if len(row) < 6:
+                continue
+            scene = bytes(row[4] or b"")
+            xy = bytes(row[5] or b"")
+            if scene:
+                scenes.append((oid, scene))
+            elif prepare_col == "Structure":
+                self._fast_prepare_fallback_oids.append(oid)
+            if xy:
+                coords.append((oid, xy))
         oids = self._write_tool_structures(
             prepare_col, [(oid, blob, smiles) for oid, blob, _fragments, smiles in prepared]
         )
+        self._fast_prepare_written_oids.extend(oids)
         if fragments_col in self.headers:
             self._table_model.set_column_text_by_oids(
                 fragments_col, [(oid, fragments) for oid, _blob, fragments, _smiles in prepared]
             )
+        depiction = getattr(self, "_depiction_coords", None)
+        if depiction is not None and coords:
+            # Writeback drops the previous orientation. These are the coordinates the scene used,
+            # so a later Render 2D rebuilds the same picture.
+            depiction.set_many(prepare_col, coords)
+        if scenes:
+            self._store_fast_prepare_scenes(scenes)
+
+    def _store_fast_prepare_scenes(self, scenes: list[tuple[int, bytes]]) -> None:
+        """Put packed scenes on the table as they arrive, creating the store on the first batch."""
+        from ...platform_support.config import load_config
+        from ...storage.structure_render_store import StructureRenderStore
+
+        model = self._table_model
+        store = model._structure_png_store
+        if store is None:
+            cfg = load_config()
+            store = StructureRenderStore(
+                max_decoded_pixmaps=cfg.structure_render_pixmap_lru,
+                max_png_entries=cfg.structure_render_png_max_entries,
+            )
+            model.set_structure_png_store(store)
+            hook = getattr(self, "_ensure_structure_lazy_scroll_hook", None)
+            if callable(hook):
+                hook()
+        store.ingest_batch(scenes)
+        repaint = getattr(self, "_repaint_visible_rendered_rows", None)
+        if callable(repaint):
+            repaint({oid for oid, _scene in scenes})
+
+    def _finish_fast_prepare(self, *, structure_scenes: bool) -> None:
+        prepare_col = getattr(self, "_fast_prepare_apply_col", "Structure")
+        written = list(getattr(self, "_fast_prepare_written_oids", []))
+        fallbacks = list(getattr(self, "_fast_prepare_fallback_oids", []))
+        self._fast_prepare_source = "Structure"
+        self._fast_prepare_allowed_oids = None
+        self._fast_prepare_fragments_col = "Fragments"
+        self._fast_prepare_update_target = True
+        self._fast_prepare_applying = False
+        self._fast_prepare_fallback_oids = []
+        self._fast_prepare_written_oids = []
 
         self.schedule_calculate_global_bounds()
         self._clear_tool_progress()
 
-        if self._render_tool_structures(prepare_col, oids, queue_title_prefix="Fast prepare: "):
+        # Scenes already cover the Structure rows. Only the builder's leftovers are redrawn,
+        # and they still have the coordinates just stored, so that redraw keeps the layout.
+        redraw = fallbacks if structure_scenes else written
+        if redraw and self._render_tool_structures(
+            prepare_col, redraw, queue_title_prefix="Fast prepare: "
+        ):
             self.status_label.setText("Fast prepare: rendering 2D…")
             return
         self.status_label.setText(self._consume_partial_results_notice() or "Fast prepare done.")
