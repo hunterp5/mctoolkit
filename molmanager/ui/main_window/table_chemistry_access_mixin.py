@@ -145,10 +145,6 @@ class TableChemistryAccessMixin:
         if col <= 0 or col >= len(self.headers):
             return False
         h = self.headers[col]
-        from ...predictions.som_prediction import is_som_map_header
-
-        if is_som_map_header(h):
-            return False
         if self._skip_chemistry_tool_column_dropdown(h):
             return False
         if self._header_looks_structural(h) or self._is_smiles_named_header(h):
