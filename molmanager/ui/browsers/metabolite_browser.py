@@ -226,6 +226,87 @@ def records_from_table(app: Any) -> list[MetaboliteBrowseRecord]:
     return out
 
 
+def _hit_to_json(hit: MetaboliteBrowseHit) -> dict[str, Any]:
+    payload: dict[str, Any] = {"smiles": hit.smiles}
+    if hit.reaction:
+        payload["reaction"] = hit.reaction
+    if hit.enzyme:
+        payload["enzyme"] = hit.enzyme
+    if hit.biosystem:
+        payload["biosystem"] = hit.biosystem
+    if hit.generation is not None:
+        payload["generation"] = int(hit.generation)
+    if hit.precursor_smiles:
+        payload["precursor_smiles"] = hit.precursor_smiles
+    return payload
+
+
+def serialize_metabolite_browse_records(
+    records: Sequence[MetaboliteBrowseRecord] | None,
+) -> list[dict[str, Any]]:
+    """JSON-safe metabolite browser payload for ``.cms`` session files."""
+    out: list[dict[str, Any]] = []
+    for rec in records or ():
+        item: dict[str, Any] = {
+            "oid": rec.oid,
+            "smiles": rec.smiles,
+            "metabolites": [_hit_to_json(hit) for hit in rec.metabolites],
+        }
+        if rec.error:
+            item["error"] = rec.error
+        out.append(item)
+    return out
+
+
+def deserialize_metabolite_browse_records(raw: Any) -> list[MetaboliteBrowseRecord]:
+    """Rebuild browser records from a session ``metabolite_browse`` list."""
+    if not isinstance(raw, list):
+        return []
+    out: list[MetaboliteBrowseRecord] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        oid_raw = item.get("oid")
+        try:
+            oid = None if oid_raw is None else int(oid_raw)
+        except (TypeError, ValueError):
+            continue
+        hits = tuple(
+            hit
+            for hit in (_coerce_hit(h) for h in (item.get("metabolites") or ()))
+            if hit is not None
+        )
+        error = item.get("error")
+        err = str(error).strip() if error else None
+        if err == BIOTRANSFORMER_CANCELLED and not hits:
+            continue
+        out.append(
+            MetaboliteBrowseRecord(
+                oid=oid,
+                smiles=str(item.get("smiles") or ""),
+                metabolites=hits,
+                error=err if not hits else None,
+            )
+        )
+    return out
+
+
+def restore_metabolite_browse_for_session(app: Any, payload: Any = None) -> int:
+    """Restore Predict Metabolites browser records after a session open.
+
+    A missing payload falls back to the parent-row metabolite columns so older
+    sessions still open the viewer. Returns the number of records kept.
+    """
+    records = deserialize_metabolite_browse_records(payload)
+    if not records and not isinstance(payload, list):
+        records = records_from_table(app)
+    app._metabolite_browse_records = list(records)
+    sync = getattr(app, "_sync_predict_viewer_actions", None)
+    if callable(sync):
+        sync()
+    return len(records)
+
+
 def _pixmap_from_smiles(smiles: str, width: int, height: int) -> QPixmap | None:
     mol = Chem.MolFromSmiles(smiles or "")
     if mol is None:
