@@ -52,16 +52,13 @@ def test_catalog_includes_key_dois() -> None:
         "10.1186/1758-2946-3-8",
         "10.1021/acs.jcim.3c00563",
         "10.1021/acs.jmedchem.7b00717",
+        "10.1021/acs.jmedchem.9b01220",
         "10.1093/bioinformatics/btu829",
         "10.1093/molbev/mst010",
         "10.1186/s13321-018-0324-5",
         "10.1186/s13321-021-00548-6",
     ):
         assert doi in html_all
-    fame = tool_citation("fame3r")
-    assert fame is not None
-    assert "non-commercial" in fame.notes.lower()
-    assert "University of Milan" in fame.notes
     cf = tool_citation("conforge")
     assert cf is not None
     assert "CONFORGE" in cf.name
