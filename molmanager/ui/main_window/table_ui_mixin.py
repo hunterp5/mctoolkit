@@ -225,7 +225,7 @@ class TableUIMixin(
         depiction = getattr(self, "_depiction_coords", None)
         if depiction is not None:
             depiction.clear()
-        self._som_browse_records = []
+        self._metabolite_browse_records = []
         clearer = getattr(self, "_store_last_dock_results", None)
         if callable(clearer):
             clearer([], title="Pose browser")
