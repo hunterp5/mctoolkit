@@ -19,7 +19,7 @@
 Keyed by :func:`molmanager.services.structure_grouping.structure_key` (canonical SMILES)
 and by each microstate SMILES in the ensemble so Protonated / protomer rows reuse the
 same prediction. Shared by Predict pKa, Protonate, Generate Protomers, and ionization
-descriptors (LogD/LogS 7.4, CNS MPO, AB-MPS). Saved into ``.cms`` session files and
+descriptors (LogD/LogS 7.4, CNS MPO, AB-MPS, BBB Score). Saved into ``.cms`` session files and
 restored on Open / Duplicate. Cleared on Clear / shutdown. Does not persist to SDF/CSV.
 """
 
