@@ -50,6 +50,11 @@ WAGER_CNS_MPO = (
     "https://doi.org/10.1021/cn100008c — overview https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3368654/"
 )
 
+GUPTA_BBB = (
+    "BBB Score: Gupta, M.; Lee, H. J.; Barden, C. J.; Weaver, D. F. The Blood–Brain Barrier (BBB) "
+    "Score. J. Med. Chem. 2019, 62 (21), 9824–9836. https://doi.org/10.1021/acs.jmedchem.9b01220"
+)
+
 LOGD_LOGS_ION = (
     "LogD 7.4 and LogS 7.4 at pH 7.4: RDKit Wildman–Crippen log P (rdkit.Chem.Crippen.MolLogP) "
     "combined with the mole fraction of net-neutral protomer states at pH 7.4 from Uni-pKa "
@@ -163,6 +168,9 @@ def descriptor_checkbox_citation_html(internal_key: str) -> str | None:
         "CNS_MPO": (
             '<a href="https://doi.org/10.1021/cn100008c">Wager et al., ACS Chem. Neurosci. 2010</a>'
         ),
+        "BBB_SCORE": (
+            '<a href="https://doi.org/10.1021/acs.jmedchem.9b01220">Gupta et al., J. Med. Chem. 2019</a>'
+        ),
         "AB_MPS": (
             '<a href="https://doi.org/10.1021/acs.jmedchem.7b00717">DeGoey et al., J. Med. Chem. 2018</a> '
             "(|LogD7.4 − 3| + aromatic rings + rotatable bonds)"
@@ -212,6 +220,8 @@ def descriptor_dialog_footer_html() -> str:
         "<b>CNS MPO score:</b> "
         '<a href="https://doi.org/10.1021/cn100008c">Wager et al., ACS Chem. Neurosci. 2010</a> '
         '(<a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3368654/">PMC3368654</a>).<br>'
+        "<b>BBB Score:</b> "
+        '<a href="https://doi.org/10.1021/acs.jmedchem.9b01220">Gupta et al., J. Med. Chem. 2019</a>.<br>'
         "<b>LogD / LogS at pH 7.4:</b> RDKit <code>Crippen.MolLogP</code> + neutral protomer fractions "
         "from Uni-pKa Boltzmann populations at pH 7.4 (same ensemble as "
         "<i>Chemistry → Prepare Structures → Protonate → Generate Protomers</i>). "
@@ -243,33 +253,13 @@ def pka_dialog_footer_html() -> str:
     )
 
 
-FAME3R_SOM = (
-    "Sites of metabolism (FAME3R): Jacob, R. A.; Gaskin, L.; Seidel, T.; Chen, Y.; "
-    "Mazzolari, A.; Kirchmair, J. FAME3R: an efficient, practical and reliable open-source "
-    "tool for predicting phase 1 and phase 2 sites of metabolism. J. Cheminform. 2026. "
-    "https://doi.org/10.1186/s13321-026-01161-1 — NERDD https://nerdd.univie.ac.at/fame3r"
-)
-
-
-def som_dialog_footer_html() -> str:
-    """Rich text for the Predict SOM (FAME3R) dialog."""
-    return (
-        "<small><b>Method</b>: FAME3R random-forest sites of metabolism — "
-        '<a href="https://doi.org/10.1186/s13321-026-01161-1">Jacob et al., J. Cheminform. 2026</a>; '
-        'service <a href="https://nerdd.univie.ac.at/fame3r">NERDD</a>. '
-        "Predicted SOM atoms are highlighted on the map (yellow→red by probability). "
-        "Pre-trained MetaQSAR models are free for <b>non-commercial</b> research; "
-        "commercial use requires a license from the University of Milan.</small>"
-    )
-
-
 def biotransformer_dialog_footer_html() -> str:
     """Rich text for the Predict Metabolites (BioTransformer) dialog."""
     return (
         "<small><b>Method</b>: BioTransformer 3 metabolite structures — "
         '<a href="https://doi.org/10.1186/s13321-018-0324-5">Djoumbou Feunang et al., '
         "J. Cheminform. 2019</a>. Local JAR only (Java on PATH). "
-        "This predicts <b>products</b>, not atom sites of metabolism. "
+        "This predicts metabolite <b>products</b>. "
         "LGPL-3; commercial redistribution of BioTransformer files needs author permission. "
         "Environmental microbial mode is not included.</small>"
     )
