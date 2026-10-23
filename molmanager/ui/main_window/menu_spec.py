@@ -291,14 +291,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             hotkey="tools.sketcher",
             tooltip="Open the structure sketcher to draw or edit molecules.",
         ),
-        SEPARATOR,
-        action(
-            "&Browser…",
-            "open_selection_browser",
-            hotkey="file.browser",
-            tooltip="Open the selection browser to review and act on selected rows. "
-            "Right-click a structure for Browser; settings pick RDKit 2D, 3Dmol 2D, or 3Dmol 3D.",
-        ),
         tooltips_visible=True,
     ),
     submenu(
@@ -488,22 +480,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                     "Predict Caco-2 and MDCK permeability / efflux endpoints "
                     "(optional Chemprop install)."
                 ),
-            ),
-            submenu(
-                "SOM",
-                action(
-                    "Predict…",
-                    "open_som_predictor",
-                    tooltip="Predict sites of metabolism with FAME3R and draw a highlighted atom map.",
-                ),
-                action(
-                    "Viewer",
-                    "open_som_viewer",
-                    tooltip="Open the SOM map browser when Predict SOM results are in the table.",
-                    attr="_act_som_viewer",
-                    enabled=False,
-                ),
-                tooltips_visible=True,
             ),
             submenu(
                 "Metabolites",
@@ -860,6 +836,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             "toggle_table_search_panel",
             hotkey="tools.search",
             tooltip="Open or hide the in-table search panel (Ctrl+F). Queries stay until deleted with −.",
+        ),
+        SEPARATOR,
+        action(
+            "&Browser…",
+            "open_selection_browser",
+            hotkey="file.browser",
+            tooltip="Open the selection browser to review and act on selected rows. "
+            "Right-click a structure for Browser; settings pick RDKit 2D, 3Dmol 2D, or 3Dmol 3D.",
         ),
         tooltips_visible=True,
     ),
