@@ -22,6 +22,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLineEdit,
     QPushButton,
@@ -43,29 +44,17 @@ class ProtonateDialog(QDialog):
         self._have_selection = selected_row_count > 0
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 6, 8, 6)
-        root.setSpacing(6)
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
 
-        form = QFormLayout()
-        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        root.addLayout(form)
-
+        structures = QGroupBox("Structures")
+        struct_form = QFormLayout(structures)
+        struct_form.setContentsMargins(8, 6, 8, 6)
+        struct_form.setSpacing(4)
+        struct_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.src_combo = QComboBox()
         self.src_combo.addItems(list(source_labels))
-        form.addRow("Structure source:", self.src_combo)
-
-        self.ph_spin = QDoubleSpinBox()
-        self.ph_spin.setRange(0.0, 14.0)
-        self.ph_spin.setDecimals(2)
-        self.ph_spin.setSingleStep(0.1)
-        self.ph_spin.setValue(7.40)
-        self.ph_spin.setToolTip("Target pH for dominant protomer selection (approximate).")
-        form.addRow("pH:", self.ph_spin)
-
-        self.output_col = QLineEdit("Protonated")
-        self.output_col.setPlaceholderText("New column name")
-        form.addRow("Output column:", self.output_col)
-
+        struct_form.addRow("Structure source:", self.src_combo)
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
         if self._have_selection:
@@ -74,15 +63,38 @@ class ProtonateDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
-        form.addRow("", self.only_selected_cb)
+        struct_form.addRow("", self.only_selected_cb)
+        root.addWidget(structures)
 
+        protonation = QGroupBox("Protonation")
+        ph_form = QFormLayout(protonation)
+        ph_form.setContentsMargins(8, 6, 8, 6)
+        ph_form.setSpacing(4)
+        self.ph_spin = QDoubleSpinBox()
+        self.ph_spin.setRange(0.0, 14.0)
+        self.ph_spin.setDecimals(2)
+        self.ph_spin.setSingleStep(0.1)
+        self.ph_spin.setValue(7.40)
+        self.ph_spin.setToolTip("Target pH for dominant protomer selection (approximate).")
+        ph_form.addRow("pH:", self.ph_spin)
+        root.addWidget(protonation)
+
+        output = QGroupBox("Output")
+        out_form = QFormLayout(output)
+        out_form.setContentsMargins(8, 6, 8, 6)
+        out_form.setSpacing(4)
+        out_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.output_col = QLineEdit("Protonated")
+        self.output_col.setPlaceholderText("New column name")
+        out_form.addRow("Output column:", self.output_col)
         self.render_cb = QCheckBox("Render 2D in output column")
         self.render_cb.setChecked(True)
         self.render_cb.setToolTip(
             "Show 2D depictions in the output column (same display style as Structure). "
             "SMILES remain stored in the cell but are not shown as text."
         )
-        form.addRow("", self.render_cb)
+        out_form.addRow("", self.render_cb)
+        root.addWidget(output)
 
         btn_row = QHBoxLayout()
         self.run_btn = QPushButton("Run")
@@ -91,6 +103,7 @@ class ProtonateDialog(QDialog):
         btn_row.addStretch()
         root.addLayout(btn_row)
 
+        self.adjustSize()
         make_window_minimizable(self)
 
     def config(self) -> tuple[str, float, str, bool, bool]:

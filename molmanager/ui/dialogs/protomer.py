@@ -14,15 +14,16 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Chemistry → Predict → Generate Protomers."""
+"""Chemistry → Prepare Structures → Protonate → Generate Protomers."""
 
 from __future__ import annotations
 
 from PyQt5.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
-    QLabel,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -61,23 +62,28 @@ class ProtomerGeneratorDialog(QDialog):
 
     def _build_protomer_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 6, 8, 6)
-        root.setSpacing(4)
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
 
-        attach_structure_input(self, root, selected_row_count=self._selected_row_count)
+        structures = QGroupBox("Structures")
+        struct_lyt = QVBoxLayout(structures)
+        struct_lyt.setContentsMargins(8, 6, 8, 6)
+        struct_lyt.setSpacing(4)
+        attach_structure_input(self, struct_lyt, selected_row_count=self._selected_row_count)
+        root.addWidget(structures)
 
-        ph_row = QHBoxLayout()
-        ph_row.setSpacing(6)
-        ph_row.addWidget(QLabel("pH:"))
+        conditions = QGroupBox("Conditions")
+        cond_form = QFormLayout(conditions)
+        cond_form.setContentsMargins(8, 6, 8, 6)
+        cond_form.setSpacing(4)
         self.ph_spin = QDoubleSpinBox()
         self.ph_spin.setRange(0.0, 14.0)
         self.ph_spin.setDecimals(2)
         self.ph_spin.setSingleStep(0.1)
         self.ph_spin.setValue(7.40)
         self.ph_spin.setToolTip("Target pH for approximate protomer population weights.")
-        ph_row.addWidget(self.ph_spin)
-        ph_row.addStretch()
-        root.addLayout(ph_row)
+        cond_form.addRow("pH:", self.ph_spin)
+        root.addWidget(conditions)
 
         gen_row = QHBoxLayout()
         gen_row.setSpacing(6)

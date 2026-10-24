@@ -25,8 +25,9 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
-    QLabel,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -45,7 +46,6 @@ from ...predictions.biotransformer_metabolites import (
 )
 from ...platform_support.bundled_paths import (
     biotransformer_models_dir,
-    resolve_biotransformer_jar,
     set_configured_biotransformer_jar,
 )
 from ...platform_support.memory_guards import check_product_enumeration, clamp_max_products_ui
@@ -75,7 +75,7 @@ class BiotransformerDialog(QDialog):
 
     def _init_biotransformer_state(self, parent) -> None:
         self.setWindowTitle(TOOL_PREDICT_METABOLITES)
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(420)
         n_sel = len(parent._selected_logical_rows()) if parent is not None else 0
         self._selected_row_count = n_sel
         self._have_selection = n_sel > 0
@@ -83,60 +83,59 @@ class BiotransformerDialog(QDialog):
     def _build_biotransformer_ui(self) -> None:
         n_sel = self._selected_row_count
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 6, 8, 6)
-        root.setSpacing(4)
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
 
-        self._install_lbl = QLabel("")
-        self._install_lbl.setWordWrap(True)
-        self._install_lbl.setStyleSheet("color: palette(mid);")
-        root.addWidget(self._install_lbl)
+        structures = QGroupBox("Structures")
+        struct_lyt = QVBoxLayout(structures)
+        struct_lyt.setContentsMargins(8, 6, 8, 6)
+        struct_lyt.setSpacing(4)
+        attach_structure_input(self, struct_lyt, selected_row_count=n_sel)
+        root.addWidget(structures)
 
-        attach_structure_input(self, root, selected_row_count=n_sel)
+        metabolism = QGroupBox("Metabolism")
+        form = QFormLayout(metabolism)
+        form.setContentsMargins(8, 6, 8, 6)
+        form.setSpacing(4)
+        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
-        sub_row = QHBoxLayout()
-        sub_row.setSpacing(6)
-        sub_row.addWidget(QLabel("Metabolism:"))
         self.subset_combo = QComboBox()
         for value, label in METABOLISM_OPTIONS:
             self.subset_combo.addItem(label, value)
         self.subset_combo.setToolTip(
             "BioTransformer module. AllHuman covers host plus gut reactions at each step."
         )
-        sub_row.addWidget(self.subset_combo, 1)
-        root.addLayout(sub_row)
+        form.addRow("Metabolism:", self.subset_combo)
 
-        step_row = QHBoxLayout()
-        step_row.setSpacing(6)
-        step_row.addWidget(QLabel("Steps:"))
         self.steps_spin = QSpinBox()
         self.steps_spin.setRange(1, 3)
         self.steps_spin.setValue(DEFAULT_NSTEPS)
         self.steps_spin.setToolTip("Maximum biotransformation generations (1–3).")
-        step_row.addWidget(self.steps_spin)
-        step_row.addWidget(QLabel("CYP mode:"))
+        form.addRow("Steps:", self.steps_spin)
+
         self.cyp_combo = QComboBox()
         for value, label in CYP_MODE_LABELS:
             self.cyp_combo.addItem(label, value)
         _set_combo_current_data(self.cyp_combo, DEFAULT_CYP_MODE)
-        step_row.addWidget(self.cyp_combo, 1)
-        root.addLayout(step_row)
+        form.addRow("CYP mode:", self.cyp_combo)
 
-        cap_row = QHBoxLayout()
-        cap_row.setSpacing(6)
-        cap_row.addWidget(QLabel("Max metabolites:"))
         self.max_spin = QSpinBox()
         self.max_spin.setRange(1, clamp_max_products_ui(10_000))
         self.max_spin.setValue(min(DEFAULT_MAX_METABOLITES, clamp_max_products_ui(10_000)))
         self.max_spin.setToolTip("Cap products kept per parent molecule.")
-        cap_row.addWidget(self.max_spin)
-        cap_row.addStretch()
-        root.addLayout(cap_row)
+        form.addRow("Max metabolites:", self.max_spin)
+        root.addWidget(metabolism)
 
+        output = QGroupBox("Output")
+        out_lyt = QVBoxLayout(output)
+        out_lyt.setContentsMargins(8, 6, 8, 6)
+        out_lyt.setSpacing(4)
         self.add_rows_cb = QCheckBox("Add metabolites as new table rows")
         self.add_rows_cb.setToolTip(
             "Append each product as a new row with parent SMILES, reaction, and generation."
         )
-        root.addWidget(self.add_rows_cb)
+        out_lyt.addWidget(self.add_rows_cb)
+        root.addWidget(output)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
@@ -176,16 +175,6 @@ class BiotransformerDialog(QDialog):
 
     def _refresh_install_state(self) -> None:
         msg = install_ready_message()
-        jar = resolve_biotransformer_jar()
-        if msg:
-            self._install_lbl.setText(msg)
-            self._install_lbl.setVisible(True)
-            self.predict_btn.setEnabled(False)
-        else:
-            found = f"Using {jar}" if jar is not None else ""
-            self._install_lbl.setText(found)
-            self._install_lbl.setVisible(bool(found))
-            self.predict_btn.setEnabled(True)
         need_package = msg is not None and (
             "JAR not found" in msg or "knowledge-base" in msg or "supportfiles" in msg
         )
@@ -242,12 +231,12 @@ class BiotransformerDialog(QDialog):
             QMessageBox.information(self, TOOL_PREDICT_METABOLITES, f"Installed:\n{jar}")
 
     def _on_predict(self) -> None:
-        if self.parent_app is None:
-            return
         missing = install_ready_message()
         if missing:
             QMessageBox.warning(self, TOOL_PREDICT_METABOLITES, missing)
             self._refresh_install_state()
+            return
+        if self.parent_app is None:
             return
         metabolism = str(self.subset_combo.currentData() or "allHuman")
         nsteps = int(self.steps_spin.value())
@@ -261,6 +250,9 @@ class BiotransformerDialog(QDialog):
         payloads = self._structure_input.collect_payloads(self, TOOL_PREDICT_METABOLITES)
         if payloads is None:
             return
+        from ...predictions.biotransformer_metabolites import metabolite_output_columns
+
+        payloads = self.parent_app._filter_rows_for_resume(payloads, metabolite_output_columns())
 
         bt_signals = self.parent_app._ensure_biotransformer_signals()
         n = len(payloads)

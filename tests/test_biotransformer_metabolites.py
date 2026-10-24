@@ -278,7 +278,9 @@ def test_unknown_metabolism_raises() -> None:
         predict_metabolites_batch(["CCO"], metabolism="envimicro")  # type: ignore[arg-type]
 
 
-def test_biotransformer_dialog_disables_predict_when_missing(qapp, monkeypatch) -> None:  # noqa: ARG001
+def test_biotransformer_dialog_warns_on_predict_when_missing(qapp, monkeypatch) -> None:  # noqa: ARG001
+    from PyQt5.QtWidgets import QMessageBox
+
     from molmanager.predictions.biotransformer_metabolites import CYP_MODE_LABELS, DEFAULT_CYP_MODE
     from molmanager.ui.dialogs.biotransformer import BiotransformerDialog
 
@@ -286,13 +288,22 @@ def test_biotransformer_dialog_disables_predict_when_missing(qapp, monkeypatch) 
         "molmanager.ui.dialogs.biotransformer.install_ready_message",
         lambda: "Java is not on PATH.",
     )
+    shown: list[str] = []
+
+    def _warn(_parent, _title, text, *_args, **_kwargs):
+        shown.append(text)
+        return QMessageBox.Ok
+
+    monkeypatch.setattr("molmanager.ui.dialogs.biotransformer.QMessageBox.warning", _warn)
     dlg = BiotransformerDialog(None)
     assert [dlg.cyp_combo.itemData(i) for i in range(dlg.cyp_combo.count())] == [
         v for v, _ in CYP_MODE_LABELS
     ]
     assert dlg.cyp_combo.currentData() == DEFAULT_CYP_MODE
-    assert not dlg.predict_btn.isEnabled()
+    assert dlg.predict_btn.isEnabled()
     assert dlg.browse_btn.isEnabled()
+    dlg.predict_btn.click()
+    assert shown == ["Java is not on PATH."]
     dlg.subset_combo.setCurrentIndex(
         next(
             i for i in range(dlg.subset_combo.count()) if dlg.subset_combo.itemData(i) == "phaseII"

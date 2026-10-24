@@ -20,9 +20,9 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -40,18 +40,35 @@ class PermeabilityPredictorDialog(QDialog):
         super().__init__(parent)
         self.parent_app = parent
         self.setWindowTitle("Predict Permeability")
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(420)
         n_sel = len(parent._selected_logical_rows()) if parent is not None else 0
         self._have_selection = n_sel > 0
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 6, 8, 6)
-        root.setSpacing(4)
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
+
+        structures = QGroupBox("Structures")
+        struct_form = QFormLayout(structures)
+        struct_form.setContentsMargins(8, 6, 8, 6)
+        struct_form.setSpacing(4)
+        struct_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.src_combo = QComboBox()
+        self.src_combo.setMinimumWidth(160)
+        struct_form.addRow("Structure source:", self.src_combo)
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
+        else:
+            self.only_selected_cb.setEnabled(False)
+        struct_form.addRow("", self.only_selected_cb)
+        root.addWidget(structures)
 
         endpoints_box = QGroupBox("Cell lines / endpoints")
         ep_layout = QVBoxLayout(endpoints_box)
-        ep_layout.setContentsMargins(8, 8, 8, 8)
-        ep_layout.setSpacing(2)
+        ep_layout.setContentsMargins(8, 6, 8, 6)
+        ep_layout.setSpacing(4)
         self._endpoint_cbs: dict[str, QCheckBox] = {}
         for column, label in PERMEABILITY_ENDPOINT_OPTIONS:
             cb = QCheckBox(label)
@@ -59,22 +76,6 @@ class PermeabilityPredictorDialog(QDialog):
             self._endpoint_cbs[column] = cb
             ep_layout.addWidget(cb)
         root.addWidget(endpoints_box)
-
-        src_row = QHBoxLayout()
-        src_row.setSpacing(6)
-        src_row.addWidget(QLabel("Structure source:"))
-        self.src_combo = QComboBox()
-        self.src_combo.setMinimumWidth(160)
-        src_row.addWidget(self.src_combo, 1)
-        root.addLayout(src_row)
-
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
-        else:
-            self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)

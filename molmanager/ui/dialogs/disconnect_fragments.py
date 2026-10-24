@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QLineEdit,
     QMessageBox,
     QRadioButton,
@@ -100,34 +101,22 @@ class DisconnectFragmentsDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("Disconnect Largest Fragments")
+        self.setMinimumWidth(420)
         self._existing = list(existing_headers)
         self._have_selection = selected_row_count > 0
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 8, 10, 8)
-        root.setSpacing(6)
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
 
-        form = QFormLayout()
-        form.setVerticalSpacing(4)
+        structures = QGroupBox("Structures")
+        struct_form = QFormLayout(structures)
+        struct_form.setContentsMargins(8, 6, 8, 6)
+        struct_form.setSpacing(4)
+        struct_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.src_combo = QComboBox()
         self.src_combo.addItems(source_labels)
-        form.addRow("Target column:", self.src_combo)
-
-        self.radio_update_target = QRadioButton("Update Target Column")
-        self.radio_new_columns = QRadioButton("New Column")
-        self.radio_update_target.setChecked(True)
-        form.addRow(self.radio_update_target)
-        form.addRow(self.radio_new_columns)
-
-        self.largest_edit = QLineEdit("Largest fragment SMILES")
-        form.addRow("Largest Fragment:", self.largest_edit)
-        self.fragments_edit = QLineEdit("Fragments")
-        form.addRow("Smallest Fragment:", self.fragments_edit)
-        root.addLayout(form)
-
-        self.radio_update_target.toggled.connect(self._sync_output_fields)
-        self.radio_new_columns.toggled.connect(self._sync_output_fields)
-
+        struct_form.addRow("Target column:", self.src_combo)
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
         if self._have_selection:
@@ -136,9 +125,35 @@ class DisconnectFragmentsDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
+        struct_form.addRow("", self.only_selected_cb)
+        root.addWidget(structures)
+
+        output = QGroupBox("Output")
+        out_form = QFormLayout(output)
+        out_form.setContentsMargins(8, 6, 8, 6)
+        out_form.setSpacing(4)
+        out_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.radio_update_target = QRadioButton("Update Target Column")
+        self.radio_new_columns = QRadioButton("New Column")
+        self.radio_update_target.setChecked(True)
+        out_form.addRow(self.radio_update_target)
+        out_form.addRow(self.radio_new_columns)
+        self.largest_edit = QLineEdit("Largest fragment SMILES")
+        out_form.addRow("Largest Fragment:", self.largest_edit)
+        self.fragments_edit = QLineEdit("Fragments")
+        out_form.addRow("Smallest Fragment:", self.fragments_edit)
+        root.addWidget(output)
+
+        self.radio_update_target.toggled.connect(self._sync_output_fields)
+        self.radio_new_columns.toggled.connect(self._sync_output_fields)
+
+        options = QGroupBox("Options")
+        opt_lyt = QVBoxLayout(options)
+        opt_lyt.setContentsMargins(8, 6, 8, 6)
+        opt_lyt.setSpacing(4)
         self.no_render_2d_cb = QCheckBox("No Render 2D")
-        root.addWidget(self.no_render_2d_cb)
+        opt_lyt.addWidget(self.no_render_2d_cb)
+        root.addWidget(options)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self._try_accept)

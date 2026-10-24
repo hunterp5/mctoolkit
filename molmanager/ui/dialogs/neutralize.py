@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QVBoxLayout,
 )
 
@@ -37,15 +38,21 @@ class NeutralizeDialog(QDialog):
     def __init__(self, source_labels: list[str], selected_row_count: int = 0, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Neutralize")
-        self.resize(420, 140)
+        self.setMinimumWidth(420)
         self._have_selection = selected_row_count > 0
 
         root = QVBoxLayout(self)
-        f = QFormLayout()
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
+
+        structures = QGroupBox("Structures")
+        form = QFormLayout(structures)
+        form.setContentsMargins(8, 6, 8, 6)
+        form.setSpacing(4)
+        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.src_combo = QComboBox()
         self.src_combo.addItems(source_labels)
-        f.addRow("Target column:", self.src_combo)
-        root.addLayout(f)
+        form.addRow("Target column:", self.src_combo)
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
         if self._have_selection:
@@ -54,14 +61,22 @@ class NeutralizeDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
+        form.addRow("", self.only_selected_cb)
+        root.addWidget(structures)
+
+        options = QGroupBox("Options")
+        opt_lyt = QVBoxLayout(options)
+        opt_lyt.setContentsMargins(8, 6, 8, 6)
+        opt_lyt.setSpacing(4)
         self.no_render_2d_cb = QCheckBox("No Render 2D")
         self.no_render_2d_cb.setToolTip("Skip redrawing 2D images after neutralization.")
-        root.addWidget(self.no_render_2d_cb)
+        opt_lyt.addWidget(self.no_render_2d_cb)
+        root.addWidget(options)
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)
         box.rejected.connect(self.reject)
         root.addWidget(box)
+        self.adjustSize()
         make_window_minimizable(self)
 
     def config(self) -> tuple[str, bool, bool]:

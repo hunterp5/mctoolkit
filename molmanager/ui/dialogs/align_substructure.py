@@ -29,6 +29,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -76,13 +77,40 @@ class AlignSubstructureDialog(QDialog):
         self._result: AlignSubstructureConfig | None = None
 
         root = QVBoxLayout(self)
-        form = QFormLayout()
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
+
+        structures = QGroupBox("Structures")
+        form = QFormLayout(structures)
+        form.setContentsMargins(8, 6, 8, 6)
+        form.setSpacing(4)
+        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.src_combo = QComboBox()
         self.src_combo.addItems(source_labels or ["Structure"])
         self.src_combo.setToolTip("Structure column whose pictures should share this orientation.")
         form.addRow("Target column:", self.src_combo)
-        root.addLayout(form)
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(
+                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
+            )
+        else:
+            self.only_selected_cb.setEnabled(False)
+        form.addRow("", self.only_selected_cb)
+        self.skip_existing_cb = QCheckBox("Skip rows that already have an orientation")
+        self.skip_existing_cb.setChecked(True)
+        self.skip_existing_cb.setToolTip(
+            "Leave rows aligned by an earlier query unchanged, so this query orients the rest. "
+            "Uncheck to replace an existing orientation when a molecule contains both substructures."
+        )
+        form.addRow("", self.skip_existing_cb)
+        root.addWidget(structures)
 
+        query = QGroupBox("Query")
+        query_lyt = QVBoxLayout(query)
+        query_lyt.setContentsMargins(8, 6, 8, 6)
+        query_lyt.setSpacing(6)
         self.query_edit = QPlainTextEdit()
         self.query_edit.setPlaceholderText("SMILES, SMARTS, or molfile")
         self.query_edit.setFixedHeight(72)
@@ -90,17 +118,17 @@ class AlignSubstructureDialog(QDialog):
             "Substructure to pin. A molfile keeps its coordinates. "
             "SMILES and SMARTS start from a default layout you can rotate or redraw."
         )
-        root.addWidget(self.query_edit)
+        query_lyt.addWidget(self.query_edit)
 
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setMinimumHeight(_PREVIEW_H)
         self.preview.setStyleSheet("background: white; border: 1px solid palette(mid);")
-        root.addWidget(self.preview)
+        query_lyt.addWidget(self.preview)
 
         self.error_label = QLabel("")
         self.error_label.setWordWrap(True)
-        root.addWidget(self.error_label)
+        query_lyt.addWidget(self.error_label)
 
         buttons = QHBoxLayout()
         self.sketch_btn = QPushButton("Edit in sketcher…")
@@ -115,25 +143,8 @@ class AlignSubstructureDialog(QDialog):
         buttons.addWidget(self.flip_h_btn)
         buttons.addWidget(self.flip_v_btn)
         buttons.addStretch(1)
-        root.addLayout(buttons)
-
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(
-                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
-            )
-        else:
-            self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
-
-        self.skip_existing_cb = QCheckBox("Skip rows that already have an orientation")
-        self.skip_existing_cb.setChecked(True)
-        self.skip_existing_cb.setToolTip(
-            "Leave rows aligned by an earlier query unchanged, so this query orients the rest. "
-            "Uncheck to replace an existing orientation when a molecule contains both substructures."
-        )
-        root.addWidget(self.skip_existing_cb)
+        query_lyt.addLayout(buttons)
+        root.addWidget(query)
 
         box = QDialogButtonBox(QDialogButtonBox.Cancel)
         self._align_btn = box.addButton("Align", QDialogButtonBox.AcceptRole)

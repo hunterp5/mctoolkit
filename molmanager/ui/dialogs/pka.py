@@ -19,6 +19,7 @@ from __future__ import annotations
 from PyQt5.QtWidgets import (
     QCheckBox,
     QDialog,
+    QGroupBox,
     QHBoxLayout,
     QPushButton,
     QVBoxLayout,
@@ -38,15 +39,25 @@ class PKaPredictorDialog(QDialog):
         super().__init__(parent)
         self.parent_app = parent
         self.setWindowTitle("Predict pKa")
-        self.setMinimumWidth(320)
+        self.setMinimumWidth(420)
         n_sel = len(parent._selected_logical_rows()) if parent is not None else 0
         self._have_selection = n_sel > 0
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 6, 8, 6)
-        root.setSpacing(4)
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
 
-        attach_structure_input(self, root, selected_row_count=n_sel)
+        structures = QGroupBox("Structures")
+        struct_lyt = QVBoxLayout(structures)
+        struct_lyt.setContentsMargins(8, 6, 8, 6)
+        struct_lyt.setSpacing(4)
+        attach_structure_input(self, struct_lyt, selected_row_count=n_sel)
+        root.addWidget(structures)
+
+        output = QGroupBox("Output")
+        out_lyt = QVBoxLayout(output)
+        out_lyt.setContentsMargins(8, 6, 8, 6)
+        out_lyt.setSpacing(4)
 
         self.most_basic_only_cb = QCheckBox("Only calculate most basic pKa")
         self.most_basic_only_cb.setToolTip(
@@ -54,7 +65,7 @@ class PKaPredictorDialog(QDialog):
             "most basic ionization step). Otherwise all macro pKas are listed."
         )
         self.most_basic_only_cb.toggled.connect(self._on_most_basic_toggled)
-        root.addWidget(self.most_basic_only_cb)
+        out_lyt.addWidget(self.most_basic_only_cb)
 
         self.most_acidic_only_cb = QCheckBox("Only calculate most acidic pKa")
         self.most_acidic_only_cb.setToolTip(
@@ -62,14 +73,15 @@ class PKaPredictorDialog(QDialog):
             "most acidic ionization step)."
         )
         self.most_acidic_only_cb.toggled.connect(self._on_most_acidic_toggled)
-        root.addWidget(self.most_acidic_only_cb)
+        out_lyt.addWidget(self.most_acidic_only_cb)
 
         self.include_pi_cb = QCheckBox("Calculate isoelectric point (pI)")
         self.include_pi_cb.setToolTip(
             "When checked, also write a shared pI column (pH where mean charge crosses zero). "
             "Simple acids and bases are N/A. Off by default; Protonate and descriptors do not write pI."
         )
-        root.addWidget(self.include_pi_cb)
+        out_lyt.addWidget(self.include_pi_cb)
+        root.addWidget(output)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
