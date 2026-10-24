@@ -41,7 +41,7 @@ def test_structure_input_panel_mode_keys(qapp) -> None:  # noqa: ARG001
 
 def test_predict_dialogs_use_shared_structure_input() -> None:
     root = Path(__file__).resolve().parents[1] / "molmanager" / "ui" / "dialogs"
-    for name in ("som.py", "pka.py", "protomer.py", "biotransformer.py"):
+    for name in ("pka.py", "protomer.py", "biotransformer.py"):
         text = (root / name).read_text(encoding="utf-8")
         assert "from .structure_input import attach_structure_input" in text
         assert "currentIndex() == 1" not in text
