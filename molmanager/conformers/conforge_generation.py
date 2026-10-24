@@ -33,6 +33,7 @@ from ..platform_support.bundled_paths import (
     resolve_user_executable,
     system_cdpkit_confgen,
 )
+from ..platform_support.tool_paths import TOOL_CONFGEN, effective_tool_path
 from .conformer_column_codec import mol_has_3d_coordinates
 from .openbabel_confab import apply_sdf_conformers, iter_sdf_mols
 
@@ -87,8 +88,8 @@ def python_conforge_available() -> bool:
 
 
 def resolve_confgen_executable(user_path: str = "") -> str | None:
-    """Resolve ``confgen`` from an explicit path, PATH, bundled dir, or CDPKit install."""
-    text = (user_path or "").strip()
+    """Resolve ``confgen`` from an explicit path, Configure, PATH, or a CDPKit install."""
+    text = effective_tool_path(TOOL_CONFGEN, user_path)
     if text:
         found = resolve_user_executable(text)
         if found:

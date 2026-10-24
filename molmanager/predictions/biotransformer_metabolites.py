@@ -389,7 +389,7 @@ def predict_one_smiles(
     jar_path = jar if jar is not None else resolve_biotransformer_jar()
     java_path = java if java is not None else java_executable()
     problems = biotransformer_layout_errors(jar_path)
-    if java_path is None and "Java is not on PATH." not in problems:
+    if java_path is None and not any(str(item).startswith("Java ") for item in problems):
         problems.insert(0, "Java is not on PATH.")
     if problems:
         return MetabolitePrediction(parent, (), error=" ".join(problems))

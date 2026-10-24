@@ -1,6 +1,6 @@
 # Settings
 
-Settings control appearance, keyboard shortcuts, and the WSL executable used for Linux-only tools: themes, application/table fonts, the hotkey editor, whether the status bar is shown, and Windows Subsystem for Linux.
+Settings control appearance, keyboard shortcuts, and paths for optional external tools: themes, application/table fonts, the hotkey editor, whether the status bar is shown, and **Configure** (WSL, Gnina, BioTransformer, and the other tools that need a local install).
 
 ## Goal
 
@@ -22,14 +22,22 @@ Global UI preferences for this installation/session; they do not alter table che
 - **Font...** - **Application font size**, **Table font size**, **Table text alignment** (3×3: top/center/bottom × left/center/right), **Reset to Default**.
 - **Hotkeys...** - category/command/shortcut table with OK/Cancel, **Clear Selected**, and **Reset to Default**.
 - **Status Bar** - show or hide the bottom bar (status messages and memory use).
-- **WSL...** - path to ``wsl.exe`` so Windows can run Linux-only tools (AmberTools / GAFF for OpenMM, and similar). **Test** runs ``uname -s`` inside WSL.
+- **Configure** - paths for optional external programs. Each page has **Browse...**, **Test**, and **OK**.
+  - **WSL...** - path to ``wsl.exe`` so Windows can run Linux-only tools (Gnina, AmberTools / GAFF, and similar). **Test** runs ``uname -s`` inside WSL.
+  - **AmberTools...** - ``antechamber`` command, bin folder, or executable. ``parmchk2`` and ``tleap`` are taken from the same folder. On Windows the command runs in WSL.
+  - **BioTransformer...** - JAR for Predict Metabolites (**Browse JAR...** / **Install...**). ``supportfiles/`` and ``btkb/`` (or ``database/``) must sit next to the JAR.
+  - **CONFORGE...** - CDPKit ``confgen`` executable.
+  - **Gnina...** - docking binary. On Windows this is the Linux command used through WSL (``gnina`` or a path such as ``/usr/local/bin/gnina``).
+  - **Java...** - ``java`` for BioTransformer. Blank uses ``java`` on PATH.
+  - **MAFFT...** - executable or install folder for Protein → Sequence.
+  - **Open Babel...** - ``obabel`` for systematic conformers.
 
 ## Workflow
 
 1. Open **Settings** and pick a theme or **Custom Colors...**.
 2. Set font sizes so the table and dialogs stay readable.
 3. Edit hotkeys for commands you use often; reset if a binding conflicts.
-4. On Windows, set **WSL...** if you will run Linux-only tools such as GAFF/AmberTools.
+4. Open **Configure** and set **WSL...** plus any tool path (Gnina, BioTransformer, AmberTools, and the others) you will run.
 5. Confirm changes and return to the table.
 
 ## Use cases

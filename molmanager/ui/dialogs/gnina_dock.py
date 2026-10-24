@@ -48,6 +48,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ...platform_support.bundled_paths import default_external_executable, resolve_user_executable
+from ...platform_support.tool_paths import TOOL_GNINA, configured_executable
 from ...docking.pose_file_io import AUTOBOX_LIGAND_FILTER
 from ...docking.gnina_job import (
     GninaJobSettings,
@@ -145,7 +146,7 @@ class GninaDockDialog(QDialog):
     Expects a receptor PDB or PDBQT, ligands from a file or selected table
     rows (conformations column), and a search box. Optional flexible side chains
     (--flexres / --flexdist); the backbone stays rigid. On Windows Gnina runs
-    through Settings → WSL.
+    through Settings → Configure → WSL.
     """
 
     def __init__(self, parent=None):
@@ -197,10 +198,13 @@ class GninaDockDialog(QDialog):
         io_form = QFormLayout(io_gb)
         io_form.setContentsMargins(8, 6, 8, 6)
         io_form.setSpacing(4)
-        self.edit_exe = QLineEdit(default_external_executable("gnina"))
+        self.edit_exe = QLineEdit(
+            configured_executable(TOOL_GNINA) or default_external_executable("gnina")
+        )
         self.edit_exe.setToolTip(
             "Gnina command. On Windows this is the Linux binary on the WSL PATH (gnina). "
-            "On Linux, uses molmanager/resources/bin/<platform>/gnina when bundled, otherwise PATH."
+            "On Linux, uses molmanager/resources/bin/<platform>/gnina when bundled, otherwise PATH. "
+            "The default comes from Settings → Configure → Gnina."
         )
         io_form.addRow("Gnina:", _browse_path_row(self.edit_exe, self._browse_exe))
 
@@ -909,7 +913,8 @@ class GninaDockDialog(QDialog):
         return effective_out_path(text, save_sdf=self.save_sdf_cb.isChecked())
 
     def _gnina_executable(self) -> str:
-        return (self.edit_exe.text() or "").strip() or default_external_executable("gnina")
+        text = (self.edit_exe.text() or "").strip()
+        return text or configured_executable(TOOL_GNINA) or default_external_executable("gnina")
 
     def _smina_executable(self) -> str:
         return self._gnina_executable()
@@ -1158,7 +1163,7 @@ class GninaDockDialog(QDialog):
                 QMessageBox.warning(
                     self,
                     "Dock",
-                    "WSL was not found. Set the WSL executable under Settings → WSL, "
+                    "WSL was not found. Set the WSL executable under Settings → Configure → WSL, "
                     "then install Gnina in that distro so `gnina` is on PATH.",
                 )
                 return

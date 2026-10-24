@@ -92,7 +92,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "settings",
                 "Settings",
                 "Settings",
-                "Theme, fonts, status bar, keyboard shortcuts, WSL, and Help.",
+                "Theme, fonts, status bar, keyboard shortcuts, external tool paths, and Help.",
             ),
         ),
     ),

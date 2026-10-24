@@ -34,6 +34,7 @@ from .protein_prepare_amber import (
     _parameterize_ligand,
     _proc_tail,
     _require_ambertools,
+    amber_program,
     ligand_only_leap_input,
 )
 from .protein_prepare_ligand import write_ligand_mol2
@@ -178,7 +179,7 @@ def _build_ligand_prmtop(
     )
     try:
         proc = run_linux_tool(
-            ["tleap", "-f", leap_in.name],
+            [amber_program("tleap"), "-f", leap_in.name],
             work_dir=work_dir,
             timeout=_TLEAP_TIMEOUT_S,
         )

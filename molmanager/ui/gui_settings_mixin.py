@@ -118,6 +118,78 @@ class GuiSettingsMixin:
         if hasattr(self, "status_label"):
             self.status_label.setText(f"WSL executable — {path}")
 
+    def _init_configure_menu(self, settings_menu) -> None:
+        """Settings → Configure: paths for optional external tools."""
+        menu = settings_menu.addMenu("&Configure")
+        menu.setToolTipsVisible(True)
+        entries = (
+            (
+                "wsl",
+                "&WSL…",
+                "Path to wsl.exe so Windows can run Linux-only tools.",
+            ),
+            (
+                "ambertools",
+                "&AmberTools…",
+                "antechamber location for GAFF parameterization (WSL on Windows).",
+            ),
+            (
+                "biotransformer",
+                "&BioTransformer…",
+                "BioTransformer JAR used by Predict Metabolites.",
+            ),
+            (
+                "confgen",
+                "&CONFORGE…",
+                "CDPKit confgen executable.",
+            ),
+            (
+                "gnina",
+                "&Gnina…",
+                "Gnina executable. On Windows this is the Linux binary used through WSL.",
+            ),
+            (
+                "java",
+                "&Java…",
+                "Java runtime for BioTransformer.",
+            ),
+            (
+                "mafft",
+                "&MAFFT…",
+                "MAFFT executable or install folder.",
+            ),
+            (
+                "obabel",
+                "&Open Babel…",
+                "obabel executable for systematic conformers.",
+            ),
+        )
+        for tool, label, tip in entries:
+            act = QAction(label, self)
+            act.setToolTip(tip)
+            act.triggered.connect(
+                lambda _checked=False, name=tool: self._open_configure_entry(name)
+            )
+            menu.addAction(act)
+
+    def _open_configure_entry(self, tool: str) -> None:
+        if tool == "wsl":
+            self.open_wsl_settings_dialog()
+            return
+        if tool == "biotransformer":
+            from .dialogs.biotransformer_settings import BiotransformerSettingsDialog
+
+            dlg = BiotransformerSettingsDialog(self)
+        else:
+            from .dialogs.tool_path_settings import ToolPathDialog
+
+            dlg = ToolPathDialog(tool, self)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        path = dlg.selected_path() or "default"
+        if hasattr(self, "status_label"):
+            self.status_label.setText(f"{dlg.windowTitle()} — {path}")
+
     def open_structure_settings_dialog(self) -> None:
         from ..table.structure_depiction_layout import (
             structure_depict_height,
@@ -201,7 +273,7 @@ class GuiSettingsMixin:
         settings_menu.addSeparator()
         settings_menu.addAction(self._act_status_bar)
         settings_menu.addSeparator()
-        settings_menu.addAction(QAction("&WSL…", self, triggered=self.open_wsl_settings_dialog))
+        self._init_configure_menu(settings_menu)
         settings_menu.addSeparator()
         from .main_window.menu_builder import _install_into_menu
         from .main_window.menu_spec import HELP_MENU

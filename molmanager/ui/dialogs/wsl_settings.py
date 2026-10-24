@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Settings → WSL: path to ``wsl.exe`` for Linux-only tools."""
+"""Settings → Configure → WSL: path to ``wsl.exe`` for Linux-only tools."""
 
 from __future__ import annotations
 

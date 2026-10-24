@@ -34,6 +34,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ...platform_support.bundled_paths import default_external_executable
+from ...platform_support.tool_paths import TOOL_OBABEL, configured_executable
 from ...conformers.openbabel_confab import SystematicConfParams, ensure_openbabel_confab_ready
 from ..qt_widget_utils import make_window_minimizable
 from .conformer_output import (
@@ -93,10 +94,12 @@ class SystematicConformationsDialog(QDialog):
 
         exe_row = QHBoxLayout()
         exe_row.setContentsMargins(0, 0, 0, 0)
-        self.obabel_edit = QLineEdit(default_external_executable("obabel"))
+        self.obabel_edit = QLineEdit(
+            configured_executable(TOOL_OBABEL) or default_external_executable("obabel")
+        )
         self.obabel_edit.setToolTip(
-            "Open Babel executable. Defaults to a bundled copy under resources/bin if present, "
-            "otherwise the pip wheel (`openbabel/bin/obabel`)."
+            "Open Babel executable. Defaults to Settings → Configure → Open Babel, "
+            "a bundled copy under resources/bin, or the pip wheel (`openbabel/bin/obabel`)."
         )
         exe_row.addWidget(self.obabel_edit, 1)
         btn_e = QPushButton("Browse…")

@@ -35,6 +35,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ...platform_support.bundled_paths import default_external_executable
+from ...platform_support.tool_paths import TOOL_CONFGEN, configured_executable
 from ...conformers.conforge_generation import (
     CONFORGE_MODES,
     CONFORGE_PRESETS,
@@ -147,9 +148,12 @@ class ConforgeConformationsDialog(QDialog):
 
         exe_row = QHBoxLayout()
         exe_row.setContentsMargins(0, 0, 0, 0)
-        self.confgen_edit = QLineEdit(default_external_executable("confgen"))
+        self.confgen_edit = QLineEdit(
+            configured_executable(TOOL_CONFGEN) or default_external_executable("confgen")
+        )
         self.confgen_edit.setToolTip(
-            "confgen executable from a CDPKit install. On Windows, Browse to "
+            "confgen executable from a CDPKit install. Defaults to Settings → Configure → "
+            "CONFORGE. On Windows, Browse to "
             r"C:\Program Files\CDPKit\Bin\confgen.exe after running the MSVC installer."
         )
         exe_row.addWidget(self.confgen_edit, 1)

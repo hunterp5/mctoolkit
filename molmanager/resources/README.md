@@ -42,4 +42,4 @@ python scripts/bootstrap_gnn_mtl_model.py
 python scripts/bootstrap_biotransformer.py
 ```
 
-Requires Java on PATH plus the official JAR (`BioTransformer3.0_20230525.jar` or `biotransformer-3.0.0.jar`) with sibling `btkb/` or `database/` and `supportfiles/`. Override the JAR with `MOLMANAGER_BIOTRANSFORMER_JAR`, or use **Browse JAR…** in Predict Metabolites.
+Requires Java on PATH plus the official JAR (`BioTransformer3.0_20230525.jar` or `biotransformer-3.0.0.jar`) with sibling `btkb/` or `database/` and `supportfiles/`. Override the JAR with `MOLMANAGER_BIOTRANSFORMER_JAR`, **Settings → Configure → BioTransformer**, or **Browse JAR…** in Predict Metabolites.

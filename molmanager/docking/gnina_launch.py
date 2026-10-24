@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 from ..platform_support.bundled_paths import resolve_bundled_executable, resolve_user_executable
+from ..platform_support.tool_paths import TOOL_GNINA, effective_tool_path
 
 _WHICH_TIMEOUT_S = 20.0
 
@@ -74,7 +75,8 @@ def gnina_missing_message(user_path: str = "") -> str:
         "https://github.com/gnina/gnina/releases "
         "(not a Windows .exe).\n\n"
         "On Windows, install it in WSL so a login shell can run `gnina` "
-        "(Settings → WSL), or enter a Linux path such as /usr/local/bin/gnina. "
+        "(Settings → Configure → WSL), or set the binary under "
+        "Settings → Configure → Gnina (a Linux path such as /usr/local/bin/gnina). "
         "You can also copy the binary to molmanager/resources/bin/linux/gnina.\n\n"
         "macOS has no official Gnina build."
     )
@@ -111,7 +113,7 @@ def _wsl_which(name: str, *, timeout: float = _WHICH_TIMEOUT_S) -> str | None:
 
 def resolve_gnina_command(user_path: str = "", *, timeout: float = _WHICH_TIMEOUT_S) -> str | None:
     """Return a Gnina command that exists on this host or in WSL, else ``None``."""
-    text = (user_path or "").strip() or "gnina"
+    text = effective_tool_path(TOOL_GNINA, user_path) or "gnina"
     local = resolve_user_executable(text)
     if local:
         return local
@@ -127,6 +129,14 @@ def resolve_gnina_command(user_path: str = "", *, timeout: float = _WHICH_TIMEOU
             return _wsl_which("gnina", timeout=timeout)
         return None
     return None
+
+
+def describe_gnina(user_path: str = "") -> tuple[bool, str]:
+    """Whether *user_path* resolves, plus a status line or the missing-tool message."""
+    found = resolve_gnina_command(user_path)
+    if found:
+        return True, f"OK: {found}"
+    return False, gnina_missing_message(user_path)
 
 
 def convert_gnina_argv_paths(argv: list[str]) -> list[str]:

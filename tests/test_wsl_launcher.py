@@ -44,7 +44,7 @@ def test_wsl_argv_requires_executable(monkeypatch) -> None:
     monkeypatch.setattr(
         "molmanager.platform_support.wsl_launcher.resolve_wsl_executable", lambda _p="": None
     )
-    with pytest.raises(FileNotFoundError, match="Settings → WSL"):
+    with pytest.raises(FileNotFoundError, match="Configure → WSL"):
         wsl_argv(["uname", "-s"])
 
 
@@ -84,19 +84,37 @@ def test_wsl_settings_dialog_saves_path(qapp, monkeypatch, tmp_path):  # noqa: A
     dlg.close()
 
 
-def test_settings_menu_has_wsl(qapp) -> None:  # noqa: ARG001
+def test_settings_menu_has_configure(qapp) -> None:  # noqa: ARG001
     from molmanager.ui.main_window import ChemistryWorkspaceWindow
 
     w = ChemistryWorkspaceWindow()
     mb = w.menuBar()
     settings = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Settings")
     labels = [a.text().replace("&", "") for a in settings.actions() if not a.isSeparator()]
-    assert "WSL…" in labels
-    assert labels[-1] == "WSL…"
+    assert "WSL…" not in labels
+    assert "Configure" in labels
+    assert labels.index("Configure") == labels.index("Status Bar") + 1
+    assert labels[-1] == "Help"
     assert "Status Bar" in labels
     assert labels.index("Status Bar") == labels.index("Hotkeys…") + 1
     assert "Structure…" not in labels
     assert "2D Render…" in labels
+    configure = next(
+        a.menu() for a in settings.actions() if a.text().replace("&", "") == "Configure"
+    )
+    configure_labels = [
+        a.text().replace("&", "") for a in configure.actions() if not a.isSeparator()
+    ]
+    assert configure_labels == [
+        "WSL…",
+        "AmberTools…",
+        "BioTransformer…",
+        "CONFORGE…",
+        "Gnina…",
+        "Java…",
+        "MAFFT…",
+        "Open Babel…",
+    ]
     gui = next(a.menu() for a in settings.actions() if a.text().replace("&", "") == "GUI")
     gui_labels = [a.text().replace("&", "") for a in gui.actions() if not a.isSeparator()]
     assert "Status Bar" not in gui_labels

@@ -133,6 +133,15 @@ def _isolate_recent_paths(tmp_path, monkeypatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_tool_paths(tmp_path, monkeypatch) -> None:
+    """Keep Settings → Configure paths off the developer QSettings profile."""
+    from PyQt5.QtCore import QSettings
+
+    store = QSettings(str(tmp_path / "tool_paths.ini"), QSettings.IniFormat)
+    monkeypatch.setattr("molmanager.platform_support.tool_paths._qsettings", lambda: store)
+
+
 @pytest.fixture(scope="session")
 def qapp():
     """Single QApplication for the test session."""

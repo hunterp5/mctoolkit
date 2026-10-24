@@ -300,7 +300,7 @@ If **Chemistry → Predict → pKa** fails with a PyTorch version error (often a
 
 Docking is **Protein → Dock Ligand → Gnina…** (file-based CLI with CNN scoring). Receptor PDBQT still comes from **Prepare → Receptor PDB…** then **Prepare → PDBQT…** (Gnina also accepts a PDB receptor). Ligand PDBQT can come from the same PDBQT dialog (Meeko). Python pieces are in the docking extra (`pip install -e ".[docking]"` or `requirements.txt`). Protein Viewer **Render → Interactions** uses ProLIF from that same extra.
 
-The **Gnina** engine is not included in the Python install. Download the official Linux binary from [https://github.com/gnina/gnina](https://github.com/gnina/gnina). On Windows, install it in WSL (Settings → WSL) so `gnina` is on that distro’s PATH. On Linux, either:
+The **Gnina** engine is not included in the Python install. Download the official Linux binary from [https://github.com/gnina/gnina](https://github.com/gnina/gnina). On Windows, install it in WSL (Settings → Configure → WSL) so `gnina` is on that distro’s PATH, or set the binary under Settings → Configure → Gnina. On Linux, either:
 
 - Put `gnina` in:
   - `molmanager/resources/bin/linux/`

@@ -128,9 +128,7 @@ def install_biotransformer(
     dest_dir.mkdir(parents=True, exist_ok=True)
     existing = find_biotransformer_jar_in(dest_dir)
     if existing is not None:
-        problems = [
-            e for e in biotransformer_layout_errors(existing) if not e.startswith("Java is not")
-        ]
+        problems = [e for e in biotransformer_layout_errors(existing) if not e.startswith("Java ")]
         if not problems:
             _emit(progress, f"Already present: {existing}")
             return existing

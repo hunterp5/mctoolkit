@@ -51,6 +51,7 @@ from ...platform_support.bundled_paths import (
     ensure_mafft_ready,
     resolve_mafft_executable,
 )
+from ...platform_support.tool_paths import TOOL_MAFFT, configured_executable
 from ...protein.protein_msa import (
     FastaRecord,
     alignment_html,
@@ -186,7 +187,8 @@ class ProteinSequenceMsaDialog(QDialog):
 
         exe_form = QFormLayout()
         exe_row = QHBoxLayout()
-        resolved = resolve_mafft_executable() or default_external_executable("mafft")
+        saved_mafft = configured_executable(TOOL_MAFFT)
+        resolved = saved_mafft or resolve_mafft_executable() or default_external_executable("mafft")
         self.mafft_edit = QLineEdit(resolved)
         self.mafft_edit.setToolTip(
             "MAFFT executable or install folder (Windows: mafft.bat, or the all-in-one directory)."

@@ -157,25 +157,113 @@ def _proc_tail(proc, extra: str = "") -> str:
     return text
 
 
+_AMBER_BASENAMES = frozenset(
+    {
+        "antechamber",
+        "parmchk2",
+        "tleap",
+        "antechamber.exe",
+        "parmchk2.exe",
+        "tleap.exe",
+    }
+)
+
+
 def _amber_missing_message() -> str:
     return (
         "AmberTools (antechamber) was not found. On Windows install AmberTools in "
-        "WSL and set Settings → WSL so a login shell can see `antechamber` on PATH "
-        "(conda activate in ~/.bashrc, or apt). On Linux put AmberTools on PATH."
+        "WSL and set Settings → Configure → WSL so a login shell can see `antechamber` "
+        "on PATH (conda activate in ~/.bashrc, or apt), or set the binary under "
+        "Settings → Configure → AmberTools. On Linux put AmberTools on PATH or set "
+        "that same AmberTools entry."
     )
 
 
-def ambertools_available(*, timeout: float = _WHICH_TIMEOUT_S) -> bool:
-    """True when `antechamber` is on the Linux/WSL PATH."""
+def _split_tool_path(path: str) -> tuple[str, str, str]:
+    """Return ``(parent, separator, leaf)`` without changing slash style."""
+    text = (path or "").strip().strip('"')
+    if "\\" in text and "/" not in text:
+        parent, leaf = text.rsplit("\\", 1)
+        return parent, "\\", leaf
+    if "/" in text:
+        parent, leaf = text.rsplit("/", 1)
+        return parent, "/", leaf
+    return "", "", text
+
+
+def _join_tool_path(directory: str, name: str) -> str:
+    text = directory.rstrip("/\\")
+    if "\\" in text and "/" not in text:
+        return f"{text}\\{name}"
+    return f"{text}/{name}"
+
+
+def _command_is_path(command: str) -> bool:
+    text = (command or "").strip()
+    if text.startswith(("/", "\\")):
+        return True
+    return len(text) >= 3 and text[1] == ":" and text[2] in {"\\", "/"}
+
+
+def amber_program(name: str, user_path: str = "") -> str:
+    """Command for ``antechamber``, ``parmchk2``, or ``tleap``.
+
+    *user_path* may be empty (Settings → Configure → AmberTools), a bare command,
+    a bin directory, or one of those executables. Sibling tools stay beside it.
+    """
+    if name not in {"antechamber", "parmchk2", "tleap"}:
+        raise ValueError(f"Unknown AmberTools program: {name}")
+    raw = (user_path or "").strip().strip('"')
+    if not raw:
+        from ..platform_support.tool_paths import TOOL_AMBER, configured_executable
+
+        raw = configured_executable(TOOL_AMBER).strip().strip('"')
+    if not raw:
+        return name
+    parent, sep, leaf = _split_tool_path(raw)
+    leaf_l = leaf.lower()
+    if leaf_l in _AMBER_BASENAMES:
+        suffix = ".exe" if leaf_l.endswith(".exe") else ""
+        if not sep:
+            return f"{name}{suffix}"
+        return f"{parent}{sep}{name}{suffix}"
+    if sep or raw.endswith(("/", "\\")) or Path(raw).expanduser().is_dir():
+        return _join_tool_path(raw, name)
+    return raw if name == "antechamber" else name
+
+
+def _amber_probe_argv(command: str) -> list[str]:
+    from ..platform_support.wsl_launcher import linux_path
+
+    text = (command or "antechamber").strip()
+    if _command_is_path(text):
+        return ["test", "-x", linux_path(text)]
+    which_name = "antechamber" if text.lower() in {"antechamber", "antechamber.exe"} else text
+    return ["which", which_name]
+
+
+def ambertools_available(*, timeout: float = _WHICH_TIMEOUT_S, user_path: str = "") -> bool:
+    """True when ``antechamber`` is on the Linux/WSL PATH or at the configured path."""
     from ..platform_support.wsl_launcher import run_linux_tool
 
+    argv = _amber_probe_argv(amber_program("antechamber", user_path))
     try:
-        proc = run_linux_tool(["which", "antechamber"], work_dir=Path("."), timeout=timeout)
+        proc = run_linux_tool(argv, work_dir=Path("."), timeout=timeout)
     except FileNotFoundError:
         return False
     except Exception:
         return False
-    return proc.returncode == 0 and bool((proc.stdout or "").strip())
+    if argv[0] == "which":
+        return proc.returncode == 0 and bool((proc.stdout or "").strip())
+    return proc.returncode == 0
+
+
+def describe_ambertools(user_path: str = "") -> tuple[bool, str]:
+    """Status line for Settings → Configure → AmberTools."""
+    cmd = amber_program("antechamber", user_path)
+    if ambertools_available(user_path=user_path):
+        return True, f"OK: {cmd}"
+    return False, _amber_missing_message()
 
 
 def _require_ambertools() -> None:
@@ -227,7 +315,7 @@ def _parameterize_ligand(
         ("gas", "GASTEIGER", ["-dr", "no"]),
     ):
         argv = [
-            "antechamber",
+            amber_program("antechamber"),
             "-i",
             f"{stem}.mol2",
             "-fi",
@@ -266,7 +354,7 @@ def _parameterize_ligand(
     parm_s = "2" if atom_type == "gaff2" else "1"
     try:
         proc = run_linux_tool(
-            ["parmchk2", "-i", gaff_mol2, "-f", "mol2", "-o", frcmod, "-s", parm_s],
+            [amber_program("parmchk2"), "-i", gaff_mol2, "-f", "mol2", "-o", frcmod, "-s", parm_s],
             work_dir=work_dir,
             timeout=_PARMCHK_TIMEOUT_S,
         )
@@ -378,7 +466,7 @@ def build_gaff_prmtop(
     """
     from .protein_prepare_ligand import ligand_residue_blocks, write_ligand_mol2
 
-    log_prepare("AmberTools: looking up antechamber in WSL/PATH…")
+    log_prepare(f"AmberTools: looking up {amber_program('antechamber')}…")
     _require_ambertools()
     ff = _normalize_ligand_ff(ligand_ff)
     if not _ligand_ff_is_gaff(ff):
@@ -443,7 +531,7 @@ def build_gaff_prmtop(
 
     try:
         proc = run_linux_tool(
-            ["tleap", "-f", leap_in.name],
+            [amber_program("tleap"), "-f", leap_in.name],
             work_dir=work_dir,
             timeout=_TLEAP_TIMEOUT_S,
         )

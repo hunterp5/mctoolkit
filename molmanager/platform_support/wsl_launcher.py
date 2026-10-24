@@ -16,7 +16,7 @@
 
 """Windows Subsystem for Linux (WSL) launcher for Linux-only tools.
 
-Settings → WSL stores the ``wsl.exe`` path. Callers build a Windows argv with
+Settings → Configure → WSL stores the ``wsl.exe`` path. Callers build a Windows argv with
 :func:`wsl_argv` or run a command with :func:`run_wsl` (for example AmberTools
 GAFF parameterization that is not available as a native Windows binary).
 """
@@ -114,7 +114,7 @@ def wsl_argv(
     exe = resolve_wsl_executable(user_path)
     if not exe:
         raise FileNotFoundError(
-            "WSL executable not found. Set it under Settings → WSL, or install "
+            "WSL executable not found. Set it under Settings → Configure → WSL, or install "
             "Windows Subsystem for Linux."
         )
     argv = [exe]

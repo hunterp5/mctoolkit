@@ -47,7 +47,7 @@ from .scope import selection_scope_checked
 _CONFORMER_FF_TOOLTIP = (
     "MMFF94 or MMFF94s when parameters exist; otherwise falls back to UFF automatically. "
     "GAFF2/GAFF minimize with AmberTools (antechamber) and OpenMM in vacuum; "
-    "on Windows AmberTools runs in WSL (Settings → WSL)."
+    "on Windows AmberTools runs in WSL (Settings → Configure → WSL)."
 )
 # Search budget can exceed what we store: packing/viewer stay healthy around 50–200 kept poses.
 _STOCHASTIC_NUM_CONFS_MAX = 1000

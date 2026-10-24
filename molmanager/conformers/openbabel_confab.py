@@ -36,6 +36,7 @@ from ..platform_support.bundled_paths import (
     openbabel_launch_env,
     resolve_user_executable,
 )
+from ..platform_support.tool_paths import TOOL_OBABEL, effective_tool_path
 from .conformer_column_codec import mol_has_3d_coordinates
 
 logger = logging.getLogger(__name__)
@@ -77,8 +78,8 @@ def python_confab_available(obabel_path: str = "") -> bool:
 
 
 def resolve_obabel_executable(user_path: str = "") -> str | None:
-    """Resolve ``obabel`` from an explicit path, PATH, or the bundled binary directory."""
-    text = (user_path or "").strip()
+    """Resolve ``obabel`` from an explicit path, Configure, PATH, or the bundled directory."""
+    text = effective_tool_path(TOOL_OBABEL, user_path)
     if text:
         found = resolve_user_executable(text)
         if found:

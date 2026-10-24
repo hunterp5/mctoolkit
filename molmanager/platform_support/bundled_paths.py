@@ -120,7 +120,9 @@ def find_mafft_executable_in_tree(root: Path) -> Path | None:
 
 def resolve_mafft_executable(user_path: str = "") -> str | None:
     """Resolve MAFFT from a file, install folder, PATH, or bundled ``resources/bin``."""
-    text = (user_path or "").strip()
+    from .tool_paths import TOOL_MAFFT, effective_tool_path
+
+    text = effective_tool_path(TOOL_MAFFT, user_path)
     if text:
         hit = _mafft_from_user_path(Path(text).expanduser())
         if hit is not None:
@@ -376,8 +378,8 @@ def biotransformer_models_dir() -> Path:
     return models_dir() / "biotransformer"
 
 
-def java_executable() -> Path | None:
-    """``java`` on PATH (``java.exe`` on Windows)."""
+def java_on_path() -> Path | None:
+    """``java`` on PATH (``java.exe`` on Windows), ignoring Settings → Configure → Java."""
     found = which("java")
     if found:
         return Path(found)
@@ -386,6 +388,17 @@ def java_executable() -> Path | None:
         if found:
             return Path(found)
     return None
+
+
+def java_executable() -> Path | None:
+    """Configured Java from Settings → Configure → Java, otherwise :func:`java_on_path`."""
+    from .tool_paths import TOOL_JAVA, configured_executable
+
+    saved = configured_executable(TOOL_JAVA)
+    if saved:
+        found = resolve_user_executable(saved)
+        return Path(found) if found else None
+    return java_on_path()
 
 
 # Official Bitbucket runnable package uses BioTransformer3.0_*.jar + btkb/, not
@@ -485,14 +498,23 @@ def biotransformer_knowledge_base_dir(root: Path) -> Path | None:
 
 def biotransformer_layout_errors(jar: Path | None = None) -> list[str]:
     """Human-readable problems with the local BioTransformer install (empty if ready)."""
+    from .tool_paths import TOOL_JAVA, configured_executable
+
     errors: list[str] = []
     if java_executable() is None:
-        errors.append("Java is not on PATH.")
+        saved_java = configured_executable(TOOL_JAVA)
+        if saved_java:
+            errors.append(
+                f"Java was not found ({saved_java}). Set it under Settings → Configure → Java."
+            )
+        else:
+            errors.append("Java is not on PATH.")
     jar_path = jar if jar is not None else resolve_biotransformer_jar()
     if jar_path is None or not jar_path.is_file():
         errors.append(
             "BioTransformer JAR not found. Run python scripts/bootstrap_biotransformer.py, "
-            "browse to a JAR in Predict Metabolites, or set MOLMANAGER_BIOTRANSFORMER_JAR."
+            "browse to a JAR under Settings → Configure → BioTransformer, "
+            "or set MOLMANAGER_BIOTRANSFORMER_JAR."
         )
         return errors
     root = jar_path.resolve().parent

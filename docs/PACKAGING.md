@@ -60,7 +60,7 @@ pip install -e ".[pka,permeability,docking,conforge,dev]"
 ## Bundling external tools
 
 1. Run `scripts\bootstrap_optional_tools.ps1` (Windows) or `scripts/bootstrap_optional_tools.sh` (Linux/macOS) to install Python deps, swap in CUDA PyTorch when an NVIDIA GPU is present, and print where to place a Gnina binary.
-2. On Linux, copy `gnina` into `molmanager/resources/bin/linux/` (or set `MOLMANAGER_BUNDLE_DIR`). On Windows, install Gnina in WSL so `gnina` is on that distro’s PATH (Settings → WSL).
+2. On Linux, copy `gnina` into `molmanager/resources/bin/linux/` (or set `MOLMANAGER_BUNDLE_DIR`). On Windows, install Gnina in WSL so `gnina` is on that distro’s PATH (Settings → Configure → WSL), or set the binary under Settings → Configure → Gnina.
 3. Protein → Dock Ligand defaults to bundled paths when present.
 
 ## PyInstaller (starter)
