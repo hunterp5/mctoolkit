@@ -176,6 +176,22 @@ def test_superpose_row_task_fetches_by_oid():
         store.close()
 
 
+def test_ensemble_store_pop_column_removes_only_that_header() -> None:
+    mol = _ethanol_ensemble(2)
+    store = EnsembleStore()
+    try:
+        assert store.store_mol(1, "confs", mol)
+        assert store.store_mol(2, "superpose", mol)
+        popped = store.pop_column("confs")
+        assert 1 in popped and popped[1]
+        assert (1, "confs") not in store
+        assert (2, "superpose") in store
+        store[(1, "confs")] = popped[1]
+        assert store.mol_for(1, "confs") is not None
+    finally:
+        store.close()
+
+
 def test_ensemble_store_batches_commits_and_still_reads():
     mol = _ethanol_ensemble(2)
     store = EnsembleStore()

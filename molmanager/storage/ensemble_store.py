@@ -289,6 +289,31 @@ class EnsembleStore(MutableMapping[tuple[int, str], str]):
         compact = blocks_b64_to_ensemble_blob(blob.decode("ascii", errors="ignore"))
         return unpack_ensemble_mol(compact) if compact else None
 
+    def pop_column(self, column: str) -> dict[int, str]:
+        """Remove every payload stored under *column* and return ``oid -> blocks``."""
+        col = str(column)
+        self._flush()
+        rows = self._conn.execute(
+            "SELECT oid, kind, blob FROM ensembles WHERE col = ?",
+            (col,),
+        ).fetchall()
+        self._conn.execute("DELETE FROM ensembles WHERE col = ?", (col,))
+        self._conn.commit()
+        self._pending = 0
+        for key in list(self._lru):
+            if key[1] == col:
+                self._lru.pop(key, None)
+        out: dict[int, str] = {}
+        for oid, kind, blob in rows:
+            kind_s, raw = str(kind), bytes(blob or b"")
+            if kind_s == KIND_COMPACT:
+                text = ensemble_blob_to_blocks_b64(raw)
+            else:
+                text = raw.decode("ascii", errors="ignore")
+            if text:
+                out[int(oid)] = text
+        return out
+
     def discard_oids(self, oids: Iterable[int]) -> None:
         dead = [int(o) for o in oids]
         if not dead:

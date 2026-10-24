@@ -572,6 +572,8 @@ class UndoDeleteColumnCommand(QUndoCommand):
         self._was_logarithmic = hdr in getattr(app, "_logarithmic_columns", set())
         self._text_by_oid: dict[int, str] = {}
         self._png_by_oid: dict[int, bytes] = {}
+        self._ionization_cache: dict | None = None
+        self._ensemble_blobs: dict[int, str] = {}
         if self._was_pixmap:
             self._png_by_oid = app._table_model.column_png_bytes_by_oid(hdr)
         else:
@@ -593,6 +595,11 @@ class UndoDeleteColumnCommand(QUndoCommand):
             app.headers.pop(idx)
             getattr(app, "_logarithmic_columns", set()).discard(self._hdr)
             _sync_filters_after_column_removed(app, self._hdr)
+            from ..column_result_cache import release_deleted_column_cache
+
+            self._ionization_cache, self._ensemble_blobs = release_deleted_column_cache(
+                app, self._hdr
+            )
         finally:
             try:
                 app.table.setUpdatesEnabled(True)
@@ -619,6 +626,11 @@ class UndoDeleteColumnCommand(QUndoCommand):
                 pairs = list(self._text_by_oid.items())
                 if pairs:
                     app._table_model.set_column_text_by_oids(self._hdr, pairs)
+            from ..column_result_cache import restore_deleted_column_cache
+
+            restore_deleted_column_cache(
+                app, self._hdr, self._ionization_cache, self._ensemble_blobs
+            )
             if self._was_logarithmic:
                 getattr(app, "_logarithmic_columns", set()).add(self._hdr)
             _sync_bounds_after_column_restored(app, self._hdr)

@@ -123,6 +123,13 @@ def clear() -> None:
         _store.clear()
 
 
+def replace(items: dict[str, Any]) -> None:
+    """Replace the session cache. Used to undo a column delete."""
+    with _lock:
+        _store.clear()
+        _store.update(items)
+
+
 def size() -> int:
     with _lock:
         return len(_store)
