@@ -31,7 +31,7 @@ does not:
   side with more substituents.
 - Multi-character labels reverse when bonds come only from the right (GR-2.1.6),
   with charges kept at the free end of the label.
-- Terminal CF3, CN, N3, CO2H, SO3H, PO3H2, OMe, Boc and Ph are written as abbreviations
+- Terminal CF3, CN, N3, CO2H, SO3H, PO3H2, OMe and Boc are written as abbreviations
   when that option is on. CF3 is fluorine coloured, CN and N3 are nitrogen blue, CO2H is
   oxygen red, SO3H is sulfur yellow, and PO3H2 is phosphorus orange.
 - Bonds stop at padded label boxes measured with the bundled font's metrics.
@@ -76,7 +76,7 @@ from molmanager.chem.depiction_text import cap_height, text_advance, text_ink_bo
 
 # Bump whenever the builder draws the same molecule differently, so cached scenes
 # (saved in session files) are rebuilt instead of showing the old picture.
-BUILDER_REVISION = 12
+BUILDER_REVISION = 13
 # LayoutOptions.token uses the low 3 bits. Bit 3 is the abbreviation toggle.
 _REVISION_STRIDE = 1 << (ABBREVIATION_REVISION_BIT + 1)
 

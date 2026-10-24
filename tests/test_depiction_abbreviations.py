@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Terminal CF3, CN, N3, CO2H, SO3H, PO3H2, OMe, Boc and Ph abbreviations in depiction scenes."""
+"""Terminal CF3, CN, N3, CO2H, SO3H, PO3H2, OMe and Boc abbreviations in depiction scenes."""
 
 from __future__ import annotations
 
@@ -55,22 +55,23 @@ def test_benzene_stays_a_ring(monkeypatch) -> None:
     assert len(scene.strokes) == 9
 
 
-def test_trifluoromethyl_and_phenyl_contract(monkeypatch) -> None:
+def test_trifluoromethyl_contracts_and_the_phenyl_ring_stays_drawn(monkeypatch) -> None:
     monkeypatch.setenv("MOLMANAGER_STRUCTURE_ABBREVIATIONS", "0")
     full = _scene("FC(F)(F)c1ccccc1")
     monkeypatch.setenv("MOLMANAGER_STRUCTURE_ABBREVIATIONS", "1")
     short = _scene("FC(F)(F)c1ccccc1")
     texts = set(_texts(short))
-    assert texts == {"CF3", "Ph"} or texts == {"F3C", "Ph"}
+    assert "CF3" in texts or "F3C" in texts
+    assert "Ph" not in texts
     cf3 = next(label for label in short.labels if _label_text(label) in {"CF3", "F3C"})
-    phenyl = next(label for label in short.labels if _label_text(label) == "Ph")
     assert cf3.role == 9
-    assert phenyl.role == 6
     assert len(short.strokes) < len(full.strokes)
     # Covered fluorines sit on the CF3 carbon, so a highlight lands on the label.
     assert short.atoms[0] == pytest.approx(short.atoms[1])
     assert short.atoms[2] == pytest.approx(short.atoms[1])
     assert short.atoms[3] == pytest.approx(short.atoms[1])
+    ring = {(round(x, 4), round(y, 4)) for x, y in short.atoms[4:]}
+    assert len(ring) == 6
 
 
 def test_methoxy_reverses_when_the_bond_comes_from_the_right(monkeypatch) -> None:
@@ -98,16 +99,16 @@ def test_methoxy_reverses_when_the_bond_comes_from_the_right(monkeypatch) -> Non
     assert scene.atoms[0] == pytest.approx(scene.atoms[1])
 
 
-def test_boc_on_nitrogen_contracts_with_phenyl(monkeypatch) -> None:
+def test_boc_on_nitrogen_contracts_and_the_phenyl_ring_stays_drawn(monkeypatch) -> None:
     monkeypatch.setenv("MOLMANAGER_STRUCTURE_ABBREVIATIONS", "0")
     full = _scene("CC(C)(C)OC(=O)Nc1ccccc1")
     monkeypatch.setenv("MOLMANAGER_STRUCTURE_ABBREVIATIONS", "1")
     short = _scene("CC(C)(C)OC(=O)Nc1ccccc1")
     texts = set(_texts(short))
     assert "Boc" in texts
-    assert "Ph" in texts
+    assert "Ph" not in texts
     assert "NH" in texts or "HN" in texts
-    assert len(short.strokes) < len(full.strokes) // 2
+    assert len(short.strokes) < len(full.strokes)
 
 
 def test_tert_butyl_ester_is_not_boc(monkeypatch) -> None:
@@ -128,7 +129,7 @@ def test_nitrile_contracts_in_nitrogen_blue(monkeypatch) -> None:
     monkeypatch.setenv("MOLMANAGER_STRUCTURE_ABBREVIATIONS", "1")
     short = _scene("c1ccccc1C#N")
     texts = set(_texts(short))
-    assert texts == {"Ph", "CN"} or texts == {"Ph", "NC"}
+    assert texts == {"CN"} or texts == {"NC"}
     nitrile = next(label for label in short.labels if _label_text(label) in {"CN", "NC"})
     assert nitrile.role == 7
     assert len(short.strokes) < len(full.strokes)
@@ -225,13 +226,13 @@ def test_ester_carboxylate_and_formic_acid_stay_drawn(monkeypatch) -> None:
         assert "HO2C" not in texts
 
 
-def test_phenyl_azide_and_benzoic_acid_contract_both_groups(monkeypatch) -> None:
+def test_phenyl_azide_and_benzoic_acid_keep_the_ring(monkeypatch) -> None:
     monkeypatch.setenv("MOLMANAGER_STRUCTURE_ABBREVIATIONS", "1")
     azide = set(_texts(_scene("c1ccccc1N=[N+]=[N-]")))
-    assert "Ph" in azide
+    assert "Ph" not in azide
     assert "N3" in azide or "3N" in azide
     acid = set(_texts(_scene("c1ccccc1C(=O)O")))
-    assert "Ph" in acid
+    assert "Ph" not in acid
     assert "CO2H" in acid or "HO2C" in acid
 
 
@@ -350,13 +351,13 @@ def test_phosphonate_ester_and_phosphoric_acid_stay_drawn(monkeypatch) -> None:
         assert "H2O3P" not in texts
 
 
-def test_phenyl_sulfonic_and_phosphonic_acids_contract_both_groups(monkeypatch) -> None:
+def test_phenyl_sulfonic_and_phosphonic_acids_keep_the_ring(monkeypatch) -> None:
     monkeypatch.setenv("MOLMANAGER_STRUCTURE_ABBREVIATIONS", "1")
     sulfonic = set(_texts(_scene("c1ccccc1S(=O)(=O)O")))
-    assert "Ph" in sulfonic
+    assert "Ph" not in sulfonic
     assert "SO3H" in sulfonic or "HO3S" in sulfonic
     phosphonic = set(_texts(_scene("c1ccccc1P(=O)(O)O")))
-    assert "Ph" in phosphonic
+    assert "Ph" not in phosphonic
     assert "PO3H2" in phosphonic or "H2O3P" in phosphonic
 
 

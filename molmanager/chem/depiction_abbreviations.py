@@ -16,7 +16,7 @@
 
 """Terminal-group abbreviations for structure scenes.
 
-The set is CF3, CN, N3, CO2H, SO3H, PO3H2, OMe, Boc and Ph (IUPAC GR-2.3). When abbreviations
+The set is CF3, CN, N3, CO2H, SO3H, PO3H2, OMe and Boc (IUPAC GR-2.3). When abbreviations
 are on, the builder writes the short label on the group's attachment atom and leaves
 the rest of the group out of the drawing. Atom indexes stay as they are, so highlights
 still name the original atoms. The attachment atom is kept, and the covered atoms
@@ -57,7 +57,7 @@ class Abbreviation:
 
 
 def abbreviations_enabled() -> bool:
-    """True when scenes should contract CF3, CN, N3, CO2H, SO3H, PO3H2, OMe, Boc and Ph."""
+    """True when scenes should contract CF3, CN, N3, CO2H, SO3H, PO3H2, OMe and Boc."""
     from molmanager.platform_support.config import load_config
 
     return bool(load_config().structure_abbreviations)
@@ -76,7 +76,6 @@ def find_abbreviations(mol) -> dict[int, Abbreviation]:
     _ensure_rings(mol)
     candidates = (
         *_boc_groups(mol),
-        *_phenyl_groups(mol),
         *_carboxylic_acid_groups(mol),
         *_sulfonic_acid_groups(mol),
         *_phosphonic_acid_groups(mol),
@@ -523,31 +522,6 @@ def _methoxy_groups(mol) -> list[Abbreviation]:
         found.append(
             _group(atom.GetIdx(), _with_hydrogens(mol, {methyl.GetIdx()}), forward, reverse, "O")
         )
-    return found
-
-
-def _phenyl_groups(mol) -> list[Abbreviation]:
-    found = []
-    label = (("Ph", PieceKind.NORMAL),)
-    info = mol.GetRingInfo()
-    for ring in info.AtomRings():
-        if len(ring) != 6 or any(info.NumAtomRings(index) != 1 for index in ring):
-            continue
-        atoms = [mol.GetAtomWithIdx(index) for index in ring]
-        if any(atom.GetAtomicNum() != 6 or not _plain(atom) for atom in atoms):
-            continue
-        ipso = [atom for atom in atoms if len(_heavy_neighbors(atom)) == 3]
-        unsubstituted = [atom for atom in atoms if len(_heavy_neighbors(atom)) == 2]
-        if len(ipso) != 1 or len(unsubstituted) != 5:
-            continue
-        if any(atom.GetTotalNumHs() != 1 for atom in unsubstituted):
-            continue
-        anchor = ipso[0]
-        outside = [other for other in _heavy_neighbors(anchor) if other.GetIdx() not in ring]
-        if len(outside) != 1:
-            continue
-        hidden = {atom.GetIdx() for atom in unsubstituted}
-        found.append(_group(anchor.GetIdx(), _with_hydrogens(mol, hidden), label, None, "Ph"))
     return found
 
 
