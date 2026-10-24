@@ -124,21 +124,33 @@ class TableUIMixin(
         self.status_label.setText(f"Sorted{name} {kind} {direction}.")
 
     def _on_horizontal_header_section_clicked(self, logical_index: int) -> None:
+        """Select columns from a header click, using the same modifiers as row headers.
+
+        A plain click replaces the column selection and clears entries. Shift replaces
+        with the range from the anchor. Ctrl toggles the clicked column, and Ctrl+Shift
+        adds the range; both keep any entry selection.
+        """
         if logical_index < 0 or logical_index >= len(self.headers):
             return
         if self.headers[logical_index] == "ID_HIDDEN":
             return
         mods = QApplication.keyboardModifiers()
+        ctrl = bool(mods & Qt.ControlModifier)
         if mods & Qt.ShiftModifier:
             anchor = getattr(self, "_column_selection_anchor", None)
             if anchor is None or anchor < 0 or anchor >= len(self.headers):
                 self._column_selection_anchor = logical_index
-                self._select_columns([logical_index], anchor_col=logical_index)
+                mode = "toggle" if ctrl else "replace"
+                self._select_columns([logical_index], anchor_col=logical_index, mode=mode)
             else:
-                self._select_column_range(anchor, logical_index)
+                self._select_column_range(anchor, logical_index, mode="add" if ctrl else "replace")
             return
         self._column_selection_anchor = logical_index
-        self._select_columns([logical_index], anchor_col=logical_index)
+        self._select_columns(
+            [logical_index],
+            anchor_col=logical_index,
+            mode="toggle" if ctrl else "replace",
+        )
 
     def _row_cells_dict(self, row: int) -> dict[str, str]:
         out: dict[str, str] = {}

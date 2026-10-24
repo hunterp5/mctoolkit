@@ -43,13 +43,16 @@ _VISIBLE_SOURCE_ROWS_UNSET = object()
 class TableSelectionMixin:
     """Programmatic and user-driven table selection (including large OID overrides)."""
 
-    def _select_column_range(self, anchor_col: int, end_col: int) -> None:
-        """Select all visible columns from ``anchor_col`` to ``end_col`` (inclusive)."""
+    def _select_column_range(self, anchor_col: int, end_col: int, *, mode: str = "replace") -> None:
+        """Select visible columns from ``anchor_col`` to ``end_col`` (inclusive).
+
+        ``mode`` is forwarded to :meth:`_select_columns` (``replace`` or ``add``).
+        """
         hh = self.table.horizontalHeader()
         vis_a = hh.visualIndex(int(anchor_col))
         vis_b = hh.visualIndex(int(end_col))
         if vis_a < 0 or vis_b < 0:
-            self._select_columns([end_col], anchor_col=end_col)
+            self._select_columns([end_col], anchor_col=end_col, mode=mode)
             return
         lo, hi = (vis_a, vis_b) if vis_a <= vis_b else (vis_b, vis_a)
         cols: list[int] = []
@@ -60,9 +63,28 @@ class TableSelectionMixin:
             if self.headers[logical] == "ID_HIDDEN":
                 continue
             cols.append(logical)
-        self._select_columns(cols, anchor_col=end_col)
+        self._select_columns(cols, anchor_col=end_col, mode=mode)
 
-    def _select_columns(self, cols: list[int], *, anchor_col: int | None = None) -> None:
+    def _column_span_selection(self, view_model, row_count: int, cols: list[int]) -> QItemSelection:
+        """Full-height selection covering ``cols`` in the table view."""
+        sel = QItemSelection()
+        if row_count <= 0:
+            return sel
+        last = row_count - 1
+        for col in cols:
+            sel.select(view_model.index(0, col), view_model.index(last, col))
+        return sel
+
+    def _select_columns(
+        self, cols: list[int], *, anchor_col: int | None = None, mode: str = "replace"
+    ) -> None:
+        """Select full columns in the table view.
+
+        ``mode`` matches row-header modifiers: ``replace`` (plain or Shift click)
+        clears the entry selection, ``toggle`` (Ctrl click) flips each column,
+        and ``add`` (Ctrl+Shift range) unions the columns in. Add and toggle keep
+        any entry selection.
+        """
         view_model = self.table.model()
         if view_model is None:
             self._report_table_selection_status(0)
@@ -84,32 +106,68 @@ class TableSelectionMixin:
         if not unique_cols:
             self._report_table_selection_status(0)
             return
+        sm = self.table.selectionModel()
+        select_cols = unique_cols
+        deselect_cols: list[int] = []
+        if mode == "toggle" and sm is not None:
+            select_cols = []
+            for col in unique_cols:
+                if sm.isColumnSelected(col):
+                    deselect_cols.append(col)
+                else:
+                    select_cols.append(col)
         prev_behavior = self.table.selectionBehavior()
         was_auto_scroll = bool(self.table.hasAutoScroll())
         self.table.setSelectionBehavior(QAbstractItemView.SelectColumns)
         self.table.setAutoScroll(False)
-        sel = QItemSelection()
-        for col in unique_cols:
-            top = view_model.index(0, col)
-            bottom = view_model.index(n - 1, col)
-            sel.select(top, bottom)
-        sm = self.table.selectionModel()
         scroll_pos = self._table_scroll_pos()
         current = sm.currentIndex() if sm is not None else None
         try:
             if sm is not None:
-                sm.select(sel, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Columns)
-                if current is not None and current.isValid():
+                if mode == "toggle":
+                    if deselect_cols:
+                        sm.select(
+                            self._column_span_selection(view_model, n, deselect_cols),
+                            QItemSelectionModel.Deselect | QItemSelectionModel.Columns,
+                        )
+                    if select_cols:
+                        sm.select(
+                            self._column_span_selection(view_model, n, select_cols),
+                            QItemSelectionModel.Select | QItemSelectionModel.Columns,
+                        )
+                elif mode == "add":
+                    sm.select(
+                        self._column_span_selection(view_model, n, unique_cols),
+                        QItemSelectionModel.Select | QItemSelectionModel.Columns,
+                    )
+                else:
+                    sm.select(
+                        self._column_span_selection(view_model, n, unique_cols),
+                        QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Columns,
+                    )
+                if mode == "replace" and current is not None and current.isValid():
                     keep = view_model.index(current.row(), unique_cols[0])
+                    if keep.isValid():
+                        sm.setCurrentIndex(keep, QItemSelectionModel.NoUpdate)
+                elif mode != "replace":
+                    row = current.row() if current is not None and current.isValid() else 0
+                    focus = (
+                        int(anchor_col)
+                        if anchor_col is not None and int(anchor_col) in seen
+                        else unique_cols[-1]
+                    )
+                    keep = view_model.index(max(0, row), focus)
                     if keep.isValid():
                         sm.setCurrentIndex(keep, QItemSelectionModel.NoUpdate)
         finally:
             self.table.setSelectionBehavior(prev_behavior)
             self.table.setAutoScroll(was_auto_scroll)
             self._restore_table_scroll_pos(scroll_pos)
-        # Column selection replaces any entry selection. This clear is not a user
-        # entry selection: the column status below is the message to show.
-        self.selection_store.clear()
+        # A replacing column click drops any entry selection. This clear is not a
+        # user entry selection: the column status below is the message to show.
+        # Ctrl add/toggle keeps entries, the way a Ctrl row click keeps cells.
+        if mode == "replace":
+            self.selection_store.clear()
         focus_col = (
             int(anchor_col)
             if anchor_col is not None and int(anchor_col) in seen
@@ -121,10 +179,28 @@ class TableSelectionMixin:
             preserve_scroll=True,
             scroll_pos=scroll_pos,
         )
-        n_cols = len(unique_cols)
-        extra = f"{n_cols} column{'s' if n_cols != 1 else ''}."
-        self._report_table_selection_status(n, extra=extra)
+        n_cols = len(unique_cols) if mode == "replace" else self._full_selected_column_count()
+        if n_cols <= 0:
+            self._report_table_selection_status(self.selection_store.count())
+        else:
+            extra = f"{n_cols} column{'s' if n_cols != 1 else ''}."
+            self._report_table_selection_status(n, extra=extra)
         self._restore_table_scroll_pos(scroll_pos)
+
+    def _full_selected_column_count(self) -> int:
+        """How many data columns are selected for every visible row."""
+        sm = self.table.selectionModel()
+        if sm is None or not self.headers:
+            return 0
+        n = 0
+        for ix in sm.selectedColumns():
+            if not ix.isValid():
+                continue
+            col = int(ix.column())
+            if col <= 0 or col >= len(self.headers) or self.headers[col] == "ID_HIDDEN":
+                continue
+            n += 1
+        return n
 
     def _table_scroll_pos(self) -> tuple[int, int]:
         vbar = self.table.verticalScrollBar()
