@@ -88,6 +88,108 @@ def test_plan_ionization_cuda_uses_one_worker_pool(monkeypatch) -> None:
     assert workers == 1
 
 
+def test_structure_progress_flags_cross_process_queue() -> None:
+    """Pool tasks must be able to pickle progress flags (Windows spawn queue)."""
+    import pickle
+    from concurrent.futures import ProcessPoolExecutor
+
+    from molmanager.workers.ionization_parallel import (
+        _set_shared_progress_flag,
+        close_structure_progress_flags,
+        structure_progress_flags,
+    )
+
+    flags = structure_progress_flags(2)
+    assert flags is not None
+    try:
+        roundtrip = pickle.loads(pickle.dumps(flags))
+        try:
+            roundtrip[1] = 1
+            assert flags[1] == 1
+        finally:
+            close_structure_progress_flags(roundtrip)
+        with ProcessPoolExecutor(max_workers=1) as ex:
+            assert ex.submit(_set_shared_progress_flag, flags, 0).result(timeout=60) == 1
+        assert flags[0] == 1
+        assert flags[1] == 1
+    finally:
+        close_structure_progress_flags(flags)
+
+
+def test_build_microstates_cache_resumes_after_cancel(monkeypatch) -> None:
+    """Protonate, protomers, and ionization descriptors share this cache."""
+    from molmanager.ionization.microstate_cache import lookup
+    from molmanager.workers.structure_grouping import structure_key
+
+    cache_clear()
+    calls: list[str] = []
+    cancel = threading.Event()
+
+    def _fake(mol):
+        calls.append(structure_key(mol))
+        if len(calls) == 1:
+            cancel.set()
+        return [{"pka": 7.0}]
+
+    monkeypatch.setattr(
+        "molmanager.ionization.unipka_ensembles.microstates_for_mol",
+        _fake,
+    )
+    mols = [Chem.MolFromSmiles(s) for s in ("CCO", "CCN", "CCC")]
+    assert all(m is not None for m in mols)
+    first = ionization_parallel.build_microstates_cache_by_key(mols, cancel_event=cancel)
+    assert len(calls) == 1
+    assert len(first) == 1
+    done = calls[0]
+    hit, _states = lookup(done)
+    assert hit
+
+    ionization_parallel.build_microstates_cache_by_key(mols)
+    assert len(calls) == 3
+    assert calls[0] == done
+    assert set(calls[1:]) == {structure_key(m) for m in mols if structure_key(m) != done}
+
+
+def test_failed_pool_does_not_cache_unscored_structures(monkeypatch) -> None:
+    """A pool that never returns must not record an empty pKa hit."""
+    from molmanager.ionization.microstate_cache import lookup
+    from molmanager.workers.structure_grouping import structure_key
+
+    cache_clear()
+    monkeypatch.setattr(
+        ionization_parallel,
+        "plan_ionization_process_workers",
+        lambda _n, _c: (True, 1),
+    )
+    monkeypatch.setattr(ionization_parallel, "unipka_cuda_available", lambda: True)
+
+    def _failed_future():
+        from concurrent.futures import Future
+
+        fut: Future = Future()
+        fut.set_exception(RuntimeError("pool task failed"))
+        return fut
+
+    class _Pool:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> bool:
+            return False
+
+        def submit(self, *_args, **_kwargs):
+            return _failed_future()
+
+    monkeypatch.setattr(ionization_parallel, "ionization_process_pool", lambda *_a, **_k: _Pool())
+    mol = Chem.MolFromSmiles("CCO")
+    assert mol is not None
+    out = ionization_parallel.build_microstates_cache_by_key([mol])
+    key = structure_key(mol)
+    assert out[key] is None
+    hit, _states = lookup(key)
+    assert hit is False
+
+
 def test_chunk_structure_keys_spreads_across_workers() -> None:
     from molmanager.workers.ionization_parallel import chunk_structure_keys
 
@@ -121,12 +223,15 @@ def test_structure_progress_flags_mark_prefix() -> None:
 
     flags = structure_progress_flags(4)
     assert flags is not None
-    mark_structure_progress(flags, [1, 2, 3], 2)
-    assert flagged_unique_count(flags, 4) == 2
-    assert flags[1] == 1
-    assert flags[2] == 1
-    assert flags[0] == 0
-    assert flags[3] == 0
+    try:
+        mark_structure_progress(flags, [1, 2, 3], 2)
+        assert flagged_unique_count(flags, 4) == 2
+        assert flags[1] == 1
+        assert flags[2] == 1
+        assert flags[0] == 0
+        assert flags[3] == 0
+    finally:
+        ionization_parallel.close_structure_progress_flags(flags)
 
 
 def test_map_ionization_progress_protonate_moves_before_last_tick() -> None:

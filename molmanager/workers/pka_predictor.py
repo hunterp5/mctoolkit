@@ -53,6 +53,8 @@ from .structure_grouping import group_rows_by_structure
 logger = logging.getLogger(__name__)
 
 _unipka_lock = threading.Lock()
+# Placeholder written for rows a cancelled run did not score. Later runs treat it as empty.
+_CANCELLED_RESULT = "Cancelled."
 
 _UNIPKA_SUPPRESSED_LOGGER_NAMES = (
     "rdkit.Chem.PandasPatcher",
@@ -292,6 +294,7 @@ class PKaPredictorWorker(QRunnable):
                 UNIPKA_PROGRESS_POLL_S,
                 chunk_structure_keys,
                 flagged_row_count,
+                close_structure_progress_flags,
                 mark_structure_progress,
                 plan_ionization_process_workers,
                 structure_progress_flags,
@@ -369,6 +372,7 @@ class PKaPredictorWorker(QRunnable):
                     os.environ.get("MOLMANAGER_UNIPKA_MMFF_THREADS") is None and proc_workers > 1
                 )
                 prev_mmff = _set_unipka_mmff_thread_env(proc_workers)
+                pool_error_logged = False
                 logger.info(
                     "pKa: scoring in %s worker process(es) (%s unique structure(s))",
                     proc_workers,
@@ -379,6 +383,34 @@ class PKaPredictorWorker(QRunnable):
                     nonlocal done_cum
                     done_cum = flagged_row_count(flags, order, oids_map, done_base)
                     _emit(done_cum, force=force)
+
+                def _log_pool_failure() -> None:
+                    nonlocal pool_error_logged
+                    if should_terminate_process_pool(cancel_ev):
+                        logger.debug("pKa process-pool task ended after cancel", exc_info=True)
+                        return
+                    if pool_error_logged:
+                        logger.error("pKa process-pool task failed")
+                        return
+                    pool_error_logged = True
+                    logger.exception("pKa process-pool task failed")
+
+                def _take_result(fut) -> None:
+                    if fut.cancelled():
+                        return
+                    try:
+                        rows = fut.result()
+                    except Exception:
+                        _log_pool_failure()
+                        return
+                    for key, txt, pi_txt, ensemble, cacheable in rows:
+                        results_by_key[key] = (txt, pi_txt)
+                        if cacheable:
+                            cache_store(key, ensemble)
+                        idx = key_index.get(key)
+                        if idx is not None:
+                            mark_structure_progress(flags, [idx], 1)
+                    _emit_live()
 
                 try:
                     with ionization_process_pool(proc_workers, cancel_event=cancel_ev) as ex:
@@ -397,8 +429,11 @@ class PKaPredictorWorker(QRunnable):
                                 or application_is_shutting_down()
                             ):
                                 cancelled = True
-                                for f in pending:
-                                    f.cancel()
+                                completed, pending = wait(pending, timeout=0)
+                                for fut in completed:
+                                    _take_result(fut)
+                                for fut in pending:
+                                    fut.cancel()
                                 break
                             completed, pending = wait(
                                 pending,
@@ -406,24 +441,18 @@ class PKaPredictorWorker(QRunnable):
                                 return_when=FIRST_COMPLETED,
                             )
                             _emit_live()
-                            for f in completed:
-                                if f.cancelled():
-                                    continue
-                                try:
-                                    for key, txt, pi_txt, ensemble, cacheable in f.result():
-                                        results_by_key[key] = (txt, pi_txt)
-                                        if cacheable:
-                                            cache_store(key, ensemble)
-                                        idx = key_index.get(key)
-                                        if idx is not None:
-                                            mark_structure_progress(flags, [idx], 1)
-                                except Exception:
-                                    logger.exception("pKa process-pool task failed")
-                                _emit_live()
+                            for fut in completed:
+                                _take_result(fut)
                 finally:
                     _restore_unipka_mmff_thread_env(prev_mmff, wrote_mmff)
+                    close_structure_progress_flags(flags)
+                missing = (
+                    (_CANCELLED_RESULT, _CANCELLED_RESULT)
+                    if cancelled
+                    else ("Error (see log)", "N/A")
+                )
                 for key in order:
-                    txt, pi_txt = results_by_key.get(key, ("Error (see log)", "N/A"))
+                    txt, pi_txt = results_by_key.get(key, missing)
                     for oid in oids_map.get(key, ()):
                         row_text[oid] = (txt, pi_txt)
             else:
@@ -474,11 +503,13 @@ class PKaPredictorWorker(QRunnable):
                     done_cum += len(oids_map[key])
                     _emit(done_cum)
 
-            out = [(oid, *(row_text.get(oid, ("N/A", "N/A")))) for oid, _ in self.rows]
-            _emit(tot, force=True)
-            if cancelled and done_cum > 0:
+            unfinished = (_CANCELLED_RESULT, _CANCELLED_RESULT) if cancelled else ("N/A", "N/A")
+            out = [(oid, *row_text.get(oid, unfinished)) for oid, _mol in self.rows]
+            saved = sum(1 for _oid, text, _pi in out if text != _CANCELLED_RESULT)
+            _emit(tot if not cancelled else min(saved, tot), force=True)
+            if cancelled and saved < tot:
                 try:
-                    self.worker_signals.partial_results.emit("pKa prediction", done_cum, tot)
+                    self.worker_signals.partial_results.emit("pKa prediction", saved, tot)
                 except Exception:
                     pass
             if use_mp:

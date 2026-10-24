@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 from rdkit import Chem
 
@@ -97,8 +99,47 @@ def test_pka_worker_emits_partial_results_on_cancel(monkeypatch) -> None:
     worker.run()
 
     assert finished, "expected finished signal"
-    assert finished[0], "expected at least one completed pKa row"
+    by_oid = {oid: txt for oid, txt, _pi in finished[0]}
+    assert by_oid[1] == "4.20; 7.10"
+    assert by_oid[2] == "Cancelled."
     assert partial == [("pKa prediction", 1, 2)]
+
+
+def test_pka_worker_resumes_uncalculated_rows_after_cancel(monkeypatch) -> None:
+    """A later Predict pKa run scores only structures the cancelled run did not finish."""
+    scored: list[str] = []
+    cancel = threading.Event()
+
+    def _predict(mol):
+        scored.append(Chem.MolToSmiles(mol, canonical=True))
+        cancel.set()
+        return _ensemble(7.1)
+
+    monkeypatch.setattr("molmanager.workers.pka_predictor.predict_ionization_ensemble", _predict)
+
+    class _Never:
+        def is_set(self) -> bool:
+            return False
+
+    rows = [(1, Chem.MolFromSmiles("CCO")), (2, Chem.MolFromSmiles("CCN"))]
+    ws = WorkerSignals()
+    ps = PKaPredictorSignals()
+    PKaPredictorWorker(rows, ws, ps, cancel_event=cancel).run()
+    assert len(scored) == 1
+    done_first = scored[0]
+
+    scored.clear()
+    finished: list[list[tuple[int | None, str, str]]] = []
+    ps2 = PKaPredictorSignals()
+    ps2.finished.connect(lambda result, _include_pi=False: finished.append(result))
+    PKaPredictorWorker(rows, WorkerSignals(), ps2, cancel_event=_Never()).run()
+
+    assert scored == [s for s in ("CCO", "CCN") if s != done_first]
+    assert len(scored) == 1
+    assert finished
+    by_oid = {oid: txt for oid, txt, _pi in finished[0]}
+    assert by_oid[1] == "7.10"
+    assert by_oid[2] == "7.10"
 
 
 def test_pka_worker_deduplicates_identical_structures(monkeypatch) -> None:
@@ -222,9 +263,7 @@ def test_pka_worker_updates_progress_per_molecule(monkeypatch) -> None:
         (3, Chem.MolFromSmiles("CCC")),
     ]
     assert all(mol is not None for _oid, mol in rows)
-    PKaPredictorWorker(
-        rows, ws, ps, cancel_event=_CancelNever(), progress_state=state
-    ).run()
+    PKaPredictorWorker(rows, ws, ps, cancel_event=_CancelNever(), progress_state=state).run()
     assert 1 in seen
     assert 2 in seen
     assert seen[-1] == 3

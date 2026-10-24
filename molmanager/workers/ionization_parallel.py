@@ -18,12 +18,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import threading
-from concurrent.futures import FIRST_COMPLETED, BrokenExecutor, ProcessPoolExecutor, wait
 from collections.abc import Iterator
+from concurrent.futures import FIRST_COMPLETED, BrokenExecutor, ProcessPoolExecutor, wait
 from contextlib import contextmanager
+from multiprocessing.shared_memory import SharedMemory
 
 from rdkit import Chem
 
@@ -63,14 +65,73 @@ def unipka_cuda_available() -> bool:
     return torch_is_cuda_build()
 
 
+class _SharedStructureFlags:
+    """0/1 slots a process-pool task can update.
+
+    ``multiprocessing.Array`` only pickles while a child is spawning. Pool
+    tasks are sent later, on a queue, and Windows raises ``SynchronizedArray
+    objects should only be shared between processes through inheritance``.
+    Named shared memory pickles as a name, which the worker can open.
+    """
+
+    def __init__(self, n: int, name: str | None = None) -> None:
+        self._n = int(n)
+        self._owner = name is None
+        if name is None:
+            self._shm = SharedMemory(create=True, size=max(self._n, 1))
+            if self._n:
+                self._shm.buf[: self._n] = bytes(self._n)
+        else:
+            self._shm = SharedMemory(name=name)
+
+    def __reduce__(self):
+        return (_SharedStructureFlags, (self._n, self._shm.name))
+
+    def __len__(self) -> int:
+        return self._n
+
+    def __getitem__(self, index: int) -> int:
+        return int(self._shm.buf[int(index)])
+
+    def __setitem__(self, index: int, value: int) -> None:
+        self._shm.buf[int(index)] = int(value) & 0xFF
+
+    def close(self) -> None:
+        shm = getattr(self, "_shm", None)
+        if shm is None:
+            return
+        self._shm = None
+        with contextlib.suppress(BufferError, OSError):
+            shm.close()
+        if not self._owner:
+            return
+        with contextlib.suppress(FileNotFoundError, OSError):
+            shm.unlink()
+
+    def __del__(self) -> None:
+        self.close()
+
+
 def structure_progress_flags(n: int):
     """Shared 0/1 completion flags for unique structures (process-pool progress)."""
-    from multiprocessing import Array
-
     n_i = max(0, int(n))
     if n_i <= 0:
         return None
-    return Array("B", n_i)
+    return _SharedStructureFlags(n_i)
+
+
+def close_structure_progress_flags(flags) -> None:
+    """Release a block from :func:`structure_progress_flags`."""
+    close = getattr(flags, "close", None)
+    if callable(close):
+        close()
+
+
+def _set_shared_progress_flag(flags, index: int) -> int:
+    """Set one shared progress slot. Spawn-safe entry so tests can cross the task queue."""
+    idx = int(index)
+    flags[idx] = 1
+    return int(flags[idx])
 
 
 def mark_structure_progress(flags, flag_indices: list[int] | None, done_local: int) -> None:
@@ -524,6 +585,7 @@ def build_microstates_cache_by_key(
         flags = structure_progress_flags(n_need)
         n_cached = len(cache)
         pool_failed = False
+        scored_keys: set[str] = set()
         wrote_mmff = os.environ.get("MOLMANAGER_UNIPKA_MMFF_THREADS") is None and proc_workers > 1
         prev_mmff = _set_unipka_mmff_thread_env(proc_workers)
 
@@ -545,16 +607,17 @@ def build_microstates_cache_by_key(
                 while pending:
                     if should_terminate_process_pool(cancel_event):
                         completed, pending = wait(pending, timeout=0)
-                        for f in completed:
-                            if f.cancelled():
+                        for fut in completed:
+                            if fut.cancelled():
                                 continue
                             try:
-                                for key, states in f.result():
+                                for key, states in fut.result():
                                     cache[key] = states
+                                    scored_keys.add(key)
                             except Exception:
                                 logger.debug("Uni-pKa process-pool task failed", exc_info=True)
-                        for f in pending:
-                            f.cancel()
+                        for fut in pending:
+                            fut.cancel()
                         break
                     completed, pending = wait(
                         pending,
@@ -568,6 +631,7 @@ def build_microstates_cache_by_key(
                         try:
                             for key, states in f.result():
                                 cache[key] = states
+                                scored_keys.add(key)
                                 idx = need_index.get(key)
                                 if idx is not None:
                                     mark_structure_progress(flags, [idx], 1)
@@ -586,11 +650,13 @@ def build_microstates_cache_by_key(
                         break
         finally:
             _restore_unipka_mmff_thread_env(prev_mmff, wrote_mmff)
+            close_structure_progress_flags(flags)
         if pool_failed:
             discard_ionization_process_pool()
         if pool_failed or any(k not in cache for k in need):
             # Do not score leftover structures in this process when a CUDA wheel is
             # installed — that would initialize CUDA in the GUI and block shutdown.
+            # Unscored keys stay out of the session cache so a later run retries them.
             sequential_ok = not unipka_cuda_available()
             for key in need:
                 if key in cache:
@@ -599,11 +665,12 @@ def build_microstates_cache_by_key(
                     break
                 if sequential_ok:
                     cache[key] = microstates_for_mol(rep[key])
+                    scored_keys.add(key)
                 else:
                     cache[key] = None
                 _report_ionization(len(cache), force=True)
         _report_ionization(len(cache), force=True)
-        cache_store_many({k: cache[k] for k in need if k in cache})
+        cache_store_many({k: cache[k] for k in scored_keys})
         logger.debug(
             "ionization cache: %s unique (%s missed session cache), process pool=%s",
             n_unique,
