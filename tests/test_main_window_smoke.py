@@ -644,7 +644,75 @@ def test_row_header_modifiers_drive_entry_selection(qapp):  # noqa: ARG001
     w.close()
 
 
-def test_row_header_click_selects_entries_not_qt_rows(qapp):  # noqa: ARG001
+def test_column_header_modifiers_match_row_selection(qapp, monkeypatch):  # noqa: ARG001
+    """Ctrl toggles a column; Ctrl+Shift adds a range; both keep the entry selection."""
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication
+
+    w = ChemistryWorkspaceWindow()
+    _seed_rows(w, 6)
+    structure = w.headers.index("Structure")
+    smiles = w.headers.index("SMILES")
+    mw = w.headers.index("MW")
+    mods = Qt.NoModifier
+
+    def modifiers():
+        return mods
+
+    monkeypatch.setattr(QApplication, "keyboardModifiers", modifiers)
+
+    def click(col: int, modifiers_value) -> None:
+        nonlocal mods
+        mods = modifiers_value
+        w._on_horizontal_header_section_clicked(col)
+
+    click(smiles, Qt.NoModifier)
+    assert w._selected_full_column_indices() == [smiles]
+    assert w.selection_store.is_empty()
+    assert w.status_label.text() == "Selected 6 of 6 row(s). 1 column."
+
+    click(mw, Qt.ShiftModifier)
+    assert sorted(w._selected_full_column_indices()) == [smiles, mw]
+    assert w.status_label.text() == "Selected 6 of 6 row(s). 2 columns."
+
+    click(structure, Qt.ControlModifier)
+    assert sorted(w._selected_full_column_indices()) == [structure, smiles, mw]
+
+    click(smiles, Qt.ControlModifier)
+    assert sorted(w._selected_full_column_indices()) == [structure, mw]
+
+    # Ctrl+Shift adds the range from the last anchor (SMILES) and keeps Structure.
+    click(mw, Qt.ControlModifier | Qt.ShiftModifier)
+    assert sorted(w._selected_full_column_indices()) == [structure, smiles, mw]
+
+    w.select_table_rows([4])
+    click(smiles, Qt.ControlModifier)
+    assert w._selected_oids_set() == {4}
+    assert w._selected_full_column_indices() == [smiles]
+    click(mw, Qt.ControlModifier)
+    assert w._selected_oids_set() == {4}
+    assert sorted(w._selected_full_column_indices()) == [smiles, mw]
+    click(smiles, Qt.ControlModifier)
+    click(mw, Qt.ControlModifier)
+    assert w._selected_full_column_indices() == []
+    assert w._selected_oids_set() == {4}
+    assert w.status_label.text() == "Selected 1 of 6 row(s)."
+
+    # Shift replaces the columns and clears entries. Anchor is the last Ctrl click (MW).
+    click(smiles, Qt.ShiftModifier)
+    assert sorted(w._selected_full_column_indices()) == [smiles, mw]
+    assert w.selection_store.is_empty()
+
+    w.select_table_rows([1])
+    click(structure, Qt.NoModifier)
+    assert w._selected_full_column_indices() == [structure]
+    assert w.selection_store.is_empty()
+
+    w._column_selection_anchor = None
+    click(mw, Qt.ControlModifier | Qt.ShiftModifier)
+    assert sorted(w._selected_full_column_indices()) == [structure, mw]
+    assert w._column_selection_anchor == mw
+    w.close()
     from PyQt5.QtCore import QPoint, Qt
     from PyQt5.QtTest import QTest
 
@@ -937,9 +1005,11 @@ def test_structure_header_menu_offers_duplicate_not_rename(qapp):  # noqa: ARG00
     menu = w._create_header_context_menu(1)
     assert menu is not None
     names = [a.objectName() for a in menu.actions()]
+    titles = [a.text() for a in menu.actions() if a.text()]
     assert "header_duplicate" in names
     assert "header_rename" not in names
     assert "header_delete" not in names
+    assert "Sort" not in titles
     select_menu = next(a.menu() for a in menu.actions() if a.text() == "Select")
     select_names = [a.objectName() for a in select_menu.actions() if a.objectName()]
     assert "header_select_all" in select_names
