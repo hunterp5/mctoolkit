@@ -133,7 +133,10 @@ class ConformersToolsMixin:
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, "Generate Conformations"):
             return
-        data = self._collect_mols_for_conformer_tools(only_selected=only_selected)
+        data = self._filter_rows_for_resume(
+            self._collect_mols_for_conformer_tools(only_selected=only_selected),
+            ["confs"],
+        )
         if not data:
             QMessageBox.information(
                 self,
@@ -173,7 +176,10 @@ class ConformersToolsMixin:
             only_selected, allowed, "Generate Conformations — Systematic"
         ):
             return
-        data = self._collect_mols_for_conformer_tools(only_selected=only_selected)
+        data = self._filter_rows_for_resume(
+            self._collect_mols_for_conformer_tools(only_selected=only_selected),
+            ["confs"],
+        )
         if not data:
             QMessageBox.information(
                 self,
@@ -217,7 +223,10 @@ class ConformersToolsMixin:
             only_selected, allowed, "Generate Conformations — CONFORGE"
         ):
             return
-        data = self._collect_mols_for_conformer_tools(only_selected=only_selected)
+        data = self._filter_rows_for_resume(
+            self._collect_mols_for_conformer_tools(only_selected=only_selected),
+            ["confs"],
+        )
         if not data:
             QMessageBox.information(
                 self,
@@ -440,6 +449,7 @@ class ConformersToolsMixin:
             if unpack_confs_blocks_json_b64(full) is None:
                 continue
             data.append((int(o), full))
+        data = self._filter_rows_for_resume(data, ["superpose"])
         if not data:
             QMessageBox.information(
                 self,

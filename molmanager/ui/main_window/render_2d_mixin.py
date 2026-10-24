@@ -390,6 +390,12 @@ class Render2DMixin:
         renders, row_by_oid = self._build_render2d_tasks_in_table_order(
             src, base_w, base_h, allowed_oids
         )
+        if src == "Structure":
+            have = self._stored_structure_scene_oids()
+            missing = {int(item[0]) for item in renders if int(item[0]) not in have}
+            if missing and len(missing) < len(renders):
+                renders = [item for item in renders if int(item[0]) in missing]
+                row_by_oid = {oid: row for oid, row in row_by_oid.items() if oid in missing}
         if not renders:
             QMessageBox.information(
                 self,

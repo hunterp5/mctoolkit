@@ -127,6 +127,7 @@ class PredictToolsMixin:
             )
             if payload.oid is not None and payload.has_structure()
         ]
+        payloads = self._filter_rows_for_resume(payloads, output_columns)
         if not payloads:
             QMessageBox.information(
                 self,

@@ -325,12 +325,26 @@ class AutoQSARDialog(QDialog):
         if self._job_running or self._job is None or self.parent_app is None:
             return
         bundle = self._job.search.fit.bundle
-        out_col = self.pred_column_edit.text().strip() or f"AutoQSAR_{self._job.search.activity_column}"
+        out_col = (
+            self.pred_column_edit.text().strip() or f"AutoQSAR_{self._job.search.activity_column}"
+        )
+        df = self._job.dataframe
+        oids = list(self._job.oids)
+        payloads = self._mol_payloads if bundle.fp_choice else None
+        if payloads is None or len(payloads) == len(oids):
+            kept = self.parent_app._filter_rows_for_resume([(int(oid),) for oid in oids], [out_col])
+            if len(kept) != len(oids):
+                keep = {int(row[0]) for row in kept}
+                mask = [i for i, oid in enumerate(oids) if int(oid) in keep]
+                df = df.iloc[mask].reset_index(drop=True)
+                oids = [oids[i] for i in mask]
+                if payloads is not None:
+                    payloads = [payloads[i] for i in mask]
         params = {
             "bundle": bundle,
-            "dataframe": self._job.dataframe,
-            "oids": list(self._job.oids),
-            "mol_payloads": self._mol_payloads if bundle.fp_choice else None,
+            "dataframe": df,
+            "oids": oids,
+            "mol_payloads": payloads,
             "output_column": out_col,
         }
         self._active_progress_label = "AutoQSAR predictions"
@@ -339,11 +353,11 @@ class AutoQSARDialog(QDialog):
         self._active_job_id = enqueue_process_queue_job(
             self.parent_app,
             "AutoQSAR predictions",
-            len(self._job.oids),
+            len(oids),
             lambda ev, ps, p=params, sigs=self._signals: AutoQSARPredictWorker(
                 p, sigs, cancel_event=ev, progress_state=ps
             ),
-            queue_label=f"AutoQSAR predict ({len(self._job.oids)} rows)",
+            queue_label=f"AutoQSAR predict ({len(oids)} rows)",
         )
         self.parent_app.process_queue.thread_finished.connect(self._on_thread_finished)
 

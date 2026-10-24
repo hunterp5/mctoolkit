@@ -206,6 +206,7 @@ class DescriptorsToolsMixin:
         confs_col_by_idx=None,
         ensemble_db=None,
     ) -> None:
+        data = self._filter_rows_for_resume(data, disp_headers)
         req = workers.CalcDescriptorsRequest(
             data=data,
             disp_headers=disp_headers,

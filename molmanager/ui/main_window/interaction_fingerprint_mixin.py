@@ -103,6 +103,7 @@ class InteractionFingerprintMixin:
                     pose = singles[0]
             poses.append((oid, pose))
         fp_header, residue_header = fingerprint_headers(params.column_prefix)
+        poses = self._filter_rows_for_resume(poses, [fp_header, residue_header])
         from ...workers.interaction_fingerprint import InteractionFingerprintWorker
 
         def _make_worker(cancel_event, progress_state):

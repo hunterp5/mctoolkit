@@ -227,3 +227,38 @@ def test_on_calc_finished_chunks_large_write(qapp, monkeypatch):  # noqa: ARG001
         "3",
     ]
     w.close()
+
+
+def test_filter_rows_for_resume_keeps_only_open_cells() -> None:
+    host = _ModelHost(
+        ["ID_HIDDEN", "Structure", "confs", "Metabolite Count", "Metabolite SMILES"],
+        {
+            1: {"confs": '{"ok":true}', "Metabolite Count": "2", "Metabolite SMILES": "CCO"},
+            2: {"confs": "", "Metabolite Count": "N/A", "Metabolite SMILES": "Cancelled."},
+            3: {"confs": '{"ok":true}', "Metabolite Count": "0", "Metabolite SMILES": ""},
+        },
+    )
+    conf_rows = [(1, "a"), (2, "b"), (3, "c")]
+    assert host._filter_rows_for_resume(conf_rows, ["confs"]) == [(2, "b")]
+    # Count "0" is a finished metabolite row even when the SMILES cell is blank.
+    met = host._filter_rows_for_resume(conf_rows, ["Metabolite Count", "Metabolite SMILES"])
+    assert met == [(2, "b")]
+
+
+def test_filter_rows_for_resume_runs_everything_when_column_is_new_or_full() -> None:
+    host = _ModelHost(
+        ["ID_HIDDEN", "Structure", "confs"],
+        {1: {"confs": '{"ok":true}'}, 2: {"confs": '{"ok":true}'}},
+    )
+    rows = [(1, "a"), (2, "b")]
+    assert host._filter_rows_for_resume(rows, ["confs"]) == rows
+    assert host._filter_rows_for_resume(rows, ["LogP"]) == rows
+
+    class _Payload:
+        def __init__(self, oid: int) -> None:
+            self.oid = oid
+
+    payloads = [_Payload(1), _Payload(2)]
+    assert host._filter_rows_for_resume(payloads, ["confs"]) == payloads
+    host._rows[2]["confs"] = ""
+    assert [item.oid for item in host._filter_rows_for_resume(payloads, ["confs"])] == [2]

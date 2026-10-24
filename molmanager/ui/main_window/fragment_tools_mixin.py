@@ -66,6 +66,12 @@ class FragmentToolsMixin:
             return
         src = p.structure_source
         payloads = self.collect_scoped_table_structure_payloads(src, only_selected=only_selected)
+        prefix = (p.column_prefix or "").strip()
+        prefix_cols = [
+            header for header in self.headers if prefix and header.startswith(f"{prefix}_")
+        ]
+        if prefix_cols:
+            payloads = self._filter_rows_for_resume(payloads, prefix_cols)
         if not payloads:
             QMessageBox.information(
                 self,
@@ -162,6 +168,11 @@ class FragmentToolsMixin:
             self.status_label.setText("Ready.")
             return
         prefix = p.column_prefix or ("BRICS" if p.method == "brics" else "RECAP")
+        from ...chem.fragment_decomposition import fragment_columns_for_prefix
+
+        frag_cols = fragment_columns_for_prefix(list(self.headers), prefix)
+        if frag_cols:
+            data = self._filter_rows_for_resume(data, frag_cols)
         method = "brics" if p.method == "brics" else "recap"
         self._fragment_decomp_render_2d_after = bool(getattr(p, "render_2d", False))
         enqueue_process_queue_job(

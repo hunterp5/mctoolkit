@@ -36,10 +36,80 @@ def cell_looks_uncalculated(text: str) -> bool:
     return t.startswith("error")
 
 
+def _oid_from_job_row(row) -> int | None:
+    """Row id from a ``(oid, ...)`` tuple or an object with ``oid``."""
+    if isinstance(row, (tuple, list)):
+        raw = row[0] if row else None
+    else:
+        raw = getattr(row, "oid", None)
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 class ColumnWriteMixin:
     def _unique_table_column_names(self, bases: list[str]) -> list[str]:
         """Return column header names; append `` (n)`` when a name already exists in the table."""
         return self._result_column_names(bases, result_oids=None)
+
+    def _cell_text_for_oid(self, header: str, oid: int) -> str | None:
+        """Backing cell text, or ``None`` when the table cannot be read."""
+        if header not in getattr(self, "headers", []):
+            return ""
+        model = getattr(self, "_table_model", None)
+        row_of = getattr(model, "logical_row_for_oid", None)
+        if model is None or not callable(row_of):
+            return None
+        try:
+            row = int(row_of(int(oid)))
+        except (TypeError, ValueError):
+            return ""
+        if row < 0:
+            return ""
+        backing = getattr(model, "backing_value_for_row_header", None)
+        value_of = getattr(model, "value_for_header", None)
+        if callable(backing):
+            return str(backing(row, header) or "")
+        if callable(value_of):
+            return str(value_of(row, header) or "")
+        return None
+
+    def _filter_rows_for_resume(self, rows, output_headers: Sequence[str]) -> list:
+        """Drop rows that already have a calculated value for this job.
+
+        A row is still open when every *output_headers* column exists and each
+        of those cells is blank, ``N/A``, ``Cancelled.``, or an error. When a
+        requested column is not in the table yet, or every row is already
+        filled, the input list is returned unchanged so the write path can
+        create the column or a ``Name (1)`` copy.
+        """
+        headers = [str(h).strip() for h in output_headers if str(h or "").strip()]
+        materialized = list(rows)
+        if not materialized or not headers:
+            return materialized
+        table_headers = list(getattr(self, "headers", []) or [])
+        if any(header not in table_headers for header in headers):
+            return materialized
+        parsed: list[tuple[int, object]] = []
+        for row in materialized:
+            oid = _oid_from_job_row(row)
+            if oid is None:
+                return materialized
+            parsed.append((oid, row))
+        pending: list[int] = []
+        for oid, _row in parsed:
+            texts = [self._cell_text_for_oid(header, oid) for header in headers]
+            if any(text is None for text in texts):
+                return materialized
+            if all(cell_looks_uncalculated(text or "") for text in texts):
+                pending.append(oid)
+        if not pending or len(pending) == len(parsed):
+            return materialized
+        keep = set(pending)
+        return [row for oid, row in parsed if oid in keep]
 
     def _column_has_uncalculated_oids(self, header: str, oids: Sequence[int]) -> bool:
         """True when *header* is missing or any of *oids* still has a fillable cell."""

@@ -64,7 +64,12 @@ class ProtonateToolsMixin:
         if self._abort_if_only_selected_but_empty(only_selected, allowed, "Protonate"):
             return
 
-        data = self._structure_tool_inputs(src, allowed)
+        from ...workers.protonate_worker import protomer_percent_column_name
+
+        data = self._filter_rows_for_resume(
+            self._structure_tool_inputs(src, allowed),
+            [out_col, protomer_percent_column_name(float(ph))],
+        )
         if not data:
             QMessageBox.information(
                 self,

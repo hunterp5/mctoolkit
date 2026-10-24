@@ -329,6 +329,7 @@ class ComsiaDialog(QDialog):
             QMessageBox.information(self, "CoMSIA", "No posed rows in the current scope.")
             return
         column = self.pred_column_edit.text().strip() or self._auto_pred_name or "CoMSIA"
+        records = self.parent_app._filter_rows_for_resume(records, [column])
         self.pred_column_edit.setText(column)
         params = {"records": records, "model": self._model, "output_column": column}
         self._start_job(

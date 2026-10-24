@@ -524,11 +524,21 @@ class QSARDialog(QDialog):
         use_fp = bool(bundle.fp_choice)
         df, oids = self._scoped_dataframe_and_oids()
         out_col = self.pred_column_edit.text().strip() or f"QSAR_{self._fit_result.activity_column}"
+        payloads = self._collect_payloads() if use_fp else None
+        if payloads is None or len(payloads) == len(oids):
+            kept = self.parent_app._filter_rows_for_resume([(int(oid),) for oid in oids], [out_col])
+            if len(kept) != len(oids):
+                keep = {int(row[0]) for row in kept}
+                mask = [i for i, oid in enumerate(oids) if int(oid) in keep]
+                df = df.iloc[mask].reset_index(drop=True)
+                oids = [oids[i] for i in mask]
+                if payloads is not None:
+                    payloads = [payloads[i] for i in mask]
         params = {
             "bundle": bundle,
             "dataframe": df,
             "oids": oids,
-            "mol_payloads": self._collect_payloads() if use_fp else None,
+            "mol_payloads": payloads,
             "output_column": out_col,
         }
         n = len(oids)
