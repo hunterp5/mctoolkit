@@ -118,7 +118,7 @@ class TableMenuMixin:
             empty_act.setToolTip(
                 "Select every visible row where this column is blank or whitespace-only."
             )
-        if self._table_model.rowCount() > 0:
+        if self._table_model.rowCount() > 0 and self.headers[col] != "Structure":
             sort_top = menu.addMenu("Sort")
             num_m = sort_top.addMenu("Numeric")
             sort_num_asc = num_m.addAction("Ascending")
@@ -454,8 +454,9 @@ class TableMenuMixin:
             structure_menu = True
         if chem_col and mol_ctx is not None:
             browser_act = menu.addAction("Browser…")
-            render2d_act = menu.addAction(TOOL_RENDER_2D)
-            render2d_act.setEnabled(oid is not None)
+            if col != CompoundTableModel.STRUCTURE_COL:
+                render2d_act = menu.addAction(TOOL_RENDER_2D)
+                render2d_act.setEnabled(oid is not None)
         if structure_menu:
             menu.addSeparator()
 
