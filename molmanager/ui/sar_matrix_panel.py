@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt5.QtCore import QEvent, Qt
-from PyQt5.QtGui import QBrush, QColor
+from PyQt5.QtGui import QBrush, QColor, QFont
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -37,7 +37,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from ..analysis.sar_matrix import SarCell, SarMatrix, sar_page_csv
+from ..analysis.sar_matrix import SarCell, SarMatrix, sar_page_csv, sar_recommendation
 from .browsers.chrome import BrowserHostDialog, apply_browser_body_layout, style_browser_data_table
 from .dockable_plot import (
     apply_plot_chrome_glyphs,
@@ -53,6 +53,7 @@ from .dockable_plot import (
 from .strings import TOOL_SAR_MATRIX
 
 _HEADER_LIMIT = 22
+_PREDICTION_ROLE = Qt.UserRole + 1
 _WORSE = QColor(252, 220, 220)
 _BETTER = QColor(170, 214, 186)
 
@@ -128,7 +129,8 @@ class SarMatrixPanel(QWidget):
         footer = QHBoxLayout()
         self._export_btn = QPushButton("Export…", self)
         self._export_btn.setToolTip(
-            "Save the current page as a CSV table. Blank cells were not made."
+            "Save the current page as a CSV table. Predicted cells start with ≈. "
+            "Blank cells were not made and could not be predicted."
         )
         style_plot_footer_text_button(self._export_btn)
         self._export_btn.clicked.connect(self._export_current_page)
@@ -216,23 +218,55 @@ class SarMatrixPanel(QWidget):
         for row, row_label in enumerate(page.row_labels):
             for col, col_label in enumerate(page.col_labels):
                 cell = page.cells.get((row_label, col_label))
-                self._table.setItem(row, col, self._item_for(cell, low, high))
+                predicted = page.predictions.get((row_label, col_label))
+                detail = self._pair_detail(row_label, col_label)
+                self._table.setItem(row, col, self._item_for(cell, predicted, low, high, detail))
         direction = "higher is darker" if self._higher_is_better else "lower is darker"
-        self._summary.setText(
-            f"{matrix.activity_axis} · {page.filled_count()} filled, "
-            f"{page.empty_count()} not made · {direction}"
-        )
+        predicted_count = len(page.predictions)
+        unscored = page.empty_count() - predicted_count
+        counts = [f"{page.filled_count()} filled"]
+        if predicted_count:
+            counts.append(f"{predicted_count} predicted")
+        if unscored:
+            counts.append(f"{unscored} not made")
+        lines = [f"{matrix.activity_axis} · {', '.join(counts)} · {direction}"]
+        recommendation = sar_recommendation(matrix, higher_is_better=self._higher_is_better)
+        if recommendation:
+            lines.append(recommendation)
+        self._summary.setText("\n".join(lines))
+
+    def _pair_detail(self, row_label: str, col_label: str) -> str:
+        matrix = self._matrix
+        if matrix is None:
+            return ""
+        page = self._current_page()
+        parts = [f"{matrix.row_axis}={row_label}", f"{matrix.col_axis}={col_label}"]
+        if matrix.page_axis and page is not None and page.label:
+            parts.append(f"{matrix.page_axis}={page.label}")
+        return ", ".join(parts)
 
     def _item_for(
         self,
         cell: SarCell | None,
+        predicted: float | None,
         low: float | None,
         high: float | None,
+        detail: str,
     ) -> QTableWidgetItem:
-        if cell is None:
+        if cell is None and predicted is None:
             item = QTableWidgetItem("")
             item.setToolTip("Not made")
             item.setBackground(self.palette().alternateBase())
+            return item
+        if cell is None:
+            item = QTableWidgetItem(f"≈{predicted:.4g}")
+            item.setData(_PREDICTION_ROLE, (float(predicted), detail))
+            item.setTextAlignment(Qt.AlignCenter)
+            font = QFont(item.font())
+            font.setItalic(True)
+            item.setFont(font)
+            item.setToolTip(f"Free-Wilson prediction: {predicted:.4g}\nNot made. {detail}")
+            self._paint_activity(item, float(predicted), low, high)
             return item
         item = QTableWidgetItem(cell.grid_text())
         item.setData(Qt.UserRole, list(cell.oids))
@@ -243,17 +277,40 @@ class SarMatrixPanel(QWidget):
             lines.append(f"Row {oid}: {shown}")
         item.setToolTip("\n".join(lines))
         value = cell.display_value()
-        if value is not None and low is not None and high is not None:
-            item.setBackground(
-                QBrush(_activity_color(value, low, high, higher_is_better=self._higher_is_better))
-            )
-            item.setForeground(QBrush(QColor(20, 20, 20)))
+        if value is not None:
+            self._paint_activity(item, value, low, high)
         return item
+
+    def _paint_activity(
+        self,
+        item: QTableWidgetItem,
+        value: float,
+        low: float | None,
+        high: float | None,
+    ) -> None:
+        if low is None or high is None:
+            return
+        item.setBackground(
+            QBrush(_activity_color(value, low, high, higher_is_better=self._higher_is_better))
+        )
+        item.setForeground(QBrush(QColor(20, 20, 20)))
 
     def _on_cell_clicked(self, row: int, col: int) -> None:
         item = self._table.item(row, col)
         app = self._app
         if item is None or app is None:
+            return
+        predicted = item.data(_PREDICTION_ROLE)
+        if isinstance(predicted, tuple) and len(predicted) == 2:
+            value, detail = predicted
+            matrix = self._matrix
+            activity = matrix.activity_axis if matrix is not None else "Activity"
+            status = getattr(app, "status_label", None)
+            if status is not None:
+                status.setText(
+                    f"SAR matrix: Free-Wilson predicts {activity} ≈ {float(value):.4g} "
+                    f"for {detail}. Not made."
+                )
             return
         oids = item.data(Qt.UserRole)
         if not oids:

@@ -26,6 +26,7 @@ from molmanager.analysis.sar_matrix import (
     build_sar_matrix,
     rgroup_index,
     sar_page_csv,
+    sar_recommendation,
     suggest_rgroup_axes,
 )
 
@@ -121,6 +122,61 @@ def test_suggest_rgroup_axes_orders_attachment_numbers():
     )
 
 
+def test_crossed_hole_is_predicted_and_named_when_it_wins():
+    matrix = build_sar_matrix(
+        [
+            _obs(1, "H", "H", activity=1.0),
+            _obs(2, "Me", "H", activity=2.0),
+            _obs(3, "H", "F", activity=3.0),
+        ],
+        row_axis="R1",
+        col_axis="R2",
+        activity_axis="pIC50",
+    )
+    page = matrix.pages[0]
+    assert page.predictions[("Me", "F")] == pytest.approx(4.0)
+    assert ("H", "H") not in page.predictions
+    text = sar_recommendation(matrix, higher_is_better=True)
+    assert text == "Best unmade: R1=Me, R2=F, predicted 4, above R1=H, R2=F (3)."
+    assert "≈4" in sar_page_csv(page, row_axis="R1")
+    lower = sar_recommendation(matrix, higher_is_better=False)
+    assert lower == "Best pair is already made (R1=H, R2=H, 1)."
+
+
+def test_worse_hole_reports_the_best_made_pair():
+    matrix = build_sar_matrix(
+        [
+            _obs(1, "H", "H", activity=5.0),
+            _obs(2, "Me", "H", activity=6.0),
+            _obs(3, "Cl", "H", activity=4.0),
+            _obs(4, "H", "F", activity=8.0),
+            _obs(5, "Me", "F", activity=9.0),
+        ],
+        row_axis="R1",
+        col_axis="R2",
+        activity_axis="pIC50",
+    )
+    assert matrix.pages[0].predictions[("Cl", "F")] == pytest.approx(7.0)
+    text = sar_recommendation(matrix, higher_is_better=True)
+    assert text == "Best pair is already made (R1=Me, R2=F, 9)."
+
+
+def test_disjoint_series_does_not_invent_a_cross_term():
+    matrix = build_sar_matrix(
+        [
+            _obs(1, "Me", "Cl", activity=6.0),
+            _obs(2, "Et", "F", activity=5.0),
+        ],
+        row_axis="R1",
+        col_axis="R2",
+        activity_axis="pIC50",
+    )
+    assert matrix.pages[0].predictions == {}
+    assert sar_recommendation(matrix, higher_is_better=True) == (
+        "Best pair is already made (R1=Me, R2=Cl, 6)."
+    )
+
+
 def test_panel_leaves_an_unmade_cell_blank(qapp):
     from molmanager.ui.sar_matrix_panel import SarMatrixPanel
 
@@ -147,6 +203,37 @@ def test_panel_leaves_an_unmade_cell_blank(qapp):
         filled = panel._table.item(1, 0)
         assert filled is not None
         assert filled.text() == "6"
+        assert "Best pair is already made" in panel._summary.text()
+    finally:
+        panel.close()
+
+
+def test_panel_draws_a_prediction_in_italic(qapp):
+    from molmanager.ui.sar_matrix_panel import SarMatrixPanel
+
+    matrix = build_sar_matrix(
+        [
+            _obs(1, "H", "H", activity=1.0),
+            _obs(2, "Me", "H", activity=2.0),
+            _obs(3, "H", "F", activity=3.0),
+        ],
+        row_axis="R1",
+        col_axis="R2",
+        activity_axis="pIC50",
+    )
+    panel = SarMatrixPanel(None)
+    panel.set_matrix(matrix, higher_is_better=True)
+    panel.show()
+    qapp.processEvents()
+    try:
+        labels = [panel._table.verticalHeaderItem(row).text() for row in range(2)]
+        columns = [panel._table.horizontalHeaderItem(col).text() for col in range(2)]
+        item = panel._table.item(labels.index("Me"), columns.index("F"))
+        assert item is not None
+        assert item.text() == "≈4"
+        assert item.font().italic()
+        assert "Free-Wilson prediction" in item.toolTip()
+        assert "Best unmade: R1=Me, R2=F" in panel._summary.text()
     finally:
         panel.close()
 

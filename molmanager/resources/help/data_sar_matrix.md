@@ -1,6 +1,6 @@
 # SAR Matrix
 
-SAR Matrix pivots two R-group columns into a grid and colors each filled cell by an activity column. A third substituent becomes pages. An empty cell is a combination that is not in the table.
+SAR Matrix pivots two R-group columns into a grid and colors each filled cell by an activity column. A third substituent becomes pages. An empty cell that the additive model can separate shows a Free-Wilson prediction, in italic and marked with ≈. A cell the model cannot separate stays blank.
 
 ## Goal
 
@@ -8,7 +8,7 @@ See the series as the R1 × R2 table used in a review, including the combination
 
 ## When to use
 
-Use **Data → SAR Matrix** after **Chemistry → Reaction → R-Group Decomposition** has written R columns. Use **Free-Wilson** when you want a predicted activity for those empty cells.
+Use **Data → SAR Matrix** after **Chemistry → Reaction → R-Group Decomposition** has written R columns. The grid's Free-Wilson numbers are the additive prediction for an unmade pair. Use **Free-Wilson** when you want those structures built and added to the table.
 
 ## Inputs / scope
 
@@ -32,9 +32,10 @@ Two substituent columns and one numeric activity column. Optional third substitu
 
 1. Decompose the series so the table has R1 and R2 columns.
 2. Open **Data → SAR Matrix** and check the suggested columns.
-3. Click a filled cell to select those rows.
-4. Use the page list when a third substituent is set.
-5. **Export…** writes the current page as CSV. Blank cells were not made.
+3. Click a filled cell to select those rows. A predicted cell reports its Free-Wilson value.
+4. Read the line under the grid. It names an unmade pair only when that prediction beats the best measured cell.
+5. Use the page list when a third substituent is set.
+6. **Export…** writes the current page as CSV. Predicted cells start with ≈. Blank cells were not made and could not be predicted.
 
 ## Use cases
 
@@ -44,4 +45,4 @@ Two substituent columns and one numeric activity column. Optional third substitu
 
 ## Tips and limits
 
-Each axis stops at 60 substituents; filter the series if a column is wider than that. The color scale uses the cells on every page, so a page can be compared with the next one. The mean hides a spread: the cell tooltip lists each row.
+Each axis stops at 60 substituents; filter the series if a column is wider than that. The color scale uses measured and predicted cells on every page, so a page can be compared with the next one. A prediction is the Fujita-Ban sum for that row, column, and page. Two series that never share a substituent do not get a cross-term, and a substituent that always travels with one partner stays blank. The mean hides a spread: the cell tooltip lists each row.
