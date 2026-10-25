@@ -217,3 +217,101 @@ def test_aliased_substituent_is_not_identifiable() -> None:
     hidden = [coef for coef in result.coefficients if not coef.identifiable]
     assert hidden
     assert all(coef.coefficient is None for coef in hidden)
+
+
+def _table_by_header(dialog, header: str):
+    from PyQt5.QtWidgets import QTableWidget
+
+    for table in dialog.findChildren(QTableWidget):
+        labels = [
+            table.horizontalHeaderItem(column).text()
+            for column in range(table.columnCount())
+            if table.horizontalHeaderItem(column) is not None
+        ]
+        if header in labels:
+            return table
+    raise AssertionError(f"no table with header {header}")
+
+
+def _cell_text(table, row: int, column: int) -> str:
+    item = table.item(row, column)
+    assert item is not None
+    return item.text()
+
+
+def _cell_pixmap(table, row: int, column: int):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtGui import QPixmap
+
+    item = table.item(row, column)
+    assert item is not None
+    pixmap = item.data(Qt.DecorationRole)
+    if isinstance(pixmap, QPixmap) and not pixmap.isNull():
+        return pixmap
+    return None
+
+
+def _painted_has_ink(table, row: int, column: int) -> bool:
+    from PyQt5.QtCore import QRect
+    from PyQt5.QtGui import QColor, QImage, QPainter
+    from PyQt5.QtWidgets import QStyleOptionViewItem
+
+    index = table.model().index(row, column)
+    delegate = table.itemDelegateForColumn(column)
+    option = QStyleOptionViewItem()
+    option.rect = QRect(0, 0, 180, 112)
+    option.font = table.font()
+    image = QImage(180, 112, QImage.Format_ARGB32_Premultiplied)
+    image.fill(QColor(255, 255, 255))
+    painter = QPainter(image)
+    try:
+        delegate.paint(painter, option, index)
+    finally:
+        painter.end()
+    for y in range(0, image.height(), 2):
+        for x in range(0, image.width(), 2):
+            color = image.pixelColor(x, y)
+            if color.red() < 250 or color.green() < 250 or color.blue() < 250:
+                return True
+    return False
+
+
+def test_results_dialog_draws_smiles(qapp) -> None:  # noqa: ARG001
+    from molmanager.ui.dialogs.free_wilson_results import FreeWilsonResultsDialog
+
+    result = run_free_wilson(
+        _records(
+            (_HH, 1.0),
+            (_ME_H, 1.5),
+            (_CL_H, 3.0),
+            (_H_F, 4.0),
+            (_ME_F, 4.5),
+        ),
+        _settings(report=REPORT_FUJITA_BAN),
+    )
+    assert result.ok and result.missing
+    dialog = FreeWilsonResultsDialog(result)
+    try:
+        contributions = _table_by_header(dialog, "Substituent")
+        labels = {_cell_text(contributions, row, 1): row for row in range(contributions.rowCount())}
+        assert "H" in labels
+        assert _cell_pixmap(contributions, labels["H"], 1) is None
+        assert _painted_has_ink(contributions, labels["H"], 1)
+        drawn = next(label for label in labels if label not in {"H"})
+        assert _cell_pixmap(contributions, labels[drawn], 1) is not None
+        assert _painted_has_ink(contributions, labels[drawn], 1)
+
+        observed = _table_by_header(dialog, "Residual")
+        assert _cell_pixmap(observed, 0, 4) is not None
+        assert "=" in _cell_text(observed, 0, 4)
+        assert _painted_has_ink(observed, 0, 4)
+
+        missing = _table_by_header(dialog, "SMILES")
+        smiles = result.missing[0].smiles
+        assert _cell_text(missing, 0, 2) == smiles
+        assert missing.item(0, 2).toolTip() == smiles
+        assert _cell_pixmap(missing, 0, 2) is not None
+        assert _painted_has_ink(missing, 0, 2)
+        assert _cell_pixmap(missing, 0, 0) is not None
+    finally:
+        dialog.deleteLater()

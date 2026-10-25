@@ -14,20 +14,28 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Free-Wilson results: coefficients, predictions, and missing analogs."""
+"""Free-Wilson results: coefficients, predictions, and missing analogs.
+
+Substituent labels and missing-analog SMILES are drawn in the tables. The cell
+text stays the SMILES so a hover or copy still yields the string.
+"""
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtCore import QSize, Qt
+from PyQt5.QtGui import QColor, QFontMetrics, QPainter, QPalette, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView,
+    QAbstractScrollArea,
     QDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
+    QStyle,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -50,6 +58,16 @@ from ..qt_widget_utils import make_window_resizable, qobject_is_deleted
 from ..strings import TOOL_FREE_WILSON
 
 _DRAW_ERRORS = (RuntimeError, ValueError, TypeError, OSError)
+_FRAG_W = 128
+_FRAG_H = 80
+_CAPTION_H = 18
+_STRIP_GAP = 8
+_MOL_W = 220
+_MOL_H = 96
+_STRUCTURE_ROW_H = 112
+_STRUCTURE_MARGIN = 4
+_CELL_INK = QColor(32, 32, 32)
+_SMILES_HEADER_TIP = "Drawn from the SMILES. Hover or copy the cell for the text."
 
 
 def _fmt(value: float | None) -> str:
@@ -62,15 +80,29 @@ def _substituent_text(pairs: tuple[tuple[str, str], ...]) -> str:
     return ", ".join(f"{position}={label}" for position, label in pairs)
 
 
-def _readonly_table(headers: list[str]) -> QTableWidget:
+def _readonly_table(
+    headers: list[str],
+    structure_columns: tuple[int, ...] = (),
+) -> QTableWidget:
     table = QTableWidget(0, len(headers))
     table.setHorizontalHeaderLabels(headers)
     table.setEditTriggers(QAbstractItemView.NoEditTriggers)
     table.setSelectionBehavior(QAbstractItemView.SelectRows)
     table.setSelectionMode(QAbstractItemView.SingleSelection)
     table.verticalHeader().setVisible(False)
-    table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-    table.horizontalHeader().setStretchLastSection(True)
+    table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustIgnored)
+    table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    header = table.horizontalHeader()
+    header.setSectionResizeMode(QHeaderView.ResizeToContents)
+    header.setStretchLastSection(True)
+    if structure_columns:
+        delegate = _StructureCellDelegate(table)
+        for column in structure_columns:
+            table.setItemDelegateForColumn(column, delegate)
+            header_item = table.horizontalHeaderItem(column)
+            if header_item is not None:
+                header_item.setToolTip(_SMILES_HEADER_TIP)
+        table.verticalHeader().setDefaultSectionSize(_STRUCTURE_ROW_H)
     return table
 
 
@@ -78,6 +110,82 @@ def _text_item(text: str) -> QTableWidgetItem:
     item = QTableWidgetItem(text)
     item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
     return item
+
+
+def _structure_item(text: str, pixmap: QPixmap | None) -> QTableWidgetItem:
+    """Cell whose picture is *pixmap* and whose copied text is *text*."""
+    item = _text_item(text)
+    item.setToolTip(text)
+    item.setTextAlignment(Qt.AlignCenter)
+    if pixmap is not None and not pixmap.isNull():
+        item.setData(Qt.DecorationRole, pixmap)
+    return item
+
+
+def _render_smiles(smiles: str, width: int, height: int) -> QPixmap | None:
+    """2D depiction of *smiles*, or ``None`` when it has no heavy atoms to draw."""
+    text = (smiles or "").strip()
+    if not text or text == "H" or width <= 0 or height <= 0:
+        return None
+    try:
+        mol = Chem.MolFromSmiles(text)
+    except _DRAW_ERRORS:
+        return None
+    if mol is None or mol.GetNumHeavyAtoms() == 0:
+        return None
+    try:
+        pixmap = molecule_pixmap(mol, width, height)
+    except _DRAW_ERRORS:
+        return None
+    if pixmap.isNull():
+        return None
+    return pixmap
+
+
+class _StructureCellDelegate(QStyledItemDelegate):
+    """Paint a SMILES depiction on white so it fills the cell like the main table."""
+
+    def paint(self, painter, option, index):  # noqa: N802 — Qt API name
+        opt = QStyleOptionViewItem(option)
+        painter.save()
+        painter.fillRect(opt.rect, QColor(255, 255, 255))
+        pix = index.data(Qt.DecorationRole)
+        if isinstance(pix, QPixmap) and not pix.isNull():
+            self._paint_pixmap(painter, opt, pix)
+        else:
+            self._paint_label(painter, opt, str(index.data(Qt.DisplayRole) or ""))
+        if opt.state & QStyle.State_Selected:
+            highlight = opt.palette.color(QPalette.Highlight)
+            highlight.setAlpha(48)
+            painter.fillRect(opt.rect, highlight)
+        painter.restore()
+
+    def _paint_pixmap(self, painter: QPainter, opt: QStyleOptionViewItem, pix: QPixmap) -> None:
+        margin = _STRUCTURE_MARGIN
+        avail_w = max(1, opt.rect.width() - 2 * margin)
+        avail_h = max(1, opt.rect.height() - 2 * margin)
+        fitted = pix.scaled(avail_w, avail_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        x = opt.rect.x() + margin + (avail_w - fitted.width()) // 2
+        y = opt.rect.y() + margin + (avail_h - fitted.height()) // 2
+        painter.drawPixmap(x, y, fitted)
+
+    def _paint_label(self, painter: QPainter, opt: QStyleOptionViewItem, text: str) -> None:
+        painter.setPen(_CELL_INK)
+        painter.setFont(opt.font)
+        inner = opt.rect.adjusted(
+            _STRUCTURE_MARGIN,
+            _STRUCTURE_MARGIN,
+            -_STRUCTURE_MARGIN,
+            -_STRUCTURE_MARGIN,
+        )
+        shown = QFontMetrics(opt.font).elidedText(text, Qt.ElideMiddle, max(1, inner.width()))
+        painter.drawText(inner, int(Qt.AlignCenter), shown)
+
+    def sizeHint(self, option, index):  # noqa: N802 — Qt API name
+        pix = index.data(Qt.DecorationRole)
+        if isinstance(pix, QPixmap) and not pix.isNull():
+            return QSize(pix.width() + 2 * _STRUCTURE_MARGIN, _STRUCTURE_ROW_H)
+        return QSize(_FRAG_W, _STRUCTURE_ROW_H)
 
 
 class FreeWilsonResultsDialog(QDialog):
@@ -88,8 +196,9 @@ class FreeWilsonResultsDialog(QDialog):
         self.parent_app = parent
         self._result = result
         self._added_smiles: set[str] = set()
+        self._depictions: dict[tuple[str, int, int], QPixmap | None] = {}
         self.setWindowTitle(self._title())
-        self.resize(860, 560)
+        self.resize(980, 640)
         self.setAttribute(Qt.WA_DeleteOnClose, True)
 
         root = QVBoxLayout(self)
@@ -165,7 +274,8 @@ class FreeWilsonResultsDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
         table = _readonly_table(
-            ["Position", "Substituent", "Count", "Coefficient", "Std. error", "Note"]
+            ["Position", "Substituent", "Count", "Coefficient", "Std. error", "Note"],
+            structure_columns=(1,),
         )
         table.setRowCount(len(self._result.coefficients))
         for row_index, coef in enumerate(self._result.coefficients):
@@ -175,23 +285,30 @@ class FreeWilsonResultsDialog(QDialog):
                 note = "reference"
             else:
                 note = ""
+            table.setItem(row_index, 0, _text_item(coef.position))
+            table.setItem(
+                row_index,
+                1,
+                _structure_item(coef.label, self._depict_smiles(coef.label, _FRAG_W, _FRAG_H)),
+            )
             values = [
-                coef.position,
-                coef.label,
                 str(coef.count),
                 _fmt(coef.coefficient),
                 _fmt(coef.std_error),
                 note,
             ]
-            for column, value in enumerate(values):
-                table.setItem(row_index, column, _text_item(value))
+            for offset, value in enumerate(values):
+                table.setItem(row_index, offset + 2, _text_item(value))
         layout.addWidget(table)
         return page
 
     def _observed_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        table = _readonly_table(["OID", "Observed", "Predicted", "Residual", "Substituents"])
+        table = _readonly_table(
+            ["OID", "Observed", "Predicted", "Residual", "Substituents"],
+            structure_columns=(4,),
+        )
         table.setRowCount(len(self._result.observed))
         for row_index, row in enumerate(self._result.observed):
             values = [
@@ -199,10 +316,15 @@ class FreeWilsonResultsDialog(QDialog):
                 _fmt(row.observed),
                 _fmt(row.predicted),
                 _fmt(row.residual),
-                _substituent_text(row.substituents),
             ]
             for column, value in enumerate(values):
                 table.setItem(row_index, column, _text_item(value))
+            text = _substituent_text(row.substituents)
+            table.setItem(
+                row_index,
+                4,
+                _structure_item(text, self._depict_substituents(row.substituents)),
+            )
         layout.addWidget(table, 1)
         button_row = QHBoxLayout()
         self._write_btn = QPushButton("Write predictions")
@@ -227,17 +349,25 @@ class FreeWilsonResultsDialog(QDialog):
             note = QLabel(self._result.enumeration_message)
             note.setWordWrap(True)
             layout.addWidget(note)
-        self._missing_table = _readonly_table(["Substituents", "Predicted", "SMILES"])
+        self._missing_table = _readonly_table(
+            ["Substituents", "Predicted", "SMILES"],
+            structure_columns=(0, 2),
+        )
         self._missing_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._missing_table.setRowCount(len(self._result.missing))
         for row_index, analog in enumerate(self._result.missing):
-            values = [
-                _substituent_text(analog.substituents),
-                _fmt(analog.predicted),
-                analog.smiles,
-            ]
-            for column, value in enumerate(values):
-                self._missing_table.setItem(row_index, column, _text_item(value))
+            substituent_text = _substituent_text(analog.substituents)
+            self._missing_table.setItem(
+                row_index,
+                0,
+                _structure_item(substituent_text, self._depict_substituents(analog.substituents)),
+            )
+            self._missing_table.setItem(row_index, 1, _text_item(_fmt(analog.predicted)))
+            self._missing_table.setItem(
+                row_index,
+                2,
+                _structure_item(analog.smiles, self._depict_smiles(analog.smiles, _MOL_W, _MOL_H)),
+            )
         self._missing_table.itemSelectionChanged.connect(self._preview_selection)
         layout.addWidget(self._missing_table, 1)
         button_row = QHBoxLayout()
@@ -258,6 +388,44 @@ class FreeWilsonResultsDialog(QDialog):
         button_row.addStretch(1)
         layout.addLayout(button_row)
         return page
+
+    def _depict_smiles(self, smiles: str, width: int, height: int) -> QPixmap | None:
+        key = (smiles, width, height)
+        if key not in self._depictions:
+            self._depictions[key] = _render_smiles(smiles, width, height)
+        return self._depictions[key]
+
+    def _depict_substituents(self, pairs: tuple[tuple[str, str], ...]) -> QPixmap | None:
+        """One captioned fragment per R position. Hydrogen stays the letter H."""
+        if not pairs:
+            return None
+        width = len(pairs) * _FRAG_W + _STRIP_GAP * (len(pairs) - 1)
+        image = QPixmap(max(1, width), _CAPTION_H + _FRAG_H)
+        image.fill(Qt.white)
+        painter = QPainter(image)
+        try:
+            painter.setPen(_CELL_INK)
+            metrics = QFontMetrics(painter.font())
+            x = 0
+            for position, label in pairs:
+                painter.drawText(x, 0, _FRAG_W, _CAPTION_H, Qt.AlignCenter, position)
+                pixmap = self._depict_smiles(label, _FRAG_W, _FRAG_H)
+                if pixmap is not None and not pixmap.isNull():
+                    painter.drawPixmap(x, _CAPTION_H, pixmap)
+                else:
+                    shown = metrics.elidedText(label, Qt.ElideMiddle, _FRAG_W - 8)
+                    painter.drawText(
+                        x,
+                        _CAPTION_H,
+                        _FRAG_W,
+                        _FRAG_H,
+                        int(Qt.AlignCenter),
+                        shown,
+                    )
+                x += _FRAG_W + _STRIP_GAP
+        finally:
+            painter.end()
+        return image
 
     def _preview_selection(self) -> None:
         analogs = self._selected_analogs()
