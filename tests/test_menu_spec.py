@@ -197,10 +197,11 @@ def test_binning_follows_cluster():
     assert labels.index("Binning…") == labels.index("Cluster…") + 1
 
 
-def test_sar_matrix_follows_free_wilson():
+def test_hansch_follows_free_wilson():
     data = find_submenu(MAIN_WINDOW_MENUS, "Data")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]
-    assert labels.index("SAR Matrix…") == labels.index("Free-Wilson…") + 1
+    assert labels.index("Hansch…") == labels.index("Free-Wilson…") + 1
+    assert labels.index("SAR Matrix…") == labels.index("Hansch…") + 1
 
 
 def test_data_table_operations_submenu():
@@ -284,7 +285,11 @@ def test_data_menu_plot_submenu_titles():
     assert labels.index("DimRed Plots") == labels.index("MedChem Plots") + 1
     assert labels.index("Plotter…") == labels.index("DimRed Plots") + 1
     medchem = find_submenu(data.items, "MedChem Plots")
-    assert menu_outline(medchem.items) == ["BOILED-Egg plot…", "Golden Triangle plot…"]
+    assert menu_outline(medchem.items) == [
+        "BOILED-Egg plot…",
+        "Golden Triangle plot…",
+        "LipE plot…",
+    ]
     dimred = find_submenu(data.items, "DimRed Plots")
     assert menu_outline(dimred.items) == [
         "Principal Component Analysis…",

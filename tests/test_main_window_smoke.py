@@ -1547,6 +1547,7 @@ def test_data_menu_nests_medchem_with_dimensionality_reduction(qapp):  # noqa: A
     assert [a.text().replace("&", "") for a in medchem.actions()] == [
         "BOILED-Egg plot…",
         "Golden Triangle plot…",
+        "LipE plot…",
     ]
     dimred = next(a.menu() for a in data.actions() if a.text().replace("&", "") == "DimRed Plots")
     assert [a.text().replace("&", "") for a in dimred.actions()] == [

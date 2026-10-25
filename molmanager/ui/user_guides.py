@@ -424,6 +424,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Additive substituent contributions and predicted missing analogs.",
             ),
             _e(
+                "data_hansch",
+                "Hansch",
+                "Hansch",
+                "Activity versus π, σ, and a steric constant on a shared core.",
+            ),
+            _e(
                 "data_sar_matrix",
                 "SAR Matrix",
                 "SAR Matrix",
@@ -517,6 +523,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Golden Triangle",
                 "Golden Triangle",
                 "Data → MedChem Plots → Golden Triangle plot.",
+            ),
+            _e(
+                "data_lipe",
+                "LipE",
+                "Lipophilic efficiency",
+                "Data → MedChem Plots → LipE plot.",
             ),
             _e(
                 "data_sali",

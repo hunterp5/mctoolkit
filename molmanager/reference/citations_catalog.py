@@ -769,6 +769,23 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 notes="Plot implemented in MolManager (LogP −2 to 5, MW 200–450 Da, apex near 1.5 / 450).",
             ),
             _t(
+                "lipe",
+                "LipE",
+                "Data → MedChem Plots → LipE plot (pActivity vs LogP).",
+                (
+                    (
+                        "Leeson, P. D.; Springthorpe, B. The influence of drug-like concepts on "
+                        "decision-making in medicinal chemistry. Nat. Rev. Drug Discov. 2007, 6, 881–890.",
+                        "https://doi.org/10.1038/nrd2445",
+                    ),
+                ),
+                LIC_GPL3,
+                notes=(
+                    "LipE = pActivity − LogP. The plot draws iso-LipE lines; "
+                    "LipE 5 is the selectable reference."
+                ),
+            ),
+            _t(
                 "sali",
                 "SALI",
                 "Data → SALI (structure–activity landscape index).",
@@ -821,6 +838,30 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                     "One additive least-squares fit. Fujita-Ban (default) reports the change versus "
                     "a reference substituent; classic Free-Wilson recenters the same fit so "
                     "occurrence-weighted coefficients sum to zero. Implemented in MolManager."
+                ),
+            ),
+            _t(
+                "hansch",
+                "Hansch",
+                "Data → Hansch (activity versus hydrophobic, electronic, and steric constants).",
+                (
+                    (
+                        "Hansch, C.; Fujita, T. ρ-σ-π Analysis. A Method for the Correlation of "
+                        "Biological Activity and Chemical Structure. J. Am. Chem. Soc. 1964, 86, "
+                        "1616–1626.",
+                        "https://doi.org/10.1021/ja01062a035",
+                    ),
+                    (
+                        "Fujita, T.; Iwasa, J.; Hansch, C. A New Substituent Constant, π, Derived "
+                        "from Partition Coefficients. J. Am. Chem. Soc. 1964, 86, 5175–5180.",
+                        "https://doi.org/10.1021/ja01077a028",
+                    ),
+                ),
+                LIC_GPL3,
+                notes=(
+                    "Ordinary least squares on substituent constants loaded from a file the user "
+                    "supplies. π², Hammett σ or Swain–Lupton F and R, and one steric column are "
+                    "optional. Es is used on the scale stored in that file. Implemented in MolManager."
                 ),
             ),
             _t(

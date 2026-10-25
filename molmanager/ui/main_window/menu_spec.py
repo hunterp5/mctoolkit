@@ -750,6 +750,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             ),
         ),
         action(
+            "&Hansch…",
+            "open_hansch_dialog",
+            tooltip=(
+                "Fit a Hansch equation of activity versus π, σ, and a steric constant "
+                "on a shared core."
+            ),
+        ),
+        action(
             "SAR Matrix…",
             "open_sar_matrix_dialog",
             tooltip=(
@@ -762,6 +770,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             "&MedChem Plots",
             action("BOILED-Egg plot…", "open_boiled_egg_plot"),
             action("Golden Triangle plot…", "open_golden_triangle_plot"),
+            action(
+                "LipE plot…",
+                "open_lipe_plot",
+                tooltip=(
+                    "Plot pActivity against LogP with lines of constant "
+                    "lipophilic efficiency (LipE = pActivity − LogP)."
+                ),
+            ),
             tooltips_visible=True,
         ),
         submenu(
