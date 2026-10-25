@@ -80,6 +80,9 @@ class WorkspaceTools:
         self.free_wilson = _LazyMixinHost(
             app, lambda: _load("molmanager.ui.main_window.free_wilson_mixin", "FreeWilsonMixin")
         )
+        self.hansch = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.hansch_mixin", "HanschMixin")
+        )
         self.sar_matrix = _LazyMixinHost(
             app, lambda: _load("molmanager.ui.main_window.sar_matrix_mixin", "SarMatrixMixin")
         )

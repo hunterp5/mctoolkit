@@ -99,6 +99,7 @@ from .external_records_mixin import ExternalRecordsMixin
 from .fast_prepare_tools_mixin import FastPrepareToolsMixin
 from .fragment_tools_mixin import FragmentToolsMixin
 from .free_wilson_mixin import FreeWilsonMixin
+from .hansch_mixin import HanschMixin
 from .sar_matrix_mixin import SarMatrixMixin
 from .interaction_fingerprint_mixin import InteractionFingerprintMixin
 from .ingest_export_mixin import IngestExportMixin
@@ -285,6 +286,8 @@ class ChemistryWorkspaceWindow(
         self.signals.mmp_failed.connect(self.on_mmp_failed, _qc)
         self.signals.free_wilson_finished.connect(self.on_free_wilson_finished, _qc)
         self.signals.free_wilson_failed.connect(self.on_free_wilson_failed, _qc)
+        self.signals.hansch_finished.connect(self.on_hansch_finished, _qc)
+        self.signals.hansch_failed.connect(self.on_hansch_failed, _qc)
         self.signals.activity_cliff_finished.connect(self.on_activity_cliff_finished, _qc)
         self.signals.activity_cliff_failed.connect(self.on_activity_cliff_failed, _qc)
         self.signals.mmp_neighborhood_finished.connect(self.on_mmp_neighborhood_finished, _qc)
@@ -782,6 +785,7 @@ install_window_forwards(
 )
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.qsar", (QsarMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.free_wilson", (FreeWilsonMixin,))
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.hansch", (HanschMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.sar_matrix", (SarMatrixMixin,))
 install_window_forwards(
     ChemistryWorkspaceWindow,

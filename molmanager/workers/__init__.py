@@ -102,6 +102,7 @@ _LAZY_EXPORT_MODULES: dict[str, tuple[str, ...]] = {
     ".rgroup_decomposition": ("RGroupDecompositionWorker",),
     ".rgroup_enumeration": ("RGroupEnumerationWorker",),
     ".free_wilson_worker": ("FreeWilsonWorker",),
+    ".hansch_worker": ("HanschWorker",),
     ".signals": (
         "BulkSimilaritySignals",
         "DiverseSubsetSignals",
@@ -187,6 +188,7 @@ __all__ = [
     "RGroupDecompositionWorker",
     "RGroupEnumerationWorker",
     "FreeWilsonWorker",
+    "HanschWorker",
     "SessionSaveSignals",
     "SessionSaveWorker",
     "SqliteRebuildSignals",

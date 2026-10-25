@@ -36,9 +36,12 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem import rdRGroupDecomposition
 
+from .linear_fit import fit_linear, independent_column_indices, linear_standard_error
+from .substituent_constants import HYDROGEN_ATTACHMENT, attachment_key
+
 logger = logging.getLogger(__name__)
 
-HYDROGEN_KEY = "H"
+HYDROGEN_KEY = HYDROGEN_ATTACHMENT
 REPORT_FUJITA_BAN = "fujita_ban"
 REPORT_FREE_WILSON = "free_wilson"
 DEFAULT_MIN_COUNT = 2
@@ -54,7 +57,6 @@ SKIP_INCOMPLETE = "incomplete decomposition"
 SKIP_ACTIVITY = "no numeric activity"
 
 _RDKIT_ERRORS = (RuntimeError, ValueError, TypeError, OSError)
-_RANK_TOL = 1e-8
 _PROGRESS_STRIDE = 8192
 
 ProgressCallback = Callable[[str, int, int], None]
@@ -201,22 +203,22 @@ def parse_free_wilson_core(query: str) -> Chem.Mol | None:
     return mol
 
 
-def rgroup_decomp_failure_message(exc: BaseException) -> str:
+def rgroup_decomp_failure_message(exc: BaseException, *, tool: str = "Free-Wilson") -> str:
     """Turn RDKit core-decomposition failures into short UI text."""
     msg = (str(exc) or "").strip()
     low = msg.lower()
     if "could not prepare" in low and "core" in low:
         return (
-            "RDKit could not prepare the core for Free-Wilson decomposition. "
+            f"RDKit could not prepare the core for {tool} decomposition. "
             "Check that dummy atoms ([*], [1*], …) label attachment sites correctly and that "
             "the pattern is valid SMARTS (or try a simpler core)."
         )
     if "invariant violation" in low and "core" in low:
         return (
-            "Free-Wilson decomposition failed while processing the core. "
+            f"{tool} decomposition failed while processing the core. "
             "Verify the core SMARTS/SMILES and R-group dummy labels match your row structures."
         )
-    return msg or "Free-Wilson decomposition failed."
+    return msg or f"{tool} decomposition failed."
 
 
 def run_free_wilson(
@@ -261,7 +263,12 @@ def _run(
     total = max(len(records), 1)
     _report(progress, "Free-Wilson: decomposing", 0, total)
     try:
-        decomp_rows, unmatched = _decompose(core, records, settings)
+        decomp_rows, unmatched = _decompose(
+            core,
+            records,
+            only_match_at_r_groups=bool(settings.only_match_at_r_groups),
+            matching=settings.matching,
+        )
     except _RDKIT_ERRORS as exc:
         return _result(settings, message=rgroup_decomp_failure_message(exc))
     _check_cancel(cancel_event)
@@ -317,7 +324,7 @@ def _run(
         )
     _report(progress, "Free-Wilson: fitting", 0, 1)
     design = _design_matrix(fitted, model)
-    kept = _independent_columns(design)
+    kept = independent_column_indices(design)
     if not kept and design.shape[1] > 0:
         return _result(
             settings,
@@ -349,15 +356,17 @@ def _run(
 def _decompose(
     core: Chem.Mol,
     records: Sequence[tuple[int, Chem.Mol, float]],
-    settings: FreeWilsonSettings,
+    *,
+    only_match_at_r_groups: bool,
+    matching: str,
 ) -> tuple[list[dict], list[int]]:
     mols = [mol for _oid, mol, _activity in records]
     if not mols:
         return [], []
     options = rdRGroupDecomposition.RGroupDecompositionParameters()
-    options.onlyMatchAtRGroups = bool(settings.only_match_at_r_groups)
+    options.onlyMatchAtRGroups = bool(only_match_at_r_groups)
     options.removeHydrogensPostMatch = True
-    if (settings.matching or "").strip().lower() == "exhaustive":
+    if (matching or "").strip().lower() == "exhaustive":
         options.matchingStrategy = rdRGroupDecomposition.RGroupMatching.Exhaustive
     else:
         options.matchingStrategy = rdRGroupDecomposition.RGroupMatching.Greedy
@@ -432,13 +441,7 @@ def _substituents_from_row(
 def _substituent_identity(mol: Chem.Mol) -> tuple[str, str, Chem.Mol]:
     """Return ``(key, label, mol)``. Hydrogen has no heavy atom; the mol keeps map numbers."""
     copied = Chem.Mol(mol)
-    if copied.GetNumHeavyAtoms() == 0:
-        return HYDROGEN_KEY, HYDROGEN_KEY, copied
-    keyed = Chem.Mol(copied)
-    for atom in keyed.GetAtoms():
-        if atom.GetAtomicNum() == 0:
-            atom.SetAtomMapNum(0)
-    key = Chem.MolToSmiles(keyed, canonical=True)
+    key = attachment_key(copied)
     return key, key, copied
 
 
@@ -541,20 +544,6 @@ def _design_matrix(rows: list[_DecompRow], model: list[_FittedSub]) -> np.ndarra
     return matrix
 
 
-def _independent_columns(design: np.ndarray) -> list[int]:
-    """Column-pivoted QR indices that span the substituent design matrix."""
-    if design.size == 0 or design.shape[1] == 0:
-        return []
-    from scipy.linalg import qr
-
-    _q, r_matrix, pivots = qr(design, mode="economic", pivoting=True)
-    diagonal = np.abs(np.diag(r_matrix))
-    if diagonal.size == 0 or diagonal[0] <= 0.0:
-        return []
-    rank = int(np.sum(diagonal > (_RANK_TOL * float(diagonal[0]))))
-    return sorted(int(index) for index in pivots[:rank])
-
-
 @dataclass
 class _FitStats:
     intercept: float
@@ -576,59 +565,35 @@ def _least_squares(
     model: list[_FittedSub],
 ) -> _FitStats:
     y = np.array([row.activity for row in rows], dtype=float)
-    n = int(y.shape[0])
-    ones = np.ones((n, 1), dtype=float)
-    predictors = np.column_stack([ones, design]) if design.shape[1] else ones
-    beta, _residuals, _rank, _singular = np.linalg.lstsq(predictors, y, rcond=None)
-    predicted = predictors @ beta
-    residual = y - predicted
-    sse = float(residual @ residual)
-    n_parameters = int(predictors.shape[1])
-    dof = n - n_parameters
-    centered = y - float(np.mean(y))
-    sst = float(centered @ centered)
-    r_squared = 1.0 if sst <= _RANK_TOL else 1.0 - (sse / sst)
-    adjusted = None
-    if dof > 0 and n > 1:
-        adjusted = 1.0 - (1.0 - r_squared) * (n - 1) / dof
-    rmse = float(np.sqrt(sse / n)) if n else None
-    covariance = None
-    intercept_se = None
-    column_se: dict[int, float] = {}
-    if dof > 0:
-        sigma2 = sse / dof
-        covariance = _covariance(predictors, sigma2)
-        stderr = np.sqrt(np.maximum(np.diag(covariance), 0.0))
-        intercept_se = float(stderr[0])
-        for offset, original in enumerate(kept_original_columns):
-            column_se[original] = float(stderr[offset + 1])
+    fit = fit_linear(y, design)
     by_column = {sub.column: sub for sub in model if sub.column is not None}
     for offset, original in enumerate(kept_original_columns):
         sub = by_column.get(original)
-        if sub is not None:
-            sub.fb_coefficient = float(beta[offset + 1])
+        if sub is not None and offset < len(fit.coefficients):
+            sub.fb_coefficient = float(fit.coefficients[offset])
             sub.identifiable = True
+    column_se: dict[int, float] = {}
+    if fit.residual_df > 0:
+        for offset, original in enumerate(kept_original_columns):
+            error = (
+                fit.coefficient_std_errors[offset]
+                if offset < len(fit.coefficient_std_errors)
+                else None
+            )
+            if error is not None:
+                column_se[original] = float(error)
     return _FitStats(
-        intercept=float(beta[0]),
-        intercept_se=intercept_se,
+        intercept=fit.intercept,
+        intercept_se=fit.intercept_std_error,
         column_se=column_se,
-        r_squared=float(r_squared),
-        adjusted_r_squared=None if adjusted is None else float(adjusted),
-        rmse=rmse,
-        residual_df=int(dof),
-        saturated=dof <= 0,
-        n_parameters=n_parameters,
-        covariance=covariance,
+        r_squared=fit.r_squared,
+        adjusted_r_squared=fit.adjusted_r_squared,
+        rmse=fit.rmse,
+        residual_df=fit.residual_df,
+        saturated=fit.saturated,
+        n_parameters=fit.n_parameters,
+        covariance=fit.covariance,
     )
-
-
-def _covariance(predictors: np.ndarray, sigma2: float) -> np.ndarray:
-    gram = predictors.T @ predictors
-    try:
-        inverse = np.linalg.inv(gram)
-    except np.linalg.LinAlgError:
-        inverse = np.linalg.pinv(gram)
-    return sigma2 * inverse
 
 
 def _with_enumeration(
@@ -737,7 +702,7 @@ def _reported_intercept_se(
     if report != REPORT_FREE_WILSON:
         return fit.intercept_se
     weights = _fw_intercept_weights(model, rows, fit.covariance.shape[0])
-    return _linear_se(weights, fit.covariance)
+    return linear_standard_error(weights, fit.covariance)
 
 
 def _report_coefficients(
@@ -789,7 +754,7 @@ def _one_coefficient(
     if fit.covariance is None or (sub.column is None and not sub.is_reference):
         return coefficient, None, True
     weights = _fw_coefficient_weights(sub, model, rows, fit.covariance.shape[0])
-    return coefficient, _linear_se(weights, fit.covariance), True
+    return coefficient, linear_standard_error(weights, fit.covariance), True
 
 
 def _by_position(model: list[_FittedSub]) -> list[tuple[str, list[_FittedSub]]]:
@@ -868,11 +833,6 @@ def _fw_intercept_weights(
                 continue
             weights[index] += item.count / total
     return weights
-
-
-def _linear_se(weights: np.ndarray, covariance: np.ndarray) -> float:
-    variance = float(weights @ covariance @ weights)
-    return float(np.sqrt(max(variance, 0.0)))
 
 
 def _observed_predictions(

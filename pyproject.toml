@@ -79,6 +79,7 @@ molmanager = [
     "resources/README.md",
     "resources/fonts/*",
     "resources/help/**/*.md",
+    "resources/substituent_constants.csv",
     "resources/unipka/**",
     "resources/models/**/README.md",
     "resources/models/**/.gitkeep",

@@ -14,4 +14,4 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Table-level analyses: MMP, cliffs, SALI, Free-Wilson, QSAR, AutoQSAR, CoMSIA, MPO, property space."""
+"""Table-level analyses: MMP, cliffs, SALI, Free-Wilson, Hansch, QSAR, AutoQSAR, CoMSIA, MPO, property space."""

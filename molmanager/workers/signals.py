@@ -99,6 +99,9 @@ class WorkerSignals(QObject):
     # Free-Wilson: FreeWilsonResult
     free_wilson_finished = pyqtSignal(object)
     free_wilson_failed = pyqtSignal(str)
+    # Hansch: HanschResult
+    hansch_finished = pyqtSignal(object)
+    hansch_failed = pyqtSignal(str)
     # Activity cliff map: (pairs, activity_column, x_mode)
     activity_cliff_finished = pyqtSignal(list, str, str)
     activity_cliff_failed = pyqtSignal(str)
