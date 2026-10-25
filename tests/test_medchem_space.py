@@ -14,11 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Tests for BOILED-Egg / golden-triangle medicinal chemistry plots."""
+"""Tests for BOILED-Egg, golden-triangle, and LipE medicinal chemistry plots."""
 
 from __future__ import annotations
 
 from rdkit import Chem
+from rdkit.Chem import Crippen
 
 from molmanager.analysis.medchem_space import (
     MedChemRowSnapshot,
@@ -32,6 +33,8 @@ from molmanager.analysis.medchem_space import (
     oids_in_egg_gia,
     oids_in_egg_yolk,
     oids_in_golden_triangle_region,
+    oids_with_lipe_at_least,
+    prefer_pactivity_column,
     required_descriptor_columns_ok,
     resolve_descriptor_column,
     snapshot_scope_row_indices,
@@ -41,6 +44,7 @@ from molmanager.analysis.medchem_space import (
 from molmanager.ui.medchem_space_plot import (
     build_boiled_egg_figure,
     build_golden_triangle_figure,
+    build_lipe_figure,
     marker_opacity_for_point_count,
 )
 
@@ -305,3 +309,171 @@ def test_large_medchem_cloud_fades_markers():
     rest = float(fig.data[0].marker.opacity)
     assert rest < 0.88
     assert float(fig.data[0].unselected.marker.opacity) < rest
+
+
+def test_lipe_is_pactivity_minus_logp_and_skips_missing_activity():
+    assert prefer_pactivity_column(["IC50", "pIC50", "LogP"]) == "pIC50"
+    assert required_descriptor_columns_ok("lipe", tpsa_col=None, logp_col="LogP", mw_col=None)
+    kept = MedChemRowSnapshot(
+        oid=1,
+        label="a",
+        structure_text="",
+        tpsa_text="",
+        wlogp_text="",
+        mw_text="",
+        logp_text="2.0",
+        activity_text="8.5",
+    )
+    missing = MedChemRowSnapshot(
+        oid=2,
+        label="b",
+        structure_text="CCO",
+        tpsa_text="",
+        wlogp_text="",
+        mw_text="",
+        logp_text="1.0",
+        activity_text="",
+    )
+    ds, updates = build_medchem_space_from_snapshots(
+        [kept, missing],
+        plot_kind="lipe",
+        tpsa_col=None,
+        logp_col="LogP",
+        mw_col=None,
+        wlogp_col=None,
+        use_table_columns_only=True,
+    )
+    assert updates == []
+    assert ds.skipped == 1
+    assert len(ds.points) == 1
+    assert ds.points[0].lipe == 6.5
+    assert ds.points[0].activity == 8.5
+    assert oids_with_lipe_at_least(ds) == [1]
+    assert "LipE ≥ 5: 1 of 1" in ds.summary_text(plot_kind="lipe")
+    fig = build_lipe_figure(ds)
+    assert list(fig.data[0].x) == [2.0]
+    assert list(fig.data[0].y) == [8.5]
+    assert any(shape.line.dash == "solid" for shape in fig.layout.shapes)
+
+
+def test_lipe_fills_logp_from_structure():
+    snap = MedChemRowSnapshot(
+        oid=3,
+        label="ethanol",
+        structure_text="CCO",
+        tpsa_text="",
+        wlogp_text="",
+        mw_text="",
+        logp_text="",
+        activity_text="7",
+    )
+    ds, updates = build_medchem_space_from_snapshots(
+        [snap],
+        plot_kind="lipe",
+        tpsa_col=None,
+        logp_col="LogP",
+        mw_col=None,
+        wlogp_col=None,
+        use_table_columns_only=True,
+    )
+    assert len(ds.points) == 1
+    point = ds.points[0]
+    assert point.activity == 7.0
+    assert abs(point.lipe - (7.0 - point.logp)) < 1e-9
+    assert updates and "LogP" in updates[0][1]
+    mol_logp = Crippen.MolLogP(Chem.MolFromSmiles("CCO"))
+    assert abs(point.logp - mol_logp) < 1e-6
+
+
+def test_lipe_activity_combo_lists_numeric_columns(qapp):  # noqa: ARG001
+    from molmanager.ui.compound_table_model import CompoundTableModel
+    from molmanager.ui.dialogs.medchem_space import MedChemPlotPanel
+
+    headers = ["ID_HIDDEN", "Structure", "SMILES", "pIC50", "LogP"]
+    model = CompoundTableModel(headers)
+    model.append_row(1, {"SMILES": "CCO", "pIC50": "6.5", "LogP": "1.2"})
+
+    class _Host:
+        def __init__(self) -> None:
+            self.headers = headers
+            self._table_model = model
+            self.global_bounds = {}
+
+        def _selected_oids_set(self) -> set[int]:
+            return set()
+
+        def _selected_logical_rows(self) -> list[int]:
+            return []
+
+        def _visible_source_row_indices(self):
+            return None
+
+        def chemistry_tool_structure_sources(self) -> list[str]:
+            return ["Structure"]
+
+        def is_plot_docked(self, _widget) -> bool:
+            return False
+
+    panel = MedChemPlotPanel(_Host(), plot_kind="lipe", window_title="LipE plot")
+    try:
+        combo = panel.activity_combo
+        assert combo is not None
+        labels = [combo.itemText(i) for i in range(combo.count())]
+        assert labels == ["pIC50", "LogP"]
+        assert combo.currentText() == "pIC50"
+    finally:
+        panel._hide_lipe_dialogs()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_lipe_opens_activity_settings_before_the_plot(qapp):
+    from molmanager.ui.dialogs.medchem_space import MedChemPlotPanel, MedChemSpaceDialog
+
+    egg = MedChemPlotPanel(
+        None,
+        plot_kind="boiled_egg",
+        window_title="BOILED-Egg",
+        session_restore=True,
+    )
+    try:
+        assert egg.activity_combo is None
+        assert egg.run_btn is None
+        assert not hasattr(egg, "_appearance_dialog")
+    finally:
+        egg.deleteLater()
+
+    dlg = MedChemSpaceDialog(None, plot_kind="lipe", window_title="LipE plot")
+    panel = dlg._panel
+    try:
+        panel.present_initial_ui()
+        qapp.processEvents()
+        assert not dlg.isVisible()
+        assert panel._opts_dialog.isVisible()
+        assert panel._opts_dialog.windowTitle() == "LipE plot"
+        assert panel.activity_combo is not None
+        assert panel.run_btn is not None
+        assert panel._opts_dialog.isAncestorOf(panel.activity_combo)
+        assert panel._opts_dialog.isAncestorOf(panel.run_btn)
+        assert not panel._appearance_dialog.isVisible()
+        assert not panel._opts_dialog.isAncestorOf(panel.color_combo)
+
+        panel._open_plot_options()
+        qapp.processEvents()
+        assert panel._appearance_dialog.isVisible()
+        assert panel._appearance_dialog.windowTitle() == "LipE plot — Plot Options"
+        assert panel._appearance_dialog.isAncestorOf(panel.color_combo)
+        assert not panel._appearance_dialog.isAncestorOf(panel.activity_combo)
+
+        panel._appearance_dialog.hide()
+        panel._full_dataset = object()
+        panel.present_initial_ui()
+        qapp.processEvents()
+        assert dlg.isVisible()
+        assert not panel._opts_dialog.isVisible()
+        assert not panel._appearance_dialog.isVisible()
+    finally:
+        panel._hide_lipe_dialogs()
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()

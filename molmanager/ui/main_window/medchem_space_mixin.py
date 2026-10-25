@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""BOILED-Egg and golden-triangle plots (Data menu)."""
+"""BOILED-Egg, golden-triangle, and LipE plots (Data menu)."""
 
 from __future__ import annotations
 
@@ -39,12 +39,21 @@ class MedChemSpaceMixin:
             attr="_golden_triangle_dialog",
         )
 
+    def open_lipe_plot(self) -> None:
+        self._open_medchem_space_dialog(
+            plot_kind="lipe",
+            title="LipE plot",
+            attr="_lipe_dialog",
+            present_settings=True,
+        )
+
     def _open_medchem_space_dialog(
         self,
         *,
         plot_kind: str,
         title: str,
         attr: str,
+        present_settings: bool = False,
     ) -> None:
         if not self.headers or self._table_model.rowCount() == 0:
             QMessageBox.information(
@@ -61,11 +70,29 @@ class MedChemSpaceMixin:
             d.setAttribute(Qt.WA_DeleteOnClose, True)
             return d
 
+        previous = getattr(self, attr, None) if present_settings else None
         dlg = reuse_or_show_modeless_singleton(
             self,
             attr,
             _factory,
-            on_reused_visible=self._sync_dialog_only_selected_scope,
+            show=not present_settings,
+            on_reused_visible=(None if present_settings else self._sync_dialog_only_selected_scope),
         )
+        if not present_settings:
+            dlg.raise_()
+            dlg.activateWindow()
+            return
+        self._sync_dialog_only_selected_scope(dlg)
+        panel = getattr(dlg, "_panel", None)
+        if dlg is previous and panel is not None and panel._full_dataset is not None:
+            opener = getattr(panel, "_open_setup_dialog", None)
+            if callable(opener):
+                opener()
+                return
+        present = getattr(panel, "present_initial_ui", None)
+        if callable(present):
+            present()
+            return
+        dlg.show()
         dlg.raise_()
         dlg.activateWindow()

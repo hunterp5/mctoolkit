@@ -358,6 +358,25 @@ def in_golden_triangle(logp: float, mw: float) -> bool:
     return _point_in_polygon(logp, mw, _GOLDEN_TRIANGLE)
 
 
+# Leeson & Springthorpe: LipE = pActivity − logP. 5 is a common oral-series reference.
+LIPE_REFERENCE = 5.0
+
+
+def lipophilic_efficiency(activity: float, logp: float) -> float:
+    """LipE (lipophilic efficiency) as pActivity minus LogP."""
+    return float(activity) - float(logp)
+
+
+def prefer_pactivity_column(names: list[str]) -> str | None:
+    """Pick a pIC50 / pKi style column. Raw IC50 is a last resort."""
+    folded = [(name, name.casefold().replace(" ", "").replace("_", "")) for name in names]
+    for key in ("pic50", "pec50", "pki", "pkd", "pactivity"):
+        for original, flat in folded:
+            if key in flat:
+                return original
+    return names[0] if names else None
+
+
 def in_boiled_egg_regions(tpsa: float, logp: float) -> bool:
     """True when the compound lies in the GIA (egg white) or BBB (yolk) region."""
     gia, bbb = classify_boiled_egg(tpsa, logp)
@@ -375,6 +394,8 @@ class MedChemSpacePoint:
     gia: bool
     bbb: bool
     golden_triangle: bool
+    activity: float | None = None
+    lipe: float | None = None
 
 
 @dataclass(frozen=True)
@@ -416,6 +437,10 @@ class MedChemSpaceDataset:
             if gt is None:
                 gt = sum(1 for p in self.points if p.golden_triangle)
             lines.append(f"In golden triangle region: {gt:,}")
+        elif plot_kind == "lipe":
+            vals = [p.lipe for p in self.points if p.lipe is not None]
+            n_hi = sum(1 for value in vals if value >= LIPE_REFERENCE)
+            lines.append(f"LipE ≥ {LIPE_REFERENCE:g}: {n_hi:,} of {len(vals):,}")
         else:
             gia = self.gia_count
             bbb = self.bbb_count
@@ -443,6 +468,7 @@ class MedChemRowSnapshot:
     wlogp_text: str
     mw_text: str
     logp_text: str
+    activity_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -535,6 +561,8 @@ def required_descriptor_columns_ok(
     """True when table columns cover descriptors for ``plot_kind`` (strict table-only mode)."""
     if plot_kind == "golden_triangle":
         return bool(mw_col and logp_col)
+    if plot_kind == "lipe":
+        return bool(logp_col)
     return bool(tpsa_col and logp_col and mw_col and (wlogp_col or logp_col))
 
 
@@ -547,6 +575,8 @@ def snapshot_table_values_complete(
     logp: float | None,
 ) -> bool:
     """True when this row already has every descriptor the plot reads from the table."""
+    if plot_kind == "lipe":
+        return logp is not None
     if plot_kind == "golden_triangle":
         return mw is not None and logp is not None
     return all(x is not None for x in (tpsa, wlogp, mw, logp))
@@ -579,6 +609,16 @@ def _merge_descriptor_values(
     wlogp = wlogp if wlogp is not None else wlogp_m
     mw = mw if mw is not None else mw_m
     logp = logp if logp is not None else logp_m
+    if plot_kind == "lipe":
+        if logp is None:
+            return None, None, None, None
+        if tpsa is None:
+            tpsa = 0.0
+        if wlogp is None:
+            wlogp = float(logp)
+        if mw is None:
+            mw = 0.0
+        return tpsa, wlogp, mw, logp
     if plot_kind == "golden_triangle":
         if logp is None or mw is None:
             return None, None, None, None
@@ -623,19 +663,26 @@ def _point_from_values(
     wlogp: float,
     mw: float,
     logp: float,
+    activity: float | None = None,
 ) -> MedChemSpacePoint | None:
     if any(v != v for v in (tpsa, wlogp, mw, logp)):
         return None
     gia, bbb = classify_boiled_egg(tpsa, wlogp)
     gt = in_golden_triangle(logp, mw)
-    hover = (
-        f"{label}<br>"
-        f"TPSA: {tpsa:.1f} Ų<br>"
-        f"LogP: {wlogp:.2f}<br>"
-        f"MW: {mw:.1f} Da<br>"
-        f"GIA: {'yes' if gia else 'no'}; BBB: {'yes' if bbb else 'no'}; "
-        f"Golden triangle: {'yes' if gt else 'no'}"
-    )
+    lipe = None
+    if activity is not None and activity == activity:
+        lipe = lipophilic_efficiency(activity, logp)
+        hover = f"{label}<br>LogP: {logp:.2f}<br>pActivity: {activity:.2f}<br>LipE: {lipe:.2f}"
+    else:
+        activity = None
+        hover = (
+            f"{label}<br>"
+            f"TPSA: {tpsa:.1f} Ų<br>"
+            f"LogP: {wlogp:.2f}<br>"
+            f"MW: {mw:.1f} Da<br>"
+            f"GIA: {'yes' if gia else 'no'}; BBB: {'yes' if bbb else 'no'}; "
+            f"Golden triangle: {'yes' if gt else 'no'}"
+        )
     return MedChemSpacePoint(
         oid=int(oid),
         tpsa=tpsa,
@@ -646,6 +693,8 @@ def _point_from_values(
         gia=gia,
         bbb=bbb,
         golden_triangle=gt,
+        activity=activity,
+        lipe=lipe,
     )
 
 
@@ -693,6 +742,7 @@ def build_medchem_space_from_snapshots(
         wlogp = _parse_float_cell(snap.wlogp_text) if wlogp_col else None
         mw = _parse_float_cell(snap.mw_text) if mw_col else None
         logp = _parse_float_cell(snap.logp_text) if logp_col else None
+        activity = _parse_float_cell(snap.activity_text) if plot_kind == "lipe" else None
 
         computed_from_mol = False
         if use_table_columns_only and snapshot_table_values_complete(
@@ -765,6 +815,9 @@ def build_medchem_space_from_snapshots(
                 skipped += 1
                 continue
 
+        if plot_kind == "lipe" and activity is None:
+            skipped += 1
+            continue
         pt = _point_from_values(
             oid=snap.oid,
             label=snap.label or f"OID {snap.oid}",
@@ -772,6 +825,7 @@ def build_medchem_space_from_snapshots(
             wlogp=float(wlogp),
             mw=float(mw),
             logp=float(logp),
+            activity=activity,
         )
         if pt is None:
             skipped += 1
@@ -867,6 +921,14 @@ def oids_in_egg_yolk(dataset: MedChemSpaceDataset) -> list[int]:
 
 def oids_in_golden_triangle_region(dataset: MedChemSpaceDataset) -> list[int]:
     return [p.oid for p in dataset.points if p.golden_triangle]
+
+
+def oids_with_lipe_at_least(
+    dataset: MedChemSpaceDataset, minimum: float = LIPE_REFERENCE
+) -> list[int]:
+    """Compounds whose LipE is at least ``minimum`` (default 5)."""
+    floor = float(minimum)
+    return [p.oid for p in dataset.points if p.lipe is not None and p.lipe >= floor]
 
 
 def _parse_float_cell(text: str) -> float | None:

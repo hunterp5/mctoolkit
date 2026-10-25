@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""BOILED-Egg and golden-triangle plots (Data menu)."""
+"""BOILED-Egg, golden-triangle, and LipE plots (Data menu)."""
 
 from __future__ import annotations
 
@@ -36,9 +36,16 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
-from ..dockable_plot import handle_floating_plot_close_event, style_plot_footer_text_button
+from ..dockable_plot import (
+    handle_floating_plot_close_event,
+    hide_plot_options_dialog,
+    make_plot_options_dialog,
+    show_plot_options_dialog,
+    style_plot_footer_text_button,
+)
 from ..background_jobs import register_background_job
 from ...platform_support.config import load_config
 from ...platform_support.session_log import session_log_buffer
@@ -53,6 +60,8 @@ from ...analysis.medchem_space import (
     oids_in_egg_gia,
     oids_in_egg_yolk,
     oids_in_golden_triangle_region,
+    oids_with_lipe_at_least,
+    prefer_pactivity_column,
     required_descriptor_columns_ok,
     resolve_descriptor_column,
     snapshot_scope_row_indices,
@@ -64,6 +73,7 @@ from ..medchem_space_plot import (
     _MARKER_OPACITY,
     build_boiled_egg_figure,
     build_golden_triangle_figure,
+    build_lipe_figure,
 )
 from ..plotly_interactive_view import PlotlyInteractiveView
 from ..plot_table_sync import retained_snapshot_oids
@@ -82,11 +92,11 @@ except ImportError:
     _HAS_WEB = False
 
 
-MedChemPlotKind = Literal["boiled_egg", "golden_triangle"]
+MedChemPlotKind = Literal["boiled_egg", "golden_triangle", "lipe"]
 
 
 class MedChemPlotPanel(DockableResultPlotPanel):
-    """BOILED-Egg or golden-triangle controls + plot (dialog or docked beside the table)."""
+    """BOILED-Egg, golden-triangle, or LipE controls + plot (dialog or docked)."""
 
     MEDCHEM_SESSION_KIND = "medchem_space"
     owns_docked_plot_actions = True
@@ -108,13 +118,18 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self._snapshot_collect_gen = 0
         self._snapshot_collect_ctx: dict | None = None
         self._table_writer: ChunkedTableWriter | None = None
+        lipe = plot_kind == "lipe"
         super().__init__(
             parent_app,
             window_title=window_title,
             floating_dialog_cls=MedChemSpaceDialog,
             parent=None,
-            opts_title=f"{window_title} — Plot Options",
-            opts_tooltip="Configure structure source, color, and On Hover.",
+            opts_title=window_title if lipe else f"{window_title} — Plot Options",
+            opts_tooltip=(
+                "Choose a pActivity column, then Run."
+                if lipe
+                else "Configure structure source, color, and On Hover."
+            ),
             pair_encoding=False,
             defer_initial_reload=True,
             default_marker_opacity=_MARKER_OPACITY,
@@ -142,6 +157,18 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         options_ly = QVBoxLayout(options_gb)
         options_ly.setSpacing(6)
 
+        self.activity_combo: QComboBox | None = None
+        self.run_btn: QPushButton | None = None
+        if plot_kind == "lipe":
+            activity_row = QHBoxLayout()
+            activity_row.addWidget(QLabel("pActivity from:"))
+            self.activity_combo = QComboBox()
+            self.activity_combo.setToolTip(
+                "pIC50, pKi, or pEC50 column. LipE is that value minus LogP."
+            )
+            activity_row.addWidget(self.activity_combo, 1)
+            options_ly.addLayout(activity_row)
+
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
         if self._have_selection:
@@ -156,6 +183,17 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self.struct_src_combo = QComboBox()
         struct_row.addWidget(self.struct_src_combo, 1)
         options_ly.addLayout(struct_row)
+        if plot_kind == "lipe":
+            run_row = QHBoxLayout()
+            run_row.setContentsMargins(0, 10, 0, 6)
+            run_row.addStretch()
+            self.run_btn = QPushButton("Run")
+            self.run_btn.setMinimumWidth(160)
+            self.run_btn.setStyleSheet("QPushButton { padding: 8px 28px; }")
+            self.run_btn.clicked.connect(self._on_lipe_run)
+            run_row.addWidget(self.run_btn)
+            run_row.addStretch()
+            options_ly.addLayout(run_row)
         extras.addWidget(options_gb)
 
         foot = self._footer_bar.layout()
@@ -165,6 +203,14 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             self.select_region_btn = QPushButton("Triangle")
             self.select_region_btn.setToolTip("Select compounds inside the golden triangle.")
             self.select_region_btn.clicked.connect(self._on_select_in_triangle)
+            style_plot_footer_text_button(self.select_region_btn)
+            foot.insertWidget(insert_at, self.select_region_btn)
+        elif plot_kind == "lipe":
+            self.select_region_btn = QPushButton("LipE ≥ 5")
+            self.select_region_btn.setToolTip(
+                "Select compounds with lipophilic efficiency of at least 5."
+            )
+            self.select_region_btn.clicked.connect(self._on_select_lipe)
             style_plot_footer_text_button(self.select_region_btn)
             foot.insertWidget(insert_at, self.select_region_btn)
         else:
@@ -183,9 +229,11 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self._reload_color_columns()
         self._update_spectrum_controls()
         self._update_size_controls()
+        if plot_kind == "lipe":
+            self._install_lipe_appearance_dialog()
         self._finish_layout()
         self.setMinimumWidth(self.embedded_minimum_width())
-        if not session_restore:
+        if not session_restore and plot_kind != "lipe":
             self._set_medchem_status(f"{self._window_title}: preparing plot…")
             QTimer.singleShot(0, self._start_refresh_job)
 
@@ -225,6 +273,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             "window_title": self._window_title,
             "only_selected": bool(self.only_selected_cb.isChecked()),
             "struct_src": self.struct_src_combo.currentText(),
+            "activity_col": self._activity_column_name() or "",
             **self._collect_encoding_chrome_state(),
             "full_dataset": self._medchem_dataset_to_dict(self._full_dataset),
             "plot_dataset": (
@@ -241,6 +290,10 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         if "only_selected" in state:
             self.only_selected_cb.setChecked(bool(state.get("only_selected")))
         self._set_combo_text(self.struct_src_combo, state.get("struct_src"))
+        if self.activity_combo is not None and state.get("activity_col"):
+            self.activity_combo.blockSignals(True)
+            self._set_combo_text(self.activity_combo, state.get("activity_col"))
+            self.activity_combo.blockSignals(False)
         self._apply_encoding_chrome_state(state)
         self._full_dataset = self._medchem_dataset_from_dict(state.get("full_dataset"))
         self._plot_dataset = self._medchem_dataset_from_dict(state.get("plot_dataset"))
@@ -313,6 +366,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             sidx = self.size_combo.findText(prev_size)
             if sidx >= 0:
                 self.size_combo.setCurrentIndex(sidx)
+            self._fill_activity_combo()
         finally:
             self.color_combo.blockSignals(False)
             self.size_combo.blockSignals(False)
@@ -320,6 +374,157 @@ class MedChemPlotPanel(DockableResultPlotPanel):
 
     def _on_scope_changed(self) -> None:
         self._reload_color_columns()
+
+    def _fill_activity_combo(self) -> None:
+        combo = self.activity_combo
+        if combo is None:
+            return
+        prev = combo.currentText()
+        # Index 0 on the color combo is "(none)". Read that combo, not this one:
+        # this combo is still empty here, and itemText past the end is "".
+        names = [
+            self.color_combo.itemText(i)
+            for i in range(1, self.color_combo.count())
+            if self.color_combo.itemText(i).strip()
+        ]
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItems(names)
+            idx = combo.findText(prev) if prev else -1
+            if idx < 0:
+                preferred = prefer_pactivity_column(names)
+                idx = combo.findText(preferred) if preferred else -1
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+        finally:
+            combo.blockSignals(False)
+
+    def _activity_column_name(self) -> str | None:
+        combo = self.activity_combo
+        if combo is None:
+            return None
+        text = combo.currentText().strip()
+        return text or None
+
+    def _install_lipe_appearance_dialog(self) -> None:
+        """Keep activity and Run in the setup dialog. Plot Options is appearance only."""
+        opts = self._opts_panel.layout()
+        opts.removeWidget(self._titles)
+        opts.removeWidget(self._markers_group)
+        opts.removeWidget(self._hover_controls)
+
+        panel = QWidget()
+        body = QVBoxLayout(panel)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(6)
+        body.addWidget(self._titles)
+        body.addWidget(self._markers_group)
+        body.addWidget(self._hover_controls)
+        body.addStretch(1)
+        self._appearance_dialog = make_plot_options_dialog(
+            self,
+            panel,
+            title=f"{self._window_title} — Plot Options",
+            min_width=520,
+            min_height=280,
+        )
+        self._opts_btn.setToolTip("Configure titles, Color by, Size by, and On Hover.")
+
+    def _hide_lipe_dialogs(self) -> None:
+        hide_plot_options_dialog(getattr(self, "_opts_dialog", None))
+        hide_plot_options_dialog(getattr(self, "_appearance_dialog", None))
+
+    def _open_setup_dialog(self) -> None:
+        """Activity column, structure source, row scope, and Run."""
+        show_plot_options_dialog(self._opts_dialog)
+
+    def _open_plot_options(self) -> None:
+        if self._plot_kind == "lipe" and getattr(self, "_appearance_dialog", None) is not None:
+            show_plot_options_dialog(self._appearance_dialog)
+            return
+        show_plot_options_dialog(self._opts_dialog)
+
+    def _ui_parent(self) -> QWidget:
+        """Parent for alerts: the open setup or plot-settings dialog, else the plot window."""
+        for opts in (
+            getattr(self, "_appearance_dialog", None),
+            getattr(self, "_opts_dialog", None),
+        ):
+            try:
+                if opts is not None and opts.isVisible():
+                    return opts
+            except RuntimeError:
+                continue
+        win = self.window()
+        try:
+            if win is not None and win.isVisible():
+                return win
+        except RuntimeError:
+            pass
+        return self.parent_app or self
+
+    def _plot_window_is_visible(self) -> bool:
+        if self._is_docked_in_main_window():
+            return True
+        win = self.window()
+        try:
+            return win is not None and win is not self and win.isVisible()
+        except RuntimeError:
+            return False
+
+    def reveal_plot_window(self) -> None:
+        """Show the floating plot host once a LipE figure is ready."""
+        self._hide_lipe_dialogs()
+        if self._is_docked_in_main_window():
+            return
+        win = self.window()
+        if win is None or win is self:
+            return
+        try:
+            win.show()
+            win.raise_()
+            win.activateWindow()
+        except RuntimeError:
+            return
+
+    def present_initial_ui(self) -> None:
+        """Open LipE setup until a figure exists; then show the plot window."""
+        if self._plot_kind != "lipe":
+            return
+        if self._full_dataset is not None or self._is_docked_in_main_window():
+            self.reveal_plot_window()
+            return
+        self._open_setup_dialog()
+
+    def _close_options_for_run(self) -> None:
+        """Hide setup and plot settings so progress is the main-window status line."""
+        self._hide_lipe_dialogs()
+        if self._plot_window_is_visible() or self.parent_app is None:
+            return
+        try:
+            self.parent_app.raise_()
+            self.parent_app.activateWindow()
+        except RuntimeError:
+            return
+
+    def _reopen_setup_if_plot_hidden(self) -> None:
+        if self._plot_kind != "lipe" or self._plot_window_is_visible():
+            return
+        self._open_setup_dialog()
+
+    def _on_lipe_run(self) -> None:
+        if not self._activity_column_name():
+            QMessageBox.information(
+                self._ui_parent(),
+                self._window_title,
+                "Choose a pActivity column (pIC50, pKi, or pEC50).",
+            )
+            return
+        self._close_options_for_run()
+        self._on_refresh()
+        if not self._job_running:
+            self._reopen_setup_if_plot_hidden()
 
     def _update_spectrum_controls(self) -> None:
         enabled = self.color_combo.currentText() != "(none)"
@@ -377,6 +582,8 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             getattr(self, "select_region_btn", None),
             getattr(self, "select_egg_btn", None),
             getattr(self, "select_yolk_btn", None),
+            self.activity_combo,
+            self.run_btn,
             self._clear_sel_btn,
         ):
             if w is not None:
@@ -448,11 +655,12 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         logp_col: str | None,
         mw_col: str | None,
         wlogp_col: str | None,
+        activity_col: str | None,
         src: str,
         include_structure: bool,
     ) -> list[str]:
         headers: list[str] = []
-        for h in (id_col, tpsa_col, logp_col, mw_col, wlogp_col):
+        for h in (id_col, tpsa_col, logp_col, mw_col, wlogp_col, activity_col):
             if h and h not in headers:
                 headers.append(h)
         if include_structure and src and src not in headers:
@@ -469,6 +677,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         logp_col: str | None,
         mw_col: str | None,
         wlogp_col: str | None,
+        activity_col: str | None,
         src: str,
     ) -> MedChemRowSnapshot:
         def cell(header: str | None) -> str:
@@ -484,6 +693,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             wlogp_text=cell(wlogp_col),
             mw_text=cell(mw_col),
             logp_text=cell(logp_col),
+            activity_text=cell(activity_col),
         )
 
     def _snapshot_from_row(
@@ -497,6 +707,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         logp_col: str | None,
         mw_col: str | None,
         wlogp_col: str | None,
+        activity_col: str | None,
     ) -> MedChemRowSnapshot:
         oid = int(model.row_oid(row))
 
@@ -512,6 +723,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             wlogp_text=cell(wlogp_col),
             mw_text=cell(mw_col),
             logp_text=cell(logp_col),
+            activity_text=cell(activity_col),
         )
 
     def _begin_snapshot_collect(self) -> None:
@@ -520,23 +732,35 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         try:
             scope_rows = self._snapshot_scope_rows()
         except ValueError as exc:
-            QMessageBox.warning(self, self._window_title, str(exc))
+            self._reopen_setup_if_plot_hidden()
+            QMessageBox.warning(self._ui_parent(), self._window_title, str(exc))
             return
         if scope_rows is not None and not scope_rows:
+            self._reopen_setup_if_plot_hidden()
             QMessageBox.information(
-                self,
+                self._ui_parent(),
                 self._window_title,
                 "No rows in the current scope.",
             )
             return
         if scope_rows is None and self.parent_app._table_model.rowCount() == 0:
+            self._reopen_setup_if_plot_hidden()
             QMessageBox.information(
-                self,
+                self._ui_parent(),
                 self._window_title,
                 "No rows in the current scope.",
             )
             return
         tpsa_col, logp_col, mw_col, wlogp_col = self._descriptor_column_names()
+        activity_col = self._activity_column_name()
+        if self._plot_kind == "lipe" and not activity_col:
+            self._reopen_setup_if_plot_hidden()
+            QMessageBox.information(
+                self._ui_parent(),
+                self._window_title,
+                "Choose a pActivity column (pIC50, pKi, or pEC50).",
+            )
+            return
         use_table = required_descriptor_columns_ok(
             self._plot_kind,
             tpsa_col=tpsa_col,
@@ -555,6 +779,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             logp_col=logp_col,
             mw_col=mw_col,
             wlogp_col=wlogp_col,
+            activity_col=activity_col,
             src=src,
             include_structure=not use_table,
         )
@@ -572,6 +797,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
             "logp_col": logp_col,
             "mw_col": mw_col,
             "wlogp_col": wlogp_col,
+            "activity_col": activity_col,
         }
         self._set_refresh_ui_busy(True)
         total = self._snapshot_scope_row_count(scope_rows)
@@ -610,6 +836,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
                             logp_col=ctx.get("logp_col"),
                             mw_col=ctx.get("mw_col"),
                             wlogp_col=ctx.get("wlogp_col"),
+                            activity_col=ctx.get("activity_col"),
                             src=str(ctx["src"]),
                         )
                     )
@@ -627,6 +854,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
                         logp_col=ctx.get("logp_col"),
                         mw_col=ctx.get("mw_col"),
                         wlogp_col=ctx.get("wlogp_col"),
+                        activity_col=ctx.get("activity_col"),
                     )
                 )
                 end += 1
@@ -725,8 +953,6 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         )
         if result.table_updates:
             self._start_table_write_job(list(result.table_updates), list(result.table_columns))
-        if self._plot_view is None:
-            return
         if not self._plot_dataset.points:
             skipped = self._full_dataset.skipped if self._full_dataset else 0
             detail = (
@@ -738,7 +964,12 @@ class MedChemPlotPanel(DockableResultPlotPanel):
                     "\n\nEnsure TPSA, LogP, and MolWt columns are populated, or choose a "
                     "structure source with valid SMILES/mol blocks (Structure column)."
                 )
-            QMessageBox.information(self, self._window_title, detail)
+            self._reopen_setup_if_plot_hidden()
+            QMessageBox.information(self._ui_parent(), self._window_title, detail)
+            return
+        if self._plot_kind == "lipe":
+            self.reveal_plot_window()
+        if self._plot_view is None:
             return
         QTimer.singleShot(0, self._push_plot_figure)
         if self.parent_app is not None:
@@ -755,7 +986,8 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self._set_refresh_ui_busy(False)
         if self.parent_app is not None:
             self.parent_app._finish_tool_progress(job_id=job_id)
-        QMessageBox.warning(self, self._window_title, message or "Plot build failed.")
+        self._reopen_setup_if_plot_hidden()
+        QMessageBox.warning(self._ui_parent(), self._window_title, message or "Plot build failed.")
 
     def _cancel_table_write_job(self) -> None:
         if self._table_writer is not None:
@@ -863,6 +1095,22 @@ class MedChemPlotPanel(DockableResultPlotPanel):
                     marker_symbol=self._markers_group.marker_symbol(),
                     **self._titles.title_overrides(),
                 )
+            elif self._plot_kind == "lipe":
+                fig = build_lipe_figure(
+                    dataset,
+                    color_values=color_vals,
+                    color_label=color_col,
+                    colorscale=colorscale,
+                    color_min=color_min,
+                    color_max=color_max,
+                    size_values=size_vals,
+                    size_label=size_label,
+                    size_min_px=size_min_px,
+                    size_max_px=size_max_px,
+                    marker_opacity=self._markers_group.marker_opacity(),
+                    marker_symbol=self._markers_group.marker_symbol(),
+                    **self._titles.title_overrides(),
+                )
             else:
                 fig = build_boiled_egg_figure(
                     dataset,
@@ -892,6 +1140,9 @@ class MedChemPlotPanel(DockableResultPlotPanel):
 
     def _on_select_in_triangle(self) -> None:
         self._select_region_oids(oids_in_golden_triangle_region, region_label="triangle")
+
+    def _on_select_lipe(self) -> None:
+        self._select_region_oids(oids_with_lipe_at_least, region_label="LipE ≥ 5")
 
     def _select_region_oids(
         self, picker: Callable[[MedChemSpaceDataset], list[int]], *, region_label: str
@@ -932,7 +1183,7 @@ def medchem_plot_panel_from_session(
     window_title = "BOILED-Egg"
     if isinstance(state, dict):
         pk = state.get("plot_kind")
-        if pk in ("boiled_egg", "golden_triangle"):
+        if pk in ("boiled_egg", "golden_triangle", "lipe"):
             plot_kind = pk
         wt = state.get("window_title")
         if isinstance(wt, str) and wt.strip():

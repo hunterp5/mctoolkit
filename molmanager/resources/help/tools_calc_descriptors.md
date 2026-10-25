@@ -34,7 +34,7 @@ Rows with valid molecules in the chosen **Target Column** / structure source. Op
 
 ## Use cases
 
-- Compute MW/LogP/TPSA for BOILED-Egg or Golden Triangle.
+- Compute MW/LogP/TPSA for BOILED-Egg, Golden Triangle, or the LipE plot (LogP).
 - Add drug-likeness flags before slider filtering.
 - Flag PAINS, Brenk, or NIH patterns and filter on the count column.
 - Generate fingerprint bit columns when a workflow expects them in-table.

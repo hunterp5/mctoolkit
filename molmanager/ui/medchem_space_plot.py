@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Plotly figures for BOILED-Egg and golden-triangle medicinal chemistry plots."""
+"""Plotly figures for BOILED-Egg, golden-triangle, and LipE medicinal chemistry plots."""
 
 from __future__ import annotations
 
@@ -298,6 +298,147 @@ def build_golden_triangle_figure(
     fig.update_yaxes(
         title_text=resolve_plot_title_text(yaxis_title, "Molecular weight (Da)"),
         range=[150, 520],
+    )
+    attach_marker_size_legend(
+        fig,
+        size_label=size_label,
+        size_values=size_values,
+        size_min_px=float(size_min_px) if size_min_px is not None else 4.0,
+        size_max_px=float(size_max_px) if size_max_px is not None else 16.0,
+    )
+    return finalize_plot_legend(fig)
+
+
+# Integer LipE contours. 5 is drawn solid; the others are guides.
+_LIPE_GUIDE_LEVELS = (2, 4, 5, 6, 8)
+
+
+def _lipe_levels_for_points(lipes: list[float]) -> list[int]:
+    """Guide lines near the data, including LipE 5 when it is still close."""
+    lo, hi = min(lipes), max(lipes)
+    levels = [level for level in _LIPE_GUIDE_LEVELS if lo - 1.0 <= level <= hi + 1.0]
+    if 5 not in levels and lo - 3.0 <= 5.0 <= hi + 3.0:
+        levels.append(5)
+    return sorted(levels)
+
+
+def _lipe_guide_layout(
+    dataset: MedChemSpaceDataset,
+) -> tuple[list[dict], list[dict], list[float] | None, list[float] | None]:
+    pairs = [(p.logp, p.activity) for p in dataset.points if p.activity is not None]
+    if not pairs:
+        return [], [], None, None
+    logps = [logp for logp, _activity in pairs]
+    activities = [activity for _logp, activity in pairs]
+    pad = 0.4
+    x0, x1 = min(logps) - pad, max(logps) + pad
+    y0, y1 = min(activities) - pad, max(activities) + pad
+    if x1 <= x0:
+        x1 = x0 + 1.0
+    if y1 <= y0:
+        y1 = y0 + 1.0
+    lipes = [activity - logp for logp, activity in pairs]
+    shapes: list[dict] = []
+    annotations: list[dict] = []
+    for level in _lipe_levels_for_points(lipes):
+        ya = x0 + float(level)
+        yb = x1 + float(level)
+        y0 = min(y0, ya, yb)
+        y1 = max(y1, ya, yb)
+        emphasize = level == 5
+        shapes.append(
+            dict(
+                type="line",
+                x0=x0,
+                y0=ya,
+                x1=x1,
+                y1=yb,
+                xref="x",
+                yref="y",
+                layer="below",
+                line=dict(
+                    color="rgba(36,90,140,0.9)" if emphasize else "rgba(120,120,120,0.55)",
+                    width=1.8 if emphasize else 1.0,
+                    dash="solid" if emphasize else "dot",
+                ),
+            )
+        )
+        annotations.append(
+            dict(
+                x=x1,
+                y=yb,
+                text=f"{level:g}",
+                showarrow=False,
+                xanchor="left",
+                yanchor="middle",
+                font=dict(size=11, color="#245a8c" if emphasize else "#666666"),
+            )
+        )
+    return shapes, annotations, [x0, x1], [y0, y1]
+
+
+def build_lipe_figure(
+    dataset: MedChemSpaceDataset,
+    *,
+    color_values: list[Any] | None = None,
+    color_label: str | None = None,
+    colorscale: str = DEFAULT_PLOT_COLORSCALE,
+    color_min: float | None = None,
+    color_max: float | None = None,
+    size_values: list[Any] | None = None,
+    size_label: str | None = None,
+    size_min_px: float | None = None,
+    size_max_px: float | None = None,
+    plot_title: str = "",
+    xaxis_title: str = "",
+    yaxis_title: str = "",
+    marker_opacity: float | None = None,
+    marker_symbol: str | None = None,
+) -> go.Figure:
+    """pActivity vs LogP with lines of constant lipophilic efficiency."""
+    pts = dataset.points
+    marker = _scatter_marker(
+        color_values,
+        color_label,
+        colorscale=colorscale,
+        color_min=color_min,
+        color_max=color_max,
+        size_values=size_values,
+        size_min_px=size_min_px,
+        size_max_px=size_max_px,
+        n_points=len(pts),
+        marker_opacity=marker_opacity,
+        marker_symbol=marker_symbol,
+    )
+    fig = go.Figure(
+        data=[
+            _compound_scatter(
+                [p.logp for p in pts],
+                [float(p.activity or 0.0) for p in pts],
+                [p.oid for p in pts],
+                marker,
+            )
+        ]
+    )
+    shapes, annotations, x_range, y_range = _lipe_guide_layout(dataset)
+    fig.update_layout(
+        title=resolve_plot_title_text(plot_title, "") or None,
+        template="plotly_white",
+        dragmode="lasso",
+        clickmode="event+select",
+        showlegend=False,
+        margin=dict(l=56, r=36, t=48 if (plot_title or "").strip() else 24, b=48),
+        meta={
+            "molmanager_selection_traces": [0],
+            "molmanager_hover_persist": False,
+        },
+        shapes=shapes,
+        annotations=annotations,
+    )
+    fig.update_xaxes(title_text=resolve_plot_title_text(xaxis_title, "LogP"), range=x_range)
+    fig.update_yaxes(
+        title_text=resolve_plot_title_text(yaxis_title, "pActivity"),
+        range=y_range,
     )
     attach_marker_size_legend(
         fig,

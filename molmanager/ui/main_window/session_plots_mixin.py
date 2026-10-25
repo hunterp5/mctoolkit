@@ -201,6 +201,7 @@ class SessionPlotsMixin:
             "_som_dialog",
             "_boiled_egg_dialog",
             "_golden_triangle_dialog",
+            "_lipe_dialog",
             "_sali_map_dialog",
             "_activity_cliff_map_dialog",
             "_mmp_neighborhood_map_dialog",
@@ -228,10 +229,16 @@ class SessionPlotsMixin:
             if panel is None:
                 continue
             try:
-                if (
-                    not dlg.isVisible()
-                    and getattr(panel, "DIMRED_SESSION_KIND", None) == "dimension_reduction"
-                    and getattr(panel, "_last_result", None) is None
+                if not dlg.isVisible() and (
+                    (
+                        getattr(panel, "DIMRED_SESSION_KIND", None) == "dimension_reduction"
+                        and getattr(panel, "_last_result", None) is None
+                    )
+                    or (
+                        getattr(panel, "MEDCHEM_SESSION_KIND", None) == "medchem_space"
+                        and getattr(panel, "_plot_kind", None) == "lipe"
+                        and getattr(panel, "_full_dataset", None) is None
+                    )
                 ):
                     continue
             except RuntimeError:
@@ -296,6 +303,7 @@ class SessionPlotsMixin:
             "_som_dialog",
             "_boiled_egg_dialog",
             "_golden_triangle_dialog",
+            "_lipe_dialog",
             "_sali_map_dialog",
             "_activity_cliff_map_dialog",
             "_mmp_neighborhood_map_dialog",
