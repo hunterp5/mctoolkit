@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Dialogs for adding rows to a named list, and for renaming or deleting lists."""
+"""Dialogs for adding or removing rows in a named list, and for renaming or deleting lists."""
 
 from __future__ import annotations
 
@@ -126,6 +126,58 @@ class AddSelectedToListDialog(QDialog):
         edit = self.name_combo.lineEdit()
         raw = edit.text() if edit is not None else self.name_combo.currentText()
         name = self._match_existing(normalize_list_name(raw))
+        if not name:
+            return
+        self._name = name
+        self.accept()
+
+
+class RemoveSelectedFromListDialog(QDialog):
+    """Pick an existing list to remove the current selection from."""
+
+    def __init__(self, parent=None, *, existing_names: list[str] | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Remove Selected from List")
+        self.setModal(True)
+        self.setMinimumWidth(360)
+        self._name = ""
+        self._existing = [name for name in (existing_names or []) if name]
+
+        root = QVBoxLayout(self)
+        hint = QLabel("Choose the list to remove the selected rows from. Rows stay in the table.")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        form = QFormLayout()
+        self.name_combo = QComboBox()
+        self.name_combo.setEditable(False)
+        for name in self._existing:
+            self.name_combo.addItem(name)
+        # A single list is the obvious target. Several lists wait for an explicit choice.
+        self.name_combo.setCurrentIndex(0 if len(self._existing) == 1 else -1)
+        form.addRow("List:", self.name_combo)
+        root.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self._ok_btn = buttons.button(QDialogButtonBox.Ok)
+        buttons.accepted.connect(self._accept_name)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+        self.name_combo.currentIndexChanged.connect(self._sync_ok_enabled)
+        self._sync_ok_enabled()
+
+    def list_name(self) -> str:
+        return self._name
+
+    def _sync_ok_enabled(self, *_args) -> None:
+        if self._ok_btn is not None:
+            self._ok_btn.setEnabled(self.name_combo.currentIndex() >= 0)
+
+    def _accept_name(self) -> None:
+        index = self.name_combo.currentIndex()
+        if index < 0:
+            return
+        name = self.name_combo.itemText(index)
         if not name:
             return
         self._name = name
