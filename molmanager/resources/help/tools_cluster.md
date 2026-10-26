@@ -1,6 +1,6 @@
 # Cluster
 
-Cluster groups rows by fingerprint similarity, numeric columns, or both. Methods include K-Means, Agglomerative, DBSCAN, Butina, sphere exclusion, and Jarvis-Patrick, with an optional exploratory trial mode.
+Cluster groups rows by fingerprint similarity, numeric columns, or both. Methods include K-Means, Agglomerative, DBSCAN, Butina, sphere exclusion, and Jarvis-Patrick, with an optional exploratory trial mode. Open it from **Data → Similarity → Cluster**.
 
 ## Goal
 
