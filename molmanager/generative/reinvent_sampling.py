@@ -185,6 +185,40 @@ def normalize_seed_lines(text: str) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def table_seed_lines(app, *, only_selected: bool) -> list[str]:
+    """Seed SMILES from the chemistry table, in table order, without duplicates.
+
+    *app* is the workspace window. An object without a table yields an empty list.
+    """
+    if app is None or not hasattr(app, "_all_oids_in_table_order"):
+        return []
+    headers = getattr(app, "headers", None) or []
+    oids = list(app._all_oids_in_table_order())
+    if only_selected:
+        allowed = set(app._selected_oids_set())
+        oids = [oid for oid in oids if oid in allowed]
+    header = ""
+    if hasattr(app, "_canonical_smiles_header_for_updates"):
+        header = app._canonical_smiles_header_for_updates() or ""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for oid in oids:
+        row = app._table_model.logical_row_for_oid(int(oid))
+        if row < 0:
+            continue
+        cell = ""
+        if header and header in headers:
+            cell = app._table_model.backing_value_for_row_header(row, header) or ""
+            if not str(cell).strip():
+                cell = app._table_model.cell_text(row, headers.index(header)) or ""
+        mol = app._mol_for_structure_row(row) if hasattr(app, "_mol_for_structure_row") else None
+        text = seed_text_for_row(str(cell), mol)
+        if text and text not in seen:
+            seen.add(text)
+            lines.append(text)
+    return lines
+
+
 def seed_text_for_row(cell_smiles: str, mol) -> str:
     """Seed text for one table row.
 

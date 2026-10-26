@@ -2,7 +2,7 @@
 
 REINVENT Sampling draws molecules with a local **REINVENT 4** install and appends them to the table.
 
-REINVENT proposes structures. It does not score or optimize them. Reinforcement learning and transfer learning stay on the REINVENT command line.
+REINVENT Sampling proposes structures from a fixed model. To optimize that model against scores, use REINVENT Learning. Transfer learning stays on the REINVENT command line.
 
 ## Goal
 
@@ -33,7 +33,7 @@ De novo sampling needs no table rows. The other generators need seeds from the s
 ## Workflow
 
 1. Install REINVENT 4 in a separate environment and set **Settings → Configure → REINVENT**. **Test** runs `reinvent -V`.
-2. Open **Chemistry → REINVENT Sampling**.
+2. Open **Chemistry → REINVENT → Sampling**.
 3. Pick the generator and model. For anything except de novo, choose seeds.
 4. Click **Sample** and leave the dialog open. Output is written in the log. **Stop** ends the process.
 5. Valid SMILES are appended with **REINVENT_NLL**, **REINVENT_Generator**, **REINVENT_Model**, and **REINVENT_Seed** when a seed was reported.
@@ -47,4 +47,4 @@ De novo sampling needs no table rows. The other generators need seeds from the s
 
 ## Tips and limits
 
-The priors are files next to the REINVENT install (`priors\reinvent.prior` and the LibInvent, LinkInvent, and Mol2Mol files). Public copies are on Zenodo (doi:10.5281/zenodo.15641296). CPU sampling is slower than a GPU. A run that would draw more than 20,000 SMILES asks before it starts. SMILES RDKit cannot read are counted in the log and are not added. Closing the dialog stops the run. This does not train a model, run reinforcement learning, or call REINVENT's scoring plugins.
+The priors are files next to the REINVENT install (`priors\reinvent.prior` and the LibInvent, LinkInvent, and Mol2Mol files). Public copies are on Zenodo (doi:10.5281/zenodo.15641296). CPU sampling is slower than a GPU. A run that would draw more than 20,000 SMILES asks before it starts. SMILES RDKit cannot read are counted in the log and are not added. Closing the dialog stops the run. This does not train a model or call REINVENT's scoring plugins. Reinforcement learning is Chemistry → REINVENT → Learning.

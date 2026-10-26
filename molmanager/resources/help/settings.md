@@ -33,7 +33,7 @@ Global UI preferences for this installation/session; they do not alter table che
   - **Java...** - ``java`` for BioTransformer. Blank uses ``java`` on PATH.
   - **MAFFT...** - executable or install folder for Protein → Sequence.
   - **Open Babel...** - ``obabel`` for systematic conformers.
-  - **REINVENT...** - ``reinvent`` from a separate REINVENT 4 environment (Chemistry → REINVENT Sampling). Blank uses ``reinvent`` on PATH. Do not install REINVENT into the MolManager environment.
+  - **REINVENT...** - ``reinvent`` from a separate REINVENT 4 environment (Chemistry → REINVENT → Sampling and Learning). Blank uses ``reinvent`` on PATH. Do not install REINVENT into the MolManager environment.
   - **xtb...** - ``xtb`` for GFN2-xTB HOMO and LUMO descriptors.
 
 ## Workflow

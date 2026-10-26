@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Chemistry → REINVENT Sampling. The dialog stays out of this module's import."""
+"""Chemistry → REINVENT. The dialogs stay out of this module's import."""
 
 from __future__ import annotations
 
@@ -43,3 +43,20 @@ class ReinventTools:
             return dialog
 
         reuse_or_show_modeless_singleton(app, "_reinvent_sampling_dialog", _factory)
+
+    def open_reinvent_learning(self) -> None:
+        """Show the reinforcement-learning dialog. One window is reused."""
+        from PyQt5.QtCore import Qt
+
+        from .dialogs.reinvent_learning import ReinventLearningDialog
+        from .singleton_modeless_dialog import reuse_or_show_modeless_singleton
+
+        app = self._app
+
+        def _factory() -> ReinventLearningDialog:
+            dialog = ReinventLearningDialog(app)
+            dialog.setModal(False)
+            dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+            return dialog
+
+        reuse_or_show_modeless_singleton(app, "_reinvent_learning_dialog", _factory)

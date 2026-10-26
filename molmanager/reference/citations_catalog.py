@@ -287,7 +287,8 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "reinvent4",
                 "REINVENT 4",
-                "Chemistry → REINVENT Sampling. De novo, LibInvent, LinkInvent, and Mol2Mol sampling.",
+                "Chemistry → REINVENT → Sampling and Learning. "
+                "De novo, LibInvent, LinkInvent, and Mol2Mol.",
                 (
                     (
                         "Loeffler, H. H.; He, J.; Tibo, A.; Janet, J. P.; Voronov, A.; "
@@ -301,8 +302,10 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 notes=(
                     "Apache-2.0. Not installed into the MolManager environment: REINVENT 4 "
                     "pins NumPy 2, pandas 3, and its own PyTorch build. Settings → Configure → "
-                    "REINVENT points at that environment's reinvent command. This wrapper samples "
-                    "only. Public priors are files in that install's priors folder "
+                    "REINVENT points at that environment's reinvent command. Sampling draws from a "
+                    "fixed model. Learning runs one staged-learning stage scored with RDKit "
+                    "properties (QED, molecular weight, SlogP, SA score, Tanimoto similarity, "
+                    "and SMARTS alerts). Public priors are files in that install's priors folder "
                     "(Zenodo 10.5281/zenodo.15641296)."
                 ),
             ),

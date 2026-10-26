@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Chemistry → REINVENT Sampling. Runs a local REINVENT 4 install and appends SMILES."""
+"""Chemistry → REINVENT → Sampling. Runs a local REINVENT 4 install and appends SMILES."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ from ...generative.reinvent_sampling import (
     execute_sampling,
     normalize_seed_lines,
     resolve_reinvent_executable,
-    seed_text_for_row,
+    table_seed_lines,
     validate_request,
 )
 from ..qt_widget_utils import apply_monospace_to_text_edit, boxed_form, make_window_minimizable
@@ -389,36 +389,7 @@ class ReinventSamplingDialog(QDialog):
         return None
 
     def _table_seed_lines(self, *, only_selected: bool) -> list[str]:
-        app = self.parent_app
-        if app is None or not hasattr(app, "_all_oids_in_table_order"):
-            return []
-        headers = getattr(app, "headers", None) or []
-        oids = list(app._all_oids_in_table_order())
-        if only_selected:
-            allowed = set(app._selected_oids_set())
-            oids = [oid for oid in oids if oid in allowed]
-        header = ""
-        if hasattr(app, "_canonical_smiles_header_for_updates"):
-            header = app._canonical_smiles_header_for_updates() or ""
-        lines: list[str] = []
-        seen: set[str] = set()
-        for oid in oids:
-            row = app._table_model.logical_row_for_oid(int(oid))
-            if row < 0:
-                continue
-            cell = ""
-            if header and header in headers:
-                cell = app._table_model.backing_value_for_row_header(row, header) or ""
-                if not str(cell).strip():
-                    cell = app._table_model.cell_text(row, headers.index(header)) or ""
-            mol = (
-                app._mol_for_structure_row(row) if hasattr(app, "_mol_for_structure_row") else None
-            )
-            text = seed_text_for_row(str(cell), mol)
-            if text and text not in seen:
-                seen.add(text)
-                lines.append(text)
-        return lines
+        return table_seed_lines(self.parent_app, only_selected=only_selected)
 
     def _set_running(self, running: bool) -> None:
         self.sample_button.setEnabled(not running)
