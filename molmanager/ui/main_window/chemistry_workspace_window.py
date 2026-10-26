@@ -84,6 +84,7 @@ from ..table_write_service import TableWriteService
 from ..tool_dialog_scope import ToolDialogScope
 from ..session_notepad import SessionNotepadHost
 from ..macro_tools import MacroTools
+from ..reinvent_tools import ReinventTools
 from ..workspace_tools import WorkspaceTools
 from .activity_cliff_mixin import ActivityCliffMixin
 from .align_substructure_mixin import AlignSubstructureMixin
@@ -800,6 +801,7 @@ install_window_forwards(
 )
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.mpo", (MpoMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.macros", (MacroTools,))
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.reinvent", (ReinventTools,))
 install_window_forwards(
     ChemistryWorkspaceWindow,
     "workspace_tools.structure_prep",
