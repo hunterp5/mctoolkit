@@ -47,6 +47,18 @@ def test_descriptor_pool_min_rows_pharm2d_is_two():
     assert _descriptor_process_pool_min_rows(cfg, ["FP_Pharm2D_Gobbi"]) == 2
 
 
+def test_descriptor_pool_orbital_jobs_are_one_row_tasks():
+    from molmanager.workers.chemistry_descriptors import _descriptor_process_pool_batch_size
+
+    cfg = load_config()
+    assert _descriptor_process_pool_min_rows(cfg, ["HOMO", "MolWt"]) == 2
+    assert _descriptor_process_pool_batch_size(cfg, ["HOMO", "LUMO"]) == 1
+    assert (
+        _descriptor_process_pool_batch_size(cfg, ["MolWt"])
+        == cfg.descriptor_process_pool_batch_size
+    )
+
+
 def test_descriptor_pool_min_rows_plain_descriptors_use_default(monkeypatch):
     monkeypatch.setenv("MOLMANAGER_DESCRIPTOR_PROCESS_POOL_MIN_ROWS", "999")
     cfg = load_config()
