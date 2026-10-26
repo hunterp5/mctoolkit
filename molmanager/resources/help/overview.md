@@ -21,7 +21,7 @@ Works on the current session table (structures plus property columns). Most tool
 - **Tools** - calculator, potency standardization, random numbers and molecules, notepad, **Query Database** (SQL, PubChem, ChEMBL, vendors, patents), the sketcher, and Design Studio.
 - **Chemistry** - calculate descriptors, prepare structures, conformations, fingerprints, substructure (Bemis–Murcko scaffolds and common core), reactions, R-group enumeration, and predictors (pKa, permeability, SOM).
 - **Protein** - 3D structure viewer for PDB, mmCIF, and related crystallographic files, **Sequence** for MAFFT multiple-sequence alignment, docking, and interaction fingerprints for stored poses.
-- **Data** - table operations, lists, statistics, clustering, plotter, MedChem plots, dimensionality reduction, QSAR, MPO, SAR matrix, filters, and table search.
+- **Data** - table operations, lists, statistics, clustering, plotter, MedChem plots, dimensionality reduction, QSAR, MPO, SAR matrix, selectivity ratios, filters, and table search.
 - **Settings** - theme, fonts, hotkeys, WSL executable for Linux-only tools, and **Help**.
 - **Layout** - rearrange or restore workspace panes.
 - **Log** - inspect running/queued background jobs and the session log (tool output, status history, warnings).

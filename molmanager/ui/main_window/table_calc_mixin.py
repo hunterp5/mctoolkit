@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Calculator, potency units, random columns, split/join/bin columns, fingerprint similarity, and diverse subset."""
+"""Calculator, potency units, random columns, split/join/bin columns, selectivity ratios, fingerprint similarity, and diverse subset."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ from ..strings import (
     TOOL_JOIN_COLUMNS,
     TOOL_POTENCY,
     TOOL_RANDOM_NUMBER,
+    TOOL_SELECTIVITY_RATIO,
     TOOL_SPLIT_COLUMN,
 )
 
@@ -203,9 +204,7 @@ class TableCalcMixin:
             return
         distribution = str(params.get("distribution") or "uniform")
         if distribution not in ("uniform", "integer", "normal"):
-            self._fail_random_number(
-                "Choose a uniform, integer, or normal distribution.", on_done
-            )
+            self._fail_random_number("Choose a uniform, integer, or normal distribution.", on_done)
             return
         try:
             settings = RandomNumberParams(
@@ -234,9 +233,7 @@ class TableCalcMixin:
             else:
                 on_done(None, {"output": str(written[0])})
 
-        self.on_calc_finished(
-            rows, [column], progress_label=TOOL_RANDOM_NUMBER, on_complete=_after
-        )
+        self.on_calc_finished(rows, [column], progress_label=TOOL_RANDOM_NUMBER, on_complete=_after)
 
     def _fail_random_number(self, message: str, on_done) -> None:
         from ..macro_recorder import report_unless_replaying
@@ -744,6 +741,101 @@ class TableCalcMixin:
         self.status_label.setText(
             f'{TOOL_BINNING}: "{range_final}" and "{class_final}" — '
             f"{len(binned.range_names)} {noun}, {labeled} of {len(rows)} row(s)."
+        )
+
+    def open_selectivity_ratio_dialog(self) -> None:
+        from ..analysis_job_support import ensure_activity_analysis_ready
+        from ..dialogs import SelectivityRatioDialog
+
+        columns = ensure_activity_analysis_ready(
+            self,
+            TOOL_SELECTIVITY_RATIO,
+            missing_activity_message=(
+                "Selectivity needs at least two numeric assay columns on a p-scale "
+                "(pIC50, pKi, or pEC50)."
+            ),
+        )
+        if columns is None:
+            return
+        if len(columns) < 2:
+            QMessageBox.information(
+                self,
+                TOOL_SELECTIVITY_RATIO,
+                "Selectivity needs a primary assay and at least one other numeric column.",
+            )
+            return
+        dialog = SelectivityRatioDialog(columns, len(self._selected_logical_rows()), self)
+        self._prepare_tool_dialog(dialog)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        dialog.accepted.connect(lambda *_, dlg=dialog: self._on_selectivity_ratio_accepted(dlg))
+        dialog.show()
+
+    def _on_selectivity_ratio_accepted(self, dialog) -> None:
+        from ...analysis.selectivity_ratio import (
+            NARROW_WINDOW_HEADER,
+            NARROW_WINDOW_YES,
+            selectivity_cells,
+            selectivity_headers,
+        )
+
+        try:
+            params = dialog.params()
+        except ValueError as exc:
+            QMessageBox.warning(self, TOOL_SELECTIVITY_RATIO, str(exc))
+            return
+        only_selected = dialog.only_selected_rows()
+        allowed = self._selected_oids_set() if only_selected else None
+        if self._abort_if_only_selected_but_empty(only_selected, allowed, TOOL_SELECTIVITY_RATIO):
+            return
+        oids = self._all_oids_in_table_order()
+        if allowed is not None:
+            oids = [oid for oid in oids if oid in allowed]
+        if not oids:
+            QMessageBox.information(
+                self,
+                TOOL_SELECTIVITY_RATIO,
+                "No rows to process for this scope.",
+            )
+            return
+        columns = (params.primary_column, *params.secondary_columns)
+        if any(name not in self.headers for name in columns):
+            QMessageBox.warning(
+                self,
+                TOOL_SELECTIVITY_RATIO,
+                "Choose assay columns that are still in the table.",
+            )
+            return
+        indexes = {name: self.headers.index(name) for name in columns}
+
+        def cell(oid: int, header: str) -> float | None:
+            row = self._table_model.logical_row_for_oid(int(oid))
+            if row < 0:
+                return None
+            raw = self._table_model.backing_value_for_row_header(row, header) or ""
+            if not raw:
+                raw = self._table_cell_text(row, indexes[header]) or ""
+            return safe_float(str(raw))
+
+        rows = []
+        narrow = 0
+        for oid in oids:
+            primary = cell(oid, params.primary_column)
+            off_targets = [(name, cell(oid, name)) for name in params.secondary_columns]
+            values = selectivity_cells(
+                primary,
+                off_targets,
+                potency_cutoff=params.potency_cutoff,
+                window=params.window,
+            )
+            if values.get(NARROW_WINDOW_HEADER) == NARROW_WINDOW_YES:
+                narrow += 1
+            rows.append((int(oid), values))
+        headers = list(selectivity_headers(params.secondary_columns))
+        written = self.on_calc_finished(rows, headers, progress_label=TOOL_SELECTIVITY_RATIO)
+        noun = "column" if len(written) == 1 else "columns"
+        self.status_label.setText(
+            f"{TOOL_SELECTIVITY_RATIO}: {len(written)} {noun}, "
+            f"{narrow} narrow-window row(s) of {len(rows)}."
         )
 
     def open_fp_similarity(self):
