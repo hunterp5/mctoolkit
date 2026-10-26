@@ -396,8 +396,7 @@ class SarMatrixPanel(QWidget):
         if mol is None or not callable(opener):
             self._studio_status("that row has no structure.")
             return
-        extra = f" ({len(oids)} in this cell)" if len(oids) > 1 else ""
-        opener(mol, caption=f"Row {oids[0]}{extra}. {detail}")
+        opener(mol, caption=detail)
 
     def _open_unmade_cell(
         self,

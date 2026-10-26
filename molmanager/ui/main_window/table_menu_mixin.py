@@ -520,7 +520,7 @@ class TableMenuMixin:
         elif design_act is not None and action == design_act and mol_ctx is not None:
             opener = getattr(self, "open_design_studio_for_molecule", None)
             if callable(opener):
-                opener(sketch_mol, caption=f"Row {oid}" if oid is not None else "")
+                opener(sketch_mol)
         elif view_poses_act is not None and action == view_poses_act and oid is not None:
             column = self.headers[col] if 0 <= col < len(self.headers) else ""
             self.show_packed_poses_in_viewer(int(oid), column)

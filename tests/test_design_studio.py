@@ -204,6 +204,11 @@ def test_studio_strip_scores_a_loaded_molecule(qapp):
         qapp.processEvents()
         panel._strip._refresh_now()
         assert panel._strip._caption.text() == "toluene"
+        panel._strip.set_caption("Row 4. R1=C")
+        assert panel._strip._caption.text() == "R1=C"
+        assert panel._strip._caption.isHidden() is False
+        panel._strip.set_caption("Row 4")
+        assert panel._strip._caption.isHidden() is True
         assert panel._strip._mpo_value.text() != "—"
         assert panel._strip._value_labels["MW"].text().startswith("92")
     finally:
@@ -284,7 +289,7 @@ def test_structure_menu_opens_design_studio(qapp, monkeypatch):
         window.show_table_menu(rect.center())
         texts = opened["texts"]
         assert texts[texts.index("Open in Sketcher…") + 1] == "Open in Design Studio"
-        assert opened["kwargs"] == {"caption": "Row 0"}
+        assert opened["kwargs"] == {}
         assert Chem.MolToSmiles(opened["mol"]) == "CCN"
     finally:
         window.close()

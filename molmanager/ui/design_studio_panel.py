@@ -64,6 +64,22 @@ from .threadpool_access import start_runnable_on_app_pool
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CAPTION = "Draw a structure. Scores update as the sketch changes."
+
+
+def _property_caption(text: str) -> str:
+    """Drop a leading table row id. Keep any substituent or suggestion text after it."""
+    shown = (text or "").strip()
+    if not shown.startswith("Row "):
+        return shown
+    rest = shown[4:]
+    head, separator, tail = rest.partition(".")
+    if not head.strip().split(" ", 1)[0].isdigit():
+        return shown
+    if not separator:
+        return ""
+    return tail.strip()
+
+
 _PKA_FAILED = "pKa calculation failed"
 _TERM_DIGITS = {"MW": 2, "LogP": 2, "TPSA": 1, "QED": 3, "RotBonds": 0}
 
@@ -207,7 +223,13 @@ class DesignPropertyStrip(QWidget):
         self._timer.timeout.connect(self._refresh_now)
 
     def set_caption(self, text: str) -> None:
-        self._caption.setText((text or "").strip() or _DEFAULT_CAPTION)
+        shown = _property_caption(text)
+        if not shown:
+            self._caption.hide()
+            self._caption.setText("")
+            return
+        self._caption.setText(shown)
+        self._caption.show()
 
     def schedule_refresh(self) -> None:
         """Debounce sketch edits before recomputing."""
