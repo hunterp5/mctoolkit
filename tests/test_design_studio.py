@@ -23,11 +23,15 @@ from rdkit import Chem
 
 from molmanager.analysis.design_studio import (
     DesignAssemblyError,
+    SeriesRow,
     assemble_rgroup_product,
     compute_design_snapshot,
+    mmp_suggestions,
+    rgroup_swap_suggestions,
     series_core_from_labels,
     suggest_core_column,
 )
+from molmanager.analysis.mmp_analysis import MmpPair
 
 
 def test_assemble_methyl_and_chloro_on_a_phenyl_core():
@@ -209,6 +213,50 @@ def test_studio_strip_scores_a_loaded_molecule(qapp):
         qapp.processEvents()
 
 
+def test_mmp_suggestion_applies_a_gain_and_marks_a_cliff():
+    pair = MmpPair(
+        oid_a=1,
+        oid_b=2,
+        smiles_a="Cc1ccccc1",
+        smiles_b="Clc1ccccc1",
+        activity_a=5.0,
+        activity_b=6.5,
+        delta_activity=1.5,
+        transform="C[*:1]>>Cl[*:1]",
+        core="c1ccc([*:1])cc1",
+        sidechain_a="C[*:1]",
+        sidechain_b="Cl[*:1]",
+    )
+    found = mmp_suggestions(Chem.MolFromSmiles("Cc1ccccc1"), [pair])
+    assert len(found) == 1
+    assert found[0].smiles == "Clc1ccccc1"
+    assert "median Δ +1.50" in found[0].detail
+    assert "activity cliff" in found[0].detail
+    assert "SALI" in found[0].detail
+
+
+def test_rgroup_swap_estimates_the_series_shift():
+    rows = [
+        SeriesRow(
+            "c1ccc([*:1])cc1",
+            (("R1", "C[*:1]"),),
+            5.0,
+            "Cc1ccccc1",
+        ),
+        SeriesRow(
+            "c1ccc([*:1])cc1",
+            (("R1", "Cl[*:1]"),),
+            7.0,
+            "Clc1ccccc1",
+        ),
+    ]
+    found = rgroup_swap_suggestions("Cc1ccccc1", rows)
+    assert len(found) == 1
+    assert found[0].smiles == "Clc1ccccc1"
+    assert "7.00" in found[0].detail
+    assert "+2.00" in found[0].detail
+
+
 def test_structure_menu_opens_design_studio(qapp, monkeypatch):
     from PyQt5.QtWidgets import QMenu
 
@@ -246,3 +294,51 @@ def test_structure_menu_opens_design_studio(qapp, monkeypatch):
         assert Chem.MolToSmiles(opened["mol"]) == "CCN"
     finally:
         window.close()
+
+
+def test_design_studio_keeps_other_shortcuts_and_takes_undo(qapp):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtGui import QKeySequence
+    from PyQt5.QtWidgets import QAction, QWidget
+
+    from molmanager.ui.design_studio_panel import DesignStudioPanel
+
+    class Host(QWidget):
+        def __init__(self) -> None:
+            super().__init__()
+            undo = QAction("Undo", self)
+            undo.setShortcut(QKeySequence("Ctrl+Z"))
+            undo.setShortcutContext(Qt.ApplicationShortcut)
+            other = QAction("Toggle Filter Panel", self)
+            other.setShortcut(QKeySequence("Ctrl+Shift+L"))
+            other.setShortcutContext(Qt.ApplicationShortcut)
+            self.addAction(undo)
+            self.addAction(other)
+            self._hotkey_actions = {
+                "edit.undo": undo,
+                "edit.redo": QAction(self),
+                "edit.copy": QAction(self),
+                "edit.paste": QAction(self),
+                "edit.delete_selection": QAction(self),
+                "tools.toggle_filter_panel": other,
+            }
+            self.undo = undo
+            self.other = other
+
+    host = Host()
+    panel = DesignStudioPanel(host)
+    dialog = panel.create_floating_dialog(host)
+    try:
+        dialog.show()
+        dialog.activateWindow()
+        dialog.raise_()
+        qapp.processEvents()
+        panel._sketcher._sync_parent_edit_hotkeys()
+        assert host.other.isEnabled() is True
+        assert host.undo.isEnabled() is False
+        assert panel._sketcher.isWindow() is False
+    finally:
+        panel.shutdown()
+        dialog.close()
+        host.close()
+        qapp.processEvents()
