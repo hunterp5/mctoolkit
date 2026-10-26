@@ -1,6 +1,6 @@
 # Fingerprint Similarity
 
-Fingerprint Similarity scores every scoped molecule against a query (from a table row or SMILES) using chosen fingerprint and metric, writing a similarity column.
+Fingerprint Similarity scores every scoped molecule against a query (from a table row or SMILES) using chosen fingerprint and metric, writing a similarity column. Open it from **Data → Similarity**.
 
 ## Goal
 
