@@ -196,3 +196,24 @@ def test_bond_key_sets_order(qapp) -> None:  # noqa: ARG001
     assert dialog.canvas.active_bond_order == 2
     assert dialog.bond_double.isChecked()
     dialog.close()
+
+
+def test_original_size_restores_the_opened_layout(qapp) -> None:
+    dialog = SketcherDialog(QWidget())
+    dialog.resize(900, 700)
+    dialog.show()
+    qapp.processEvents()
+    mol = Chem.MolFromSmiles("c1ccccc1O")
+    assert mol is not None
+    assert dialog.canvas.load_from_rdkit_mol(mol)
+    qapp.processEvents()
+    assert dialog.canvas.has_opened_render()
+    opened = [(node["id"], node["pos"].x(), node["pos"].y()) for node in dialog.canvas.nodes]
+    for node in dialog.canvas.nodes:
+        node["pos"] = QPoint(node["pos"].x() + 80, node["pos"].y() - 40)
+    dialog.canvas._view_scale = 2.5
+    assert dialog.canvas.restore_opened_render()
+    restored = [(node["id"], node["pos"].x(), node["pos"].y()) for node in dialog.canvas.nodes]
+    assert restored == opened
+    assert dialog.canvas._view_scale == 1.0
+    dialog.close()
