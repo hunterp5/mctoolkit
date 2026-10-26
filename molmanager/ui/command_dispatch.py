@@ -28,21 +28,37 @@ from typing import Any
 
 from ..chem.reaction_enumeration import ReactionEnumerationRequest
 from ..workflows.command_catalog import command_for_step_kind
+from ..workflows.tool_requests import (
+    CalculatorColumnRequest,
+    DescriptorCalculationRequest,
+    ProtonateRequest,
+    filter_request_from_params,
+)
 from ..workflows.macro_recipe import (
     ROW_SCOPE_SELECTION,
     ROW_SCOPE_TABLE,
     ROW_SCOPE_VISIBLE,
     STEP_CALCULATOR,
     STEP_DESCRIPTORS,
+    STEP_EXPLICIT_H,
+    STEP_EXTRACT,
+    STEP_FAST_PREPARE,
     STEP_FILTER,
+    STEP_NEUTRALIZE,
+    STEP_PLOT,
+    STEP_POTENCY,
     STEP_PROTONATE,
+    STEP_RANDOM,
     STEP_REACTION,
+    STEP_REMOVE_H,
+    STEP_RGROUP,
     MacroReferenceError,
     MacroStep,
     substitute_column_refs,
 )
 from .job_handle import JobHandle
 from .macro_filters import start_macro_filters
+from .macro_recorder import observe_if_recording
 
 
 def dispatch_step(
@@ -72,10 +88,25 @@ def dispatch_step(
             _filters(app, step, bindings, _done)
         elif step.kind == STEP_REACTION:
             _reaction(app, step, _done)
+        elif step.kind == STEP_RANDOM:
+            _random_number(app, step, bindings, _done)
+        elif step.kind == STEP_EXTRACT:
+            _extract(app, step, bindings, _done)
+        elif step.kind == STEP_PLOT:
+            _plot(app, step, bindings, _done)
+        elif step.kind == STEP_POTENCY:
+            _potency(app, step, bindings, _done)
+        elif step.kind == STEP_RGROUP:
+            _rgroup(app, step, _done)
+        elif step.kind in (STEP_EXPLICIT_H, STEP_REMOVE_H, STEP_NEUTRALIZE):
+            _structure_edit(app, step, bindings, _done)
+        elif step.kind == STEP_FAST_PREPARE:
+            _fast_prepare(app, step, bindings, _done)
         else:
             _done(f"Unknown step kind {step.kind!r}.")
     except MacroReferenceError as exc:
         _done(str(exc))
+    observe_if_recording(app, step, handle)
     return handle
 
 
@@ -85,10 +116,15 @@ def _descriptors(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]],
         done(error)
         return
     source = _resolve(str(step.params.get("structure_source") or ""), bindings)
-    keys = [str(key).strip() for key in step.params.get("descriptors") or [] if str(key).strip()]
+    keys = tuple(
+        str(key).strip() for key in step.params.get("descriptors") or [] if str(key).strip()
+    )
     app.start_descriptor_calculation(
-        source=source,
-        keys=keys,
+        DescriptorCalculationRequest(
+            structure_source=source,
+            keys=keys,
+            row_scope=str(step.params.get("row_scope") or ROW_SCOPE_TABLE),
+        ),
         allowed=allowed,
         on_done=done,
     )
@@ -106,8 +142,11 @@ def _calculator(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], 
         quote_for_calculator=True,
     )
     app.start_calculator_job(
-        column=column,
-        expression=expression,
+        CalculatorColumnRequest(
+            column=column,
+            expression=expression,
+            row_scope=str(step.params.get("row_scope") or ROW_SCOPE_TABLE),
+        ),
         allowed=allowed,
         on_done=done,
     )
@@ -120,30 +159,25 @@ def _protonate(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], d
         return
     params = step.params
     app.start_protonate_job(
-        source=_resolve(str(params.get("structure_source") or ""), bindings),
-        ph=float(params.get("ph", 7.4)),
-        output_column=_resolve(str(params.get("output_column") or ""), bindings).strip(),
-        render_2d=bool(params.get("render_2d", False)),
+        ProtonateRequest(
+            structure_source=_resolve(str(params.get("structure_source") or ""), bindings),
+            ph=float(params.get("ph", 7.4)),
+            output_column=_resolve(str(params.get("output_column") or ""), bindings).strip(),
+            render_2d=bool(params.get("render_2d", False)),
+            row_scope=str(params.get("row_scope") or ROW_SCOPE_TABLE),
+        ),
         allowed=allowed,
         on_done=done,
     )
 
 
 def _filters(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], done) -> None:
-    clauses: list[dict[str, Any]] = []
-    for clause in step.params.get("clauses") or []:
-        item = dict(clause)
-        if item.get("column"):
-            item["column"] = _resolve(str(item["column"]), bindings).strip()
-        if item.get("structure_source"):
-            item["structure_source"] = _resolve(str(item["structure_source"]), bindings).strip()
-        clauses.append(item)
-    start_macro_filters(
-        app,
-        clauses,
-        replace=bool(step.params.get("replace", True)),
-        on_done=lambda error: done(error, {}),
-    )
+    try:
+        request = filter_request_from_params(step.params, resolve=lambda text: _resolve(text, bindings))
+    except (KeyError, TypeError, ValueError) as exc:
+        done(str(exc) or "The filter step could not be read.")
+        return
+    start_macro_filters(app, request, on_done=lambda error: done(error, {}))
 
 
 def _reaction(app: Any, step: MacroStep, done) -> None:
@@ -164,6 +198,127 @@ def _reaction(app: Any, step: MacroStep, done) -> None:
         save_path=str(params.get("save_path") or "").strip() or None,
     )
     app.start_reaction_enumeration(request, on_done=done)
+
+
+def _random_number(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], done) -> None:
+    error, allowed = _allowed(app, step)
+    if error:
+        done(error)
+        return
+    params = dict(step.params)
+    params["column"] = _resolve(str(params.get("column") or ""), bindings).strip()
+    app.start_random_number_job(params, allowed=allowed, on_done=done)
+
+
+def _extract(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], done) -> None:
+    error, allowed = _allowed(app, step)
+    if error:
+        done(error)
+        return
+    params = dict(step.params)
+    params["source_column"] = _resolve(str(params.get("source_column") or ""), bindings).strip()
+    app.start_reaction_extract_job(params, allowed=allowed, on_done=done)
+
+
+def _potency(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], done) -> None:
+    error, allowed = _allowed(app, step)
+    if error:
+        done(error)
+        return
+    params = _copy_state(step.params)
+    for name in ("column", "unit_column", "mw_column"):
+        value = params.get(name)
+        if isinstance(value, str) and value:
+            params[name] = _resolve(value, bindings).strip()
+    assays = []
+    for item in params.get("assay_concentrations") or []:
+        if not isinstance(item, dict):
+            assays.append(item)
+            continue
+        row = dict(item)
+        for name in ("conc_column", "ref_column"):
+            value = row.get(name)
+            if isinstance(value, str) and value:
+                row[name] = _resolve(value, bindings).strip()
+        assays.append(row)
+    params["assay_concentrations"] = assays
+    app.start_potency_job(params, allowed=allowed, on_done=done)
+
+
+def _rgroup(app: Any, step: MacroStep, done) -> None:
+    app.start_rgroup_enumeration(dict(step.params), on_done=done)
+
+
+def _structure_edit(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], done) -> None:
+    error, allowed = _allowed(app, step)
+    if error:
+        done(error)
+        return
+    params = dict(step.params)
+    params["structure_source"] = _resolve(
+        str(params.get("structure_source") or ""), bindings
+    ).strip()
+    if step.kind == STEP_EXPLICIT_H:
+        app.start_explicit_hydrogens_job(params, allowed=allowed, on_done=done)
+    elif step.kind == STEP_REMOVE_H:
+        app.start_remove_explicit_hydrogens_job(params, allowed=allowed, on_done=done)
+    else:
+        app.start_neutralize_job(params, allowed=allowed, on_done=done)
+
+
+def _fast_prepare(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], done) -> None:
+    error, allowed = _allowed(app, step)
+    if error:
+        done(error)
+        return
+    params = dict(step.params)
+    params["structure_source"] = _resolve(
+        str(params.get("structure_source") or ""), bindings
+    ).strip()
+    app.start_fast_prepare_job(params, allowed=allowed, on_done=done)
+
+
+def _plot(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], done) -> None:
+    state = step.params.get("state")
+    if not isinstance(state, dict):
+        done("This plot step has no saved plot settings.")
+        return
+    try:
+        app.apply_recorded_plot(_resolve_plot_state(state, bindings))
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        done(str(exc) or "The plot could not be restored.")
+        return
+    done(None, {})
+
+
+_PLOT_TEXT_FIELDS = ("x", "y", "z", "color", "size")
+_PLOT_LIST_FIELDS = ("radar_spokes", "hover_columns")
+
+
+def _resolve_plot_state(
+    state: dict[str, Any], bindings: dict[str, dict[str, str]]
+) -> dict[str, Any]:
+    updated = _copy_state(state)
+    for key in _PLOT_TEXT_FIELDS:
+        value = updated.get(key)
+        if isinstance(value, str) and value:
+            updated[key] = _resolve(value, bindings)
+    for key in _PLOT_LIST_FIELDS:
+        values = updated.get(key)
+        if isinstance(values, list):
+            updated[key] = [
+                _resolve(item, bindings) if isinstance(item, str) and item else item
+                for item in values
+            ]
+    return updated
+
+
+def _copy_state(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _copy_state(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_copy_state(item) for item in value]
+    return value
 
 
 def _allowed(app: Any, step: MacroStep) -> tuple[str | None, set[int] | None]:
