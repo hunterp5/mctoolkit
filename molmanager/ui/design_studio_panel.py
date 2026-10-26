@@ -513,7 +513,9 @@ class DesignStudioPanel(QWidget):
             parent_app._design_studio_dialog = dialog
         return dialog
 
-    def load_molecule(self, mol: Chem.Mol, *, caption: str = "", refresh_suggestions: bool = True) -> bool:
+    def load_molecule(
+        self, mol: Chem.Mol, *, caption: str = "", refresh_suggestions: bool = True
+    ) -> bool:
         """Replace the sketch. *caption* is the line above the scores."""
         self._strip.set_caption(caption)
         loaded = self._sketcher.load_structure_from_mol(mol, confirm_if_nonempty=False)
@@ -573,9 +575,7 @@ class DesignStudioPanel(QWidget):
                 oid = int(model.row_oid(index))
             except (TypeError, ValueError):
                 continue
-            substituents = tuple(
-                (axis, _cell_text(model, index, axis, headers)) for axis in axes
-            )
+            substituents = tuple((axis, _cell_text(model, index, axis, headers)) for axis in axes)
             product = ""
             mol = mols.get(oid)
             if mol is not None:

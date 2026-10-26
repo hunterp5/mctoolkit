@@ -327,9 +327,7 @@ def rgroup_swap_suggestions(
             if not canon or canon in known:
                 continue
             shift = mean_new - mean_old
-            predicted = (
-                reference.activity + shift if reference.activity is not None else mean_new
-            )
+            predicted = reference.activity + shift if reference.activity is not None else mean_new
             known.add(canon)
             found.append(
                 (
@@ -427,9 +425,7 @@ class _PreparedRow:
 
 def _mean_activity(rows: Sequence[_PreparedRow], axis: str, label: str) -> float | None:
     values = [
-        row.activity
-        for row in rows
-        if row.label_at(axis) == label and row.activity is not None
+        row.activity for row in rows if row.label_at(axis) == label and row.activity is not None
     ]
     if not values:
         return None
