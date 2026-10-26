@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -34,7 +34,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ...chem.murcko import SCAFFOLD_COLUMNS
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 from ..strings import TOOL_BEMIS_MURCKO, TOOL_COMMON_CORE
 from .scope import selection_scope_checked
 
@@ -65,17 +65,27 @@ class BemisMurckoDialog(QDialog):
         self.resize(480, 280)
         self._checks: dict[str, tuple[QCheckBox, str]] = {}
         root = QVBoxLayout(self)
+        structures = QGroupBox("Structures")
+        struct_ly = QVBoxLayout(structures)
+        struct_ly.setContentsMargins(8, 6, 8, 6)
         target, self.src_combo, self.only_selected_cb = _target_row(
             self, list(columns), selected_row_count
         )
         self._only_selected_scope_prefix = "Selected Rows Only"
-        root.addLayout(target)
+        struct_ly.addLayout(target)
+        root.addWidget(structures)
+
+        columns_box = QGroupBox("Columns")
+        columns_ly = QVBoxLayout(columns_box)
+        columns_ly.setContentsMargins(8, 6, 8, 6)
+        columns_ly.setSpacing(4)
         for header, internal, tip in SCAFFOLD_COLUMNS:
             box = QCheckBox(header)
             box.setChecked(True)
             box.setToolTip(tip)
-            root.addWidget(box)
+            columns_ly.addWidget(box)
             self._checks[header] = (box, internal)
+        root.addWidget(columns_box)
         root.addStretch(1)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._on_accept)
@@ -120,13 +130,17 @@ class CommonCoreDialog(QDialog):
         self.setWindowTitle(TOOL_COMMON_CORE)
         self.setMinimumWidth(460)
         root = QVBoxLayout(self)
+        structures = QGroupBox("Structures")
+        struct_ly = QVBoxLayout(structures)
+        struct_ly.setContentsMargins(8, 6, 8, 6)
         target, self.src_combo, self.only_selected_cb = _target_row(
             self, list(columns), selected_row_count
         )
         self._only_selected_scope_prefix = "Selected Rows Only"
-        root.addLayout(target)
+        struct_ly.addLayout(target)
+        root.addWidget(structures)
 
-        form = QFormLayout()
+        _search, form = boxed_form("Search")
         self.outliers = QSpinBox()
         self.outliers.setRange(0, 100_000)
         self.outliers.setValue(0)
@@ -142,7 +156,6 @@ class CommonCoreDialog(QDialog):
         self.timeout.setSuffix(" s")
         self.timeout.setToolTip("Stop the search if it runs longer than this.")
         form.addRow("Time limit:", self.timeout)
-        root.addLayout(form)
 
         self.complete_rings = QCheckBox("Complete rings only")
         self.complete_rings.setChecked(True)
@@ -150,7 +163,8 @@ class CommonCoreDialog(QDialog):
             "Keep the core from ending in the middle of a ring, so it can be pasted "
             "into Structure Decomposition → Core-Based or Free-Wilson."
         )
-        root.addWidget(self.complete_rings)
+        form.addRow("", self.complete_rings)
+        root.addWidget(_search)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
