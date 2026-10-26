@@ -42,10 +42,9 @@ def test_conforge_conformations_dialog_defaults(qapp):  # noqa: ARG001
     assert p.from_scratch is True
     assert dlg.output_panel.add_to_table_cb.text() == "Add as Entries"
     assert p.confgen_path == ""
-    option_boxes = [b for b in dlg.findChildren(QGroupBox) if b.title() == "Options"]
-    assert option_boxes
-    assert dlg.output_panel.add_to_table_cb.parent() is option_boxes[0]
-    assert dlg.original_cb.parent() is option_boxes[0]
+    boxes = {b.title(): b for b in dlg.findChildren(QGroupBox)}
+    assert dlg.output_panel.add_to_table_cb.parent() is boxes["Output"]
+    assert dlg.original_cb.parent() is boxes["Ensemble"]
     dlg.close()
 
 
