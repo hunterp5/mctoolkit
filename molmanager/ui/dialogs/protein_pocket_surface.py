@@ -26,14 +26,13 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QDoubleSpinBox,
-    QFormLayout,
     QHBoxLayout,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 
 POCKET_SURFACE_TYPES = (
     ("ms", "Molecular"),
@@ -138,9 +137,7 @@ class ProteinPocketSurfaceDialog(QDialog):
         root.setContentsMargins(10, 8, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setSpacing(6)
+        surface, form = boxed_form("Surface")
 
         self.chk_show = QCheckBox("Show pocket surface")
         self.chk_show.setToolTip("Draw a surface on protein residues within 4.5 Å of the ligand.")
@@ -183,10 +180,12 @@ class ProteinPocketSurfaceDialog(QDialog):
         self.spin_opacity.setValue(70.0)
         self.spin_opacity.setToolTip("How see-through the surface is (100% is solid).")
         form.addRow("Opacity:", self.spin_opacity)
+        root.addWidget(surface)
 
+        mesh, mesh_form = boxed_form("Mesh")
         self.chk_wireframe = QCheckBox("Wireframe")
         self.chk_wireframe.setToolTip("Draw the surface as a mesh instead of a solid.")
-        form.addRow(self.chk_wireframe)
+        mesh_form.addRow(self.chk_wireframe)
 
         self.spin_linewidth = QDoubleSpinBox()
         self.spin_linewidth.setRange(0.5, 4.0)
@@ -194,8 +193,8 @@ class ProteinPocketSurfaceDialog(QDialog):
         self.spin_linewidth.setSingleStep(0.5)
         self.spin_linewidth.setValue(1.5)
         self.spin_linewidth.setToolTip("Mesh line thickness when Wireframe is on.")
-        form.addRow("Line width:", self.spin_linewidth)
-        root.addLayout(form)
+        mesh_form.addRow("Line width:", self.spin_linewidth)
+        root.addWidget(mesh)
         root.addStretch()
 
         btn_row = QHBoxLayout()
