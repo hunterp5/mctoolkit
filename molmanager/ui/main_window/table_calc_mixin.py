@@ -42,42 +42,83 @@ class TableCalcMixin:
 
         if not isinstance(dlg, CalculatorDialog):
             return
-        self.new_c = dlg.name_input.text().strip()
-        if not self.new_c:
-            QMessageBox.warning(self, TOOL_CALCULATOR, "Enter a name for the new column.")
-            return
-        self.new_c = self._unique_table_column_names([self.new_c])[0]
-        expr = dlg.expr_input.text().strip()
-        if not expr:
-            QMessageBox.warning(self, TOOL_CALCULATOR, "Enter an expression to evaluate.")
-            return
+        column = dlg.name_input.text().strip()
+        expression = dlg.expr_input.text().strip()
         only_selected = dlg.only_selected_rows()
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, TOOL_CALCULATOR):
             return
+        self.start_calculator_job(
+            column=column,
+            expression=expression,
+            allowed=None if not only_selected else set(allowed or ()),
+            on_done=None,
+        )
+
+    def start_calculator_job(
+        self,
+        *,
+        column: str,
+        expression: str,
+        allowed: set[int] | None,
+        on_done,
+    ) -> None:
+        """Evaluate *expression* into *column*. ``on_done(error, {"output": header})``.
+
+        *allowed* ``None`` uses every row. The dialog passes ``on_done=None`` and
+        shows its own warnings.
+        """
+        if load_config().disable_custom_calc:
+            message = (
+                "The calculator is disabled by policy "
+                "(environment variable MOLMANAGER_DISABLE_CUSTOM_CALC)."
+            )
+            if on_done is not None:
+                on_done(message, {})
+            else:
+                QMessageBox.information(self, TOOL_CALCULATOR, message)
+            return
+        name = (column or "").strip()
+        if not name:
+            message = "Enter a name for the new column."
+            if on_done is not None:
+                on_done(message, {})
+            else:
+                QMessageBox.warning(self, TOOL_CALCULATOR, message)
+            return
+        expr = (expression or "").strip()
+        if not expr:
+            message = "Enter an expression to evaluate."
+            if on_done is not None:
+                on_done(message, {})
+            else:
+                QMessageBox.warning(self, TOOL_CALCULATOR, message)
+            return
+        self.new_c = self._unique_table_column_names([name])[0]
         numeric_vars = list(self.global_bounds.keys())
         h_map = {h: i for i, h in enumerate(self.headers)}
         oids_list = self._all_oids_in_table_order()
         if allowed is not None:
-            oids_list = [o for o in oids_list if o in allowed]
+            oids_list = [oid for oid in oids_list if oid in allowed]
         row_data = [
             (
-                o,
+                oid,
                 {
-                    v: (self._table_cell_text(self.logical_row_for_oid(o), h_map[v]) or "0")
-                    for v in numeric_vars
+                    var: (self._table_cell_text(self.logical_row_for_oid(oid), h_map[var]) or "0")
+                    for var in numeric_vars
                 },
             )
-            for o in oids_list
+            for oid in oids_list
         ]
         if not row_data:
-            QMessageBox.information(
-                self,
-                TOOL_CALCULATOR,
-                "No rows to process for this scope.",
-            )
+            message = "No rows to process for this scope."
             self.status_label.setText("Ready.")
+            if on_done is not None:
+                on_done(message, {})
+            else:
+                QMessageBox.information(self, TOOL_CALCULATOR, message)
             return
+        self._calculator_on_done = on_done
         enqueue_process_queue_job(
             self,
             "Calculator…",
@@ -746,6 +787,7 @@ class TableCalcMixin:
 
     def on_custom_calc_finished(self, res):
         # If the expression failed for every row, don't add an all-error column.
+        done = getattr(self, "_calculator_on_done", None)
         ok_any = False
         for _idx, val in res:
             t = (val or "").strip()
@@ -753,25 +795,45 @@ class TableCalcMixin:
                 ok_any = True
                 break
         if not ok_any:
-            QMessageBox.warning(
-                self,
-                TOOL_CALCULATOR,
-                "The expression produced no numeric results (all rows failed). No column was added.",
-            )
+            self._calculator_on_done = None
             self.status_label.setText(f"{TOOL_CALCULATOR}: no numeric results.")
             self._clear_tool_progress()
+            message = (
+                "The expression produced no numeric results (all rows failed). No column was added."
+            )
+            if done is not None:
+                done(message, {})
+            else:
+                QMessageBox.warning(self, TOOL_CALCULATOR, message)
             return
 
         self._finish_tool_progress("Calculator…")
+
+        def _after(written: list[str]) -> None:
+            callback = getattr(self, "_calculator_on_done", None)
+            self._calculator_on_done = None
+            column = written[0] if written else str(getattr(self, "new_c", ""))
+            self.status_label.setText(
+                self._consume_partial_results_notice()
+                or f'{TOOL_CALCULATOR}: column "{column}" updated.'
+            )
+            if callback is not None:
+                if not written:
+                    callback("Calculator produced no column.", {})
+                else:
+                    callback(None, {"output": str(written[0])})
+
         self.on_calc_finished(
             [(int(oid), {self.new_c: str(val)}) for oid, val in res],
             [self.new_c],
             finish_progress=False,
+            on_complete=_after if done is not None else None,
         )
-        self.status_label.setText(
-            self._consume_partial_results_notice()
-            or f'{TOOL_CALCULATOR}: column "{self.new_c}" updated.'
-        )
+        if done is None:
+            self.status_label.setText(
+                self._consume_partial_results_notice()
+                or f'{TOOL_CALCULATOR}: column "{self.new_c}" updated.'
+            )
 
 
 def _structure_molecular_weights(app, oids: list[int], *, only_selected: bool) -> dict[int, float]:
