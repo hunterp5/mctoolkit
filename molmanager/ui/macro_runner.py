@@ -58,6 +58,7 @@ class MacroRunner(QObject):
         self._generation = 0
         self._running = False
         self._handle: JobHandle | None = None
+        self._replay_recorder = None
 
     @property
     def is_running(self) -> bool:
@@ -90,6 +91,11 @@ class MacroRunner(QObject):
         self._steps = list(recipe.steps)
         self._index = 0
         self._bindings = {}
+        recorder = getattr(app, "macro_recorder", None)
+        begin = getattr(recorder, "begin_replay", None)
+        if callable(begin):
+            begin()
+            self._replay_recorder = recorder
         self._kick(self._generation)
 
     def cancel(self) -> None:
@@ -100,7 +106,7 @@ class MacroRunner(QObject):
         self._handle = None
         if handle is not None:
             handle.abandon()
-        self._clear_hooks()
+        self._drop_filter_wait()
         app = self._app
         queue = getattr(app, "process_queue", None)
         cancel_running = getattr(queue, "cancel_running", None)
@@ -173,23 +179,27 @@ class MacroRunner(QObject):
             return
         self._running = False
         self._generation += 1
-        self._clear_hooks()
+        self._drop_filter_wait()
+        self._end_replay()
         self._set_status(message)
         self.finished.emit(ok, message)
 
-    def _clear_hooks(self) -> None:
+    def _end_replay(self) -> None:
+        recorder = getattr(self, "_replay_recorder", None)
+        self._replay_recorder = None
+        end = getattr(recorder, "end_replay", None)
+        if callable(end):
+            end()
+
+    def _drop_filter_wait(self) -> None:
         app = self._app
         if app is None:
             return
-        for name in (
-            "_macro_descriptor_done",
-            "_calculator_on_done",
-            "_protonate_on_done",
-            "_macro_reaction_done",
-            "_macro_filter_done",
-        ):
-            if getattr(app, name, None) is not None:
-                setattr(app, name, None)
+        wait = getattr(app, "_macro_filter_wait", None)
+        if wait is None:
+            return
+        app._macro_filter_wait = None
+        wait.fail("Cancelled.")
 
     def _set_status(self, message: str) -> None:
         label = getattr(self._app, "status_label", None)
