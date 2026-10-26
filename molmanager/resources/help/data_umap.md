@@ -31,7 +31,7 @@ Feature columns and/or fingerprints from a structure source; optional **Selected
 
 ## Workflow
 
-1. **Data → DimRed Plots → UMAP Visualization** opens **Plot Options** (the empty plot window stays closed).
+1. **Data → Dimensionality Reduction → UMAP Visualization** opens **Plot Options** (the empty plot window stays closed).
 2. Select feature columns and optional fingerprint.
 3. Set standardization, color-by, and method parameters.
 4. Run the embedding; the plot window opens when results are ready.
