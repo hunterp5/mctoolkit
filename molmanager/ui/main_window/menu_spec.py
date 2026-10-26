@@ -283,8 +283,8 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             "open_macros",
             hotkey="tools.macros",
             tooltip=(
-                "Run a saved sequence of descriptors, a calculator column, filters, "
-                "protonation, and reaction enumeration."
+                "Run or record a sequence of table tools: descriptors, calculator, "
+                "filters, structure preparation, enumeration, potency, and plots."
             ),
         ),
         action(
