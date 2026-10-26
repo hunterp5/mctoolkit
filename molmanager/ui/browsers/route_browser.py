@@ -14,44 +14,189 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Browse AiZynthFinder routes: one target, then each reaction step."""
+"""Browse AiZynthFinder routes as a tree of precursor cards."""
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtCore import QEvent, QPoint, Qt, QTimer
+from PyQt5.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPalette, QPen, QPixmap
 from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
     QComboBox,
     QDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
+    QMenu,
+    QPlainTextEdit,
+    QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 from rdkit import Chem
 from rdkit.Chem import Draw
 
+from ...predictions.aizynthfinder_run import leaf_stock_counts, sort_routes
+from ...table.structure_image import molecule_pixmap
 from ..qt_widget_utils import make_window_minimizable, make_window_resizable
 from ..strings import TOOL_RETROSYNTHESIS
+from ..structure_copy_menu import add_structure_copy_submenu
+from .chrome import style_browser_data_table, style_browser_structure_label
 
+_CARD_W = 160
+_CARD_H = 110
+_BRANCH_LEN = 120
 _STEP_W = 680
 _STEP_H = 160
+_IN_STOCK = "#2e7d32"
+_NOT_IN_STOCK = "#ef6c00"
+_CARD_NAME = "route-mol-card"
+_STEP_BUTTON_QSS = (
+    "QPushButton {"
+    " padding: 0px 6px;"
+    " border: 1px solid palette(mid);"
+    " border-radius: 3px;"
+    " background: palette(base);"
+    "}"
+    "QPushButton:checked { background: palette(midlight); }"
+)
+_ROUTE_COLUMNS = ("#", "Status", "Score", "Steps", "In stock")
+
+
+class _RouteCanvas(QScrollArea):
+    """Route drawing. Center-click and drag to pan."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._pan: tuple[QPoint, int, int] | None = None
+        self._app_filter = False
+        self._pan_cursor = False
+        self.viewport().installEventFilter(self)
+
+    def setWidget(self, widget) -> None:  # noqa: N802
+        super().setWidget(widget)
+        if widget is not None:
+            self.watch(widget)
+
+    def watch(self, root: QWidget) -> None:
+        """Listen for center-clicks on *root* and the cards added under it."""
+        root.installEventFilter(self)
+        for child in root.findChildren(QWidget):
+            child.installEventFilter(self)
+
+    def end_pan(self) -> None:
+        self._pan = None
+        if QWidget.mouseGrabber() is self.viewport():
+            self.viewport().releaseMouse()
+        if self._app_filter:
+            app = QApplication.instance()
+            if app is not None:
+                app.removeEventFilter(self)
+            self._app_filter = False
+        if self._pan_cursor:
+            QApplication.restoreOverrideCursor()
+            self._pan_cursor = False
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        kind = event.type()
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.MiddleButton:
+            if not self._on_canvas(obj):
+                return super().eventFilter(obj, event)
+            self._begin_pan(event.globalPos())
+            return False
+        if self._pan is not None and kind == QEvent.MouseMove:
+            buttons = event.buttons()
+            if buttons and not (buttons & Qt.MiddleButton):
+                self.end_pan()
+                return False
+            origin, horizontal, vertical = self._pan
+            delta = event.globalPos() - origin
+            self.horizontalScrollBar().setValue(horizontal - delta.x())
+            self.verticalScrollBar().setValue(vertical - delta.y())
+            return True
+        if self._pan is not None and kind == QEvent.WindowDeactivate:
+            self.end_pan()
+            return False
+        if (
+            self._pan is not None
+            and kind == QEvent.MouseButtonRelease
+            and event.button() == Qt.MiddleButton
+        ):
+            self.end_pan()
+            return True
+        return super().eventFilter(obj, event)
+
+    def _begin_pan(self, origin: QPoint) -> None:
+        self._pan = (
+            origin,
+            self.horizontalScrollBar().value(),
+            self.verticalScrollBar().value(),
+        )
+        app = QApplication.instance()
+        if app is not None and not self._app_filter:
+            app.installEventFilter(self)
+            self._app_filter = True
+        if not self._pan_cursor:
+            QApplication.setOverrideCursor(Qt.ClosedHandCursor)
+            self._pan_cursor = True
+        QTimer.singleShot(0, self._grab_pan)
+
+    def _grab_pan(self) -> None:
+        """Take the mouse after the press, so the drag is not dropped."""
+        if self._pan is None:
+            return
+        viewport = self.viewport()
+        if QWidget.mouseGrabber() is not viewport:
+            viewport.grabMouse()
+
+    def _on_canvas(self, obj) -> bool:
+        if obj is self.viewport() or obj is self.widget():
+            return True
+        widget = self.widget()
+        return isinstance(obj, QWidget) and widget is not None and widget.isAncestorOf(obj)
+
+
+def _route_log_view() -> QPlainTextEdit:
+    log = QPlainTextEdit()
+    log.setReadOnly(True)
+    log.setLineWrapMode(QPlainTextEdit.NoWrap)
+    log.setMaximumHeight(132)
+    log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+    font = QFont("Consolas")
+    font.setStyleHint(QFont.Monospace)
+    font.setPointSize(9)
+    log.setFont(font)
+    log.setStyleSheet(
+        "QPlainTextEdit {"
+        " background: palette(base);"
+        " color: palette(text);"
+        " border: 1px solid palette(mid);"
+        " border-radius: 4px;"
+        "}"
+    )
+    return log
 
 
 class RouteBrowserDialog(QDialog):
-    """Modeless list of searched targets and the reaction steps of one route."""
+    """Modeless list of searched targets and the precursor tree of one route."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"{TOOL_RETROSYNTHESIS} routes")
         self.setModal(False)
         self.setWindowModality(Qt.NonModal)
-        self.setMinimumSize(760, 520)
+        self.setMinimumSize(920, 560)
         self._targets: list[dict] = []
+        self._routes: list[dict] = []
         self._pixmaps: dict[tuple, QPixmap | None] = {}
+        self._reaction_pixmaps: dict[tuple, QPixmap | None] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 8)
@@ -62,20 +207,28 @@ class RouteBrowserDialog(QDialog):
         root.addWidget(self.target_combo)
 
         splitter = QSplitter(Qt.Horizontal)
-        self.route_list = QListWidget()
-        self.route_list.setMinimumWidth(220)
-        self.route_list.currentRowChanged.connect(self._show_route)
-        splitter.addWidget(self.route_list)
+        self.route_table = _route_table()
+        self.route_table.currentCellChanged.connect(self._on_route_cell_changed)
+        splitter.addWidget(self.route_table)
+
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(6)
 
         self._steps_host = QWidget()
         self._steps_layout = QVBoxLayout(self._steps_host)
         self._steps_layout.setContentsMargins(4, 4, 4, 4)
         self._steps_layout.setSpacing(12)
         self._steps_layout.addStretch(1)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self._steps_host)
-        splitter.addWidget(scroll)
+        self._route_scroll = _RouteCanvas()
+        self._route_scroll.setWidgetResizable(True)
+        self._route_scroll.setWidget(self._steps_host)
+        right_layout.addWidget(self._route_scroll, 1)
+
+        self.summary_log = _route_log_view()
+        right_layout.addWidget(self.summary_log)
+        splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)
         root.addWidget(splitter, 1)
 
@@ -85,6 +238,10 @@ class RouteBrowserDialog(QDialog):
 
         make_window_minimizable(self)
         make_window_resizable(self)
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._route_scroll.end_pan()
+        super().hideEvent(event)
 
     def set_targets(self, targets: list[dict], *, focus_smiles: str = "") -> None:
         """Replace the target list. *targets* items have ``smiles`` and ``routes``."""
@@ -104,35 +261,82 @@ class RouteBrowserDialog(QDialog):
             self.target_combo.setCurrentIndex(focus)
             self._on_target_changed(focus)
         else:
-            self.route_list.clear()
+            self._clear_route_table()
+            self._routes = []
             self._clear_steps("No routes to show.")
 
+    def molecule_cards(self) -> list[QFrame]:
+        """Structure cards currently in the route tree."""
+        return self.findChildren(QFrame, _CARD_NAME)
+
     def _on_target_changed(self, index: int) -> None:
-        self.route_list.clear()
         target = self._target_at(index)
-        routes = list(target.get("routes") or []) if target else []
-        if not routes:
+        self._routes = sort_routes(list(target.get("routes") or [])) if target else []
+        self._fill_route_table(self._routes)
+        if not self._routes:
             self._clear_steps("This structure has no extracted routes.")
             return
-        for number, route in enumerate(routes, start=1):
-            solved = "solved" if route.get("solved") else "unsolved"
-            score = str(route.get("score") or "").strip() or "no score"
-            n_steps = len(route.get("steps") or [])
-            noun = "step" if n_steps == 1 else "steps"
-            item = QListWidgetItem(f"{number}. {solved}   {score}   {n_steps} {noun}")
-            self.route_list.addItem(item)
-        self.route_list.setCurrentRow(0)
+        self.route_table.blockSignals(True)
+        self.route_table.selectRow(0)
+        self.route_table.blockSignals(False)
+        self._show_route(0)
+
+    def _on_route_cell_changed(
+        self, row: int, _column: int, _prev_row: int, _prev_col: int
+    ) -> None:
+        self._show_route(row)
+
+    def _fill_route_table(self, routes: list[dict]) -> None:
+        table = self.route_table
+        extras = _extra_score_names(routes)
+        headers = list(_ROUTE_COLUMNS) + extras
+        table.blockSignals(True)
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.setRowCount(len(routes))
+        for row, route in enumerate(routes):
+            solved = bool(route.get("solved"))
+            cells = _route_cells(row + 1, route)
+            cells.extend(_score_cell(route, name) for name in extras)
+            for column, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(Qt.AlignCenter)
+                item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                if column == 1:
+                    color = _IN_STOCK if solved else _NOT_IN_STOCK
+                    item.setForeground(QBrush(QColor(color)))
+                table.setItem(row, column, item)
+        table.resizeColumnsToContents()
+        table.blockSignals(False)
+
+    def _clear_route_table(self) -> None:
+        self.route_table.blockSignals(True)
+        self.route_table.setRowCount(0)
+        self.route_table.blockSignals(False)
 
     def _show_route(self, row: int) -> None:
-        target = self._target_at(self.target_combo.currentIndex())
-        routes = list(target.get("routes") or []) if target else []
-        if row < 0 or row >= len(routes):
+        if row < 0 or row >= len(self._routes):
             return
+        route = self._routes[row]
         self._clear_steps("")
-        steps = list(routes[row].get("steps") or [])
+        self.summary_log.setPlainText(_route_log(row + 1, route))
+        tree = route.get("tree")
+        if isinstance(tree, dict) and str(tree.get("smiles") or "").strip():
+            self._empty.hide()
+            self._steps_layout.insertWidget(
+                self._steps_layout.count() - 1,
+                _MoleculeNode(tree, self._pixmap_for),
+                0,
+                Qt.AlignRight | Qt.AlignTop,
+            )
+            self._route_scroll.watch(self._steps_host)
+            self._pin_canvas()
+            QTimer.singleShot(0, self._scroll_to_target)
+            return
+        steps = list(route.get("steps") or [])
         if not steps:
             message = "No reaction steps."
-            if routes[row].get("solved"):
+            if route.get("solved"):
                 message = "No reaction steps. The target is in stock."
             self._empty.setText(message)
             self._empty.show()
@@ -140,8 +344,11 @@ class RouteBrowserDialog(QDialog):
         self._empty.hide()
         for number, step in enumerate(steps, start=1):
             self._steps_layout.insertWidget(
-                self._steps_layout.count() - 1, _StepWidget(number, step, self._pixmap_for)
+                self._steps_layout.count() - 1,
+                _StepWidget(number, step, self._reaction_pixmap_for),
             )
+        self._route_scroll.watch(self._steps_host)
+        self._pin_canvas()
 
     def _target_at(self, index: int) -> dict | None:
         if index < 0 or index >= len(self._targets):
@@ -149,6 +356,7 @@ class RouteBrowserDialog(QDialog):
         return self._targets[index]
 
     def _clear_steps(self, message: str) -> None:
+        self._steps_host.setMinimumSize(0, 0)
         layout = self._steps_layout
         for index in range(layout.count() - 1, -1, -1):
             item = layout.itemAt(index)
@@ -157,10 +365,34 @@ class RouteBrowserDialog(QDialog):
                 continue
             widget.setParent(None)
             widget.deleteLater()
+        self.summary_log.setPlainText("" if message else self.summary_log.toPlainText())
         self._empty.setText(message)
         self._empty.setVisible(bool(message))
 
-    def _pixmap_for(self, step: dict) -> QPixmap | None:
+    def _scroll_to_target(self) -> None:
+        self._pin_canvas()
+        bar = self._route_scroll.horizontalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def _pin_canvas(self) -> None:
+        layout = self._steps_host.layout()
+        if layout is None:
+            return
+        layout.activate()
+        content = layout.totalMinimumSize()
+        view = self._route_scroll.viewport().size()
+        self._steps_host.setMinimumSize(
+            content.width() + max(0, view.width()),
+            content.height() + max(0, view.height()),
+        )
+
+    def _pixmap_for(self, smiles: str) -> QPixmap | None:
+        key = (smiles, _CARD_W, _CARD_H)
+        if key not in self._pixmaps:
+            self._pixmaps[key] = _molecule_pixmap(smiles, _CARD_W, _CARD_H)
+        return self._pixmaps[key]
+
+    def _reaction_pixmap_for(self, step: dict) -> QPixmap | None:
         product = str(step.get("product") or "")
         reactants = [
             str(item.get("smiles") or "")
@@ -168,13 +400,374 @@ class RouteBrowserDialog(QDialog):
             if str(item.get("smiles") or "").strip()
         ]
         key = (product, tuple(reactants), _STEP_W, _STEP_H)
-        if key not in self._pixmaps:
-            self._pixmaps[key] = _reaction_pixmap(product, reactants, _STEP_W, _STEP_H)
-        return self._pixmaps[key]
+        if key not in self._reaction_pixmaps:
+            self._reaction_pixmaps[key] = _reaction_pixmap(product, reactants, _STEP_W, _STEP_H)
+        return self._reaction_pixmaps[key]
+
+
+class _MoleculeNode(QWidget):
+    """One molecule, with its precursors to the left and the parent to the right."""
+
+    def __init__(
+        self,
+        node: dict,
+        pixmap_for,
+        *,
+        joined: bool = False,
+        counter: list[int] | None = None,
+    ) -> None:
+        super().__init__()
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setSpacing(0)
+        layout.setAlignment(Qt.AlignVCenter)
+        steps = counter if counter is not None else [0]
+        for reaction in node.get("reactions") or []:
+            if not isinstance(reaction, dict):
+                continue
+            reactants = [item for item in reaction.get("reactants") or [] if isinstance(item, dict)]
+            if not reactants:
+                continue
+            _add_reaction(layout, reaction, reactants, pixmap_for, steps)
+        smiles = str(node.get("smiles") or "")
+        layout.addWidget(_MoleculeCard(node, pixmap_for(smiles)), 0, Qt.AlignVCenter)
+        if joined:
+            layout.addWidget(_HStem(), 0, Qt.AlignVCenter)
+
+
+class _MoleculeCard(QFrame):
+    """White depiction well. Green when the molecule is in stock, amber otherwise."""
+
+    def __init__(self, node: dict, pixmap: QPixmap | None) -> None:
+        super().__init__()
+        self._smiles = str(node.get("smiles") or "")
+        self.setObjectName(_CARD_NAME)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        color = _IN_STOCK if node.get("in_stock") else _NOT_IN_STOCK
+        self.setStyleSheet(
+            f"QFrame#{_CARD_NAME} {{ background-color: #ffffff; "
+            f"border: 2px solid {color}; border-radius: 4px; }}"
+        )
+        self.setToolTip(_card_tooltip(node))
+        root = QVBoxLayout(self)
+        root.setContentsMargins(6, 6, 6, 6)
+        root.setSpacing(0)
+        image = QLabel()
+        image.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        style_browser_structure_label(image)
+        image.setFixedSize(_CARD_W, _CARD_H)
+        if isinstance(pixmap, QPixmap) and not pixmap.isNull():
+            image.setPixmap(pixmap)
+        root.addWidget(image)
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802
+        mol = Chem.MolFromSmiles(self._smiles) if self._smiles else None
+        menu = QMenu(self)
+        by_act = add_structure_copy_submenu(menu, mol)
+        chosen = menu.exec_(event.globalPos())
+        if chosen in by_act:
+            text, _status = by_act[chosen]
+            clipboard = QApplication.clipboard()
+            if clipboard is not None and text:
+                clipboard.setText(text)
+        event.accept()
+
+
+class _HStem(QWidget):
+    """Horizontal connector between a molecule and the route toward its parent."""
+
+    def __init__(self, length: int = 22) -> None:
+        super().__init__()
+        self.setFixedSize(length, 12)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setPen(QPen(self.palette().color(QPalette.Mid), 2))
+        mid = self.height() // 2
+        painter.drawLine(0, mid, self.width(), mid)
+
+
+class _VBranch(QWidget):
+    """Vertical connector beside a column of precursors."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFixedWidth(12)
+        self.setMinimumHeight(24)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setPen(QPen(self.palette().color(QPalette.Mid), 2))
+        top, bottom = _branch_span(self)
+        mid = self.height() // 2
+        painter.drawLine(0, top, 0, bottom)
+        painter.drawLine(0, mid, self.width(), mid)
+
+
+def _route_table() -> QTableWidget:
+    table = QTableWidget(0, len(_ROUTE_COLUMNS))
+    table.setHorizontalHeaderLabels(list(_ROUTE_COLUMNS))
+    table.setSelectionBehavior(QAbstractItemView.SelectRows)
+    table.setSelectionMode(QAbstractItemView.SingleSelection)
+    table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+    table.setFocusPolicy(Qt.StrongFocus)
+    table.setMinimumWidth(340)
+    table.setWordWrap(False)
+    table.verticalHeader().setVisible(False)
+    table.verticalHeader().setDefaultSectionSize(28)
+    header = table.horizontalHeader()
+    header.setStretchLastSection(True)
+    header.setSectionResizeMode(QHeaderView.ResizeToContents)
+    header.setDefaultAlignment(Qt.AlignCenter)
+    style_browser_data_table(table)
+    return table
+
+
+def _route_cells(number: int, route: dict) -> list[str]:
+    solved = "Solved" if route.get("solved") else "Unsolved"
+    score = str(route.get("score") or "").strip() or "—"
+    in_stock, total = leaf_stock_counts(route)
+    return [str(number), solved, score, str(len(route.get("steps") or [])), f"{in_stock}/{total}"]
+
+
+def _extra_score_names(routes: list[dict]) -> list[str]:
+    """Score names other than the state score, in first-seen order."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for route in routes:
+        scores = route.get("scores")
+        if not isinstance(scores, dict):
+            continue
+        for key in scores:
+            label = str(key)
+            if label.lower() == "state score" or label in seen:
+                continue
+            seen.add(label)
+            names.append(label)
+    return names
+
+
+def _score_cell(route: dict, name: str) -> str:
+    scores = route.get("scores")
+    if not isinstance(scores, dict) or name not in scores:
+        return "—"
+    return _format_route_value(scores.get(name))
+
+
+def _route_log(number: int, route: dict) -> str:
+    solved = "Solved" if route.get("solved") else "Unsolved"
+    score = str(route.get("score") or "").strip() or "no score"
+    n_steps = len(route.get("steps") or [])
+    in_stock, total = leaf_stock_counts(route)
+    lines = [
+        f"route {number}",
+        f"status    {solved}",
+        f"score     {score}",
+        f"steps     {n_steps}",
+        f"in stock  {in_stock}/{total}",
+    ]
+    lines.extend(_route_detail_lines(route))
+    return "\n".join(lines)
+
+
+def _route_detail_lines(route: dict) -> list[str]:
+    lines: list[str] = []
+    scores = route.get("scores")
+    if isinstance(scores, dict):
+        for key, value in scores.items():
+            if str(key).lower() == "state score":
+                continue
+            lines.append(f"{key}  {_format_route_value(value)}")
+    metadata = route.get("metadata")
+    if isinstance(metadata, dict):
+        for key, value in metadata.items():
+            if value not in (None, ""):
+                lines.append(f"{key}  {value}")
+    return lines
+
+
+def _add_reaction(
+    layout: QHBoxLayout,
+    reaction: dict,
+    reactants: list[dict],
+    pixmap_for,
+    counter: list[int],
+) -> None:
+    counter[0] += 1
+    number = counter[0]
+    if len(reactants) == 1:
+        layout.addWidget(
+            _MoleculeNode(reactants[0], pixmap_for, joined=True, counter=counter),
+            0,
+            Qt.AlignVCenter,
+        )
+    else:
+        column = QWidget()
+        column.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
+        col = QVBoxLayout(column)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(8)
+        for reactant in reactants:
+            col.addWidget(_MoleculeNode(reactant, pixmap_for, joined=True, counter=counter))
+        pair = QWidget()
+        pair.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
+        pair_layout = QHBoxLayout(pair)
+        pair_layout.setContentsMargins(0, 0, 0, 0)
+        pair_layout.setSpacing(0)
+        pair_layout.addWidget(column)
+        pair_layout.addWidget(_VBranch())
+        layout.addWidget(pair, 0, Qt.AlignVCenter)
+    layout.addWidget(_StepBranch(number, reaction), 0, Qt.AlignVCenter)
+
+
+class _StepBranch(QWidget):
+    """Branch line with a Step button that opens and closes the reaction details."""
+
+    def __init__(self, number: int, reaction: dict) -> None:
+        super().__init__()
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(4)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addWidget(_HStem(_BRANCH_LEN), 0, Qt.AlignVCenter)
+        self._button = QPushButton(f"Step {number}")
+        self._button.setObjectName("route-step")
+        self._button.setCheckable(True)
+        self._button.setCursor(Qt.PointingHandCursor)
+        self._button.setFixedHeight(22)
+        self._button.setStyleSheet(_STEP_BUTTON_QSS)
+        self._button.toggled.connect(self._toggle)
+        row.addWidget(self._button, 0, Qt.AlignVCenter)
+        row.addWidget(_HStem(_BRANCH_LEN), 0, Qt.AlignVCenter)
+        root.addLayout(row)
+        self._detail = _reaction_label(_step_detail(reaction), None)
+        self._detail.setMaximumWidth(220)
+        self._detail.hide()
+        root.addWidget(self._detail)
+
+    def _toggle(self, expanded: bool) -> None:
+        self._detail.setVisible(expanded and bool(self._detail.text()))
+        QTimer.singleShot(0, self._repin)
+
+    def _repin(self) -> None:
+        parent = self.parentWidget()
+        while parent is not None:
+            pin = getattr(parent, "_pin_canvas", None)
+            if callable(pin):
+                pin()
+                return
+            parent = parent.parentWidget()
+
+
+def _step_detail(reaction: dict) -> str:
+    caption = _reaction_caption(reaction)
+    metadata = _metadata_tooltip(reaction.get("metadata"))
+    if caption and metadata:
+        return f"{caption}\n{metadata}"
+    return caption or metadata
+
+
+def _reaction_label(caption: str, metadata: object) -> QLabel:
+    label = QLabel(caption)
+    label.setAlignment(Qt.AlignCenter)
+    label.setWordWrap(True)
+    label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    tip = _metadata_tooltip(metadata)
+    if tip:
+        label.setToolTip(tip)
+    return label
+
+
+def _branch_span(branch: QWidget) -> tuple[int, int]:
+    """Vertical line from the first precursor's connector to the last."""
+    parent = branch.parentWidget()
+    layout = parent.layout() if parent is not None else None
+    column = layout.itemAt(0).widget() if layout is not None and layout.count() else None
+    col_layout = column.layout() if column is not None else None
+    if col_layout is None or col_layout.count() < 1 or column is None:
+        return 0, max(0, branch.height())
+    first = col_layout.itemAt(0).widget()
+    last = col_layout.itemAt(col_layout.count() - 1).widget()
+    if first is None or last is None or first.height() <= 0 or last.height() <= 0:
+        return 0, max(0, branch.height())
+    top = column.y() + first.y() + first.height() // 2 - branch.y()
+    bottom = column.y() + last.y() + last.height() // 2 - branch.y()
+    if bottom < top:
+        top, bottom = bottom, top
+    return top, bottom
+
+
+def _card_tooltip(node: dict) -> str:
+    stock = node.get("stock")
+    names = [str(item).strip() for item in stock] if isinstance(stock, list) else []
+    names = [name for name in names if name]
+    if names:
+        return f"In stock: {', '.join(names)}. Right-click to copy"
+    return "Right-click to copy"
+
+
+def _reaction_caption(reaction: dict) -> str:
+    meta = reaction.get("metadata")
+    if not isinstance(meta, dict) or not meta:
+        return ""
+    parts: list[str] = []
+    name = str(meta.get("policy_name") or "").strip()
+    if name:
+        parts.append(name)
+    if meta.get("policy_probability") not in (None, ""):
+        parts.append(_probability_text(meta.get("policy_probability")))
+    if meta.get("policy_probability_rank") not in (None, ""):
+        parts.append(f"rank {meta.get('policy_probability_rank')}")
+    classification = str(meta.get("classification") or "").strip()
+    if classification:
+        parts.append(classification)
+    occurrence = meta.get("library_occurrence", meta.get("library_occurence"))
+    if occurrence not in (None, ""):
+        parts.append(f"occurs {occurrence}")
+    return " · ".join(parts)
+
+
+def _metadata_tooltip(metadata: object) -> str:
+    if not isinstance(metadata, dict) or not metadata:
+        return ""
+    return "\n".join(f"{key}: {value}" for key, value in metadata.items())
+
+
+def _format_route_value(value: object) -> str:
+    if isinstance(value, float):
+        return f"{value:.3f}"
+    if value is None or value == "":
+        return "—"
+    return str(value)
+
+
+def _probability_text(value: object) -> str:
+    try:
+        return f"{float(value):.4f}"  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _molecule_pixmap(smiles: str, width: int, height: int) -> QPixmap | None:
+    mol = Chem.MolFromSmiles(smiles) if smiles else None
+    if mol is None:
+        return None
+    try:
+        pixmap = molecule_pixmap(mol, width, height)
+    except (ValueError, RuntimeError):
+        return None
+    if pixmap.isNull():
+        return None
+    return pixmap
 
 
 class _StepWidget(QWidget):
-    """One retrosynthetic step: reaction drawing plus precursor stock labels."""
+    """Linear fallback when a route has reaction steps and no nested tree."""
 
     def __init__(self, number: int, step: dict, pixmap_for) -> None:
         super().__init__()
@@ -189,26 +782,15 @@ class _StepWidget(QWidget):
         pixmap = pixmap_for(step)
         if isinstance(pixmap, QPixmap) and not pixmap.isNull():
             image.setPixmap(pixmap)
-        else:
-            image.setText(str(step.get("product") or ""))
         root.addWidget(image)
-        caption = QLabel(_precursor_text(step))
-        caption.setWordWrap(True)
-        caption.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        root.addWidget(caption)
-
-
-def _precursor_text(step: dict) -> str:
-    parts = []
-    for reactant in step.get("reactants") or []:
-        smiles = str(reactant.get("smiles") or "").strip()
-        if not smiles:
-            continue
-        state = "in stock" if reactant.get("in_stock") else "not in stock"
-        parts.append(f"{smiles} ({state})")
-    if not parts:
-        return str(step.get("product") or "")
-    return "Precursors: " + "; ".join(parts)
+        caption = _reaction_caption({"metadata": step.get("metadata")})
+        if caption:
+            detail = QLabel(caption)
+            detail.setAlignment(Qt.AlignCenter)
+            detail.setWordWrap(True)
+            detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            detail.setToolTip(_metadata_tooltip(step.get("metadata")))
+            root.addWidget(detail)
 
 
 def _reaction_pixmap(product: str, reactants: list[str], width: int, height: int) -> QPixmap | None:
@@ -225,22 +807,6 @@ def _reaction_pixmap(product: str, reactants: list[str], width: int, height: int
         image = QImage.fromData(bytes(drawer.GetDrawingText()))
     except (ValueError, RuntimeError):
         return _molecule_pixmap(product, width, height)
-    if image.isNull():
-        return None
-    return QPixmap.fromImage(image)
-
-
-def _molecule_pixmap(smiles: str, width: int, height: int) -> QPixmap | None:
-    mol = Chem.MolFromSmiles(smiles) if smiles else None
-    if mol is None:
-        return None
-    try:
-        drawer = Draw.MolDraw2DCairo(int(width), int(height))
-        drawer.DrawMolecule(mol)
-        drawer.FinishDrawing()
-        image = QImage.fromData(bytes(drawer.GetDrawingText()))
-    except (ValueError, RuntimeError):
-        return None
     if image.isNull():
         return None
     return QPixmap.fromImage(image)
