@@ -447,6 +447,15 @@ class FilterApplyMixin:
             schedule_replot = getattr(self, "_schedule_active_plots_replot", None)
             if callable(schedule_replot):
                 schedule_replot(force=True)
+        self._finish_macro_filter_wait()
+
+    def _finish_macro_filter_wait(self) -> None:
+        """Release a macro step that is waiting on this filter pass."""
+        callback = getattr(self, "_macro_filter_done", None)
+        if callback is None:
+            return
+        self._macro_filter_done = None
+        callback()
 
     def _route_filter_apply(self, substructure_matches: tuple | None) -> None:
         """Pick sync, async SQLite, or chunked apply based on table size and filter mix."""
@@ -488,6 +497,7 @@ class FilterApplyMixin:
                 schedule_replot = getattr(self, "_schedule_active_plots_replot", None)
                 if callable(schedule_replot):
                     schedule_replot(force=True)
+            self._finish_macro_filter_wait()
             return
 
         overrides = self._normalize_substructure_overrides(substructure_matches)
@@ -636,6 +646,9 @@ class FilterApplyMixin:
                 if n_rows >= cfg.filter_async_min_rows:
                     self._invalidate_substructure_async_jobs()
                     self._start_chunked_filter_apply(None)
+                    return
+                if getattr(self, "_macro_filter_done", None) is not None:
+                    self._apply_filters_impl_sync(None)
                     return
                 return
         if not self.filters:
