@@ -110,14 +110,12 @@ removes.
 
 `workflows/macro_recipe.py` is the saved recipe: step documents, `${stepId.key}` column
 references, and `validate_recipe`. It does not run anything. `ui/macro_runner.py` plays a
-recipe by calling the same headless entry points as the tool dialogs
-(`start_descriptor_calculation`, `start_calculator_job`, `start_protonate_job`,
-`start_reaction_enumeration`, and `ui/macro_filters.py`) and waiting on a one-shot
-completion callback. The library lives in QSettings (`ui/macro_library.py`), not in the
-session file. Tools → Macros… edits and runs it.
+recipe through `dispatch_step` (`ui/command_dispatch.py`). Each step returns a `JobHandle`
+that finishes after writeback or filter apply. `ui/macro_recorder.py` appends a step when
+that handle succeeds. The library lives in QSettings (`ui/macro_library.py`), not in the
+session file. Tools → Macros… edits, records, and runs it.
 
-Those callbacks are per tool, not per job. That is enough for an explicit recipe and is
-the wrong substrate for click-by-click recording. The recording plan is
+The recording plan, including which commands are still missing, is
 [MACRO_RECORDING.md](MACRO_RECORDING.md).
 
 ## Target architecture
