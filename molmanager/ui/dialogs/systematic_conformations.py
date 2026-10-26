@@ -22,19 +22,17 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QDialog,
     QDoubleSpinBox,
-    QFormLayout,
     QMessageBox,
     QSpinBox,
     QVBoxLayout,
 )
 
 from ...conformers.openbabel_confab import SystematicConfParams, ensure_openbabel_confab_ready
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 from .conformer_output import (
     ConformerOutputOptions,
     ConformerOutputOptionsPanel,
     add_centered_run_button,
-    conformer_options_group,
 )
 from .scope import selection_scope_checked
 
@@ -52,8 +50,7 @@ class SystematicConformationsDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
-        form.setSpacing(6)
+        search, form = boxed_form("Search")
 
         self.num_confs_sb = QSpinBox()
         self.num_confs_sb.setRange(1, 10_000)
@@ -85,17 +82,19 @@ class SystematicConformationsDialog(QDialog):
         )
         form.addRow("Energy cutoff:", self.energy_sb)
 
-        root.addLayout(form)
-
         self.original_cb = QCheckBox("Include input conformation")
         self.original_cb.setToolTip(
             "Write the starting 3D geometry as the first Confab conformer (--original)."
         )
+        form.addRow("", self.original_cb)
+        root.addWidget(search)
 
+        output, out_form = boxed_form("Output")
         self.keep_hs_cb = QCheckBox("Keep explicit hydrogens")
         self.keep_hs_cb.setToolTip(
             "Leave hydrogens on the packed ensemble. Off (default) matches Stochastic."
         )
+        out_form.addRow("", self.keep_hs_cb)
 
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
@@ -105,17 +104,12 @@ class SystematicConformationsDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
+        out_form.addRow("", self.only_selected_cb)
 
         self.output_panel = ConformerOutputOptionsPanel(self)
-        root.addWidget(
-            conformer_options_group(
-                self.original_cb,
-                self.keep_hs_cb,
-                self.only_selected_cb,
-                self.output_panel.add_to_table_cb,
-            )
-        )
-        root.addWidget(self.output_panel)
+        out_form.addRow("", self.output_panel.add_to_table_cb)
+        out_form.addRow(self.output_panel)
+        root.addWidget(output)
 
         self.run_btn = add_centered_run_button(root)
         self.run_btn.clicked.connect(self._try_accept)
