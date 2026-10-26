@@ -96,7 +96,10 @@ class OutliersTab(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         ly = QVBoxLayout(self)
-        form = QFormLayout()
+        method_box = QGroupBox("Method")
+        form = QFormLayout(method_box)
+        form.setContentsMargins(8, 6, 8, 6)
+        form.setSpacing(4)
         self.outlier_method = QComboBox()
         self.outlier_method.addItems(
             [
@@ -151,7 +154,7 @@ class OutliersTab(QWidget):
         out_btn_wrap = QWidget()
         out_btn_wrap.setLayout(out_btn_row)
         form.addRow(out_btn_wrap)
-        ly.addLayout(form)
+        ly.addWidget(method_box)
 
         self.outlier_text = QTextEdit()
         self.outlier_text.setReadOnly(True)
@@ -170,7 +173,10 @@ class CurveFitTab(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         ly = QVBoxLayout(self)
-        form = QFormLayout()
+        fit_box = QGroupBox("Fit")
+        form = QFormLayout(fit_box)
+        form.setContentsMargins(8, 6, 8, 6)
+        form.setSpacing(4)
         self.fit_x = QComboBox()
         self.fit_y = QComboBox()
         form.addRow("X (predictor):", self.fit_x)
@@ -193,7 +199,7 @@ class CurveFitTab(QWidget):
         self.fit_model.currentIndexChanged.connect(self._sync_controls)
         self.btn_curve_fit = QPushButton("Fit")
         form.addRow(self.btn_curve_fit)
-        ly.addLayout(form)
+        ly.addWidget(fit_box)
         self.curve_text = QTextEdit()
         self.curve_text.setReadOnly(True)
         apply_monospace_to_text_edit(self.curve_text)
