@@ -59,7 +59,7 @@ subpackage reads as its table of contents.
 | `platform_support/` | Process, config, and runtime concerns: `config.py`, `app_logging.py`, `bundled_paths.py`, `wsl_launcher.py`, `qt_webengine_flags.py`, `rdkit_runtime_setup.py`, `memory_guards.py`, `memory_usage.py`, `performance_tracking.py`, `exception_policy.py`, `tool_progress.py` |
 | `reference/` | In-app reference content: `help_markdown.py`, `citations_catalog.py`, `method_citations.py`, `descriptor_tooltips.py` |
 | `chem/` | Core molecule handling: `molecule_conversion.py`, `smarts_macropatterns.py`, `rdkit_fingerprints.py`, `fingerprint_cache.py`, `fragment_*.py`, `reaction_*.py`, `structure_2d_depiction.py`, `structure_hydrogens.py`, `structure_neutralize.py`, `structure_source_headers.py` |
-| `descriptors/` | `catalog.py`, `descriptors_3d.py`, `medchem_descriptors.py`, `descriptor_cache_reuse.py`, `ml_feature_matrix.py` |
+| `descriptors/` | `catalog.py`, `descriptors_3d.py`, `orbitals.py`, `medchem_descriptors.py`, `descriptor_cache_reuse.py`, `ml_feature_matrix.py` |
 | `conformers/` | Generation and encoding: `conforge_generation.py`, `openbabel_confab.py`, `conformer_column_codec.py`, `ensemble_binary_codec.py`, `conformer_output.py` |
 | `ionization/` | `unipka_ensembles.py`, `unipka_enumerator.py`, `microstate_cache.py` |
 | `protein/` | Crystallographic structures and overlays: `structure_cif.py`, `structure_atoms.py`, `structure_inventory.py`, `structure_component_types.py`, `hydrogen_bonds.py`, `protein_interactions.py`, `protein_msa.py`, `pharmacophore*.py` |
@@ -105,6 +105,20 @@ When adding or changing a tool flow, extract its decision into `workflows/` firs
 Do not build new workflows on top of `AppKernel` — that protocol exposes the whole window
 (stores, table model, undo stack, timers) and depending on it reintroduces the coupling this layer
 removes.
+
+### Macros
+
+`workflows/macro_recipe.py` is the saved recipe: step documents, `${stepId.key}` column
+references, and `validate_recipe`. It does not run anything. `ui/macro_runner.py` plays a
+recipe by calling the same headless entry points as the tool dialogs
+(`start_descriptor_calculation`, `start_calculator_job`, `start_protonate_job`,
+`start_reaction_enumeration`, and `ui/macro_filters.py`) and waiting on a one-shot
+completion callback. The library lives in QSettings (`ui/macro_library.py`), not in the
+session file. Tools → Macros… edits and runs it.
+
+Those callbacks are per tool, not per job. That is enough for an explicit recipe and is
+the wrong substrate for click-by-click recording. The recording plan is
+[MACRO_RECORDING.md](MACRO_RECORDING.md).
 
 ## Target architecture
 
@@ -416,6 +430,7 @@ to `scripts/convert_session.py`, which keeps frozen v1–v3 and CSV readers.
 ## Related docs
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — coding standards, CI lint/headers, dependency audit
+- [MACRO_RECORDING.md](MACRO_RECORDING.md) — what has to change before macros can record clicks
 - [STEREO_AND_ISOMERISM.md](STEREO_AND_ISOMERISM.md)
 - [VALENCE_BONDS_AND_AROMATICITY.md](VALENCE_BONDS_AND_AROMATICITY.md)
 - [PACKAGING.md](PACKAGING.md)
