@@ -1339,6 +1339,7 @@ def test_session_omits_idle_table_search(qapp):  # noqa: ARG001
 
     doc = saved_document(w)
     assert "table_search" not in doc
+    assert "table_find_replace" not in doc
 
 
 def test_session_document_roundtrip_table_search(qapp):  # noqa: ARG001
@@ -1392,6 +1393,48 @@ def test_session_document_roundtrip_table_search(qapp):  # noqa: ARG001
     second_col = w2._search_criterion_rows[1].col_combo.currentData()
     assert second_col == w2.headers.index("SMILES")
     assert w2._selected_logical_rows() == [0]
+
+
+def test_session_document_roundtrip_find_replace(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    w.headers = ["ID_HIDDEN", "Structure", "SMILES", "Note"]
+    w._table_model.set_headers(list(w.headers))
+    w._table_model.append_row(0, {"SMILES": "CC", "Note": "ethane"})
+    w.mols[0] = Chem.MolFromSmiles("CC")
+    w.next_oid = 1
+    w._find_replace_panel.setVisible(True)
+    note_col = w.headers.index("Note")
+    w._populate_find_replace_columns(preferred_col=note_col)
+    bar = w._find_replace_bar
+    bar.find_edit.setText("eth")
+    bar.replace_edit.setText("prop")
+    bar.case_cb.setChecked(True)
+    bar.whole_cb.setChecked(True)
+    scope = bar.scope_combo.findData("table")
+    assert scope >= 0
+    bar.scope_combo.setCurrentIndex(scope)
+
+    doc = saved_document(w)
+    payload = doc.get("table_find_replace")
+    assert isinstance(payload, dict)
+    assert payload.get("visible") is True
+    assert payload.get("find") == "eth"
+    assert payload.get("replace") == "prop"
+    assert payload.get("column") == "Note"
+    assert payload.get("scope") == "table"
+    assert payload.get("case_sensitive") is True
+    assert payload.get("whole_cell") is True
+
+    w2 = ChemistryWorkspaceWindow()
+    open_saved(w, w2, doc)
+    assert not w2._find_replace_panel.isHidden()
+    restored = w2._find_replace_bar
+    assert restored.find_edit.text() == "eth"
+    assert restored.replace_edit.text() == "prop"
+    assert restored.case_cb.isChecked()
+    assert restored.whole_cb.isChecked()
+    assert restored.scope_combo.currentData() == "table"
+    assert restored.column_combo.currentData() == w2.headers.index("Note")
 
 
 def test_session_roundtrip_restores_protein_viewer(qapp, tmp_path) -> None:  # noqa: ARG001
