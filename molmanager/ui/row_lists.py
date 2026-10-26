@@ -64,6 +64,30 @@ class RowListStore:
         self._oids[key] = sorted(have)
         return created, added
 
+    def remove(self, name: str, oids: Iterable[int]) -> int:
+        """Drop *oids* from *name*. Return how many ids were removed.
+
+        An unknown list is left unchanged and returns 0. The list remains when
+        every id is removed.
+        """
+        key = normalize_list_name(name)
+        current = self._oids.get(key)
+        if not key or current is None:
+            return 0
+        drop: set[int] = set()
+        for raw in oids:
+            try:
+                drop.add(int(raw))
+            except (TypeError, ValueError):
+                continue
+        if not drop:
+            return 0
+        kept = [oid for oid in current if oid not in drop]
+        removed = len(current) - len(kept)
+        if removed:
+            self._oids[key] = kept
+        return removed
+
     def retain(self, names: Iterable[str]) -> list[str]:
         """Keep only *names* that already exist. Return the names that were removed."""
         keep = {name for name in names if name in self._oids}
