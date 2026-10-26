@@ -27,7 +27,6 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
-    QFormLayout,
     QHBoxLayout,
     QLineEdit,
     QMessageBox,
@@ -42,7 +41,7 @@ from ...table.random_number_columns import (
     RandomNumberParams,
     generate_random_values,
 )
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 from ..strings import TOOL_RANDOM_NUMBER
 from .scope import selection_scope_checked
 
@@ -90,7 +89,7 @@ class RandomNumberDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
+        output, out_form = boxed_form("Output")
         self.name_input = QLineEdit()
         self.name_input.setText("Random")
         self.name_input.setPlaceholderText("Column name")
@@ -98,8 +97,28 @@ class RandomNumberDialog(QDialog):
             "Values are written to a new column with this name. "
             "If the name already exists, a suffix like (1) is added so the existing column is kept."
         )
-        form.addRow("Column name:", self.name_input)
+        out_form.addRow("Column name:", self.name_input)
 
+        self.decimals_sb = QSpinBox()
+        self.decimals_sb.setRange(0, 12)
+        self.decimals_sb.setValue(4)
+        self.decimals_sb.setToolTip(
+            "Decimal places for continuous distributions (ignored for integers)."
+        )
+        out_form.addRow("Decimals:", self.decimals_sb)
+
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(
+                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
+            )
+        else:
+            self.only_selected_cb.setEnabled(False)
+        out_form.addRow("", self.only_selected_cb)
+        root.addWidget(output)
+
+        distribution, form = boxed_form("Distribution")
         self.dist_combo = QComboBox()
         for key, label in RANDOM_NUMBER_DISTRIBUTION_LABELS:
             self.dist_combo.addItem(label, key)
@@ -132,15 +151,9 @@ class RandomNumberDialog(QDialog):
         self.std_sb.setRange(1e-12, 1e12)
         self.std_sb.setValue(1.0)
         form.addRow("Std. deviation:", self.std_sb)
+        root.addWidget(distribution)
 
-        self.decimals_sb = QSpinBox()
-        self.decimals_sb.setRange(0, 12)
-        self.decimals_sb.setValue(4)
-        self.decimals_sb.setToolTip(
-            "Decimal places for continuous distributions (ignored for integers)."
-        )
-        form.addRow("Decimals:", self.decimals_sb)
-
+        seed, seed_form = boxed_form("Seed")
         self.use_seed_cb = QCheckBox("Use seed")
         self.use_seed_cb.setChecked(False)
         self.seed_sb = QSpinBox()
@@ -148,16 +161,8 @@ class RandomNumberDialog(QDialog):
         self.seed_sb.setValue(0)
         self.seed_sb.setEnabled(False)
         self.seed_sb.setToolTip("Fixed seed for reproducible draws.")
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(
-                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
-            )
-        else:
-            self.only_selected_cb.setEnabled(False)
-        form.addRow("Seed:", _inline_field(self.seed_sb, self.use_seed_cb, self.only_selected_cb))
-        root.addLayout(form)
+        seed_form.addRow("Seed:", _inline_field(self.seed_sb, self.use_seed_cb))
+        root.addWidget(seed)
 
         self._button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         root.addWidget(self._button_box)
