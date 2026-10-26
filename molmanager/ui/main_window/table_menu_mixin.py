@@ -31,9 +31,9 @@ from ...conformers.conformer_column_codec import (
     resolve_blocks_b64_for_viewer,
 )
 from ...docking.pose_file_io import is_poses_header
-from ...chem.molecule_conversion import mol_structure_copy_texts
 from ..compound_table_model import CompoundTableModel
 from ..strings import TOOL_RENDER_2D
+from ..structure_copy_menu import add_structure_copy_submenu
 from ..widgets import CategoryFilterCard, FilterCard, TextFilterCard
 from .table_undo_commands import (
     UndoCellTextChangeCommand,
@@ -46,39 +46,12 @@ from .table_undo_commands import (
 )
 
 
-_STRUCTURE_COPY_FORMATS: tuple[tuple[str, str, str], ...] = (
-    ("smiles", "SMILES", "Canonical isomeric SMILES."),
-    ("inchi", "InChI", "Standard InChI."),
-    ("inchikey", "InChIKey", "Standard InChIKey."),
-    ("molfile", "Molfile", "MDL molfile (V2000)."),
-    ("smarts", "SMARTS", "Daylight SMARTS."),
-)
-
-
 class TableMenuMixin:
     """Column-header, row-header, and cell context menus."""
 
     def _add_structure_copy_submenu(self, menu: QMenu, mol) -> dict:
         """Copy submenu with SMILES and other structure formats. Maps actions to (text, status)."""
-        copy_menu = menu.addMenu("Copy")
-        copy_menu.setToolTipsVisible(True)
-        texts = mol_structure_copy_texts(mol)
-        by_act: dict = {}
-        for key, label, tooltip in _STRUCTURE_COPY_FORMATS:
-            act = copy_menu.addAction(label)
-            act.setObjectName(f"copy_format_{key}")
-            act.setToolTip(tooltip)
-            txt = texts.get(key) or ""
-            usable = bool(txt.strip())
-            act.setEnabled(usable)
-            if usable:
-                status = (
-                    "Copied canonical SMILES to clipboard."
-                    if key == "smiles"
-                    else f"Copied {label} to clipboard."
-                )
-                by_act[act] = (txt, status)
-        return by_act
+        return add_structure_copy_submenu(menu, mol)
 
     def _create_header_context_menu(self, col: int):
         """Column-header context menu. Dock results windows keep Sort and Select only."""
@@ -451,26 +424,38 @@ class TableMenuMixin:
 
         sketch_act = view_poses_act = view_conformers_act = browser_act = render2d_act = None
         design_act = None
-        structure_menu = False
+        structure_col = col == CompoundTableModel.STRUCTURE_COL
+        open_section = False
+        if structure_col and oid is not None:
+            sketch_act = menu.addAction("Open in Sketcher")
+            sketch_act.setToolTip(
+                "Open this row in the sketcher. "
+                "Update Table Entry replaces this row. Add to Table adds a new one."
+            )
+            open_section = True
+        elif chem_col and mol_ctx is not None:
+            sketch_act = menu.addAction("Open in Sketcher")
+            sketch_act.setToolTip(
+                "Open this structure in the sketcher. Add to Table adds it as a new row."
+            )
+            open_section = True
         if chem_col and mol_ctx is not None:
-            sketch_act = menu.addAction("Open in Sketcher…")
             design_act = menu.addAction("Open in Design Studio")
             design_act.setToolTip(
                 "Open this structure in the Design Studio. The table row stays unchanged."
             )
-            structure_menu = True
+            open_section = True
         if packed_confs_b64 is not None and pose_column:
             view_poses_act = menu.addAction("View Poses")
-            structure_menu = True
+            open_section = True
         if packed_confs_b64 is not None:
             view_conformers_act = menu.addAction("View Conformers…")
-            structure_menu = True
-        if chem_col and mol_ctx is not None:
-            browser_act = menu.addAction("Browser…")
-            if col != CompoundTableModel.STRUCTURE_COL:
-                render2d_act = menu.addAction(TOOL_RENDER_2D)
-                render2d_act.setEnabled(oid is not None)
-        if structure_menu:
+            open_section = True
+        if chem_col and mol_ctx is not None and not structure_col:
+            render2d_act = menu.addAction(TOOL_RENDER_2D)
+            render2d_act.setEnabled(oid is not None)
+            open_section = True
+        if open_section:
             menu.addSeparator()
 
         can_copy, copy_text = self._copy_text_for_table_cell(row, col, oid)
@@ -485,16 +470,9 @@ class TableMenuMixin:
         can_paste = oid is not None and self._column_accepts_cell_paste(row, col)
         paste_act = menu.addAction("Paste")
         paste_act.setEnabled(can_paste)
-        edit_sketch_act = None
-        if col == CompoundTableModel.STRUCTURE_COL and oid is not None:
-            edit_sketch_act = menu.addAction("Edit in Sketcher")
-            edit_sketch_act.setToolTip(
-                "Edit this row's structure. Closing the sketcher asks whether to update the row."
-            )
-            edit_structure_act = menu.addAction("Edit Structure…")
-            edit_structure_act.setToolTip("Enter a SMILES, InChI, or mol block for this row.")
-        else:
-            edit_structure_act = None
+        if chem_col and mol_ctx is not None:
+            menu.addSeparator()
+            browser_act = menu.addAction("Browser…")
 
         text_editable = self._table_model.column_accepts_text_edit(col)
         edit_act = clear_act = None
@@ -515,8 +493,11 @@ class TableMenuMixin:
                 )
 
         action = menu.exec_(self.table.viewport().mapToGlobal(pos))
-        if action == sketch_act and mol_ctx is not None:
-            self.open_sketcher(sketch_mol, source_oid=oid)
+        if sketch_act is not None and action == sketch_act:
+            self.open_sketcher(
+                sketch_mol,
+                source_oid=oid if structure_col else None,
+            )
         elif design_act is not None and action == design_act and mol_ctx is not None:
             opener = getattr(self, "open_design_studio_for_molecule", None)
             if callable(opener):
@@ -553,10 +534,6 @@ class TableMenuMixin:
             QApplication.clipboard().setText(copy_text)
         elif action == paste_act and can_paste:
             self.edit_paste(origin=(row, col))
-        elif edit_sketch_act is not None and action == edit_sketch_act:
-            self.open_sketcher(sketch_mol, source_oid=oid, update_on_close=True)
-        elif edit_structure_act is not None and action == edit_structure_act:
-            self.edit_structure_cell(row)
         elif edit_act is not None and action == edit_act:
             old_t = self._table_model.cell_text(row, col) or ""
             txt, ok = QInputDialog.getText(self, "Edit value", "New value:", text=old_t)
