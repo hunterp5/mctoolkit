@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Chemistry → Reaction → R-Group Decomposition dialogs."""
+"""Chemistry → R-Group Decomposition dialogs."""
 
 from __future__ import annotations
 
