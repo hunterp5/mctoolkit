@@ -433,6 +433,11 @@ class SessionSaveMixin:
             search_payload = collect_search()
             if search_payload:
                 doc["table_search"] = search_payload
+        collect_replace = getattr(self, "collect_find_replace_session", None)
+        if callable(collect_replace):
+            replace_payload = collect_replace()
+            if replace_payload:
+                doc["table_find_replace"] = replace_payload
         collect_lists = getattr(self, "collect_row_lists_session", None)
         if callable(collect_lists):
             lists_payload = collect_lists(oids=want)
