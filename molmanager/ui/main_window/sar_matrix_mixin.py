@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QMessageBox
 
 from ...analysis.sar_matrix import SarMatrixLimit, SarObservation, build_sar_matrix
@@ -51,7 +52,7 @@ class SarMatrixMixin:
                 self,
                 TOOL_SAR_MATRIX,
                 "SAR matrix needs two substituent columns, usually R1 and R2 from "
-                "Chemistry → Reaction → R-Group Decomposition.",
+                "Chemistry → R-Group Decomposition.",
             )
             return
         from ..dialogs.sar_matrix import SarMatrixDialog
@@ -92,7 +93,27 @@ class SarMatrixMixin:
         except SarMatrixLimit as exc:
             QMessageBox.warning(self, TOOL_SAR_MATRIX, str(exc))
             return
-        self._show_sar_matrix(matrix, higher_is_better=params.higher_is_better)
+        except (TypeError, ValueError, RuntimeError, MemoryError, OverflowError) as exc:
+            QMessageBox.warning(
+                self, TOOL_SAR_MATRIX, str(exc) or "Could not build the SAR matrix."
+            )
+            return
+        higher = params.higher_is_better
+        # The grid used to open inside this slot, which is still inside the
+        # settings dialog's click. Showing that window and closing it again
+        # fail-fasts in CoreMessaging.dll on Windows 10. Open it on the next turn.
+        QTimer.singleShot(
+            0,
+            lambda matrix=matrix, higher=higher: self._open_built_sar_matrix(
+                matrix, higher_is_better=higher
+            ),
+        )
+
+    def _open_built_sar_matrix(self, matrix, *, higher_is_better: bool) -> None:
+        try:
+            self._show_sar_matrix(matrix, higher_is_better=higher_is_better)
+        except (RuntimeError, TypeError, ValueError) as exc:
+            QMessageBox.warning(self, TOOL_SAR_MATRIX, str(exc) or "Could not open the SAR matrix.")
 
     def _show_sar_matrix(self, matrix, *, higher_is_better: bool) -> None:
         from ..sar_matrix_panel import SarMatrixPanel, SarMatrixWindow
@@ -112,14 +133,15 @@ class SarMatrixMixin:
                 existing.show()
                 existing.raise_()
                 return
-        dialog = SarMatrixWindow(self)
-        dialog._panel.set_matrix(matrix, higher_is_better=higher_is_better)
+        # Dock the panel itself. A floating shell that is shown and then
+        # destroyed in the same turn is what Windows aborts on.
+        panel = SarMatrixPanel(self, self)
+        panel.set_matrix(matrix, higher_is_better=higher_is_better)
+        dock = getattr(self, "dock_plot_widget", None)
+        if callable(dock) and dock(panel):
+            self._sar_matrix_dialog = None
+            return
+        dialog = SarMatrixWindow(self, panel=panel)
         self._sar_matrix_dialog = dialog
         dialog.show()
-        dock = getattr(self, "dock_plot_widget", None)
-        if callable(dock) and dock(dialog._panel):
-            from ..dockable_plot import discard_host_dialog_after_dock
-
-            discard_host_dialog_after_dock(dialog, self, "_sar_matrix_dialog")
-            return
         self.status_label.setText("SAR matrix: opened.")
