@@ -27,7 +27,7 @@ pActivity is read from the column you choose. LogP is taken from a LogP column w
 ## Workflow
 
 1. Use a p-scale activity column. Raw IC50 or Ki is not LipE.
-2. Open **Data → MedChem Plots → LipE plot**. Settings open so you can choose the activity column.
+2. Open **Data → MedChem Plots → LipE**. Settings open so you can choose the activity column.
 3. Choose **pActivity from**, then **Run**.
 4. Read the diagonals: the solid line is LipE 5. The in-scope count and how many compounds reach LipE 5 are written to the in-app Log.
 5. Use **LipE ≥ 5** to focus follow-up tools.
