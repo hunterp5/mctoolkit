@@ -46,7 +46,7 @@ from ...analysis.mpo_scoring import (
     DesirabilityKind,
     DesirabilitySpec,
 )
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 from .scope import selection_scope_checked
 
 if TYPE_CHECKING:
@@ -183,7 +183,7 @@ class MPOScoringDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        top = QFormLayout()
+        output, top = boxed_form("Output")
         self.out_edit = QLineEdit("MPO_Score")
         self.out_edit.setToolTip("Overall desirability column written to the table.")
         top.addRow("Output column:", self.out_edit)
@@ -206,7 +206,15 @@ class MPOScoringDialog(QDialog):
         self.decimals_sb.setRange(0, 8)
         self.decimals_sb.setValue(4)
         top.addRow("Decimals:", self.decimals_sb)
-        root.addLayout(top)
+
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
+        else:
+            self.only_selected_cb.setEnabled(False)
+        top.addRow("", self.only_selected_cb)
+        root.addWidget(output)
 
         crit_box = QGroupBox("Property criteria")
         crit_lyt = QVBoxLayout(crit_box)
@@ -267,14 +275,6 @@ class MPOScoringDialog(QDialog):
         self.hint.setStyleSheet("color: #444;")
         self.edit_form.addRow(self.hint)
         root.addWidget(edit_box)
-
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
-        else:
-            self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
 
         self._button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         root.addWidget(self._button_box)
