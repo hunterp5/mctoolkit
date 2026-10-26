@@ -183,7 +183,13 @@ class SketchWidgetEventsMixin:
                 self._drag_candidate = None
 
             # Click on bond applies the active bond tool (order / stereo / dative / wavy).
-            if isinstance(self.hover, tuple) and self.hover[0] == "bond" and not self.erase_mode:
+            # A ring template uses that same click to fuse onto the bond.
+            if (
+                isinstance(self.hover, tuple)
+                and self.hover[0] == "bond"
+                and not self.erase_mode
+                and not self.active_template
+            ):
                 bi = self.hover[1]
                 changed = self._apply_active_bond_tool(bi)
                 self._mouse_down_pos = None

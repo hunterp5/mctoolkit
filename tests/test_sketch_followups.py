@@ -18,12 +18,76 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import QPoint
+from PyQt5.QtCore import QEvent, QPoint, Qt
+from PyQt5.QtGui import QMouseEvent
 from PyQt5.QtWidgets import QApplication
 from rdkit import Chem
 
-from molmanager.ui.sketcher.bonds import _bond_make
+from molmanager.ui.sketcher.bonds import _bond_make, _bond_unpack
 from molmanager.ui.sketcher.widget import SketchWidget
+
+
+def _click(widget: SketchWidget, pos: QPoint) -> None:
+    """Move, press, and release the left button at *pos* in widget coordinates."""
+    move = QMouseEvent(QEvent.MouseMove, pos, Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+    press = QMouseEvent(QEvent.MouseButtonPress, pos, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    release = QMouseEvent(
+        QEvent.MouseButtonRelease, pos, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier
+    )
+    widget.mouseMoveEvent(move)
+    widget.mousePressEvent(press)
+    widget.mouseReleaseEvent(release)
+
+
+def _bond_midpoint_widget(widget: SketchWidget, bond_index: int) -> QPoint:
+    a_id, b_id, _order, _stereo = _bond_unpack(widget.bonds[bond_index])
+    na = next(node for node in widget.nodes if node["id"] == a_id)
+    nb = next(node for node in widget.nodes if node["id"] == b_id)
+    mid = QPoint(
+        (na["pos"].x() + nb["pos"].x()) // 2,
+        (na["pos"].y() + nb["pos"].y()) // 2,
+    )
+    return widget._model_point_to_widget(mid)
+
+
+def test_ring_template_click_on_bond_fuses(qapp) -> None:  # noqa: ARG001
+    """A highlighted bond click fuses the active ring instead of editing that bond."""
+    widget = SketchWidget()
+    widget.resize(640, 480)
+    widget.place_template("Cyclohexyl", center=QPoint(200, 200))
+    _a, _b, order, stereo = _bond_unpack(widget.bonds[0])
+    widget.active_template = "Benzene"
+    widget.active_bond_order = 2
+    mid = _bond_midpoint_widget(widget, 0)
+    move = QMouseEvent(QEvent.MouseMove, mid, Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+    widget.mouseMoveEvent(move)
+    assert widget.hover == ("bond", 0)
+    _click(widget, mid)
+    assert len(widget.nodes) == 10
+    assert _bond_unpack(widget.bonds[0])[2:] == (order, stereo)
+
+
+def test_ring_template_click_on_atom_attaches(qapp) -> None:  # noqa: ARG001
+    widget = SketchWidget()
+    widget.resize(640, 480)
+    widget.place_template("Cyclohexyl", center=QPoint(200, 200))
+    before = len(widget.nodes)
+    widget.active_template = "Cyclopropane"
+    atom = widget._model_point_to_widget(widget.nodes[0]["pos"])
+    _click(widget, atom)
+    assert len(widget.nodes) == before + 2
+
+
+def test_bond_click_without_template_sets_order(qapp) -> None:  # noqa: ARG001
+    widget = SketchWidget()
+    widget.resize(640, 480)
+    widget.place_template("Cyclohexyl", center=QPoint(200, 200))
+    widget.active_template = None
+    widget.active_bond_order = 2
+    mid = _bond_midpoint_widget(widget, 0)
+    _click(widget, mid)
+    assert len(widget.nodes) == 6
+    assert _bond_unpack(widget.bonds[0])[2] == 2
 
 
 def test_naphthalene_fuses_onto_a_bond(qapp) -> None:  # noqa: ARG001

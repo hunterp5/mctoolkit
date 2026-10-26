@@ -23,7 +23,7 @@ import math
 from PyQt5.QtCore import QPoint
 from PyQt5.QtWidgets import QWidget
 
-from molmanager.ui.sketcher.bonds import _bond_make
+from molmanager.ui.sketcher.bonds import _bond_make, _bond_unpack
 from molmanager.ui.sketcher.dialog import SketcherDialog
 from molmanager.ui.sketcher.iupac_rings import (
     exterior_ring_substituent_direction,
@@ -386,6 +386,59 @@ def test_bond_width_near_label_stroke() -> None:
     # Roughly on the order of a few pixels; within GR-1.2 vs ACS baseline.
     assert 1.0 <= style.bond_width_px <= 8.0
     assert 4 <= style.hash_bar_count <= 10
+
+
+def _screen_cross(ax: float, ay: float, bx: float, by: float, px: float, py: float) -> float:
+    """Signed area of A→B against A→P in screen coordinates."""
+    return (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+
+
+def _fused_atoms_are_outside(widget: SketchWidget, bond_index: int, old_ids: set[int]) -> bool:
+    """True when every new atom sits across the bond from the ring it was fused to."""
+    a_id, b_id, _order, _stereo = _bond_unpack(widget.bonds[bond_index])
+    na = next(node for node in widget.nodes if node["id"] == a_id)
+    nb = next(node for node in widget.nodes if node["id"] == b_id)
+    ax, ay = float(na["pos"].x()), float(na["pos"].y())
+    bx, by = float(nb["pos"].x()), float(nb["pos"].y())
+    old = [node for node in widget.nodes if node["id"] in old_ids]
+    cx = sum(float(node["pos"].x()) for node in old) / len(old)
+    cy = sum(float(node["pos"].y()) for node in old) / len(old)
+    interior = _screen_cross(ax, ay, bx, by, cx, cy)
+    new_nodes = [node for node in widget.nodes if node["id"] not in old_ids]
+    if not new_nodes or abs(interior) < 1.0:
+        return False
+    for node in new_nodes:
+        side = _screen_cross(ax, ay, bx, by, float(node["pos"].x()), float(node["pos"].y()))
+        if side * interior >= 0:
+            return False
+        nearest = min(
+            math.hypot(node["pos"].x() - other["pos"].x(), node["pos"].y() - other["pos"].y())
+            for other in old
+        )
+        if nearest < 20.0:
+            return False
+    return True
+
+
+def test_fused_ring_sits_outside_the_attached_ring(qapp) -> None:  # noqa: ARG001
+    """Ortho-fusion shares the clicked bond and grows away from that ring."""
+    for template in ("Benzene", "Cyclopentyl", "Cyclopropane"):
+        for bond_index in range(6):
+            widget = SketchWidget()
+            widget.resize(800, 600)
+            widget._median_bond_length_px = 60.0
+            widget.place_template("Cyclohexyl", center=QPoint(400, 300))
+            old_ids = {node["id"] for node in widget.nodes}
+            widget.place_template(template, fuse_bond=bond_index)
+            assert _fused_atoms_are_outside(widget, bond_index, old_ids)
+
+    widget = SketchWidget()
+    widget.resize(800, 600)
+    widget._median_bond_length_px = 60.0
+    widget.place_template("Cyclohexyl", center=QPoint(400, 300))
+    old_ids = {node["id"] for node in widget.nodes}
+    widget.place_template("Naphthalene", fuse_bond=2)
+    assert _fused_atoms_are_outside(widget, 2, old_ids)
 
 
 def test_spiro_and_fusion_placement(qapp) -> None:  # noqa: ARG001

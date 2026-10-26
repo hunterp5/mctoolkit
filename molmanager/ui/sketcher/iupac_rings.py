@@ -556,8 +556,9 @@ def fusion_ring_offsets_for_bond(
     """
     Absolute Y-up positions for an ortho-fused ring sharing bond A–B (GR-3.3.3).
 
-    Vertices 0 and 1 of the new ring map to A and B; remaining vertices lie on
-    *prefer_side* of the directed bond A→B (screen/Y-up cross product).
+    Vertices 0 and 1 of the new ring map to A and B. Remaining vertices lie where
+    the Y-up cross product ``(B-A) × (P-A)`` has the sign of *prefer_side*
+    (+1 is left of A→B). Side is chosen by mirroring across the bond.
     """
     n = max(3, int(n_atoms))
     bl = max(float(bond_length), 1.0)
@@ -565,8 +566,6 @@ def fusion_ring_offsets_for_bond(
     length = math.hypot(dx, dy) or 1.0
     ux, uy = dx / length, dy / length
     px, py = -uy, ux
-    if prefer_side < 0:
-        px, py = -px, -py
     # Large fused rings still prefer reentrant GR-3.3.2 geometry when n≥9.
     local = ring_vertex_offsets_y_up(n, bond_length=bl)
     lx0, ly0 = local[0]
