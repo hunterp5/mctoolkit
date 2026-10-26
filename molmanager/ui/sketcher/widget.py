@@ -207,6 +207,7 @@ class SketchWidget(
         self._median_bond_length_px = float(SKETCH_MEDIAN_BOND_PX)
         self._view_scale = 1.0
         self._view_pan = QPointF(0.0, 0.0)
+        self._opened_render: dict[str, Any] | None = None
         self._last_structure_paint = ""
         self._rdkit_sketch_paint_cache_key = None
         self._rdkit_sketch_paint_cache = None
@@ -2417,6 +2418,7 @@ class SketchWidget(
         self._stereo_label_node_ids.clear()
         self._clear_salt_bundle()
         self._last_selection_status = ((), (), False)
+        self._opened_render = None
         self._after_sketch_edit(notify=True, notify_if_valence_failed=True)
         if push_undo and had_sketch:
             self._report_status("Sketch cleared.")
@@ -2514,6 +2516,75 @@ class SketchWidget(
         else:
             self.update()
         return True
+
+    def has_opened_render(self) -> bool:
+        """True after a structure was loaded from the table (or another molecule open)."""
+        snap = getattr(self, "_opened_render", None)
+        return bool(snap and snap.get("positions"))
+
+    def remember_opened_render(self) -> None:
+        """Remember atom positions and view scale from the structure just opened."""
+        positions = {int(n["id"]): QPoint(int(n["pos"].x()), int(n["pos"].y())) for n in self.nodes}
+        if not positions:
+            self._opened_render = None
+            return
+        median = self._median_bond_length_sketch_px() or float(SKETCH_MEDIAN_BOND_PX)
+        self._opened_render = {
+            "positions": positions,
+            "scale": float(self._view_scale),
+            "pan": QPointF(self._view_pan),
+            "median": float(median),
+        }
+
+    def restore_opened_render(self) -> bool:
+        """Put the sketch back to the size it had when it was opened.
+
+        The same atoms return to their opened positions. If atoms were added or
+        removed, bond lengths are scaled back to that opened size instead.
+        """
+        snap = getattr(self, "_opened_render", None)
+        if not snap or not snap.get("positions"):
+            return False
+        saved: dict[int, QPoint] = snap["positions"]
+        current = {int(n["id"]) for n in self.nodes}
+        if current and current == set(saved):
+            for node in self.nodes:
+                pos = saved[int(node["id"])]
+                node["pos"] = QPoint(pos.x(), pos.y())
+        else:
+            self._scale_sketch_to_median_bond(float(snap["median"]))
+        self._view_scale = float(snap["scale"])
+        pan = snap["pan"]
+        self._view_pan = QPointF(pan.x(), pan.y())
+        self._refresh_sketch_draw_metrics()
+        self._after_sketch_edit(notify=True, notify_if_valence_failed=True)
+        return True
+
+    def _scale_sketch_to_median_bond(self, target: float) -> None:
+        """Scale atom positions about their centroid so the median bond is *target* px."""
+        current = self._median_bond_length_sketch_px()
+        if not self.nodes or not current or target <= 0 or abs(current - target) < 0.5:
+            return
+        factor = float(target) / float(current)
+        cx = sum(float(n["pos"].x()) for n in self.nodes) / len(self.nodes)
+        cy = sum(float(n["pos"].y()) for n in self.nodes) / len(self.nodes)
+        for node in self.nodes:
+            node["pos"] = QPoint(
+                int(round(cx + (float(node["pos"].x()) - cx) * factor)),
+                int(round(cy + (float(node["pos"].y()) - cy) * factor)),
+            )
+        if self.reaction_arrow is not None:
+            a, b = self.reaction_arrow
+            self.reaction_arrow = (
+                QPoint(
+                    int(round(cx + (float(a.x()) - cx) * factor)),
+                    int(round(cy + (float(a.y()) - cy) * factor)),
+                ),
+                QPoint(
+                    int(round(cx + (float(b.x()) - cx) * factor)),
+                    int(round(cy + (float(b.y()) - cy) * factor)),
+                ),
+            )
 
     def ensure_sketch_fits_viewport(
         self, *, margin: int | None = None, refresh: bool = True
