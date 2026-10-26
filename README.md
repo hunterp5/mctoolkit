@@ -314,6 +314,10 @@ macOS has no official Gnina binary. See **Protein → Dock Ligand** in the app a
 
 Distance-geometry ensembles remain **Chemistry → Conformations → Generate → Stochastic…** (RDKit ETKDG; no Open Babel).
 
+### HOMO / LUMO (xtb)
+
+**Calculate Descriptors → Electronic** can write **HOMO (eV)**, **LUMO (eV)**, and **HOMO-LUMO gap (eV)**. Those columns are a gas-phase GFN2-xTB single point on the lowest-energy conformer in **confs** when that column exists. A 2D structure is embedded once (ETKDG) and minimized with MMFF94 (UFF fallback) for the single point only. Install the [`xtb` binary](https://github.com/grimme-lab/xtb) and set it under Settings → Configure → xtb, or `pip install tblite` when the binary is not available. The geometry is not reoptimized with xTB.
+
 ### CONFORGE conformers (CDPKit)
 
 **Chemistry → Conformations → Generate → CONFORGE…** uses CONFORGE from [CDPKit](https://cdpkit.org).
