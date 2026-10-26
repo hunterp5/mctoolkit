@@ -136,6 +136,21 @@ def test_sketcher_edit_menu_has_copy_paste_delete(qapp) -> None:  # noqa: ARG001
     edit = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Edit")
     labels = [a.text().replace("&", "") for a in edit.actions() if not a.isSeparator()]
     assert labels[:5] == ["Undo", "Redo", "Copy", "Paste", "Delete Selection"]
+    assert "Copy as" in labels
+    assert "Clear Sketch" in labels
+    copy_as = next(action.menu() for action in edit.actions() if action.text() == "Copy as")
+    assert [action.text() for action in copy_as.actions()] == [
+        "SMILES",
+        "Selected SMILES",
+        "SMARTS",
+        "Molfile",
+        "Image",
+    ]
+    dlg.canvas.nodes = [
+        {"id": 1, "pos": QPoint(40, 40), "element": "C"},
+    ]
+    dlg._act_canvas_clear.trigger()
+    assert dlg.canvas.nodes == []
     dlg.close()
 
 
