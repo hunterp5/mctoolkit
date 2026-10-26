@@ -12,11 +12,12 @@ Use before expensive assays, docking, or visual review when the library is too r
 
 ## Inputs / scope
 
-Fingerprints from the chosen structure source and fingerprint type; optional **Selected Rows Only** as the pool to pick from.
+A fingerprint, one or more numeric columns, or both. Fingerprints come from the chosen structure source. Numeric columns must be complete on a row for that row to stay in the pool. Optional **Selected Rows Only** limits the pool.
 
 ## Options
 
-- **Structure source** and **Fingerprint**.
+- **Structure source** and **Fingerprint**. **None** uses numeric columns only.
+- **Numeric columns**. Checked columns are part of the distance. **Standardize Numeric Columns** puts them on a common scale. With a fingerprint, the bits are rescaled so those columns still affect the pick.
 - **Algorithm** - **Auto** (exact when small, Fast when large), **Exact MaxMin**, **Fast** (staged prefilter + MaxMin).
 - **Subset size** - how many rows to pick.
 - **Selected Rows Only** - restrict the candidate pool.
@@ -27,7 +28,7 @@ Fingerprints from the chosen structure source and fingerprint type; optional **S
 ## Workflow
 
 1. Filter to the candidate pool (or select rows).
-2. Choose FP + algorithm and **Subset size**.
+2. Choose a fingerprint, numeric columns, or both, then the algorithm and **Subset size**.
 3. Optionally enable rank column and table selection.
 4. Run and export or analyze the diverse picks.
 
@@ -39,4 +40,4 @@ Fingerprints from the chosen structure source and fingerprint type; optional **S
 
 ## Tips and limits
 
-Diversity is fingerprint-space diversity, not guaranteed property diversity. Exact MaxMin is costly on huge pools - use **Fast** or **Auto**. If the pool is smaller than subset size, you get the whole pool.
+Fingerprint-only picks use Tanimoto distance. Numeric columns, alone or combined with a fingerprint, use Euclidean distance. **Fast** on a numeric or combined pool MaxMin-picks inside a random candidate sample. Exact MaxMin is costly on huge pools. If the pool is smaller than the subset size, you get the whole pool.

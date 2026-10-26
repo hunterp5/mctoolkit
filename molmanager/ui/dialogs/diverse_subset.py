@@ -20,7 +20,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -28,13 +30,17 @@ from PyQt5.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
 )
 
+from ...analysis.dimensionality_reduction import is_fingerprint_bitcount_column
 from ...chem.rdkit_fingerprints import (
     SIMILARITY_FP_TYPE_LABELS,
     descriptor_onbits_column_aliases,
@@ -47,6 +53,7 @@ from ...workers.diverse_subset_worker import (
     DIVERSE_SUBSET_MODE_LABELS,
     DiverseSubsetRequest,
     DiverseSubsetWorker,
+    fingerprint_requested,
 )
 from ..qt_widget_utils import make_window_minimizable
 from ..analysis_job_support import enqueue_process_queue_job
@@ -57,8 +64,11 @@ _OID_SCAN_PUMP_EVERY = 4096
 _DEFAULT_COLUMN = "Diverse subset rank"
 
 
+_FP_NONE_LABEL = "None"
+
+
 class DiverseSubsetDialog(QDialog):
-    """Pick a maximally diverse compound subset using fingerprint MaxMin (Tanimoto distance)."""
+    """Pick a diverse subset from a fingerprint, numeric columns, or both."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -94,9 +104,32 @@ class DiverseSubsetDialog(QDialog):
         feat_form.addRow("Structure source:", self.src_combo)
 
         self.fp_combo = QComboBox()
+        self.fp_combo.addItem(_FP_NONE_LABEL)
         self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
         select_default_fingerprint(self.fp_combo)
+        self.fp_combo.setToolTip(
+            "None uses the checked numeric columns only. Otherwise MaxMin uses this "
+            "fingerprint, alone or together with those columns."
+        )
         feat_form.addRow("Fingerprint:", self.fp_combo)
+
+        feat_form.addRow(QLabel("Numeric columns:"))
+        self.column_list = QListWidget()
+        self.column_list.setMinimumHeight(72)
+        self.column_list.setMaximumHeight(120)
+        self.column_list.setSelectionMode(QAbstractItemView.NoSelection)
+        self.column_list.setToolTip(
+            "Checked columns are compared by Euclidean distance. "
+            "With a fingerprint, the bits are rescaled so the columns still affect the pick."
+        )
+        feat_form.addRow(self.column_list)
+
+        self.standardize_cb = QCheckBox("Standardize Numeric Columns")
+        self.standardize_cb.setChecked(True)
+        self.standardize_cb.setToolTip(
+            "Zero mean and unit variance on the checked columns. Fingerprint bits are not standardized."
+        )
+        feat_form.addRow("", self.standardize_cb)
 
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
@@ -128,7 +161,8 @@ class DiverseSubsetDialog(QDialog):
         n_rows = self._table_row_count
         self.subset_size_spin.setValue(min(50, max(1, n_rows)))
         self.subset_size_spin.setToolTip(
-            "Number of compounds to keep in the diverse subset (MaxMin on Tanimoto distance)."
+            "Number of compounds to keep. Fingerprints use Tanimoto distance. "
+            "Numeric columns use Euclidean distance."
         )
         subset_form.addRow("Subset size:", self.subset_size_spin)
 
@@ -164,8 +198,81 @@ class DiverseSubsetDialog(QDialog):
 
     def _wire_diverse_subset_ui(self) -> None:
         self.run_btn.clicked.connect(self.run)
+        self.fp_combo.currentTextChanged.connect(self._sync_feature_controls)
+        self.column_list.itemChanged.connect(self._sync_feature_controls)
+        self.only_selected_cb.stateChanged.connect(self._reload_numeric_columns)
         self._refresh_structure_sources()
+        self._reload_numeric_columns()
         make_window_minimizable(self)
+
+    def _use_fingerprints(self) -> bool:
+        return fingerprint_requested(self.fp_combo.currentText())
+
+    def _selected_feature_columns(self) -> list[str]:
+        columns: list[str] = []
+        for index in range(self.column_list.count()):
+            item = self.column_list.item(index)
+            if item is not None and item.checkState() == Qt.Checked:
+                columns.append(item.text())
+        return columns
+
+    def _reload_numeric_columns(self, _state: int = 0) -> None:
+        from ..table_dataframe import scoped_table_column_names
+
+        checked = set(self._selected_feature_columns())
+        self.column_list.blockSignals(True)
+        self.column_list.clear()
+        try:
+            if self.parent_app is not None:
+                only_sel = selection_scope_checked(self)
+                _all_cols, numeric_cols = scoped_table_column_names(
+                    self.parent_app, visible_only=False, only_selected=only_sel
+                )
+                for col in numeric_cols:
+                    item = QListWidgetItem(col)
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    item.setCheckState(Qt.Checked if col in checked else Qt.Unchecked)
+                    self.column_list.addItem(item)
+        finally:
+            self.column_list.blockSignals(False)
+        self._sync_feature_controls()
+
+    def _sync_feature_controls(self, *_args) -> None:
+        use_fp = self._use_fingerprints()
+        has_cols = bool(self._selected_feature_columns())
+        self.src_combo.setEnabled(use_fp)
+        self.standardize_cb.setEnabled(has_cols)
+
+    def _numeric_vectors(self, columns: list[str], only_selected: bool):
+        """Complete numeric rows keyed by OID. ``None`` means the user was already warned."""
+        import numpy as np
+        import pandas as pd
+
+        from ..table_dataframe import table_to_dataframe
+
+        app = self.parent_app
+        assert app is not None
+        df, source_rows = table_to_dataframe(app, visible_only=False, only_selected=only_selected)
+        missing = [col for col in columns if col not in df.columns]
+        if missing:
+            QMessageBox.warning(
+                self,
+                "Diverse Subset",
+                "These columns are not in the current scope: " + ", ".join(missing),
+            )
+            return None
+        oids: list[int] = []
+        for row in source_rows:
+            text = app._table_model.cell_text(row, 0)
+            oids.append(int(text) if text.isdigit() else int(row))
+        numeric = df[columns].apply(pd.to_numeric, errors="coerce")
+        out: dict[int, np.ndarray] = {}
+        for pos, oid in enumerate(oids):
+            values = numeric.iloc[pos]
+            if not bool(values.notna().all()):
+                continue
+            out[int(oid)] = values.to_numpy(dtype=np.float64, copy=True)
+        return out
 
     def _selected_mode_key(self) -> str:
         return str(self.mode_combo.currentData() or "auto")
@@ -249,8 +356,47 @@ class DiverseSubsetDialog(QDialog):
             return
 
         fp_choice = self.fp_combo.currentText()
+        use_fp = self._use_fingerprints()
+        columns = self._selected_feature_columns()
+        if not use_fp and not columns:
+            app.status_label.setText(
+                "Diverse subset: select a fingerprint, one or more numeric columns, or both."
+            )
+            return
+        if (
+            columns
+            and len(columns) == 1
+            and is_fingerprint_bitcount_column(columns[0])
+            and not use_fp
+        ):
+            QMessageBox.warning(
+                self,
+                "Diverse Subset",
+                f"The column “{columns[0]}” stores only the number of on-bits, not the full "
+                "fingerprint vector.\n\n"
+                "Choose a fingerprint type other than None, or select more numeric columns.",
+            )
+            return
+        numeric_by_oid = None
+        if columns:
+            numeric_by_oid = self._numeric_vectors(columns, only_sel)
+            if numeric_by_oid is None:
+                return
+            if len(numeric_by_oid) < 2:
+                app.status_label.setText(
+                    "Diverse subset: need at least two rows with complete values "
+                    "in the selected columns."
+                )
+                return
+            oids = [oid for oid in oids if oid in numeric_by_oid]
+            if not oids:
+                app.status_label.setText(
+                    "Diverse subset: no rows in this scope have complete column values."
+                )
+                return
+
         mode = self._selected_mode_key()
-        self._onbits_column = self._matching_onbits_column(fp_choice)
+        self._onbits_column = self._matching_onbits_column(fp_choice) if use_fp else None
         use_onbits_col = self._onbits_column is not None
         onbits_by_oid = None
         if use_onbits_col:
@@ -304,13 +450,15 @@ class DiverseSubsetDialog(QDialog):
             if reply != QMessageBox.Yes:
                 return
 
-        payloads = app.collect_scoped_table_structure_payloads(src, only_selected=only_sel)
-        if not payloads:
-            app.status_label.setText(
-                "Diverse subset: no molecules available for this structure source "
-                "(load/prepare structures first)."
-            )
-            return
+        payloads = None
+        if use_fp:
+            payloads = app.collect_scoped_table_structure_payloads(src, only_selected=only_sel)
+            if not payloads:
+                app.status_label.setText(
+                    "Diverse subset: no molecules available for this structure source "
+                    "(load/prepare structures first)."
+                )
+                return
 
         self._scope_oids = list(oids)
         self._pending_column_name = ""
@@ -323,7 +471,7 @@ class DiverseSubsetDialog(QDialog):
         }
         sig = app._ensure_diverse_subset_signals()
         req = DiverseSubsetRequest(
-            fp_choice=fp_choice,
+            fp_choice=fp_choice if use_fp else "",
             subset_size=k,
             oids=list(oids),
             structure_source=src,
@@ -332,22 +480,26 @@ class DiverseSubsetDialog(QDialog):
             onbits_by_oid=onbits_by_oid,
             use_onbits_column=use_onbits_col,
             mode=mode,
+            numeric_by_oid=numeric_by_oid,
+            standardize_numeric=bool(columns) and self.standardize_cb.isChecked(),
         )
+
+        def _worker(ev, ps, r=req, pl=payloads, s=sig):
+            mols = None
+            if pl:
+                mols = {oid: mol for oid, mol in mols_from_payloads(pl) if oid is not None}
+            return DiverseSubsetWorker(
+                replace(r, mols_by_oid=mols),
+                s,
+                cancel_event=ev,
+                progress_state=ps,
+            )
+
         enqueue_process_queue_job(
             app,
             "Diverse subset",
             n_est,
-            lambda ev, ps, r=req, pl=payloads, s=sig: DiverseSubsetWorker(
-                replace(
-                    r,
-                    mols_by_oid={
-                        oid: mol for oid, mol in mols_from_payloads(pl) if oid is not None
-                    },
-                ),
-                s,
-                cancel_event=ev,
-                progress_state=ps,
-            ),
+            _worker,
             queue_label=f"Diverse subset ({n_est} rows, pick {k}, {mode})",
         )
         self.close()

@@ -332,12 +332,42 @@ def test_diverse_subset_worker_resolves_structure_texts():
     assert len(sig.picked) == 2
 
 
+def test_numeric_columns_pick_the_extremes():
+    import numpy as np
+
+    from molmanager.workers.diverse_subset_worker import maxmin_euclidean_pick
+
+    features = np.array([[0.0], [0.1], [10.0]])
+    assert maxmin_euclidean_pick(features, 2) == [0, 2]
+    sig = _CaptureSignals()
+    worker = DiverseSubsetWorker(
+        DiverseSubsetRequest(
+            fp_choice="",
+            subset_size=2,
+            oids=[1, 2, 3],
+            numeric_by_oid={
+                1: np.array([0.0]),
+                2: np.array([0.1]),
+                3: np.array([10.0]),
+            },
+            standardize_numeric=False,
+            mode="exact",
+        ),
+        sig,
+    )
+    worker.run()
+    assert sig.err is None
+    assert sig.picked == [1, 3]
+
+
 def test_diverse_subset_dialog_mode_uses_item_data(qapp):  # noqa: ARG001
     from molmanager.ui.dialogs.diverse_subset import DiverseSubsetDialog
 
     dlg = DiverseSubsetDialog(None)
     try:
+        assert dlg.fp_combo.itemText(0) == "None"
         assert dlg.fp_combo.currentText() == "Morgan (r=2, n=2048)"
+        assert not dlg.standardize_cb.isEnabled()
         keys = [dlg.mode_combo.itemData(i) for i in range(dlg.mode_combo.count())]
         assert keys == [k for k, _ in DIVERSE_SUBSET_MODE_LABELS]
         dlg.mode_combo.setCurrentIndex(keys.index("fast"))

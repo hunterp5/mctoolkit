@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""MaxMin diverse subset selection from molecular fingerprints."""
+"""MaxMin diverse subset selection from fingerprints, numeric columns, or both."""
 
 from __future__ import annotations
 
@@ -78,6 +78,8 @@ class DiverseSubsetRequest:
     onbits_by_oid: dict[int, str] | None = None
     use_onbits_column: bool = False
     mode: str = "auto"
+    numeric_by_oid: dict[int, np.ndarray] | None = None
+    standardize_numeric: bool = True
 
 
 class _Cancelled(Exception):
@@ -137,6 +139,61 @@ def build_diverse_subset_pool(
         fp = cache_get(int(oid), internal_key)
         pool.append(DiverseSubsetPoolRow(oid=int(oid), mol=mol, fp=fp))
     return pool, None
+
+
+def fingerprint_requested(fp_choice: str | None) -> bool:
+    """False when the dialog chose numeric columns without a fingerprint."""
+    return (fp_choice or "").strip().lower() not in {"", "none"}
+
+
+def maxmin_euclidean_pick(
+    features: np.ndarray,
+    pick_size: int,
+    *,
+    seed: int = -1,
+    cancel_event: threading.Event | None = None,
+    on_pick: Callable[[int], None] | None = None,
+) -> list[int]:
+    """MaxMin on Euclidean distance. ``features`` is one row per compound."""
+    matrix = np.asarray(features, dtype=np.float64)
+    n = int(matrix.shape[0]) if matrix.ndim == 2 else 0
+    if pick_size <= 0 or n == 0:
+        return []
+    if pick_size >= n:
+        return list(range(n))
+    k = int(pick_size)
+    first = _first_pick_index(n, seed)
+    picked = [first]
+    min_dist = np.full(n, np.inf, dtype=np.float64)
+    min_dist[first] = 0.0
+    picked_mask = np.zeros(n, dtype=bool)
+    picked_mask[first] = True
+    progress_step = max(1, k // 200)
+    for step in range(1, k):
+        if cancel_event is not None and cancel_event.is_set():
+            raise _Cancelled()
+        delta = matrix - matrix[picked[-1]]
+        dists = np.sqrt(np.einsum("ij,ij->i", delta, delta))
+        np.minimum(min_dist, dists, out=min_dist)
+        min_dist[picked_mask] = -1.0
+        nxt = int(np.argmax(min_dist))
+        picked.append(nxt)
+        picked_mask[nxt] = True
+        if on_pick is not None and (step + 1) % progress_step == 0:
+            on_pick(step + 1)
+    if on_pick is not None:
+        on_pick(k)
+    return picked
+
+
+def _euclidean_candidate_rows(n: int, cap: int, seed: int) -> np.ndarray:
+    """Row indexes for a fast Euclidean pick. The pool is kept when it already fits."""
+    count = int(n)
+    limit = max(1, int(cap))
+    if count <= limit:
+        return np.arange(count, dtype=int)
+    rng = np.random.default_rng(0 if seed < 0 else int(seed))
+    return np.sort(rng.choice(count, size=limit, replace=False))
 
 
 def _first_pick_index(n: int, seed: int) -> int:
@@ -612,7 +669,11 @@ def _diverse_subset_fp_process_pool_min_rows() -> int:
 
 
 class DiverseSubsetWorker(QRunnable):
-    """Pick a maximally diverse subset by fingerprint MaxMin (off the UI thread)."""
+    """Pick a maximally diverse subset off the UI thread.
+
+    Fingerprints alone use Tanimoto distance. Numeric columns, alone or with a
+    fingerprint, use Euclidean distance on the same combined matrix as clustering.
+    """
 
     def __init__(
         self,
@@ -637,6 +698,8 @@ class DiverseSubsetWorker(QRunnable):
         self.onbits_by_oid = request.onbits_by_oid
         self.use_onbits_column = bool(request.use_onbits_column)
         self.mode = (request.mode or "auto").strip().lower()
+        self.numeric_by_oid = request.numeric_by_oid
+        self.standardize_numeric = bool(request.standardize_numeric)
         self.cancel_event = cancel_event
         self.progress_state = progress_state
 
@@ -694,9 +757,139 @@ class DiverseSubsetWorker(QRunnable):
                 out.append((int(oid), mol))
         return out
 
+    def _feature_matrix(
+        self,
+        *,
+        use_fp: bool,
+        numeric_by_oid: dict[int, np.ndarray],
+        cancel_ev: threading.Event | None,
+    ) -> tuple[list[int], np.ndarray, int, int] | None:
+        """Aligned Euclidean features. ``None`` means the caller already emitted a failure."""
+        from .cluster_worker import _align_numeric_rows, _combine_feature_matrix
+
+        n_cached = 0
+        n_computed = 0
+        fps = None
+        if use_fp:
+            try:
+                row_pairs = self._resolve_rows()
+            except _Cancelled:
+                self.signals.failed.emit("Cancelled.")
+                return None
+            pool, err = build_diverse_subset_pool(
+                row_pairs,
+                self.fp_choice,
+                onbits_by_oid=self.onbits_by_oid,
+                require_onbits_column=self.use_onbits_column,
+            )
+            if err:
+                self.signals.failed.emit(err)
+                return None
+            if not pool:
+                self.signals.failed.emit("No rows in scope.")
+                return None
+            spec = spec_for_label(self.fp_choice)
+            if spec is None:
+                self.signals.failed.emit("Unknown fingerprint type.")
+                return None
+            try:
+                fps, n_cached, n_computed = materialize_pool_fingerprints(
+                    pool,
+                    self.fp_choice,
+                    spec.internal_key,
+                    cancel_event=cancel_ev,
+                    use_process_pool=fingerprint_is_gil_heavy(self.fp_choice)
+                    or len(pool) >= _diverse_subset_fp_process_pool_min_rows(),
+                )
+            except _Cancelled:
+                self.signals.failed.emit("Cancelled.")
+                return None
+            oids = [row.oid for row in pool]
+        else:
+            oids = (
+                [int(oid) for oid in self.oids]
+                if self.oids
+                else [int(oid) for oid in numeric_by_oid]
+            )
+        kept_oids, kept_fps, numeric = _align_numeric_rows(oids, fps, numeric_by_oid)
+        if numeric is None or not kept_oids:
+            self.signals.failed.emit(
+                "No rows with complete values in the selected columns"
+                + (" and a fingerprint." if use_fp else ".")
+            )
+            return None
+        features = _combine_feature_matrix(
+            kept_fps,
+            numeric,
+            standardize=self.standardize_numeric,
+        )
+        return kept_oids, features, n_cached, n_computed
+
+    def _run_feature_space(self, *, use_fp: bool, numeric_by_oid: dict[int, np.ndarray]) -> None:
+        cancel_ev = self.cancel_event
+        built = self._feature_matrix(
+            use_fp=use_fp,
+            numeric_by_oid=numeric_by_oid,
+            cancel_ev=cancel_ev,
+        )
+        if built is None:
+            return
+        oids, features, n_cached, n_computed = built
+        n = len(oids)
+        k = self.subset_size
+        if k < 1:
+            self.signals.failed.emit("Subset size must be at least 1.")
+            return
+        pick_k = min(k, n)
+        progress_total = n + pick_k
+        if cancel_ev is not None and cancel_ev.is_set():
+            self.signals.failed.emit("Cancelled.")
+            return
+        self._report(n, progress_total, force=True)
+        resolved_mode = resolve_diverse_mode(self.mode, n)
+        cap = int(load_config().diverse_subset_fast_candidate_cap)
+
+        def _on_pick(done: int) -> None:
+            self._report(min(n + done, progress_total), progress_total)
+
+        try:
+            if resolved_mode == "fast":
+                rows = _euclidean_candidate_rows(n, max(cap, pick_k), seed=-1)
+                local = maxmin_euclidean_pick(
+                    features[rows],
+                    pick_k,
+                    cancel_event=cancel_ev,
+                    on_pick=_on_pick,
+                )
+                pick_idx = [int(rows[i]) for i in local]
+            else:
+                pick_idx = maxmin_euclidean_pick(
+                    features,
+                    pick_k,
+                    cancel_event=cancel_ev,
+                    on_pick=_on_pick,
+                )
+        except _Cancelled:
+            self.signals.failed.emit("Cancelled.")
+            return
+        column_rows = [(oids[i], str(rank + 1)) for rank, i in enumerate(pick_idx)]
+        picked_oids = [oid for oid, _ in column_rows]
+        self._report(progress_total, progress_total, force=True)
+        self.signals.finished.emit(picked_oids, column_rows, n_cached, n_computed)
+
     def run(self) -> None:
         try:
             cancel_ev = self.cancel_event
+            use_fp = fingerprint_requested(self.fp_choice)
+            numeric_by_oid = self.numeric_by_oid or None
+            if numeric_by_oid or not use_fp:
+                if not numeric_by_oid:
+                    self.signals.failed.emit(
+                        "Select a fingerprint, one or more numeric columns, or both."
+                    )
+                    return
+                self._run_feature_space(use_fp=use_fp, numeric_by_oid=numeric_by_oid)
+                return
             spec = spec_for_label(self.fp_choice)
             if spec is None:
                 self.signals.failed.emit("Unknown fingerprint type.")
