@@ -24,7 +24,6 @@ from PyQt5.QtWidgets import (
     QButtonGroup,
     QDialog,
     QDialogButtonBox,
-    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QPushButton,
@@ -35,7 +34,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 from ..theme import (
     DEFAULT_TABLE_ALIGN_H,
     DEFAULT_TABLE_ALIGN_V,
@@ -108,17 +107,19 @@ class FontSettingsDialog(QDialog):
         self._align_v = current_align_v
 
         root = QVBoxLayout(self)
-        form = QFormLayout()
+        application, app_form = boxed_form("Application")
 
         self._app_spin = self._make_spin(current_app_pt, self._default_app_pt)
         self._app_spin.valueChanged.connect(lambda pt: self.app_font_size_previewed.emit(int(pt)))
-        form.addRow("Application font size:", self._app_spin)
+        app_form.addRow("Font size:", self._app_spin)
+        root.addWidget(application)
 
+        table, form = boxed_form("Table")
         self._table_spin = self._make_spin(current_table_pt, self._default_table_pt)
         self._table_spin.valueChanged.connect(
             lambda pt: self.table_font_size_previewed.emit(int(pt))
         )
-        form.addRow("Table font size:", self._table_spin)
+        form.addRow("Font size:", self._table_spin)
 
         align_host = QWidget()
         grid = QGridLayout(align_host)
@@ -133,9 +134,9 @@ class FontSettingsDialog(QDialog):
             self._align_buttons[(h, v)] = btn
             btn.toggled.connect(lambda checked, hh=h, vv=v: self._on_align_toggled(checked, hh, vv))
             grid.addWidget(btn, i // 3, i % 3)
-        form.addRow("Table text alignment:", align_host)
+        form.addRow("Text alignment:", align_host)
         self._sync_align_buttons()
-        root.addLayout(form)
+        root.addWidget(table)
 
         actions = QHBoxLayout()
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
