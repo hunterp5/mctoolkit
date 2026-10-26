@@ -16,9 +16,10 @@
 
 """One result per started command.
 
-Tools still finish through their own callbacks. ``dispatch_step`` turns that
-callback into this handle so the recipe runner, and later a recorder, wait on
-the job rather than on a single attribute of the window.
+Tools still finish through a signal object that belongs to that job.
+``dispatch_step`` turns the job callback into this handle so the recipe
+runner, and later a recorder, wait on the job rather than on a single
+attribute of the window.
 """
 
 from __future__ import annotations
