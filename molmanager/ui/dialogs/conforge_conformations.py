@@ -23,7 +23,6 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QDoubleSpinBox,
-    QFormLayout,
     QMessageBox,
     QSpinBox,
     QVBoxLayout,
@@ -37,12 +36,11 @@ from ...conformers.conforge_generation import (
     normalize_conforge_mode,
     normalize_conforge_preset,
 )
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 from .conformer_output import (
     ConformerOutputOptions,
     ConformerOutputOptionsPanel,
     add_centered_run_button,
-    conformer_options_group,
 )
 from .scope import selection_scope_checked
 
@@ -74,8 +72,7 @@ class ConforgeConformationsDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
-        form.setSpacing(6)
+        sampling, form = boxed_form("Ensemble")
 
         self.num_confs_sb = QSpinBox()
         self.num_confs_sb.setRange(0, 10_000)
@@ -139,17 +136,19 @@ class ConforgeConformationsDialog(QDialog):
         self.timeout_sb.setToolTip("Per-molecule timeout (confgen -T). Default 3600 s.")
         form.addRow("Timeout:", self.timeout_sb)
 
-        root.addLayout(form)
-
         self.original_cb = QCheckBox("Include input conformation")
         self.original_cb.setToolTip(
             "Add the starting 3D geometry to the output ensemble when coordinates exist."
         )
+        form.addRow("", self.original_cb)
+        root.addWidget(sampling)
 
+        output, out_form = boxed_form("Output")
         self.keep_hs_cb = QCheckBox("Keep explicit hydrogens")
         self.keep_hs_cb.setToolTip(
             "Leave hydrogens on the packed ensemble. Off (default) matches Stochastic."
         )
+        out_form.addRow("", self.keep_hs_cb)
 
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
@@ -159,17 +158,12 @@ class ConforgeConformationsDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
+        out_form.addRow("", self.only_selected_cb)
 
         self.output_panel = ConformerOutputOptionsPanel(self)
-        root.addWidget(
-            conformer_options_group(
-                self.original_cb,
-                self.keep_hs_cb,
-                self.only_selected_cb,
-                self.output_panel.add_to_table_cb,
-            )
-        )
-        root.addWidget(self.output_panel)
+        out_form.addRow("", self.output_panel.add_to_table_cb)
+        out_form.addRow(self.output_panel)
+        root.addWidget(output)
 
         self.run_btn = add_centered_run_button(root)
         self.run_btn.clicked.connect(self._try_accept)
