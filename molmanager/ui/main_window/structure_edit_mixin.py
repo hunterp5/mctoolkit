@@ -107,15 +107,35 @@ class StructureEditMixin:
         dlg.show()
 
     def _on_add_explicit_hydrogens_dialog_accepted(self, dlg) -> None:
+        from ...workflows.macro_recipe import STEP_EXPLICIT_H
+        from ...workflows.macro_record import structure_edit_step
+        from ..command_dispatch import dispatch_step
+
         src, only_selected, no_render_2d = dlg.config()
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, "Add Explicit Hydrogens"):
             return
-        self.status_label.setText("Adding explicit hydrogens…")
-        self._enqueue_add_explicit_hydrogens(
-            src,
-            only_selected=only_selected,
-            no_render_2d=no_render_2d,
+        dispatch_step(
+            self,
+            structure_edit_step(
+                STEP_EXPLICIT_H, src, only_selected=only_selected, no_render_2d=no_render_2d
+            ),
+            {},
+        )
+
+    def start_explicit_hydrogens_job(
+        self, params: dict, *, allowed: set[int] | None, on_done
+    ) -> None:
+        """Add explicit hydrogens. ``on_done(error, {"output": column})`` runs after the write."""
+        self._start_structure_edit_job(
+            "add",
+            source=str(params.get("structure_source") or "").strip(),
+            no_render_2d=bool(params.get("no_render_2d")),
+            allowed=allowed,
+            on_done=on_done,
+            title="Add Explicit Hydrogens",
+            progress="Adding explicit hydrogens…",
+            queue_label="Add explicit hydrogens",
         )
 
     def _enqueue_add_explicit_hydrogens(
@@ -125,28 +145,11 @@ class StructureEditMixin:
         only_selected: bool = False,
         no_render_2d: bool = False,
     ) -> None:
-        from ...workers import AddExplicitHydrogensWorker
-
-        self._add_explicit_hydrogens_source = src
-        self._add_explicit_hydrogens_no_render_2d = no_render_2d
-        allowed = self._selected_oids_set() if only_selected else None
-        data = self._structure_tool_inputs(src, allowed)
-        if not data:
-            QMessageBox.information(
-                self,
-                "Add Explicit Hydrogens",
-                "No rows match the current scope and structure field.",
-            )
-            self.status_label.setText("Ready.")
-            return
-        enqueue_process_queue_job(
-            self,
-            "Add explicit hydrogens",
-            len(data),
-            lambda ev, ps, d=data, s=self.signals: AddExplicitHydrogensWorker(
-                d, s, is_smiles=False, cancel_event=ev, progress_state=ps
-            ),
-            queue_label="Add explicit hydrogens",
+        scope = "selection" if only_selected else "table"
+        self.start_explicit_hydrogens_job(
+            {"structure_source": src, "no_render_2d": no_render_2d, "row_scope": scope},
+            allowed=self._selected_oids_set() if only_selected else None,
+            on_done=None,
         )
 
     def run_remove_explicit_hydrogens(self) -> None:
@@ -165,17 +168,37 @@ class StructureEditMixin:
         dlg.show()
 
     def _on_remove_explicit_hydrogens_dialog_accepted(self, dlg) -> None:
+        from ...workflows.macro_recipe import STEP_REMOVE_H
+        from ...workflows.macro_record import structure_edit_step
+        from ..command_dispatch import dispatch_step
+
         src, only_selected, no_render_2d = dlg.config()
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(
             only_selected, allowed, "Remove Explicit Hydrogens"
         ):
             return
-        self.status_label.setText("Removing explicit hydrogens…")
-        self._enqueue_remove_explicit_hydrogens(
-            src,
-            only_selected=only_selected,
-            no_render_2d=no_render_2d,
+        dispatch_step(
+            self,
+            structure_edit_step(
+                STEP_REMOVE_H, src, only_selected=only_selected, no_render_2d=no_render_2d
+            ),
+            {},
+        )
+
+    def start_remove_explicit_hydrogens_job(
+        self, params: dict, *, allowed: set[int] | None, on_done
+    ) -> None:
+        """Remove explicit hydrogens. ``on_done`` runs after the write."""
+        self._start_structure_edit_job(
+            "remove",
+            source=str(params.get("structure_source") or "").strip(),
+            no_render_2d=bool(params.get("no_render_2d")),
+            allowed=allowed,
+            on_done=on_done,
+            title="Remove Explicit Hydrogens",
+            progress="Removing explicit hydrogens…",
+            queue_label="Remove explicit hydrogens",
         )
 
     def _enqueue_remove_explicit_hydrogens(
@@ -185,28 +208,11 @@ class StructureEditMixin:
         only_selected: bool = False,
         no_render_2d: bool = False,
     ) -> None:
-        from ...workers import RemoveExplicitHydrogensWorker
-
-        self._remove_explicit_hydrogens_source = src
-        self._remove_explicit_hydrogens_no_render_2d = no_render_2d
-        allowed = self._selected_oids_set() if only_selected else None
-        data = self._structure_tool_inputs(src, allowed)
-        if not data:
-            QMessageBox.information(
-                self,
-                "Remove Explicit Hydrogens",
-                "No rows match the current scope and structure field.",
-            )
-            self.status_label.setText("Ready.")
-            return
-        enqueue_process_queue_job(
-            self,
-            "Remove explicit hydrogens",
-            len(data),
-            lambda ev, ps, d=data, s=self.signals: RemoveExplicitHydrogensWorker(
-                d, s, is_smiles=False, cancel_event=ev, progress_state=ps
-            ),
-            queue_label="Remove explicit hydrogens",
+        scope = "selection" if only_selected else "table"
+        self.start_remove_explicit_hydrogens_job(
+            {"structure_source": src, "no_render_2d": no_render_2d, "row_scope": scope},
+            allowed=self._selected_oids_set() if only_selected else None,
+            on_done=None,
         )
 
     def run_neutralize(self) -> None:
@@ -223,15 +229,41 @@ class StructureEditMixin:
         dlg.show()
 
     def _on_neutralize_dialog_accepted(self, dlg) -> None:
+        from ...workflows.macro_recipe import STEP_NEUTRALIZE
+        from ...workflows.macro_record import structure_edit_step
+        from ..command_dispatch import dispatch_step
+
         src, only_selected, no_render_2d = dlg.config()
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, "Neutralize"):
             return
-        self.status_label.setText("Neutralizing structures…")
-        self._enqueue_neutralize(
-            src,
-            only_selected=only_selected,
-            no_render_2d=no_render_2d,
+        dispatch_step(
+            self,
+            structure_edit_step(
+                STEP_NEUTRALIZE, src, only_selected=only_selected, no_render_2d=no_render_2d
+            ),
+            {},
+        )
+
+    def start_neutralize_job(
+        self,
+        params: dict,
+        *,
+        allowed: set[int] | None,
+        on_done,
+        rows: list[tuple] | None = None,
+    ) -> None:
+        """Neutralize structures. ``on_done(error, {"output": column})`` runs after the write."""
+        self._start_structure_edit_job(
+            "neutralize",
+            source=str(params.get("structure_source") or "").strip(),
+            no_render_2d=bool(params.get("no_render_2d")),
+            allowed=allowed,
+            on_done=on_done,
+            title="Neutralize",
+            progress="Neutralizing structures…",
+            queue_label="Neutralize",
+            rows=rows,
         )
 
     def _enqueue_neutralize(
@@ -243,33 +275,86 @@ class StructureEditMixin:
         rows: list[tuple] | None = None,
         queue_title_prefix: str = "",
     ) -> None:
-        """Queue neutralization; *rows* (``(oid, mol_or_blob_or_text)``) overrides the scope."""
-        from ...workers import NeutralizeWorker
+        """Queue neutralization; *rows* overrides the rows collected from *src*."""
+        scope = "selection" if only_selected else "table"
+        self.start_neutralize_job(
+            {"structure_source": src, "no_render_2d": no_render_2d, "row_scope": scope},
+            allowed=self._selected_oids_set() if only_selected else None,
+            on_done=None,
+            rows=rows,
+        )
+        if queue_title_prefix:
+            self.status_label.setText(f"{queue_title_prefix}neutralize".strip())
 
-        self._neutralize_source = src
-        self._neutralize_no_render_2d = no_render_2d
-        if rows is None:
-            allowed = self._selected_oids_set() if only_selected else None
-            data = self._structure_tool_inputs(src, allowed)
-        else:
-            data = list(rows)
-        if not data:
-            QMessageBox.information(
-                self,
-                "Neutralize",
-                "No rows match the current scope and structure field.",
-            )
+    def _start_structure_edit_job(
+        self,
+        mode: str,
+        *,
+        source: str,
+        no_render_2d: bool,
+        allowed: set[int] | None,
+        on_done,
+        title: str,
+        progress: str,
+        queue_label: str,
+        rows: list[tuple] | None = None,
+    ) -> None:
+        from PyQt5.QtCore import Qt
+
+        from ..job_signals import StructureEditJobSignals, release_job_signals, retain_job_signals
+        from ..macro_recorder import report_unless_replaying
+
+        if not source or source not in self.headers:
+            message = "Choose a structure column."
             self.status_label.setText("Ready.")
+            if on_done is not None:
+                on_done(message, {})
+            report_unless_replaying(self, title, message)
             return
-        title = f"{queue_title_prefix}neutralize".strip() or "Neutralize"
+        data = list(rows) if rows is not None else self._structure_tool_inputs(source, allowed)
+        if not data:
+            message = "No rows match the current scope and structure field."
+            self.status_label.setText("Ready.")
+            if on_done is not None:
+                on_done(message, {})
+            report_unless_replaying(self, title, message, warning=False)
+            return
+        worker_cls, signal_name = _structure_edit_worker(mode)
+        sig = StructureEditJobSignals(self)
+        retain_job_signals(self, sig)
+
+        def _finished(
+            results, done=on_done, held=sig, src=source, skip_render=no_render_2d
+        ) -> None:
+            release_job_signals(self, held)
+            self._complete_structure_edit(results, src, skip_render, done)
+
+        getattr(sig, signal_name).connect(_finished, Qt.QueuedConnection)
+        self.status_label.setText(progress)
         enqueue_process_queue_job(
             self,
-            "Neutralize",
+            queue_label,
             len(data),
-            lambda ev, ps, d=data, s=self.signals: NeutralizeWorker(
+            lambda ev, ps, d=data, s=sig, cls=worker_cls: cls(
                 d, s, is_smiles=False, cancel_event=ev, progress_state=ps
             ),
-            queue_label=title,
+            queue_label=queue_label,
+        )
+
+    def _complete_structure_edit(self, results, source: str, no_render_2d: bool, on_done) -> None:
+        def _written(_column: str, done=on_done, src=source) -> None:
+            if done is None:
+                return
+            if self.has_partial_results_notice():
+                done("Cancelled.", {})
+                return
+            done(None, {"output": src})
+
+        self._apply_mol_tool_results(
+            results,
+            src=source,
+            no_render_2d=no_render_2d,
+            on_written=_written,
         )
 
     def on_disconnect_fragments_finished(self, results):
@@ -332,3 +417,18 @@ class StructureEditMixin:
         self._remove_explicit_hydrogens_source = "Structure"
         self._remove_explicit_hydrogens_no_render_2d = False
         self._apply_mol_tool_results(results, src=src, no_render_2d=no_render_2d)
+
+
+def _structure_edit_worker(mode: str):
+    from ...workers import (
+        AddExplicitHydrogensWorker,
+        NeutralizeWorker,
+        RemoveExplicitHydrogensWorker,
+    )
+
+    workers = {
+        "add": (AddExplicitHydrogensWorker, "explicit_hydrogens_added"),
+        "remove": (RemoveExplicitHydrogensWorker, "explicit_hydrogens_removed"),
+        "neutralize": (NeutralizeWorker, "neutralized"),
+    }
+    return workers[mode]
