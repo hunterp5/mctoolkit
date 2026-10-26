@@ -16,10 +16,11 @@ Global UI preferences for this installation/session; they do not alter table che
 
 ## Options
 
-- **Light Mode** / **Dark Mode** / **Groovy Mode** - built-in themes.
-- **Custom Colors...** - edit named custom themes (palette roles, save/delete).
-- **2D Render...** - pixel size of 2D structure drawings in the Structure column.
-- **Font...** - **Application font size**, **Table font size**, **Table text alignment** (3×3: top/center/bottom × left/center/right), **Reset to Default**.
+- **GUI**
+  - **Theme** - **Light Mode** / **Dark Mode** / **Groovy Mode**, plus named custom themes.
+  - **Custom Colors...** (under **Theme**) - edit named custom themes (palette roles, save/delete).
+  - **2D Render...** - pixel size of 2D structure drawings in the Structure column.
+  - **Font...** - **Application font size**, **Table font size**, **Table text alignment** (3×3: top/center/bottom × left/center/right), **Reset to Default**.
 - **Hotkeys...** - category/command/shortcut table with OK/Cancel, **Clear Selected**, and **Reset to Default**.
 - **Status Bar** - show or hide the bottom bar (status messages and memory use).
 - **Configure** - paths for optional external programs. Each page has **Browse...**, **Test**, and **OK**.
@@ -34,8 +35,8 @@ Global UI preferences for this installation/session; they do not alter table che
 
 ## Workflow
 
-1. Open **Settings** and pick a theme or **Custom Colors...**.
-2. Set font sizes so the table and dialogs stay readable.
+1. Open **Settings → GUI → Theme** and pick a theme or **Custom Colors...**.
+2. Open **Settings → GUI → Font** and set font sizes so the table and dialogs stay readable.
 3. Edit hotkeys for commands you use often; reset if a binding conflicts.
 4. Open **Configure** and set **WSL...** plus any tool path (Gnina, BioTransformer, AmberTools, and the others) you will run.
 5. Confirm changes and return to the table.
