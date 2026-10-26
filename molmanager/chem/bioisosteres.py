@@ -1799,21 +1799,42 @@ def site_count(mol: Chem.Mol | str, transform: Bioisostere | str) -> int:
 def apply_bioisostere(
     mol: Chem.Mol | str,
     transform: Bioisostere | str,
+    *,
+    atom_indices: Sequence[int] | None = None,
 ) -> tuple[str, ...]:
     """Unique product SMILES for one transform applied once at each match.
 
     The parent SMILES is omitted. Products that fail sanitization are dropped.
     Several sites become several products, not one product that changes every site.
+    When *atom_indices* is set, a match is kept only when it contains one of those
+    atoms, so a selected sketch region limits the replacement.
     """
     parsed = _as_mol(mol)
     if parsed is None:
         return ()
     row = transform if isinstance(transform, Bioisostere) else get_bioisostere(transform)
-    parent = Chem.MolToSmiles(parsed, isomericSmiles=True)
+    try:
+        work = Chem.Mol(parsed)
+        Chem.SanitizeMol(work)
+    except ValueError:
+        return ()
+    parent = Chem.MolToSmiles(work, isomericSmiles=True)
+    reaction = _reaction(row.smirks)
+    selected = None if atom_indices is None else {int(index) for index in atom_indices}
+    matches = work.GetSubstructMatches(reaction.GetReactantTemplate(0))
+    products = reaction.RunReactants((work,))
+    if len(matches) != len(products):
+        if selected is not None:
+            return ()
+        paired = ((None, item) for item in products)
+    else:
+        paired = zip(matches, products)
     seen: list[str] = []
     known: set[str] = set()
-    for products in _reaction(row.smirks).RunReactants((parsed,)):
-        product = products[0]
+    for match, product_tuple in paired:
+        if selected is not None and (match is None or not (set(match) & selected)):
+            continue
+        product = product_tuple[0]
         try:
             Chem.SanitizeMol(product)
         except ValueError:
@@ -1824,6 +1845,19 @@ def apply_bioisostere(
         known.add(smiles)
         seen.append(smiles)
     return tuple(seen)
+
+
+def matching_bioisosteres(
+    mol: Chem.Mol | str,
+    atom_indices: Sequence[int],
+) -> tuple[tuple[Bioisostere, tuple[str, ...]], ...]:
+    """Transforms that change at least one selected atom, with their product SMILES."""
+    found: list[tuple[Bioisostere, tuple[str, ...]]] = []
+    for row in BIOISOSTERES:
+        products = apply_bioisostere(mol, row, atom_indices=atom_indices)
+        if products:
+            found.append((row, products))
+    return tuple(found)
 
 
 def apply_bioisosteres(

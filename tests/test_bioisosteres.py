@@ -62,6 +62,16 @@ def test_guards_skip_the_wrong_functional_group() -> None:
     assert apply_bioisostere("c1ccc2ncccc2c1", "pyridine_to_piperidine") == ()
 
 
+def test_selected_atom_limits_the_replacement() -> None:
+    toluene = Chem.MolFromSmiles("Cc1ccccc1")
+    assert toluene is not None
+    para = apply_bioisostere(toluene, "aryl_h_to_f", atom_indices=(4,))
+    ortho = apply_bioisostere(toluene, "aryl_h_to_f", atom_indices=(2,))
+    assert para == ("Cc1ccc(F)cc1",)
+    assert ortho == ("Cc1ccccc1F",)
+    assert set(para).isdisjoint(ortho)
+
+
 def test_symmetric_sites_collapse_to_one_product() -> None:
     assert apply_bioisostere("c1ccccc1", "aryl_h_to_f") == ("Fc1ccccc1",)
     assert apply_bioisostere("c1ccccc1", "aryl_ch_to_n") == ("c1ccncc1",)

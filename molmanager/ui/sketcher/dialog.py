@@ -552,6 +552,7 @@ class SketcherDialog(QDialog):
         settings_menu.addAction(customize_el_act)
 
         l.setMenuBar(menubar)
+        self._settings_menu_action = settings_menu.menuAction()
 
         # Tools live in the left rail, under the menu. The canvas starts beside that rail.
         self.tb_clear = _glyph_tool_button(
@@ -1702,6 +1703,80 @@ class SketcherDialog(QDialog):
         self._populate_element_toolbar(symbols)
         if getattr(self, "_toolbar_panel", None) is not None:
             self._toolbar_panel.adjustSize()
+
+    def install_chemistry_menu(self) -> None:
+        """Add Chemistry between View and Settings. The Design Studio calls this."""
+        bar = self.layout().menuBar() if self.layout() is not None else None
+        if bar is None:
+            return
+        if any(action.text() == "Chemistry" for action in bar.actions()):
+            return
+        menu = QMenu("Chemistry", bar)
+        action = QAction("Bioisosteric Replacement…", self)
+        action.setToolTip(
+            "Replace the selected atoms with one bioisostere. The rest of the sketch is kept."
+        )
+        action.triggered.connect(self._open_bioisostere_replacement)
+        menu.addAction(action)
+        settings = getattr(self, "_settings_menu_action", None)
+        if settings is not None:
+            bar.insertMenu(settings, menu)
+        else:
+            bar.addMenu(menu)
+
+    def _open_bioisostere_replacement(self) -> None:
+        """Apply one bioisostere to the atoms selected on the canvas."""
+        selected = self.canvas._atoms_for_selection_move()
+        if not selected:
+            QMessageBox.information(
+                self,
+                "Bioisosteric Replacement",
+                "Select one or more atoms to replace.",
+            )
+            return
+        node_ids = {int(node["id"]) for node in self.canvas.nodes}
+        built = self.canvas._mol_from_node_ids(node_ids, return_idmap=True)
+        if not isinstance(built, tuple):
+            QMessageBox.warning(
+                self,
+                "Bioisosteric Replacement",
+                "The sketch could not be read.",
+            )
+            return
+        mol, idmap = built
+        atom_indices = [idmap[node_id] for node_id in selected if node_id in idmap]
+        if not atom_indices:
+            QMessageBox.information(
+                self,
+                "Bioisosteric Replacement",
+                "Select one or more atoms to replace.",
+            )
+            return
+        from ...chem.bioisosteres import matching_bioisosteres
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            options = matching_bioisosteres(mol, atom_indices)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not options:
+            QMessageBox.information(
+                self,
+                "Bioisosteric Replacement",
+                "None of the bioisosteres match the selected atoms.",
+            )
+            return
+        from .bioisostere_dialog import BioisostereReplacementDialog
+
+        dialog = BioisostereReplacementDialog(options, self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        smiles = dialog.chosen_smiles()
+        product = Chem.MolFromSmiles(smiles) if smiles else None
+        if product is None:
+            return
+        self.load_structure_from_mol(product, confirm_if_nonempty=False)
+        self.show_sketch_status("Replaced the selection with a bioisostere.")
 
     def _open_physical_properties(self) -> None:
         """Open (or raise) the modeless Physical Properties window."""
