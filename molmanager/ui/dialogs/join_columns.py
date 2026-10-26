@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -63,12 +64,16 @@ class JoinColumnsDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
+        columns_box = QGroupBox("Columns")
+        col_form = QFormLayout(columns_box)
+        col_form.setContentsMargins(8, 6, 8, 6)
+        col_form.setSpacing(4)
+        col_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.left_combo = QComboBox()
         self.left_combo.addItems(columns)
         self.left_combo.setToolTip("First (left) column in the joined text.")
         self.left_combo.currentTextChanged.connect(self._on_source_changed)
-        form.addRow("First column:", self.left_combo)
+        col_form.addRow("First column:", self.left_combo)
 
         self.right_combo = QComboBox()
         self.right_combo.addItems(columns)
@@ -76,42 +81,7 @@ class JoinColumnsDialog(QDialog):
         if len(columns) > 1:
             self.right_combo.setCurrentIndex(1)
         self.right_combo.currentTextChanged.connect(self._on_source_changed)
-        form.addRow("Second column:", self.right_combo)
-
-        self._delim = DelimiterPicker(
-            JOIN_DELIMITER_MODES,
-            combo_tooltip="Text placed between the two cell values.",
-            custom_placeholder=r"e.g.  |  or  \t",
-            custom_tooltip="Used when Delimiter is Custom. \\t is a tab.",
-            custom_max_length=16,
-        )
-        self._delim.add_rows(form, combo_label="Delimiter:")
-        self.delim_combo = self._delim.combo
-        self.custom_input = self._delim.custom_input
-
-        self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("New column name")
-        self.name_input.setToolTip(
-            "Name of the new joined column. Defaults to First_Second. "
-            "Existing names get a (1) suffix."
-        )
-        self.name_input.textChanged.connect(self._update_preview)
-        form.addRow("New column:", self.name_input)
-        root.addLayout(form)
-
-        self.skip_empty_cb = QCheckBox("Skip empty cells")
-        self.skip_empty_cb.setChecked(True)
-        self.skip_empty_cb.setToolTip(
-            "If one side is blank, write the other value with no extra delimiter. "
-            "Uncheck to always concatenate both sides, even when empty."
-        )
-        self.skip_empty_cb.toggled.connect(self._update_preview)
-        root.addWidget(self.skip_empty_cb)
-
-        self.preview_label = QLabel("")
-        self.preview_label.setWordWrap(True)
-        self.preview_label.setStyleSheet("color: palette(mid);")
-        root.addWidget(self.preview_label)
+        col_form.addRow("Second column:", self.right_combo)
 
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
@@ -122,7 +92,54 @@ class JoinColumnsDialog(QDialog):
         else:
             self.only_selected_cb.setEnabled(False)
         self.only_selected_cb.toggled.connect(self._update_preview)
-        root.addWidget(self.only_selected_cb)
+        col_form.addRow("", self.only_selected_cb)
+        root.addWidget(columns_box)
+
+        delimiter = QGroupBox("Delimiter")
+        delim_form = QFormLayout(delimiter)
+        delim_form.setContentsMargins(8, 6, 8, 6)
+        delim_form.setSpacing(4)
+        delim_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self._delim = DelimiterPicker(
+            JOIN_DELIMITER_MODES,
+            combo_tooltip="Text placed between the two cell values.",
+            custom_placeholder=r"e.g.  |  or  \t",
+            custom_tooltip="Used when Delimiter is Custom. \\t is a tab.",
+            custom_max_length=16,
+        )
+        self._delim.add_rows(delim_form, combo_label="Delimiter:")
+        self.delim_combo = self._delim.combo
+        self.custom_input = self._delim.custom_input
+
+        self.skip_empty_cb = QCheckBox("Skip empty cells")
+        self.skip_empty_cb.setChecked(True)
+        self.skip_empty_cb.setToolTip(
+            "If one side is blank, write the other value with no extra delimiter. "
+            "Uncheck to always concatenate both sides, even when empty."
+        )
+        self.skip_empty_cb.toggled.connect(self._update_preview)
+        delim_form.addRow("", self.skip_empty_cb)
+        root.addWidget(delimiter)
+
+        output = QGroupBox("Output")
+        out_form = QFormLayout(output)
+        out_form.setContentsMargins(8, 6, 8, 6)
+        out_form.setSpacing(4)
+        out_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("New column name")
+        self.name_input.setToolTip(
+            "Name of the new joined column. Defaults to First_Second. "
+            "Existing names get a (1) suffix."
+        )
+        self.name_input.textChanged.connect(self._update_preview)
+        out_form.addRow("New column:", self.name_input)
+        root.addWidget(output)
+
+        self.preview_label = QLabel("")
+        self.preview_label.setWordWrap(True)
+        self.preview_label.setStyleSheet("color: palette(mid);")
+        root.addWidget(self.preview_label)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)
