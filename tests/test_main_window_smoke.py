@@ -1469,8 +1469,13 @@ def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
     assert "Reaction Based…" not in labels
     assert labels.index("Structure Decomposition") == labels.index("Predict") + 1
     assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
-    assert labels.index("REINVENT Sampling…") == labels.index("Structure Enumeration") + 1
-    assert labels.index("Extract Reaction Info…") == labels.index("REINVENT Sampling…") + 1
+    assert labels.index("REINVENT") == labels.index("Structure Enumeration") + 1
+    assert labels.index("Extract Reaction Info…") == labels.index("REINVENT") + 1
+    reinvent = next(
+        a.menu() for a in tools.actions() if a.text().replace("&", "") == "REINVENT"
+    )
+    reinvent_labels = [a.text().replace("&", "") for a in reinvent.actions()]
+    assert reinvent_labels == ["Sampling…", "Learning…"]
     extract = next(a for a in tools.actions() if a.text().replace("&", "") == "Extract Reaction Info…")
     assert extract.menu() is None
     decomp = next(

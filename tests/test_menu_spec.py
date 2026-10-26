@@ -143,8 +143,10 @@ def test_reaction_menu_outline():
     assert "Reaction Based…" not in labels
     assert labels.index("Structure Decomposition") == labels.index("Predict") + 1
     assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
-    assert labels.index("REINVENT Sampling…") == labels.index("Structure Enumeration") + 1
-    assert labels.index("Extract Reaction Info…") == labels.index("REINVENT Sampling…") + 1
+    assert labels.index("REINVENT") == labels.index("Structure Enumeration") + 1
+    assert labels.index("Extract Reaction Info…") == labels.index("REINVENT") + 1
+    reinvent = find_submenu(tools.items, "REINVENT")
+    assert menu_outline(reinvent.items) == ["Sampling…", "Learning…"]
     assert labels.index("Retrosynthesis") == labels.index("Extract Reaction Info…") + 1
     retrosynthesis = find_submenu(tools.items, "Retrosynthesis")
     assert menu_outline(retrosynthesis.items) == ["Search…", "Routes…"]
@@ -219,6 +221,16 @@ def test_similarity_menu_contains_cluster():
     assert cluster.hotkey == "data.cluster"
     binning = next(item for item in similarity.items if item.title == "Binning…")
     assert binning.hotkey == "data.binning"
+
+
+def test_selectivity_ratio_follows_sali():
+    data = find_submenu(MAIN_WINDOW_MENUS, "Data")
+    labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]
+    assert labels.index("Selectivity Ratio…") == labels.index("SALI…") + 1
+    item = next(
+        entry for entry in data.items if getattr(entry, "title", "") == "Selectivity Ratio…"
+    )
+    assert item.slot == "open_selectivity_ratio_dialog"
 
 
 def test_hansch_follows_free_wilson():

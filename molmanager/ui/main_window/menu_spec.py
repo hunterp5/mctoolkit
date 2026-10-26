@@ -560,13 +560,25 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             ),
             tooltips_visible=True,
         ),
-        action(
-            "REINVENT Sampling…",
-            "open_reinvent_sampling",
-            tooltip=(
-                "Sample molecules with a local REINVENT 4 install "
-                "(de novo, R-groups, linkers, or similar molecules) and append them."
+        submenu(
+            "REINVENT",
+            action(
+                "Sampling…",
+                "open_reinvent_sampling",
+                tooltip=(
+                    "Sample molecules with a local REINVENT 4 install "
+                    "(de novo, R-groups, linkers, or similar molecules) and append them."
+                ),
             ),
+            action(
+                "Learning…",
+                "open_reinvent_learning",
+                tooltip=(
+                    "Run one REINVENT 4 reinforcement-learning stage against RDKit scores "
+                    "and append the best molecules."
+                ),
+            ),
+            tooltips_visible=True,
         ),
         action(
             "Extract Reaction Info…",
@@ -761,8 +773,8 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "Diverse Subset…",
                 "open_diverse_subset",
                 tooltip=(
-                    "Pick a maximally diverse subset of compounds "
-                    "(MaxMin on fingerprint Tanimoto distance)."
+                    "Pick a maximally diverse subset from a fingerprint, numeric columns, "
+                    "or both. Fingerprints use Tanimoto distance. Columns use Euclidean distance."
                 ),
             ),
             action(
@@ -793,6 +805,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "Plot fingerprint similarity vs |Δactivity| or |Δselectivity| colored by SALI "
                 "(|Δ| / (1 − similarity)). Selectivity is on-target minus off-target "
                 "on a pIC50 or pKi scale."
+            ),
+        ),
+        action(
+            "Selectivity Ratio…",
+            "open_selectivity_ratio_dialog",
+            tooltip=(
+                "Write log selectivity (primary pActivity minus each off-target) "
+                "and flag potent rows whose smallest window is still narrow."
             ),
         ),
         action(

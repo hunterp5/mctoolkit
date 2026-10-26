@@ -376,6 +376,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Sample molecules with a local REINVENT 4 install and append them.",
             ),
             _e(
+                "tools_reinvent_learning",
+                "REINVENT Learning",
+                "REINVENT Learning",
+                "Train a REINVENT 4 agent for one stage and append the best molecules.",
+            ),
+            _e(
                 "tools_activity_cliff",
                 "MMP Activity Cliffs",
                 "Activity Cliffs",
@@ -559,6 +565,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "LipE",
                 "Lipophilic efficiency",
                 "Data → MedChem Plots → LipE.",
+            ),
+            _e(
+                "data_selectivity_ratio",
+                "Selectivity Ratio",
+                "Selectivity Ratio",
+                "Data → Selectivity Ratio. Log selectivity and a narrow-window flag.",
             ),
             _e(
                 "data_sali",
