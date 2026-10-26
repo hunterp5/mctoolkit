@@ -29,6 +29,37 @@ from typing import Any
 
 from ..platform_support.config import load_config
 from ..workflows.macro_recipe import FILTER_NUMERIC, FILTER_SUBSTRUCTURE, FILTER_TEXT
+from ..workflows.tool_requests import FilterApplyRequest, clause_as_mapping
+
+
+class FilterWait:
+    """One filter apply. A newer apply fails the previous wait instead of stealing it."""
+
+    def __init__(self, on_done: Callable[[str | None], None]) -> None:
+        self._on_done = on_done
+        self._settled = False
+
+    def succeed(self) -> None:
+        if self._settled:
+            return
+        self._settled = True
+        self._on_done(None)
+
+    def fail(self, message: str) -> None:
+        if self._settled:
+            return
+        self._settled = True
+        self._on_done(message)
+
+
+def arm_filter_wait(app: Any, on_done: Callable[[str | None], None]) -> FilterWait:
+    """Register *on_done* as the waiter for the filter apply that is about to start."""
+    wait = FilterWait(on_done)
+    previous = getattr(app, "_macro_filter_wait", None)
+    app._macro_filter_wait = wait
+    if previous is not None:
+        previous.fail("Cancelled.")
+    return wait
 
 
 def ensure_numeric_bounds(app: Any, names: Sequence[str]) -> None:
@@ -53,12 +84,12 @@ def ensure_numeric_bounds(app: Any, names: Sequence[str]) -> None:
 
 def start_macro_filters(
     app: Any,
-    clauses: Sequence[dict[str, Any]],
+    request: FilterApplyRequest,
     *,
-    replace: bool,
     on_done: Callable[[str | None], None],
 ) -> None:
     """Replace or extend the filter panel, then apply. *on_done* may run before return."""
+    clauses = [clause_as_mapping(clause) for clause in request.clauses]
     cards: list[Any] = []
     for index, clause in enumerate(clauses, start=1):
         card = _build_card(app, clause, index)
@@ -69,7 +100,7 @@ def start_macro_filters(
     if not cards:
         on_done("Add at least one filter.")
         return
-    if replace:
+    if request.replace:
         app.replace_filter_cards(cards)
     else:
         for index, card in enumerate(cards, start=1):
@@ -77,12 +108,13 @@ def start_macro_filters(
     panel = getattr(app, "f_panel", None)
     if panel is not None:
         panel.setVisible(True)
-    app._macro_filter_done = lambda: on_done(None)
+    wait = arm_filter_wait(app, on_done)
     try:
         app._apply_filters_impl(load_config())
     except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-        app._macro_filter_done = None
-        on_done(str(exc) or "Could not apply filters.")
+        if getattr(app, "_macro_filter_wait", None) is wait:
+            app._macro_filter_wait = None
+        wait.fail(str(exc) or "Could not apply filters.")
 
 
 def _build_card(app: Any, clause: dict[str, Any], index: int) -> Any:
