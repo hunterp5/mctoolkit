@@ -28,7 +28,8 @@ from molmanager.ui.dialogs.protonate import ProtonateDialog
 def test_protonate_dialog_render_targets_output_column(qapp):  # noqa: ARG001
     dlg = ProtonateDialog(["Structure"], 0)
     assert "separate" not in dlg.render_cb.text().lower()
-    _src, _ph, col, _only, render = dlg.config()
-    assert col == "Protonated"
-    assert render is True
+    request = dlg.request()
+    assert request.output_column == "Protonated"
+    assert request.render_2d is True
+    assert request.ph == 7.4
     assert "output column" in dlg.render_cb.text().lower()
