@@ -27,6 +27,7 @@ from typing import Any
 
 # Relative to this package. ``..plot`` / ``..sketcher`` stay out of package init.
 _EXPORTS: dict[str, str] = {
+    "AizynthFinderDialog": ".aizynthfinder",
     "AlignSubstructureDialog": ".align_substructure",
     "AlignSubstructureConfig": ".align_substructure",
     "ActivityCliffDialog": ".activity_cliff",
@@ -91,6 +92,7 @@ _EXPORTS: dict[str, str] = {
     "RandomNumberDialog": ".random_number",
     "RandomNumberDialogParams": ".random_number",
     "ReactionEnumerationDialog": ".reaction_enumeration",
+    "ReinventSamplingDialog": ".reinvent_sampling",
     "RGroupEnumerationDialog": ".rgroup_enumeration",
     "ReactionExtractDialog": ".reaction_extract",
     "ReactionExtractDialogParams": ".reaction_extract",

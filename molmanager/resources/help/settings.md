@@ -1,6 +1,6 @@
 # Settings
 
-Settings control appearance, keyboard shortcuts, and paths for optional external tools: themes, application/table fonts, the hotkey editor, whether the status bar is shown, and **Configure** (WSL, Gnina, BioTransformer, and the other tools that need a local install).
+Settings control appearance, keyboard shortcuts, and paths for optional external tools: themes, application/table fonts, the hotkey editor, whether the status bar is shown, and **Configure** (WSL, Gnina, BioTransformer, AiZynthFinder, and the other tools that need a local install).
 
 ## Goal
 
@@ -26,12 +26,15 @@ Global UI preferences for this installation/session; they do not alter table che
 - **Configure** - paths for optional external programs. Each page has **Browse...**, **Test**, and **OK**.
   - **WSL...** - path to ``wsl.exe`` so Windows can run Linux-only tools (Gnina, AmberTools / GAFF, and similar). **Test** runs ``uname -s`` inside WSL.
   - **AmberTools...** - ``antechamber`` command, bin folder, or executable. ``parmchk2`` and ``tleap`` are taken from the same folder. On Windows the command runs in WSL.
+  - **AiZynthFinder...** - Python from a separate environment, plus the local ``config.yml`` from ``download_public_data``. **Test** imports ``aizynthfinder`` and refuses a remote policy server or a non-local MongoDB stock.
   - **BioTransformer...** - JAR for Predict Metabolites (**Browse JAR...** / **Install...**). ``supportfiles/`` and ``btkb/`` (or ``database/``) must sit next to the JAR.
   - **CONFORGE...** - CDPKit ``confgen`` executable.
   - **Gnina...** - docking binary. On Windows this is the Linux command used through WSL (``gnina`` or a path such as ``/usr/local/bin/gnina``).
   - **Java...** - ``java`` for BioTransformer. Blank uses ``java`` on PATH.
   - **MAFFT...** - executable or install folder for Protein → Sequence.
   - **Open Babel...** - ``obabel`` for systematic conformers.
+  - **REINVENT...** - ``reinvent`` from a separate REINVENT 4 environment (Chemistry → REINVENT Sampling). Blank uses ``reinvent`` on PATH. Do not install REINVENT into the MolManager environment.
+  - **xtb...** - ``xtb`` for GFN2-xTB HOMO and LUMO descriptors.
 
 ## Workflow
 

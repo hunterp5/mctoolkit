@@ -135,6 +135,11 @@ class GuiSettingsMixin:
                 "antechamber location for GAFF parameterization (WSL on Windows).",
             ),
             (
+                "aizynthfinder",
+                "&AiZynthFinder…",
+                "Python interpreter and config.yml for Chemistry → Retrosynthesis.",
+            ),
+            (
                 "biotransformer",
                 "&BioTransformer…",
                 "BioTransformer JAR used by Predict Metabolites.",
@@ -165,6 +170,11 @@ class GuiSettingsMixin:
                 "obabel executable for systematic conformers.",
             ),
             (
+                "reinvent",
+                "&REINVENT…",
+                "reinvent command from a separate REINVENT 4 environment (sampling).",
+            ),
+            (
                 "xtb",
                 "&xtb…",
                 "xtb executable for GFN2-xTB HOMO and LUMO descriptors.",
@@ -182,7 +192,11 @@ class GuiSettingsMixin:
         if tool == "wsl":
             self.open_wsl_settings_dialog()
             return
-        if tool == "biotransformer":
+        if tool == "aizynthfinder":
+            from .dialogs.aizynthfinder_settings import AizynthFinderSettingsDialog
+
+            dlg = AizynthFinderSettingsDialog(self)
+        elif tool == "biotransformer":
             from .dialogs.biotransformer_settings import BiotransformerSettingsDialog
 
             dlg = BiotransformerSettingsDialog(self)

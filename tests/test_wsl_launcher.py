@@ -109,12 +109,14 @@ def test_settings_menu_has_configure(qapp) -> None:  # noqa: ARG001
     assert configure_labels == [
         "WSL…",
         "AmberTools…",
+        "AiZynthFinder…",
         "BioTransformer…",
         "CONFORGE…",
         "Gnina…",
         "Java…",
         "MAFFT…",
         "Open Babel…",
+        "REINVENT…",
         "xtb…",
     ]
     gui = next(a.menu() for a in settings.actions() if a.text().replace("&", "") == "GUI")
