@@ -98,7 +98,8 @@ def test_settings_menu_has_configure(qapp) -> None:  # noqa: ARG001
     assert "Status Bar" in labels
     assert labels.index("Status Bar") == labels.index("Hotkeys…") + 1
     assert "Structure…" not in labels
-    assert "2D Render…" in labels
+    assert "2D Render…" not in labels
+    assert "Font…" not in labels
     configure = next(
         a.menu() for a in settings.actions() if a.text().replace("&", "") == "Configure"
     )
@@ -114,8 +115,14 @@ def test_settings_menu_has_configure(qapp) -> None:  # noqa: ARG001
         "Java…",
         "MAFFT…",
         "Open Babel…",
+        "xtb…",
     ]
     gui = next(a.menu() for a in settings.actions() if a.text().replace("&", "") == "GUI")
     gui_labels = [a.text().replace("&", "") for a in gui.actions() if not a.isSeparator()]
+    assert gui_labels == ["Theme", "2D Render…", "Font…"]
     assert "Status Bar" not in gui_labels
+    theme = next(a.menu() for a in gui.actions() if a.text().replace("&", "") == "Theme")
+    theme_labels = [a.text().replace("&", "") for a in theme.actions() if not a.isSeparator()]
+    assert theme_labels[:3] == ["Light Mode", "Dark Mode", "Groovy Mode"]
+    assert theme_labels[-1] == "Custom Colors…"
     w.close()
