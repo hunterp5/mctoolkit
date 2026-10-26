@@ -23,7 +23,11 @@ from PyQt5.QtWidgets import QDialog, QMessageBox
 from rdkit import Chem
 from session_roundtrip import open_saved, saved_document
 
-from molmanager.ui.dialogs.row_lists import AddSelectedToListDialog, ManageListsDialog
+from molmanager.ui.dialogs.row_lists import (
+    AddSelectedToListDialog,
+    ManageListsDialog,
+    RemoveSelectedFromListDialog,
+)
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
 from molmanager.ui.row_lists import RowListStore
 
@@ -54,6 +58,20 @@ def test_row_list_store_unions_and_serializes():
 
     assert store.retain(["missing"]) == ["Actives"]
     assert store.names() == []
+
+
+def test_row_list_store_remove_drops_ids_and_keeps_an_empty_list():
+    store = RowListStore()
+    store.add("Actives", [0, 1, 2])
+    assert store.remove("Actives", [2, 9, 2]) == 1
+    assert store.oids("Actives") == [0, 1]
+    assert store.remove("  Actives  ", [0, 1]) == 2
+    assert store.names() == ["Actives"]
+    assert store.oids("Actives") == []
+    assert store.remove("Actives", [0]) == 0
+    assert store.remove("Missing", [0]) == 0
+    assert store.remove("", [0]) == 0
+    assert store.remove("Actives", ["nope"]) == 0
 
 
 def test_row_list_store_loads_session_payload():
@@ -127,6 +145,28 @@ def test_add_selected_dialog_picks_an_existing_list(qapp):  # noqa: ARG001
     again.name_combo.setCurrentText("actives")
     again._accept_name()
     assert again.list_name() == "Actives"
+
+
+def test_remove_selected_dialog_requires_a_choice(qapp):  # noqa: ARG001
+    dlg = RemoveSelectedFromListDialog(None, existing_names=["Actives", "Leads"])
+    assert dlg.name_combo.currentIndex() == -1
+    assert not dlg._ok_btn.isEnabled()
+    dlg._accept_name()
+    assert dlg.result() != QDialog.Accepted
+
+    dlg.name_combo.setCurrentIndex(1)
+    assert dlg._ok_btn.isEnabled()
+    dlg._accept_name()
+    assert dlg.result() == QDialog.Accepted
+    assert dlg.list_name() == "Leads"
+
+
+def test_remove_selected_dialog_preselects_the_only_list(qapp):  # noqa: ARG001
+    dlg = RemoveSelectedFromListDialog(None, existing_names=["Actives"])
+    assert dlg.name_combo.currentIndex() == 0
+    assert dlg._ok_btn.isEnabled()
+    dlg._accept_name()
+    assert dlg.list_name() == "Actives"
 
 
 def test_manage_lists_dialog_delete_keeps_the_rest(qapp, monkeypatch):  # noqa: ARG001
@@ -223,7 +263,12 @@ def test_lists_menu_is_under_data_below_table(qapp):  # noqa: ARG001
     assert data.title().replace("&", "") == "Data"
     data_labels = [act.text().replace("&", "") for act in data.actions() if act.text()]
     assert data_labels.index("Lists") == data_labels.index("Table") + 1
-    assert _menu_labels(window) == ["Add Selected to List…", "", "Manage Lists…"]
+    assert _menu_labels(window) == [
+        "Add Selected to List…",
+        "Remove Selected from List…",
+        "",
+        "Manage Lists…",
+    ]
     window.close()
 
 
@@ -255,6 +300,7 @@ def test_named_list_selects_rows_and_can_be_deleted(qapp):  # noqa: ARG001
     assert window.commit_named_row_list("Actives", window._selected_oids_set()) is True
     assert _menu_labels(window) == [
         "Add Selected to List…",
+        "Remove Selected from List…",
         "Actives",
         "",
         "Manage Lists…",
@@ -272,7 +318,12 @@ def test_named_list_selects_rows_and_can_be_deleted(qapp):  # noqa: ARG001
 
     window._row_list_store().retain([])
     window._rebuild_lists_menu()
-    assert _menu_labels(window) == ["Add Selected to List…", "", "Manage Lists…"]
+    assert _menu_labels(window) == [
+        "Add Selected to List…",
+        "Remove Selected from List…",
+        "",
+        "Manage Lists…",
+    ]
     window.close()
 
 
@@ -297,6 +348,99 @@ def test_add_selected_unions_into_an_existing_list(qapp, monkeypatch):  # noqa: 
     window.close()
 
 
+def test_remove_selected_without_rows_leaves_the_list(qapp, monkeypatch):  # noqa: ARG001
+    window = ChemistryWorkspaceWindow()
+    _seed_rows(window)
+    window.commit_named_row_list("Actives", {0, 1})
+    seen: dict[str, str] = {}
+
+    def _info(*args, **kwargs):  # noqa: ARG001
+        seen["title"] = str(args[1]) if len(args) > 1 else ""
+        seen["message"] = str(args[2]) if len(args) > 2 else ""
+        return QMessageBox.Ok
+
+    monkeypatch.setattr(
+        "molmanager.ui.main_window.row_lists_mixin.QMessageBox.information",
+        _info,
+    )
+    window.remove_selected_from_list()
+    assert seen["title"] == "Remove Selected from List"
+    assert "No rows are selected" in seen["message"]
+    assert window._row_list_store().oids("Actives") == [0, 1]
+    window.close()
+
+
+def test_remove_selected_without_lists_explains(qapp, monkeypatch):  # noqa: ARG001
+    window = ChemistryWorkspaceWindow()
+    _seed_rows(window)
+    window.select_table_oids({0})
+    qapp.processEvents()
+    seen: dict[str, str] = {}
+
+    def _info(*args, **kwargs):  # noqa: ARG001
+        seen["message"] = str(args[2]) if len(args) > 2 else ""
+        return QMessageBox.Ok
+
+    monkeypatch.setattr(
+        "molmanager.ui.main_window.row_lists_mixin.QMessageBox.information",
+        _info,
+    )
+    window.remove_selected_from_list()
+    assert "no lists" in seen["message"]
+    assert window._row_list_store().names() == []
+    window.close()
+
+
+def test_remove_selected_drops_rows_and_keeps_the_list(qapp, monkeypatch):  # noqa: ARG001
+    window = ChemistryWorkspaceWindow()
+    _seed_rows(window)
+    window.commit_named_row_list("Actives", {0, 1, 2})
+    window.commit_named_row_list("Leads", {1})
+    window._session_dirty = False
+    window.select_table_oids({0, 2})
+    qapp.processEvents()
+
+    def _exec(self):
+        assert [self.name_combo.itemText(i) for i in range(self.name_combo.count())] == [
+            "Actives",
+            "Leads",
+        ]
+        assert self.name_combo.currentIndex() == -1
+        self.name_combo.setCurrentIndex(0)
+        self._accept_name()
+        return self.result()
+
+    monkeypatch.setattr(RemoveSelectedFromListDialog, "exec_", _exec)
+    assert window.remove_selected_from_list() is None
+    assert window._row_list_store().names() == ["Actives", "Leads"]
+    assert window._row_list_store().oids("Actives") == [1]
+    assert window._row_list_store().oids("Leads") == [1]
+    assert window.status_label.text() == 'Removed 2 row(s) from list "Actives".'
+    assert window._session_dirty is True
+    window.close()
+
+
+def test_remove_selected_reports_when_none_match(qapp, monkeypatch):  # noqa: ARG001
+    window = ChemistryWorkspaceWindow()
+    _seed_rows(window)
+    window.commit_named_row_list("Actives", {0})
+    window._session_dirty = False
+    window.select_table_oids({1, 2})
+    qapp.processEvents()
+
+    def _exec(self):
+        assert self.name_combo.currentIndex() == 0
+        self._accept_name()
+        return self.result()
+
+    monkeypatch.setattr(RemoveSelectedFromListDialog, "exec_", _exec)
+    window.remove_selected_from_list()
+    assert window._row_list_store().oids("Actives") == [0]
+    assert window.status_label.text() == 'Selected rows are not in list "Actives".'
+    assert window._session_dirty is False
+    window.close()
+
+
 def test_manage_row_lists_deletes_on_accept(qapp, monkeypatch):  # noqa: ARG001
     window = ChemistryWorkspaceWindow()
     _seed_rows(window)
@@ -317,7 +461,7 @@ def test_manage_row_lists_deletes_on_accept(qapp, monkeypatch):  # noqa: ARG001
     window.manage_row_lists()
     assert window._row_list_store().names() == ["Leads"]
     assert window._row_list_store().oids("Leads") == [1, 2]
-    assert _menu_labels(window)[1] == "Leads"
+    assert _menu_labels(window)[2] == "Leads"
     assert window.status_label.text() == 'Deleted list "Actives".'
     window.close()
 
@@ -343,7 +487,7 @@ def test_manage_row_lists_renames_on_accept(qapp, monkeypatch):  # noqa: ARG001
     window.manage_row_lists()
     assert window._row_list_store().names() == ["Hits", "Leads"]
     assert window._row_list_store().oids("Hits") == [0, 2]
-    assert _menu_labels(window)[1:3] == ["Hits", "Leads"]
+    assert _menu_labels(window)[2:4] == ["Hits", "Leads"]
     assert window.status_label.text() == 'Renamed "Actives" to "Hits".'
     assert window._session_dirty is True
     window.close()
@@ -369,13 +513,18 @@ def test_session_roundtrip_restores_lists(qapp):  # noqa: ARG001
     open_saved(window, restored)
     assert restored._row_list_store().names() == ["Actives", "Leads"]
     assert restored._row_list_store().oids("Actives") == [0, 2]
-    assert _menu_labels(restored)[1:3] == ["Actives", "Leads"]
+    assert _menu_labels(restored)[2:4] == ["Actives", "Leads"]
     restored.apply_row_list("Actives")
     qapp.processEvents()
     assert restored._selected_oids_set() == {0, 2}
 
     restored.clear_all()
     assert restored._row_list_store().names() == []
-    assert _menu_labels(restored) == ["Add Selected to List…", "", "Manage Lists…"]
+    assert _menu_labels(restored) == [
+        "Add Selected to List…",
+        "Remove Selected from List…",
+        "",
+        "Manage Lists…",
+    ]
     window.close()
     restored.close()
