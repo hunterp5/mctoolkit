@@ -42,6 +42,7 @@ from ...platform_support.tool_paths import (
     TOOL_JAVA,
     TOOL_MAFFT,
     TOOL_OBABEL,
+    TOOL_XTB,
     configured_executable,
     save_tool_path,
 )
@@ -169,6 +170,18 @@ def _probe_obabel(path: str) -> tuple[bool, str]:
     return False, MISSING_OPENBABEL_MSG
 
 
+def _initial_xtb() -> str:
+    from ...platform_support.bundled_paths import default_external_executable
+
+    return configured_executable(TOOL_XTB) or default_external_executable("xtb")
+
+
+def _probe_xtb(path: str) -> tuple[bool, str]:
+    from ...descriptors.orbitals import describe_xtb
+
+    return describe_xtb(path)
+
+
 @dataclass(frozen=True)
 class ToolPathSpec:
     """One Settings → Configure page: a path, optional folder browse, and Test."""
@@ -261,6 +274,19 @@ _SPECS: dict[str, ToolPathSpec] = {
         initial=_initial_obabel,
         probe=_probe_obabel,
         browse_title="Open Babel executable",
+    ),
+    TOOL_XTB: ToolPathSpec(
+        key=TOOL_XTB,
+        title="xtb",
+        tooltip=(
+            "xtb executable for GFN2-xTB HOMO and LUMO descriptors. "
+            "Leave blank to use xtb on PATH, or install the tblite package instead."
+        ),
+        placeholder="xtb",
+        file_filter="Executables (xtb.exe xtb);;All files (*.*)",
+        initial=_initial_xtb,
+        probe=_probe_xtb,
+        browse_title="xtb executable",
     ),
 }
 
