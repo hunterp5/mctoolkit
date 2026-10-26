@@ -128,9 +128,8 @@ def test_file_menu_undo_redo_actions(qapp) -> None:  # noqa: ARG001
     menus = [a.text().replace("&", "") for a in mb.actions()]
     assert "Edit" in menus
     assert "File" in menus
-    tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Tools")
-    tool_texts = [a.text().replace("&", "") for a in tools.actions()]
-    assert "Elements" not in tool_texts
+    assert "Tools" not in menus
+    assert "Elements" not in menus
     dlg.close()
 
 
