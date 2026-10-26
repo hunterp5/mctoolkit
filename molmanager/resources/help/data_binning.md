@@ -1,6 +1,6 @@
 # Binning
 
-Binning assigns each numeric value in a column to a bin and writes two new columns: the bin range and a classification label. Open from **Data → Binning**, below Cluster.
+Binning assigns each numeric value in a column to a bin and writes two new columns: the bin range and a classification label. Open from **Data → Similarity → Binning**.
 
 ## Goal
 
