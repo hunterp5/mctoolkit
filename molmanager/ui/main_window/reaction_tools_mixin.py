@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Chemistry → Reaction (extract components, reaction and R-group enumeration)."""
+"""Chemistry → Reaction (extract components, reaction enumeration) and R-group enumeration."""
 
 from __future__ import annotations
 
@@ -136,28 +136,40 @@ class ReactionToolsMixin:
         d.show()
 
     def _on_reaction_enumeration_dialog_accepted(self, d) -> None:
-        p = d.params()
+        self.start_reaction_enumeration(d.params(), on_done=None)
+
+    def start_reaction_enumeration(self, request, on_done=None) -> None:
+        """Enumerate *request*. ``on_done(error, {})`` runs when the job finishes.
+
+        The dialog passes ``on_done=None`` and keeps its warning boxes.
+        """
         from ...platform_support.memory_guards import check_product_enumeration
 
-        guard = check_product_enumeration(p.max_products)
+        guard = check_product_enumeration(request.max_products)
         if not guard.ok:
-            QMessageBox.warning(self, TOOL_REACTION_ENUMERATION, guard.message)
+            if on_done is not None:
+                on_done(guard.message, {})
+            else:
+                QMessageBox.warning(self, TOOL_REACTION_ENUMERATION, guard.message)
             return
+        self._macro_reaction_done = on_done
         enqueue_process_queue_job(
             self,
             TOOL_REACTION_ENUMERATION,
-            p.max_products,
-            lambda ev, ps, req=p, sigs=self.signals: workers.ReactionEnumerationWorker(
+            request.max_products,
+            lambda ev, ps, req=request, sigs=self.signals: workers.ReactionEnumerationWorker(
                 req,
                 TOOL_REACTION_ENUMERATION,
                 sigs,
                 cancel_event=ev,
                 progress_state=ps,
             ),
-            queue_label=f"{TOOL_REACTION_ENUMERATION} ({p.reaction_name})",
+            queue_label=f"{TOOL_REACTION_ENUMERATION} ({request.reaction_name})",
         )
 
     def on_reaction_enum_finished(self, result) -> None:
+        done = getattr(self, "_macro_reaction_done", None)
+        self._macro_reaction_done = None
         self._finish_tool_progress(TOOL_REACTION_ENUMERATION)
         parts: list[str] = []
         if result.add_to_table and result.products:
@@ -180,6 +192,8 @@ class ReactionToolsMixin:
         if int(result.skipped) > 0:
             suffix = f" ({int(result.skipped):,} outcome(s) skipped by constraints or duplicates)"
         if self.has_partial_results_notice():
+            if done is not None:
+                done("Cancelled.", {})
             return
         if parts:
             self.status_label.setText(f"{TOOL_REACTION_ENUMERATION}: {', '.join(parts)}{suffix}.")
@@ -187,15 +201,25 @@ class ReactionToolsMixin:
             self.status_label.setText(
                 f"{TOOL_REACTION_ENUMERATION}: no products generated{suffix}."
             )
+        if done is not None:
+            done(None, {})
 
     def on_reaction_enum_failed(self, message: str, tool_title: str) -> None:
+        done = getattr(self, "_macro_reaction_done", None)
+        self._macro_reaction_done = None
         if message == "Cancelled.":
             self._finish_tool_progress(tool_title)
             self.status_label.setText(self._consume_partial_results_notice() or "Cancelled.")
+            if done is not None:
+                done("Cancelled.", {})
             return
         self._clear_tool_progress()
         self.status_label.setText("Ready.")
-        QMessageBox.warning(self, tool_title, message or "Reaction enumeration failed.")
+        text = message or "Reaction enumeration failed."
+        if done is not None:
+            done(text, {})
+            return
+        QMessageBox.warning(self, tool_title, text)
 
     def open_rgroup_enumeration(self) -> None:
         from ..dialogs import RGroupEnumerationDialog
