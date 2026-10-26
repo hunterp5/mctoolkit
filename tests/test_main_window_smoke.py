@@ -1464,17 +1464,15 @@ def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
     mb = w.menuBar()
     tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Chemistry")
     labels = [a.text().replace("&", "") for a in tools.actions()]
-    assert "R-Group Decomposition" not in labels
     assert "Reaction Based Enumeration…" not in labels
-    assert "Reaction" in labels
+    assert labels.index("R-Group Decomposition") == labels.index("Predict") + 1
+    assert labels.index("R-Group Enumeration…") == labels.index("R-Group Decomposition") + 1
+    assert labels.index("Reaction") == labels.index("R-Group Enumeration…") + 1
     reaction = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "Reaction")
-    rxn_labels = [a.text().replace("&", "") for a in reaction.actions()]
-    assert "R-Group Decomposition" in rxn_labels
-    assert "Extract…" in rxn_labels
-    assert "Reaction Based Enumeration…" in rxn_labels
-    assert rxn_labels.index("Extract…") < rxn_labels.index("R-Group Decomposition")
+    rxn_labels = [a.text().replace("&", "") for a in reaction.actions() if not a.isSeparator()]
+    assert rxn_labels == ["Extract…", "Reaction Based Enumeration…"]
     decomp = next(
-        a.menu() for a in reaction.actions() if a.text().replace("&", "") == "R-Group Decomposition"
+        a.menu() for a in tools.actions() if a.text().replace("&", "") == "R-Group Decomposition"
     )
     decomp_labels = [a.text().replace("&", "") for a in decomp.actions()]
     assert "Core-Based Decomposition…" in decomp_labels
@@ -1491,7 +1489,16 @@ def test_data_menu_nests_analyze_and_split_under_table(qapp):  # noqa: ARG001
     assert "Statistics…" not in labels
     assert "Analyze Table…" not in labels
     assert "Split Column…" not in labels
-    assert labels.index("Binning…") == labels.index("Cluster…") + 1
+    assert "Cluster…" not in labels
+    assert "Binning…" not in labels
+    similarity = next(a.menu() for a in data.actions() if a.text().replace("&", "") == "Similarity")
+    similarity_labels = [a.text().replace("&", "") for a in similarity.actions() if not a.isSeparator()]
+    assert similarity_labels == [
+        "Fingerprint Similarity...",
+        "Diverse Subset…",
+        "Cluster…",
+        "Binning…",
+    ]
     table = next(a.menu() for a in data.actions() if a.text().replace("&", "") == "Table")
     table_labels = [a.text().replace("&", "") for a in table.actions() if not a.isSeparator()]
     assert table_labels == ["Operations", "Statistics…"]
@@ -1533,23 +1540,26 @@ def test_data_menu_nests_medchem_with_dimensionality_reduction(qapp):  # noqa: A
     data = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Data")
     data_labels = [a.text().replace("&", "") for a in data.actions()]
     assert "MedChem Plots" in data_labels
-    assert "DimRed Plots" in data_labels
+    assert "DimRed Plots" not in data_labels
+    assert "Dimensionality Reduction" in data_labels
     assert "Filter" in data_labels
     assert "Search…" in data_labels
-    assert "BOILED-Egg plot…" not in data_labels
-    assert "Golden Triangle plot…" not in data_labels
+    assert "BOILED-Egg…" not in data_labels
+    assert "Golden Triangle…" not in data_labels
     assert "Principal Component Analysis…" not in data_labels
     assert "t-SNE Visualization…" not in data_labels
     assert "UMAP Visualization…" not in data_labels
     assert "Self-Organizing Map…" not in data_labels
-    assert data_labels.index("DimRed Plots") == data_labels.index("MedChem Plots") + 1
+    assert data_labels.index("Dimensionality Reduction") == data_labels.index("MedChem Plots") + 1
     medchem = next(a.menu() for a in data.actions() if a.text().replace("&", "") == "MedChem Plots")
     assert [a.text().replace("&", "") for a in medchem.actions()] == [
-        "BOILED-Egg plot…",
-        "Golden Triangle plot…",
-        "LipE plot…",
+        "BOILED-Egg…",
+        "Golden Triangle…",
+        "LipE…",
     ]
-    dimred = next(a.menu() for a in data.actions() if a.text().replace("&", "") == "DimRed Plots")
+    dimred = next(
+        a.menu() for a in data.actions() if a.text().replace("&", "") == "Dimensionality Reduction"
+    )
     assert [a.text().replace("&", "") for a in dimred.actions()] == [
         "Principal Component Analysis…",
         "t-SNE Visualization…",
