@@ -49,6 +49,18 @@ COLUMN_STEPS = "AiZynth Steps"
 COLUMN_TIME = "AiZynth Time (s)"
 COLUMN_IN_STOCK = "AiZynth Precursors in Stock"
 COLUMN_NOT_IN_STOCK = "AiZynth Precursors not in Stock"
+COLUMN_FIRST_SOLUTION_TIME = "AiZynth First Solution (s)"
+COLUMN_FIRST_SOLUTION_ITERATION = "AiZynth First Solution Iteration"
+COLUMN_NODES = "AiZynth Nodes"
+COLUMN_MAX_TRANSFORMS = "AiZynth Max Transforms"
+COLUMN_MAX_CHILDREN = "AiZynth Max Children"
+COLUMN_ROUTES = "AiZynth Routes"
+COLUMN_PRECURSORS = "AiZynth Precursors"
+COLUMN_PRECURSORS_IN_STOCK_N = "AiZynth Precursors in Stock Count"
+COLUMN_AVAILABILITY = "AiZynth Precursor Availability"
+COLUMN_POLICIES = "AiZynth Policies"
+COLUMN_STOCK = "AiZynth Stock"
+COLUMN_PROFILING = "AiZynth Profiling"
 
 OUTPUT_COLUMNS: tuple[str, ...] = (
     COLUMN_SOLVED,
@@ -58,7 +70,46 @@ OUTPUT_COLUMNS: tuple[str, ...] = (
     COLUMN_TIME,
     COLUMN_IN_STOCK,
     COLUMN_NOT_IN_STOCK,
+    COLUMN_FIRST_SOLUTION_TIME,
+    COLUMN_FIRST_SOLUTION_ITERATION,
+    COLUMN_NODES,
+    COLUMN_MAX_TRANSFORMS,
+    COLUMN_MAX_CHILDREN,
+    COLUMN_ROUTES,
+    COLUMN_PRECURSORS,
+    COLUMN_PRECURSORS_IN_STOCK_N,
+    COLUMN_AVAILABILITY,
+    COLUMN_POLICIES,
+    COLUMN_STOCK,
+    COLUMN_PROFILING,
 )
+
+# Statistics already given a named column. Anything else AiZynthFinder reports is kept too.
+_MAPPED_STATS = frozenset(
+    {
+        "is_solved",
+        "number_of_solved_routes",
+        "top_score",
+        "number_of_steps",
+        "search_time",
+        "precursors_in_stock",
+        "precursors_not_in_stock",
+        "first_solution_time",
+        "first_solution_iteration",
+        "number_of_nodes",
+        "max_transforms",
+        "max_children",
+        "number_of_routes",
+        "number_of_precursors",
+        "number_of_precursors_in_stock",
+        "precursors_availability",
+        "policy_used_counts",
+        "stock_info",
+        "profiling",
+    }
+)
+# The route trees are stored separately. The target SMILES is already the table row.
+_SKIP_STATS = frozenset({"trees", "target"})
 
 _IMPORT_SNIPPET = "import importlib.metadata as m; print(m.version('aizynthfinder'))"
 _REMOTE_MODELS = re.compile(r"use_remote_models\s*:\s*true\b", re.IGNORECASE)
@@ -225,8 +276,12 @@ def aizynthcli_command(
 
 
 def summary_columns(stats: dict) -> dict[str, str]:
-    """Map one AiZynthFinder statistics record onto table cells."""
-    return {
+    """Map one AiZynthFinder statistics record onto table cells.
+
+    Named columns cover the statistics the CLI always writes. Any other field,
+    except the route trees and the target SMILES, is kept under its own column.
+    """
+    columns = {
         COLUMN_SOLVED: _solved(stats.get("is_solved")),
         COLUMN_SOLVED_ROUTES: _count(stats.get("number_of_solved_routes")),
         COLUMN_SCORE: _number(stats.get("top_score"), 3),
@@ -234,7 +289,27 @@ def summary_columns(stats: dict) -> dict[str, str]:
         COLUMN_TIME: _number(stats.get("search_time"), 1),
         COLUMN_IN_STOCK: _listish(stats.get("precursors_in_stock")),
         COLUMN_NOT_IN_STOCK: _listish(stats.get("precursors_not_in_stock")),
+        COLUMN_FIRST_SOLUTION_TIME: _number(stats.get("first_solution_time"), 1),
+        COLUMN_FIRST_SOLUTION_ITERATION: _count(stats.get("first_solution_iteration")),
+        COLUMN_NODES: _count(stats.get("number_of_nodes")),
+        COLUMN_MAX_TRANSFORMS: _count(stats.get("max_transforms")),
+        COLUMN_MAX_CHILDREN: _count(stats.get("max_children")),
+        COLUMN_ROUTES: _count(stats.get("number_of_routes")),
+        COLUMN_PRECURSORS: _count(stats.get("number_of_precursors")),
+        COLUMN_PRECURSORS_IN_STOCK_N: _count(stats.get("number_of_precursors_in_stock")),
+        COLUMN_AVAILABILITY: _format_value(stats.get("precursors_availability")),
+        COLUMN_POLICIES: _format_value(stats.get("policy_used_counts")),
+        COLUMN_STOCK: _format_value(stats.get("stock_info")),
+        COLUMN_PROFILING: _format_value(stats.get("profiling")),
     }
+    for key, value in stats.items():
+        if key in _MAPPED_STATS or key in _SKIP_STATS:
+            continue
+        header = _extra_column_name(str(key))
+        if header in columns:
+            continue
+        columns[header] = _format_value(value)
+    return columns
 
 
 def summaries_from_checkpoint(path: Path) -> dict[str, dict[str, str]]:
@@ -257,10 +332,16 @@ def routes_from_output(path: Path) -> dict[str, list[dict]]:
     return _load_output(path)[1]
 
 
-def routes_from_trees(trees: object) -> list[dict]:
-    """Turn AiZynthFinder route dicts into score, solved, and reaction steps."""
+def routes_from_trees(trees: object, stock_info: object = None) -> list[dict]:
+    """Turn AiZynthFinder route dicts into score, solved, steps, and a nested tree.
+
+    Each route keeps every score and the route metadata. Each reaction keeps the
+    template metadata, including the policy probability. *stock_info* maps a
+    SMILES string to the stock names AiZynthFinder reported for it.
+    """
     if not isinstance(trees, list):
         return []
+    stocks = stock_info if isinstance(stock_info, dict) else {}
     routes: list[dict] = []
     for tree in trees:
         if not isinstance(tree, dict):
@@ -269,14 +350,97 @@ def routes_from_trees(trees: object) -> list[dict]:
         if not smiles:
             continue
         scores = tree.get("scores") if isinstance(tree.get("scores"), dict) else {}
-        routes.append(
-            {
-                "score": _route_score(scores),
-                "solved": _route_is_solved(tree),
-                "steps": _reaction_steps(tree),
-            }
-        )
-    return routes
+        route = {
+            "score": _route_score(scores),
+            "solved": _route_is_solved(tree),
+            "steps": _reaction_steps(tree),
+            "tree": _compact_mol(tree, stocks),
+        }
+        plain_scores = _plain_dict(scores)
+        if plain_scores:
+            route["scores"] = plain_scores
+        metadata = _route_metadata(tree)
+        if metadata:
+            route["metadata"] = metadata
+        routes.append(route)
+    return sort_routes(routes)
+
+
+def sort_routes(routes: list[dict]) -> list[dict]:
+    """Solved routes first, then higher score."""
+
+    def _key(route: dict) -> tuple[int, float]:
+        solved = 1 if route.get("solved") else 0
+        try:
+            score = float(route.get("score") or 0)
+        except (TypeError, ValueError):
+            score = 0.0
+        return solved, score
+
+    return sorted(routes, key=_key, reverse=True)
+
+
+def route_tree(route: dict) -> dict | None:
+    """Nested molecule tree for *route*, rebuilt from ``steps`` when needed."""
+    tree = route.get("tree")
+    if isinstance(tree, dict) and str(tree.get("smiles") or "").strip():
+        return tree
+    return tree_from_steps(list(route.get("steps") or []))
+
+
+def tree_from_steps(steps: list[dict]) -> dict | None:
+    """Rebuild a molecule tree from flat reaction steps. Each step is consumed once."""
+    if not steps:
+        return None
+    unused = [dict(step) for step in steps if isinstance(step, dict)]
+    if not unused:
+        return None
+
+    def pop_step(product: str) -> dict | None:
+        for index, step in enumerate(unused):
+            if str(step.get("product") or "").strip() == product:
+                return unused.pop(index)
+        return None
+
+    def build(smiles: str, in_stock: bool) -> dict:
+        step = pop_step(smiles)
+        reactions: list[dict] = []
+        if step is not None:
+            reactants = []
+            for item in step.get("reactants") or []:
+                if not isinstance(item, dict):
+                    continue
+                reactants.append(
+                    build(
+                        str(item.get("smiles") or "").strip(),
+                        bool(item.get("in_stock")),
+                    )
+                )
+            reaction: dict = {"reactants": reactants}
+            reaction_smiles = str(step.get("reaction") or "").strip()
+            if reaction_smiles:
+                reaction["smiles"] = reaction_smiles
+            metadata = step.get("metadata")
+            if isinstance(metadata, dict) and metadata:
+                reaction["metadata"] = _plain_dict(metadata)
+            reactions.append(reaction)
+        return {"smiles": smiles, "in_stock": in_stock, "reactions": reactions}
+
+    root_smiles = str(unused[0].get("product") or "").strip()
+    if not root_smiles:
+        return None
+    return build(root_smiles, False)
+
+
+def leaf_stock_counts(route: dict) -> tuple[int, int]:
+    """Return ``(in_stock, total)`` for the leaves of *route*."""
+    tree = route_tree(route)
+    if tree is None:
+        return 0, 0
+    flags = _compact_leaves(tree)
+    if not flags:
+        return 0, 0
+    return sum(1 for flag in flags if flag), len(flags)
 
 
 def _load_checkpoint(path: Path) -> tuple[dict[str, dict[str, str]], dict[str, list[dict]]]:
@@ -301,7 +465,7 @@ def _load_checkpoint(path: Path) -> tuple[dict[str, dict[str, str]], dict[str, l
         if not smiles or not isinstance(stats, dict):
             continue
         summaries[smiles] = summary_columns(stats)
-        parsed = routes_from_trees(stats.get("trees"))
+        parsed = routes_from_trees(stats.get("trees"), stock_info=stats.get("stock_info"))
         if parsed:
             routes[smiles] = parsed
     return summaries, routes
@@ -326,10 +490,51 @@ def _load_output(path: Path) -> tuple[dict[str, dict[str, str]], dict[str, list[
         if not smiles:
             continue
         summaries[smiles] = summary_columns(row)
-        parsed = routes_from_trees(row.get("trees"))
+        parsed = routes_from_trees(row.get("trees"), stock_info=row.get("stock_info"))
         if parsed:
             routes[smiles] = parsed
     return summaries, routes
+
+
+def _compact_mol(node: dict, stocks: dict) -> dict:
+    reactions: list[dict] = []
+    for child in node.get("children") or []:
+        if not isinstance(child, dict) or not _is_reaction_node(child):
+            continue
+        reactants = []
+        for reactant in child.get("children") or []:
+            if isinstance(reactant, dict):
+                reactants.append(_compact_mol(reactant, stocks))
+        reaction: dict = {"reactants": reactants}
+        reaction_smiles = str(child.get("smiles") or "").strip()
+        if reaction_smiles:
+            reaction["smiles"] = reaction_smiles
+        metadata = _plain_dict(child.get("metadata"))
+        if metadata:
+            reaction["metadata"] = metadata
+        reactions.append(reaction)
+    smiles = str(node.get("smiles") or "").strip()
+    compact = {
+        "smiles": smiles,
+        "in_stock": bool(node.get("in_stock")),
+        "reactions": reactions,
+    }
+    stock_names = _stock_names(smiles, stocks)
+    if stock_names:
+        compact["stock"] = stock_names
+    return compact
+
+
+def _compact_leaves(node: dict) -> list[bool]:
+    reactions = [reaction for reaction in node.get("reactions") or [] if isinstance(reaction, dict)]
+    if not reactions:
+        return [bool(node.get("in_stock"))]
+    flags: list[bool] = []
+    for reaction in reactions:
+        for reactant in reaction.get("reactants") or []:
+            if isinstance(reactant, dict):
+                flags.extend(_compact_leaves(reactant))
+    return flags
 
 
 def _reaction_steps(mol_node: dict) -> list[dict]:
@@ -357,13 +562,15 @@ def _collect_steps(mol_node: dict, steps: list[dict]) -> None:
                 }
             )
             pending.append(reactant)
-        steps.append(
-            {
-                "product": str(mol_node.get("smiles") or "").strip(),
-                "reaction": str(child.get("smiles") or "").strip(),
-                "reactants": reactants,
-            }
-        )
+        step = {
+            "product": str(mol_node.get("smiles") or "").strip(),
+            "reaction": str(child.get("smiles") or "").strip(),
+            "reactants": reactants,
+        }
+        metadata = _plain_dict(child.get("metadata"))
+        if metadata:
+            step["metadata"] = metadata
+        steps.append(step)
         for reactant in pending:
             _collect_steps(reactant, steps)
 
@@ -391,6 +598,80 @@ def _route_is_solved(mol_node: dict) -> bool:
 
     walk(mol_node)
     return bool(leaves) and all(leaves)
+
+
+def _route_metadata(tree: dict) -> dict:
+    merged: dict = {}
+    for key in ("metadata", "route_metadata"):
+        raw = tree.get(key)
+        if isinstance(raw, dict):
+            merged.update(_plain_dict(raw))
+    return merged
+
+
+def _stock_names(smiles: str, stocks: dict) -> list[str]:
+    if not smiles or smiles not in stocks:
+        return []
+    raw = stocks.get(smiles)
+    if isinstance(raw, (list, tuple)):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    text = str(raw or "").strip()
+    if not text or text.lower() == "not in stock":
+        return []
+    return [text]
+
+
+def _plain_dict(value: object) -> dict:
+    plain = _plain(value)
+    return plain if isinstance(plain, dict) else {}
+
+
+def _plain(value: object):
+    """JSON-safe copy of an AiZynthFinder field."""
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return _plain(item())
+        except (TypeError, ValueError):
+            return str(value)
+    return str(value)
+
+
+def _extra_column_name(key: str) -> str:
+    words = key.replace("_", " ").strip()
+    if not words:
+        return "AiZynth"
+    return f"AiZynth {words[:1].upper()}{words[1:]}"
+
+
+def _format_value(value: object) -> str:
+    """One table cell for a statistic that is not a dedicated column."""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float):
+        return _number(value, 4)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, dict):
+        parts = []
+        for key, item in value.items():
+            text = _format_value(item)
+            if text:
+                parts.append(f"{key}: {text}")
+        return "; ".join(parts)
+    if isinstance(value, (list, tuple)):
+        return ", ".join(text for item in value if (text := _format_value(item)))
+    return str(value).strip()
 
 
 def _route_score(scores: dict) -> str:
