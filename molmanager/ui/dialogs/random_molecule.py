@@ -26,7 +26,6 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -47,7 +46,7 @@ from ...sources.random_molecule_sources import (
     fetch_random_molecules,
     source_label,
 )
-from ..qt_widget_utils import apply_monospace_to_text_edit, make_window_minimizable
+from ..qt_widget_utils import apply_monospace_to_text_edit, boxed_form, make_window_minimizable
 from ..strings import TOOL_RANDOM_MOLECULE
 from ..threadpool_access import start_runnable_on_app_pool
 
@@ -170,7 +169,7 @@ class RandomMoleculeDialog(QDialog):
         tip.setWordWrap(True)
         root.addWidget(tip)
 
-        form = QFormLayout()
+        source, form = boxed_form("Source")
         self.source_combo = QComboBox()
         for key, label in SOURCE_CHOICES:
             self.source_combo.addItem(label, key)
@@ -203,7 +202,7 @@ class RandomMoleculeDialog(QDialog):
             "When adding results, skip SMILES that match an existing table structure (canonical key)."
         )
         form.addRow("", self.chk_unique)
-        root.addLayout(form)
+        root.addWidget(source)
 
         filt_box = QGroupBox("Property filters")
         filt_box.setToolTip(
