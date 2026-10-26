@@ -450,12 +450,12 @@ class FilterApplyMixin:
         self._finish_macro_filter_wait()
 
     def _finish_macro_filter_wait(self) -> None:
-        """Release a macro step that is waiting on this filter pass."""
-        callback = getattr(self, "_macro_filter_done", None)
-        if callback is None:
+        """Release the filter waiter that belongs to the apply that just finished."""
+        wait = getattr(self, "_macro_filter_wait", None)
+        if wait is None:
             return
-        self._macro_filter_done = None
-        callback()
+        self._macro_filter_wait = None
+        wait.succeed()
 
     def _route_filter_apply(self, substructure_matches: tuple | None) -> None:
         """Pick sync, async SQLite, or chunked apply based on table size and filter mix."""
@@ -647,7 +647,7 @@ class FilterApplyMixin:
                     self._invalidate_substructure_async_jobs()
                     self._start_chunked_filter_apply(None)
                     return
-                if getattr(self, "_macro_filter_done", None) is not None:
+                if getattr(self, "_macro_filter_wait", None) is not None:
                     self._apply_filters_impl_sync(None)
                     return
                 return
