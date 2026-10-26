@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLineEdit,
     QMessageBox,
@@ -80,20 +81,37 @@ class DiverseSubsetDialog(QDialog):
     def _build_diverse_subset_ui(self) -> None:
         n_sel = self._selected_row_count
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 6, 8, 6)
-        root.setSpacing(6)
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
 
-        form = QFormLayout()
-        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        root.addLayout(form)
+        features = QGroupBox("Features")
+        feat_form = QFormLayout(features)
+        feat_form.setContentsMargins(8, 6, 8, 6)
+        feat_form.setSpacing(4)
+        feat_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.src_combo = QComboBox()
-        form.addRow("Structure source:", self.src_combo)
+        feat_form.addRow("Structure source:", self.src_combo)
 
         self.fp_combo = QComboBox()
         self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
         select_default_fingerprint(self.fp_combo)
-        form.addRow("Fingerprint:", self.fp_combo)
+        feat_form.addRow("Fingerprint:", self.fp_combo)
+
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
+        else:
+            self.only_selected_cb.setEnabled(False)
+        feat_form.addRow("", self.only_selected_cb)
+        root.addWidget(features)
+
+        subset = QGroupBox("Subset")
+        subset_form = QFormLayout(subset)
+        subset_form.setContentsMargins(8, 6, 8, 6)
+        subset_form.setSpacing(4)
+        subset_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.mode_combo = QComboBox()
         for key, label in DIVERSE_SUBSET_MODE_LABELS:
@@ -103,7 +121,7 @@ class DiverseSubsetDialog(QDialog):
             "MaxMin on a candidate pool — better for BindingDB-scale tables. Auto picks "
             "Exact when the pool is at or below the configured exact-row threshold."
         )
-        form.addRow("Algorithm:", self.mode_combo)
+        subset_form.addRow("Algorithm:", self.mode_combo)
 
         self.subset_size_spin = QSpinBox()
         self.subset_size_spin.setRange(1, 1_000_000)
@@ -112,31 +130,31 @@ class DiverseSubsetDialog(QDialog):
         self.subset_size_spin.setToolTip(
             "Number of compounds to keep in the diverse subset (MaxMin on Tanimoto distance)."
         )
-        form.addRow("Subset size:", self.subset_size_spin)
-
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
-        else:
-            self.only_selected_cb.setEnabled(False)
-        form.addRow("", self.only_selected_cb)
+        subset_form.addRow("Subset size:", self.subset_size_spin)
 
         self.select_subset_cb = QCheckBox("Select subset in table")
         self.select_subset_cb.setChecked(True)
         self.select_subset_cb.setToolTip("Highlight the picked rows in the compound table.")
-        form.addRow("", self.select_subset_cb)
+        subset_form.addRow("", self.select_subset_cb)
+        root.addWidget(subset)
+
+        output = QGroupBox("Output")
+        out_form = QFormLayout(output)
+        out_form.setContentsMargins(8, 6, 8, 6)
+        out_form.setSpacing(4)
+        out_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.add_column_cb = QCheckBox("Add rank column")
         self.add_column_cb.setChecked(True)
         self.add_column_cb.setToolTip(
             "Rank 1 is the first MaxMin pick; higher ranks are added for diversity."
         )
-        form.addRow("", self.add_column_cb)
+        out_form.addRow("", self.add_column_cb)
 
         self.column_name_edit = QLineEdit(_DEFAULT_COLUMN)
         self.column_name_edit.setPlaceholderText("Column name in table")
-        form.addRow("Rank column:", self.column_name_edit)
+        out_form.addRow("Rank column:", self.column_name_edit)
+        root.addWidget(output)
 
         btn_row = QHBoxLayout()
         self.run_btn = QPushButton("Pick Diverse Subset")
