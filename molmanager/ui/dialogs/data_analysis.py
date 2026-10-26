@@ -26,6 +26,7 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QCheckBox,
     QDialog,
+    QGroupBox,
     QHBoxLayout,
     QMessageBox,
     QTabWidget,
@@ -162,12 +163,14 @@ class DataAnalysisDialog(QDialog):
         self.tabs.addTab(self._tab_curve, "Curve Fit")
         self.tabs.addTab(self._tab_stats, "Statistical tests")
 
-        bottom = QHBoxLayout()
+        scope = QGroupBox("Scope")
+        bottom = QHBoxLayout(scope)
+        bottom.setContentsMargins(8, 6, 8, 6)
         bottom.addWidget(self.chk_visible)
         bottom.addWidget(self.only_selected_cb)
         bottom.addWidget(self.chk_selected_columns)
         bottom.addStretch()
-        root.addLayout(bottom)
+        root.addWidget(scope)
 
     def _wire_analysis_ui(self) -> None:
         self._reload_debounce.timeout.connect(self._reload)
