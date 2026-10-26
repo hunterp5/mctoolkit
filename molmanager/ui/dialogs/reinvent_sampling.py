@@ -27,7 +27,6 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -54,7 +53,7 @@ from ...generative.reinvent_sampling import (
     seed_text_for_row,
     validate_request,
 )
-from ..qt_widget_utils import apply_monospace_to_text_edit, make_window_minimizable
+from ..qt_widget_utils import apply_monospace_to_text_edit, boxed_form, make_window_minimizable
 from ..strings import TOOL_REINVENT_SAMPLING
 from ..threadpool_access import start_runnable_on_app_pool
 
@@ -124,7 +123,7 @@ class ReinventSamplingDialog(QDialog):
         intro.setWordWrap(True)
         root.addWidget(intro)
 
-        form = QFormLayout()
+        sampling, form = boxed_form("Sampling")
         self.generator_combo = QComboBox()
         for spec in GENERATORS:
             self.generator_combo.addItem(spec.label, spec.key)
@@ -182,9 +181,7 @@ class ReinventSamplingDialog(QDialog):
         self.temperature_spin.setValue(1.0)
         self.temperature_spin.setToolTip("Mol2Mol sampling temperature. 1.0 is the model default.")
         form.addRow(self.temperature_label, self.temperature_spin)
-        root.addLayout(form)
 
-        checks = QHBoxLayout()
         self.unique_check = QCheckBox("Unique molecules")
         self.unique_check.setChecked(True)
         self.unique_check.setToolTip(
@@ -195,10 +192,9 @@ class ReinventSamplingDialog(QDialog):
         self.randomize_check.setToolTip(
             "Shuffle atom order in seed SMILES before sampling. Useful for LibInvent and LinkInvent."
         )
-        checks.addWidget(self.unique_check)
-        checks.addWidget(self.randomize_check)
-        checks.addStretch(1)
-        root.addLayout(checks)
+        form.addRow("", self.unique_check)
+        form.addRow("", self.randomize_check)
+        root.addWidget(sampling)
 
         self.seed_box = QGroupBox("Seeds")
         seed_layout = QVBoxLayout(self.seed_box)
