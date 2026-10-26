@@ -530,6 +530,37 @@ class UndoClearCellsCommand(QUndoCommand):
         app.status_label.setText("Undo: cell values restored.")
 
 
+class UndoReplaceTextCommand(QUndoCommand):
+    """Undo/redo one Find and Replace edit across one or many text cells."""
+
+    def __init__(self, app: AppKernel, changes: list[tuple[int, str, str, str]]) -> None:
+        n = len(changes)
+        super().__init__(f"Replace {n} cell(s)" if n != 1 else "Replace cell")
+        self._app = app
+        self._changes = tuple(
+            (int(oid), str(header), str(old), str(new)) for oid, header, old, new in changes
+        )
+
+    def redo(self) -> None:
+        self._write(use_new=True)
+        n = len(self._changes)
+        self._app.status_label.setText(f"Replaced {n:,} cell(s)." if n != 1 else "Replaced 1 cell.")
+
+    def undo(self) -> None:
+        self._write(use_new=False)
+        self._app.status_label.setText("Undo: replaced text restored.")
+
+    def _write(self, *, use_new: bool) -> None:
+        app = self._app
+        grouped: dict[str, list[tuple[int, str]]] = {}
+        for oid, header, old, new in self._changes:
+            grouped.setdefault(header, []).append((oid, new if use_new else old))
+        for header, pairs in grouped.items():
+            app._table_model.set_column_text_by_oids(header, pairs)
+        app.calculate_global_bounds()
+        app.apply_filters()
+
+
 def _sync_filters_after_column_removed(app: AppKernel, hdr: str) -> None:
     """Update filter UI after a column is removed (no full-table bounds/filter pass)."""
     app.global_bounds.pop(hdr, None)
