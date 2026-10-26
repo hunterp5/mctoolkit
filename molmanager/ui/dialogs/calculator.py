@@ -35,6 +35,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ...workflows.tool_requests import CalculatorColumnRequest, row_scope_from_only_selected
 from ..qt_widget_utils import make_window_minimizable
 from ..strings import TOOL_CALCULATOR
 from .scope import selection_scope_checked
@@ -192,6 +193,14 @@ class CalculatorDialog(QDialog):
 
     def only_selected_rows(self) -> bool:
         return selection_scope_checked(self)
+
+    def request(self) -> CalculatorColumnRequest:
+        """The column and expression, without a row snapshot."""
+        return CalculatorColumnRequest(
+            column=self.name_input.text().strip(),
+            expression=self.expr_input.text().strip(),
+            row_scope=row_scope_from_only_selected(self.only_selected_rows()),
+        )
 
     def _on_apply_clicked(self) -> None:
         if not self.expr_input.text().strip():
