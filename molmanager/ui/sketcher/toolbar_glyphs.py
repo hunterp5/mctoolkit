@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+from typing import Any
 
 from PyQt5.QtCore import QPointF, QRectF, Qt
 from PyQt5.QtGui import (
@@ -26,6 +27,7 @@ from PyQt5.QtGui import (
     QColor,
     QFont,
     QIcon,
+    QImage,
     QPainter,
     QPainterPath,
     QPen,
@@ -279,6 +281,181 @@ def ring_icon(n_atoms: int, *, aromatic: bool = False, size: int = _ICON_SIZE) -
                 )
 
     return _paint_icon(paint, size)
+
+
+_HETERO_INK = {
+    "N": QColor(20, 70, 180),
+    "O": QColor(180, 30, 30),
+    "S": QColor(170, 140, 20),
+    "P": QColor(190, 100, 20),
+    "F": QColor(40, 140, 40),
+    "Cl": QColor(20, 140, 40),
+    "Br": QColor(140, 40, 20),
+    "I": QColor(120, 40, 160),
+}
+
+
+def _paint_image(paint_fn, size: int) -> QImage:
+    image = QImage(size, size, QImage.Format_ARGB32_Premultiplied)
+    image.fill(Qt.transparent)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+    paint_fn(painter, float(size))
+    painter.end()
+    return image
+
+
+def template_structure_image(
+    points: list[tuple[float, float]],
+    bonds: list[tuple[int, int, int]],
+    elements: list[str],
+    *,
+    size: int = _ICON_SIZE,
+) -> QImage:
+    """Raster of the heavy-atom graph a ring template places."""
+
+    def paint(p: QPainter, s: float) -> None:
+        if not points:
+            return
+        xs = [pt[0] for pt in points]
+        ys = [pt[1] for pt in points]
+        span = max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
+        pad = s * 0.16
+        scale = (s - 2.0 * pad) / span
+        cx = (min(xs) + max(xs)) * 0.5
+        cy = (min(ys) + max(ys)) * 0.5
+        origin = s * 0.5
+
+        def mapped(index: int) -> QPointF:
+            x, y = points[index]
+            return QPointF(origin + (x - cx) * scale, origin + (y - cy) * scale)
+
+        verts = [mapped(i) for i in range(len(points))]
+        centroid = QPointF(
+            sum(pt.x() for pt in verts) / len(verts),
+            sum(pt.y() for pt in verts) / len(verts),
+        )
+        labeled = [str(el) not in {"", "C"} for el in elements]
+        trim = s * 0.12
+        p.setBrush(Qt.NoBrush)
+        for i, j, order in bonds:
+            if i >= len(verts) or j >= len(verts):
+                continue
+            a, b = _trimmed_segment(
+                verts[i],
+                verts[j],
+                trim if labeled[i] else 0.0,
+                trim if labeled[j] else 0.0,
+            )
+            p.setPen(_ink_pen(1.45))
+            p.drawLine(a, b)
+            if int(order) < 2:
+                continue
+            mx = (a.x() + b.x()) * 0.5
+            my = (a.y() + b.y()) * 0.5
+            ox, oy = centroid.x() - mx, centroid.y() - my
+            olen = math.hypot(ox, oy) or 1.0
+            shift = s * 0.055
+            ox, oy = ox / olen * shift, oy / olen * shift
+            p.drawLine(QPointF(a.x() + ox, a.y() + oy), QPointF(b.x() + ox, b.y() + oy))
+
+        font = QFont("Helvetica", max(7, int(s * 0.26)))
+        font.setBold(True)
+        font.setStyleHint(QFont.SansSerif)
+        p.setFont(font)
+        metrics = p.fontMetrics()
+        for index, element in enumerate(elements):
+            if index >= len(verts) or not labeled[index]:
+                continue
+            symbol = str(element)
+            p.setPen(QPen(_HETERO_INK.get(symbol, _INK)))
+            width = (
+                metrics.horizontalAdvance(symbol)
+                if hasattr(metrics, "horizontalAdvance")
+                else metrics.width(symbol)
+            )
+            pt = verts[index]
+            p.drawText(
+                QRectF(
+                    pt.x() - width * 0.5 - 1,
+                    pt.y() - metrics.height() * 0.5,
+                    width + 2,
+                    metrics.height(),
+                ),
+                int(Qt.AlignCenter),
+                symbol,
+            )
+
+    return _paint_image(paint, size)
+
+
+def template_structure_icon(
+    points: list[tuple[float, float]],
+    bonds: list[tuple[int, int, int]],
+    elements: list[str],
+    *,
+    size: int = _ICON_SIZE,
+) -> QIcon:
+    """Toolbar picture of the heavy-atom graph a ring template places."""
+    return QIcon(QPixmap.fromImage(template_structure_image(points, bonds, elements, size=size)))
+
+
+def _trimmed_segment(
+    start: QPointF, end: QPointF, trim_start: float, trim_end: float
+) -> tuple[QPointF, QPointF]:
+    dx, dy = end.x() - start.x(), end.y() - start.y()
+    length = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / length, dy / length
+    if trim_start:
+        start = QPointF(start.x() + ux * trim_start, start.y() + uy * trim_start)
+    if trim_end:
+        end = QPointF(end.x() - ux * trim_end, end.y() - uy * trim_end)
+    return start, end
+
+
+def ring_template_image(
+    elements: list[str],
+    orders: list[int],
+    *,
+    size: int = _ICON_SIZE,
+) -> QImage:
+    """Raster for a monocycle, using the same vertex layout the canvas places."""
+    from .iupac_rings import ring_vertex_offsets_y_up, rotate_offsets_to_inward_heteroatoms
+
+    count = len(elements)
+    offsets = ring_vertex_offsets_y_up(count, bond_length=60.0)
+    if count >= 9:
+        offsets = rotate_offsets_to_inward_heteroatoms(offsets, elements)
+    points = [(x, -y) for x, y in offsets]
+    bonds = [(i, (i + 1) % count, int(orders[i]) if i < len(orders) else 1) for i in range(count)]
+    return template_structure_image(points, bonds, elements, size=size)
+
+
+def ring_template_icon(
+    elements: list[str],
+    orders: list[int],
+    *,
+    size: int = _ICON_SIZE,
+) -> QIcon:
+    """Icon for a monocycle, using the same vertex layout the canvas places."""
+    return QIcon(QPixmap.fromImage(ring_template_image(elements, orders, size=size)))
+
+
+def fused_ring_image(template: Any, *, size: int = _ICON_SIZE) -> QImage:
+    """Raster for a fused template, using its heavy-atom coordinates and symbols."""
+    points = [(float(x), -float(y)) for x, y in template.coords]
+    return template_structure_image(
+        points,
+        [(int(i), int(j), int(order)) for i, j, order in template.bonds],
+        [str(el) for el in template.elements],
+        size=size,
+    )
+
+
+def fused_ring_icon(template: Any, *, size: int = _ICON_SIZE) -> QIcon:
+    """Icon for a fused template, using its heavy-atom coordinates and symbols."""
+    return QIcon(QPixmap.fromImage(fused_ring_image(template, size=size)))
 
 
 def mode_select_icon(size: int = _ICON_SIZE) -> QIcon:
@@ -625,9 +802,10 @@ def status_error_icon(size: int = _ICON_SIZE) -> QIcon:
 
 # Carbocycle toolbar order: (template key, atom count, aromatic, tooltip)
 TOOLBAR_RING_TEMPLATES: tuple[tuple[str, int, bool, str], ...] = (
-    ("Cyclopropane", 3, False, "Cyclopropyl ring template"),
-    ("Cyclobutane", 4, False, "Cyclobutyl ring template"),
-    ("Cyclopentyl", 5, False, "Cyclopentyl ring template"),
-    ("Cyclohexyl", 6, False, "Cyclohexyl ring template"),
     ("Benzene", 6, True, "Benzene ring template"),
+    ("Pyridine", 6, True, "Pyridine ring template"),
+    ("Cyclohexyl", 6, False, "Cyclohexyl ring template"),
+    ("Cyclopentyl", 5, False, "Cyclopentyl ring template"),
+    ("Cyclobutane", 4, False, "Cyclobutyl ring template"),
+    ("Cyclopropane", 3, False, "Cyclopropyl ring template"),
 )
