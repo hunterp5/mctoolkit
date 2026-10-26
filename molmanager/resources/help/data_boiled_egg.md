@@ -26,7 +26,7 @@ Structures/properties required by the plot for rows in scope; **Selected Rows On
 ## Workflow
 
 1. Compute needed descriptors if missing.
-2. Open **Data → MedChem Plots → BOILED-Egg plot** and set structure source/color.
+2. Open **Data → MedChem Plots → BOILED-Egg** and set structure source/color.
 3. Inspect points in white/yolk regions. Counts (in scope, GIA, BBB, skipped rows) are written to the in-app Log.
 4. Use region select actions to push rows back to the table selection.
 
