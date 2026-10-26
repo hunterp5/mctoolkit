@@ -83,6 +83,7 @@ from ..table_session import TableSession
 from ..table_write_service import TableWriteService
 from ..tool_dialog_scope import ToolDialogScope
 from ..session_notepad import SessionNotepadHost
+from ..macro_tools import MacroTools
 from ..workspace_tools import WorkspaceTools
 from .activity_cliff_mixin import ActivityCliffMixin
 from .align_substructure_mixin import AlignSubstructureMixin
@@ -615,6 +616,10 @@ class ChemistryWorkspaceWindow(
         self._search_panel.setVisible(False)
         self._search_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self._init_table_search_panel(self._search_panel)
+        self._find_replace_panel = QFrame(cw)
+        self._find_replace_panel.setVisible(False)
+        self._find_replace_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self._init_find_replace_panel(self._find_replace_panel)
         self._table_area = QWidget(cw)
         self._table_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         table_area_lyt = QVBoxLayout(self._table_area)
@@ -628,13 +633,14 @@ class ChemistryWorkspaceWindow(
         self._workspace_layout.pane_close_requested.connect(self.close_plot_pane)
         self._workspace_layout.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # Search spans the full workspace width (above table+plots), stopping at the filter panel.
+        # Search and Find and Replace span the workspace width, stopping at the filter panel.
         self._workspace_column = QWidget(cw)
         self._workspace_column.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         workspace_col_lyt = QVBoxLayout(self._workspace_column)
         workspace_col_lyt.setContentsMargins(0, 0, 0, 0)
         workspace_col_lyt.setSpacing(4)
         workspace_col_lyt.addWidget(self._search_panel)
+        workspace_col_lyt.addWidget(self._find_replace_panel)
         workspace_col_lyt.addWidget(self._workspace_layout, 1)
         self._content_h = content_h
         content_h.addWidget(self._workspace_column, 1)
@@ -793,6 +799,7 @@ install_window_forwards(
     (InteractionFingerprintMixin,),
 )
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.mpo", (MpoMixin,))
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.macros", (MacroTools,))
 install_window_forwards(
     ChemistryWorkspaceWindow,
     "workspace_tools.structure_prep",
