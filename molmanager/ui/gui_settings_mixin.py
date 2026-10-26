@@ -53,7 +53,7 @@ from .theme import (
 
 
 class GuiSettingsMixin:
-    """Settings → GUI: light / dark / groovy / named custom themes."""
+    """Settings → GUI: theme, 2D render size, and fonts."""
 
     def _init_gui_settings(self) -> None:
         self._hotkey_actions: dict[str, QAction] = {}
@@ -78,6 +78,7 @@ class GuiSettingsMixin:
         self._act_theme_groovy.triggered.connect(lambda: self._set_gui_theme(THEME_GROOVY))
         self._custom_theme_actions: dict[str, QAction] = {}
         self._gui_menu: QMenu | None = None
+        self._theme_menu: QMenu | None = None
         self._act_customize_colors = QAction(
             "Custom Colors…", self, triggered=self.open_custom_theme_dialog
         )
@@ -162,6 +163,11 @@ class GuiSettingsMixin:
                 "obabel",
                 "&Open Babel…",
                 "obabel executable for systematic conformers.",
+            ),
+            (
+                "xtb",
+                "&xtb…",
+                "xtb executable for GFN2-xTB HOMO and LUMO descriptors.",
             ),
         )
         for tool, label, tip in entries:
@@ -263,12 +269,13 @@ class GuiSettingsMixin:
         self._act_status_bar.setChecked(load_status_bar_visible())
         self._act_status_bar.toggled.connect(self._on_status_bar_toggled)
         self._gui_menu = settings_menu.addMenu("&GUI")
+        self._theme_menu = self._gui_menu.addMenu("&Theme")
         self._rebuild_gui_theme_menu()
-        settings_menu.addSeparator()
-        settings_menu.addAction(
+        self._gui_menu.addAction(
             QAction("2D &Render…", self, triggered=self.open_structure_settings_dialog)
         )
-        settings_menu.addAction(QAction("&Font…", self, triggered=self.open_font_dialog))
+        self._gui_menu.addAction(QAction("&Font…", self, triggered=self.open_font_dialog))
+        settings_menu.addSeparator()
         settings_menu.addAction(QAction("&Hotkeys…", self, triggered=self.open_hotkeys_dialog))
         settings_menu.addSeparator()
         settings_menu.addAction(self._act_status_bar)
@@ -314,7 +321,7 @@ class GuiSettingsMixin:
             timer.stop()
 
     def _rebuild_gui_theme_menu(self) -> None:
-        menu = getattr(self, "_gui_menu", None)
+        menu = getattr(self, "_theme_menu", None)
         if menu is None:
             return
         menu.clear()
