@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 
 from ..layout_perf import perf_span
+from ...plotting.plot_axes import PLOT_SESSION_KIND as _PLOT_SESSION_KIND
 
 logger = logging.getLogger(__name__)
 
@@ -360,6 +361,64 @@ class PlotToolsMixin:
         d = PlotDialog(self)
         self._prepare_tool_dialog(d)
         return d
+
+    def current_plot_session_state(self) -> dict | None:
+        """Settings of the open plotter. ``None`` when no plotter is open."""
+        widget = self._plotter_widget()
+        if widget is None:
+            return None
+        try:
+            state = widget.collect_session_state()
+        except RuntimeError:
+            return None
+        if not isinstance(state, dict) or state.get("kind") != _PLOT_SESSION_KIND:
+            return None
+        return state
+
+    def apply_recorded_plot(self, state: dict) -> None:
+        """Restore *state* on the open plotter, opening one when none is visible."""
+        if not isinstance(state, dict):
+            raise ValueError("This plot step has no saved plot settings.")
+        widget = self._plotter_widget()
+        if widget is None:
+            if not getattr(self, "headers", None):
+                raise ValueError("Load a table before restoring a plot.")
+            dialog = self._create_plot_dialog()
+            self._register_plot_dialog(dialog)
+            widget = getattr(dialog, "_plot_widget", None)
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+        if widget is None or not hasattr(widget, "apply_session_state"):
+            raise RuntimeError("The plotter could not be opened.")
+        refresh = getattr(widget, "refresh_axis_columns", None)
+        if callable(refresh):
+            refresh()
+        widget.apply_session_state(state)
+
+    def _plotter_widget(self):
+        """The first floating or docked plotter, ignoring other docked views."""
+        for widget in self._iter_plot_widgets():
+            collect = getattr(widget, "collect_session_state", None)
+            if not callable(collect):
+                continue
+            try:
+                state = collect()
+            except RuntimeError:
+                continue
+            if isinstance(state, dict) and state.get("kind") == _PLOT_SESSION_KIND:
+                return widget
+        return None
+
+    def _iter_plot_widgets(self):
+        for dialog in self._iter_plot_dialogs():
+            panel = getattr(dialog, "_plot_widget", None)
+            if panel is not None:
+                yield panel
+        try:
+            yield from self.iter_docked_plot_widgets()
+        except RuntimeError:
+            return
 
     def _bind_undocked_browser_dialog(self, dlg) -> bool:
         """Track Data → Browser windows after undock. Return True if handled."""
