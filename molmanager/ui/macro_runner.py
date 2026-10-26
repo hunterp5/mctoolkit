@@ -16,10 +16,10 @@
 
 """Run a macro recipe one step at a time on the GUI thread.
 
-Each step calls the same entry point as its dialog, then waits until that
-tool's table write (or filter apply) finishes. The wait is a one-shot
-callback on the window. That is enough for an explicit recipe and is the
-piece click-recording has to replace with a real per-job handle.
+Each step goes through ``dispatch_step``, which returns a ``JobHandle``.
+The next step starts after that handle finishes, which is after the tool's
+table write or filter pass. The tools still store a one-shot callback
+internally; the runner does not.
 """
 
 from __future__ import annotations
@@ -30,22 +30,14 @@ from typing import Any
 from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
 from ..workflows.macro_recipe import (
-    ROW_SCOPE_SELECTION,
-    ROW_SCOPE_TABLE,
-    ROW_SCOPE_VISIBLE,
-    STEP_CALCULATOR,
-    STEP_DESCRIPTORS,
-    STEP_FILTER,
-    STEP_PROTONATE,
-    STEP_REACTION,
     MacroRecipe,
-    MacroReferenceError,
     MacroStep,
     step_summary,
-    substitute_column_refs,
     validate_recipe,
 )
-from .macro_filters import ensure_numeric_bounds, start_macro_filters
+from .command_dispatch import dispatch_step
+from .job_handle import JobHandle, JobOutcome
+from .macro_filters import ensure_numeric_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +57,7 @@ class MacroRunner(QObject):
         self._bindings: dict[str, dict[str, str]] = {}
         self._generation = 0
         self._running = False
+        self._handle: JobHandle | None = None
 
     @property
     def is_running(self) -> bool:
@@ -103,6 +96,10 @@ class MacroRunner(QObject):
         """Stop after the current tool notices cancellation. Later steps do not start."""
         if not self._running:
             return
+        handle = self._handle
+        self._handle = None
+        if handle is not None:
+            handle.abandon()
         self._clear_hooks()
         app = self._app
         queue = getattr(app, "process_queue", None)
@@ -131,30 +128,25 @@ class MacroRunner(QObject):
         self.progressed.emit(message)
         self._set_status(message)
         try:
-            self._dispatch(step, generation)
-        except (AttributeError, MacroReferenceError, RuntimeError, TypeError, ValueError) as exc:
+            handle = dispatch_step(self._app, step, self._bindings)
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
             logger.exception("Macro step failed to start")
             self._on_step_finished(generation, step.id, str(exc) or "The step could not start.", {})
+            return
+        self._handle = handle
+        seen = False
 
-    def _dispatch(self, step: MacroStep, generation: int) -> None:
-        def _done(error: str | None, outputs: dict[str, str] | None = None) -> None:
-            self._on_step_finished(generation, step.id, error, outputs or {})
+        def _on_handle(outcome: JobOutcome, gen: int = generation, step_id: str = step.id) -> None:
+            nonlocal seen
+            if seen or outcome.cancelled:
+                return
+            seen = True
+            error = None if outcome.ok else (outcome.error or "The step failed.")
+            self._on_step_finished(gen, step_id, error, outcome.outputs)
 
-        try:
-            if step.kind == STEP_DESCRIPTORS:
-                self._descriptors(step, _done)
-            elif step.kind == STEP_CALCULATOR:
-                self._calculator(step, _done)
-            elif step.kind == STEP_PROTONATE:
-                self._protonate(step, _done)
-            elif step.kind == STEP_FILTER:
-                self._filters(step, _done)
-            elif step.kind == STEP_REACTION:
-                self._reaction(step, _done)
-            else:
-                _done(f"Unknown step kind {step.kind!r}.")
-        except MacroReferenceError as exc:
-            _done(str(exc))
+        handle.finished.connect(_on_handle)
+        if handle.outcome is not None:
+            _on_handle(handle.outcome)
 
     def _on_step_finished(
         self,
@@ -175,115 +167,6 @@ class MacroRunner(QObject):
         ensure_numeric_bounds(self._app, list(outputs.values()))
         self._index += 1
         QTimer.singleShot(0, lambda gen=generation: self._kick(gen))
-
-    def _descriptors(self, step: MacroStep, done) -> None:
-        error, allowed = self._allowed(step)
-        if error:
-            done(error)
-            return
-        source = self._resolve(str(step.params.get("structure_source") or ""))
-        keys = [
-            str(key).strip() for key in step.params.get("descriptors") or [] if str(key).strip()
-        ]
-        self._app.start_descriptor_calculation(
-            source=source,
-            keys=keys,
-            allowed=allowed,
-            on_done=done,
-        )
-
-    def _calculator(self, step: MacroStep, done) -> None:
-        error, allowed = self._allowed(step)
-        if error:
-            done(error)
-            return
-        column = self._resolve(str(step.params.get("column") or "")).strip()
-        expression = substitute_column_refs(
-            str(step.params.get("expression") or ""),
-            self._bindings,
-            quote_for_calculator=True,
-        )
-        self._app.start_calculator_job(
-            column=column,
-            expression=expression,
-            allowed=allowed,
-            on_done=done,
-        )
-
-    def _protonate(self, step: MacroStep, done) -> None:
-        error, allowed = self._allowed(step)
-        if error:
-            done(error)
-            return
-        params = step.params
-        self._app.start_protonate_job(
-            source=self._resolve(str(params.get("structure_source") or "")),
-            ph=float(params.get("ph", 7.4)),
-            output_column=self._resolve(str(params.get("output_column") or "")).strip(),
-            render_2d=bool(params.get("render_2d", False)),
-            allowed=allowed,
-            on_done=done,
-        )
-
-    def _filters(self, step: MacroStep, done) -> None:
-        clauses: list[dict[str, Any]] = []
-        for clause in step.params.get("clauses") or []:
-            item = dict(clause)
-            if item.get("column"):
-                item["column"] = self._resolve(str(item["column"])).strip()
-            if item.get("structure_source"):
-                item["structure_source"] = self._resolve(str(item["structure_source"])).strip()
-            clauses.append(item)
-        start_macro_filters(
-            self._app,
-            clauses,
-            replace=bool(step.params.get("replace", True)),
-            on_done=lambda error: done(error, {}),
-        )
-
-    def _reaction(self, step: MacroStep, done) -> None:
-        from ..chem.reaction_enumeration import ReactionEnumerationRequest
-
-        params = step.params
-        request = ReactionEnumerationRequest(
-            reaction_name=str(params.get("reaction_name") or "Reaction").strip() or "Reaction",
-            rxn_smarts=str(params.get("smarts") or "").strip(),
-            reactant_1_mode=str(params.get("reactant_1_mode") or "smiles"),
-            reactant_2_mode=str(params.get("reactant_2_mode") or "smiles"),
-            reactant_file_1=_reactant_file(params, 1),
-            reactant_file_2=_reactant_file(params, 2),
-            reactant_smiles_1=_reactant_smiles(params, 1),
-            reactant_smiles_2=_reactant_smiles(params, 2),
-            max_products=int(params.get("max_products") or 1),
-            output_filters=str(params.get("output_filters") or ""),
-            add_to_table=bool(params.get("add_to_table", True)),
-            save_to_file=bool(params.get("save_to_file", False)),
-            save_path=str(params.get("save_path") or "").strip() or None,
-        )
-        self._app.start_reaction_enumeration(request, on_done=done)
-
-    def _allowed(self, step: MacroStep) -> tuple[str | None, set[int] | None]:
-        """``(error, oids)``. ``oids is None`` means every row."""
-        scope = str(step.params.get("row_scope") or ROW_SCOPE_TABLE)
-        app = self._app
-        if scope == ROW_SCOPE_TABLE:
-            return None, None
-        if scope == ROW_SCOPE_SELECTION:
-            selected = {int(oid) for oid in (app._selected_oids_set() or set())}
-            if not selected:
-                return "This step uses selected rows, and nothing is selected.", None
-            return None, selected
-        if scope == ROW_SCOPE_VISIBLE:
-            visible = app._filter_proxy_model.visible_oids()
-            if visible is None:
-                return None, None
-            if not visible:
-                return "This step uses visible rows, and the filters hide every row.", None
-            return None, {int(oid) for oid in visible}
-        return f"Unknown row scope {scope!r}.", None
-
-    def _resolve(self, text: str) -> str:
-        return substitute_column_refs(text, self._bindings)
 
     def _finish(self, ok: bool, message: str) -> None:
         if not self._running:
@@ -312,15 +195,3 @@ class MacroRunner(QObject):
         label = getattr(self._app, "status_label", None)
         if label is not None:
             label.setText(message)
-
-
-def _reactant_file(params: dict[str, Any], slot: int) -> str:
-    if str(params.get(f"reactant_{slot}_mode") or "") != "file":
-        return ""
-    return str(params.get(f"reactant_{slot}") or "")
-
-
-def _reactant_smiles(params: dict[str, Any], slot: int) -> str:
-    if str(params.get(f"reactant_{slot}_mode") or "smiles") != "smiles":
-        return ""
-    return str(params.get(f"reactant_{slot}") or "")

@@ -22,6 +22,11 @@ import sys
 
 import pytest
 
+from molmanager.workflows.command_catalog import (
+    COMMANDS,
+    command_by_id,
+    command_for_step_kind,
+)
 from molmanager.workflows.macro_recipe import (
     STEP_KINDS,
     MacroDocumentError,
@@ -141,3 +146,20 @@ def test_unsupported_library_version_is_rejected():
 
 def test_catalog_uses_internal_keys():
     assert descriptor_display_by_key()["MolWt"] == "Mol Weight"
+
+
+def test_command_catalog_lists_the_recipe_steps_without_qt():
+    for name in list(sys.modules):
+        if name.startswith("molmanager.workflows.command_catalog"):
+            del sys.modules[name]
+    qt_already_loaded = "PyQt5.QtWidgets" in sys.modules
+    import molmanager.workflows.command_catalog  # noqa: F401
+
+    if not qt_already_loaded:
+        assert "PyQt5.QtWidgets" not in sys.modules
+    assert len(COMMANDS) == 5
+    descriptors = command_for_step_kind("descriptors")
+    assert descriptors is not None
+    assert descriptors.command_id == "chemistry.descriptors"
+    assert command_by_id("chemistry.descriptors") is descriptors
+    assert command_for_step_kind("not-a-step") is None
