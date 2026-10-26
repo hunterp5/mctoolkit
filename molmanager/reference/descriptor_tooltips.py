@@ -21,6 +21,12 @@ from __future__ import annotations
 from ..chem.rdkit_fingerprints import FpKind, spec_for_internal_key
 
 _3D_NEED = " Needs 3D coordinates (confs or a 3D import); otherwise N/A."
+_ORBITAL = (
+    " GFN2-xTB single point (eV). Uses the lowest-energy packed conformer when confs "
+    "exist; otherwise embeds one ETKDG conformer and minimizes it with MMFF94 "
+    "(UFF fallback). Needs xtb or the tblite package, and a closed-shell singlet; "
+    "otherwise N/A. The geometry is not reoptimized with xTB."
+)
 
 _TOOLTIPS: dict[str, str] = {
     "FractionCSP3": "Fraction of carbon atoms that are sp3 (tetrahedral).",
@@ -70,6 +76,9 @@ _TOOLTIPS: dict[str, str] = {
     "MinPartialCharge": "Most negative Gasteiger partial charge.",
     "MaxAbsPartialCharge": "Largest absolute Gasteiger partial charge.",
     "MinAbsPartialCharge": "Smallest absolute Gasteiger partial charge.",
+    "HOMO": "Highest occupied molecular orbital energy." + _ORBITAL,
+    "LUMO": "Lowest unoccupied molecular orbital energy." + _ORBITAL,
+    "HOMO_LUMO_GAP": "Difference between the LUMO and HOMO energies." + _ORBITAL,
     "PMI1": "Smallest principal moment of inertia." + _3D_NEED,
     "PMI2": "Intermediate principal moment of inertia." + _3D_NEED,
     "PMI3": "Largest principal moment of inertia." + _3D_NEED,
