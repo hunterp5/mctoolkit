@@ -63,19 +63,16 @@ class ViewerOpenersMixin:
         dlg.raise_()
         dlg.activateWindow()
 
-    def open_sketcher(self, mol=None, *, source_oid=None, update_on_close=False):
+    def open_sketcher(self, mol=None, *, source_oid=None):
         # QAction.triggered passes False; never treat that as a molecule.
         if mol is not None and not isinstance(mol, Chem.Mol):
             mol = None
         from ..sketcher import SketcherDialog
 
         def _on_reuse(dlg):
-            if mol is not None:
-                if not dlg.load_structure_from_mol(mol):
-                    return
-            elif update_on_close:
-                dlg.canvas.clear(push_undo=False)
-            dlg.set_source_entry(source_oid, update_on_close=update_on_close)
+            if mol is not None and not dlg.load_structure_from_mol(mol):
+                return
+            dlg.set_source_entry(source_oid)
 
         reuse_or_show_modeless_singleton(
             self,
@@ -84,9 +81,8 @@ class ViewerOpenersMixin:
                 self,
                 initial_mol=mol,
                 source_oid=source_oid,
-                update_on_close=update_on_close,
             ),
-            on_reused_visible=_on_reuse if mol is not None or update_on_close else None,
+            on_reused_visible=_on_reuse,
         )
 
     def open_molecule_3d(self, mol=None, *, source_oid=None):
