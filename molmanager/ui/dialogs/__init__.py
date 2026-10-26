@@ -60,6 +60,7 @@ _EXPORTS: dict[str, str] = {
     "GenerateConformationsDialog": ".generate_conformations",
     "MPOScoringDialog": ".mpo_scoring",
     "MPOScoringDialogParams": ".mpo_scoring",
+    "MacroDialog": ".macros",
     "MmpDialog": ".mmp",
     "MmpDialogParams": ".mmp",
     "MmpNeighborhoodDialog": ".mmp_neighborhood",
