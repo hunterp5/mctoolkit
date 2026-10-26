@@ -167,6 +167,34 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 homepage="https://openbabel.org",
             ),
             _t(
+                "xtb",
+                "xtb",
+                "Calculate Descriptors: HOMO, LUMO, and HOMO–LUMO gap (GFN2-xTB).",
+                (
+                    (
+                        "Bannwarth, C.; Ehlert, S.; Grimme, S. GFN2-xTB—An Accurate and Broadly "
+                        "Parametrized Self-Consistent Tight-Binding Quantum Chemical Method with "
+                        "Multipole Electrostatics and Density-Dependent Dispersion Contributions. "
+                        "J. Chem. Theory Comput. 2019, 15, 1652–1671.",
+                        "https://doi.org/10.1021/acs.jctc.8b01176",
+                    ),
+                    (
+                        "Bannwarth, C.; et al. Extended tight-binding quantum chemistry methods. "
+                        "WIREs Comput. Mol. Sci. 2021, 11, e1493.",
+                        "https://doi.org/10.1002/wcms.1493",
+                    ),
+                ),
+                LIC_LGPL3,
+                homepage="https://github.com/grimme-lab/xtb",
+                notes=(
+                    "Gas-phase closed-shell singlet single point on the lowest-energy packed "
+                    "conformer (MMFF94, UFF fallback). A 2D structure with no conformers is "
+                    "embedded once with ETKDG and minimized the same way; xTB does not reoptimize. "
+                    "The xtb binary is preferred; the tblite package (also LGPL-3.0) is used when "
+                    "xtb is not installed."
+                ),
+            ),
+            _t(
                 "conforge",
                 "CONFORGE (CDPKit)",
                 "Knowledge-based conformer ensembles (Chemistry → Conformations → Generate → CONFORGE).",
@@ -697,7 +725,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "umap",
                 "UMAP (umap-learn)",
-                "Data → DimRed Plots → UMAP Visualization.",
+                "Data → Dimensionality Reduction → UMAP Visualization.",
                 (
                     (
                         "McInnes, L.; Healy, J.; Melville, J. UMAP: Uniform Manifold Approximation "
@@ -716,7 +744,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "som",
                 "Self-organizing map (Kohonen)",
-                "Data → DimRed Plots → Self-Organizing Map (NumPy implementation in MolManager).",
+                "Data → Dimensionality Reduction → Self-Organizing Map (NumPy implementation in MolManager).",
                 (
                     (
                         "Kohonen, T. Self-Organized Formation of Topologically Correct Feature Maps. "
@@ -743,7 +771,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "boiled_egg",
                 "BOILED-Egg",
-                "Data → MedChem Plots → BOILED-Egg plot (TPSA vs WLOGP regions).",
+                "Data → MedChem Plots → BOILED-Egg (TPSA vs WLOGP regions).",
                 (
                     (
                         "Daina, A.; Zoete, V. A BOILED-Egg To Predict Gastrointestinal Absorption "
@@ -757,7 +785,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "golden_triangle",
                 "Golden Triangle",
-                "Data → MedChem Plots → Golden Triangle plot (LogP vs MW).",
+                "Data → MedChem Plots → Golden Triangle (LogP vs MW).",
                 (
                     (
                         "Johnson, T. W.; Dress, K. R.; Edwards, M. Using the Golden Triangle to "
@@ -771,7 +799,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "lipe",
                 "LipE",
-                "Data → MedChem Plots → LipE plot (pActivity vs LogP).",
+                "Data → MedChem Plots → LipE (pActivity vs LogP).",
                 (
                     (
                         "Leeson, P. D.; Springthorpe, B. The influence of drug-like concepts on "
