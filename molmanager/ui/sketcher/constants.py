@@ -191,7 +191,7 @@ SKETCH_RING_TEMPLATES: dict[str, tuple[int, list[str], list[int]]] = {
         ["N", "C", "N", "C", "C", "C"],
         [2 if i % 2 == 0 else 1 for i in range(6)],
     ),
-    "Pyrazine": (6, ["N", "C", "N", "C", "C", "C"], [2, 1, 2, 1, 2, 1]),
+    "Pyrazine": (6, ["N", "C", "C", "N", "C", "C"], [2, 1, 2, 1, 2, 1]),
     "Pyridazine": (6, ["N", "N", "C", "C", "C", "C"], [1, 2, 1, 2, 1, 2]),
     "Triazine": (6, ["N", "C", "N", "C", "N", "C"], [2, 1, 2, 1, 2, 1]),
     "Pyrrole": (5, ["N"] + ["C"] * 4, [1, 2, 1, 2, 1]),
