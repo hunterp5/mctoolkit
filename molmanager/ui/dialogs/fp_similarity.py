@@ -23,6 +23,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLineEdit,
     QPushButton,
@@ -60,32 +61,42 @@ class FPSimilarityDialog(QDialog):
         self._pending_column_name = ""
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 6, 8, 6)
-        root.setSpacing(6)
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
 
-        form = QFormLayout()
-        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        root.addLayout(form)
+        similarity = QGroupBox("Similarity")
+        sim_form = QFormLayout(similarity)
+        sim_form.setContentsMargins(8, 6, 8, 6)
+        sim_form.setSpacing(4)
+        sim_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.src_combo = QComboBox()
         self._refresh_structure_sources()
-        form.addRow("Structure source:", self.src_combo)
+        sim_form.addRow("Structure source:", self.src_combo)
 
         self.fp_combo = QComboBox()
         self.fp_combo.addItems(SIMILARITY_FP_TYPE_LABELS)
         select_default_fingerprint(self.fp_combo)
-        form.addRow("Fingerprint:", self.fp_combo)
+        sim_form.addRow("Fingerprint:", self.fp_combo)
 
         self.metric_combo = QComboBox()
         self.metric_combo.addItems(SIMILARITY_METRIC_LABELS)
-        form.addRow("Similarity metric:", self.metric_combo)
+        sim_form.addRow("Similarity metric:", self.metric_combo)
 
-        self.column_name_edit = QLineEdit()
-        self.column_name_edit.setPlaceholderText("Column name in table")
-        self._sync_default_column_name()
-        self.metric_combo.currentTextChanged.connect(self._sync_default_column_name)
-        form.addRow("Output column:", self.column_name_edit)
+        self.only_selected_cb = QCheckBox("Only compare to selected rows")
+        self._only_selected_scope_prefix = "Only compare to selected rows"
+        if self._have_selection:
+            self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
+        else:
+            self.only_selected_cb.setEnabled(False)
+        sim_form.addRow("", self.only_selected_cb)
+        root.addWidget(similarity)
 
+        query = QGroupBox("Query")
+        query_form = QFormLayout(query)
+        query_form.setContentsMargins(8, 6, 8, 6)
+        query_form.setSpacing(4)
+        query_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         query_row = QHBoxLayout()
         self.query_combo = QComboBox()
         self.query_combo.addItems(["From Table Row", "SMILES Input"])
@@ -98,15 +109,20 @@ class FPSimilarityDialog(QDialog):
         self.smi_input.setPlaceholderText("Enter SMILES")
         self.smi_input.setVisible(False)
         query_row.addWidget(self.smi_input, 1)
-        form.addRow("Query:", query_row)
+        query_form.addRow("Query:", query_row)
+        root.addWidget(query)
 
-        self.only_selected_cb = QCheckBox("Only compare to selected rows")
-        self._only_selected_scope_prefix = "Only compare to selected rows"
-        if self._have_selection:
-            self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
-        else:
-            self.only_selected_cb.setEnabled(False)
-        form.addRow("", self.only_selected_cb)
+        output = QGroupBox("Output")
+        out_form = QFormLayout(output)
+        out_form.setContentsMargins(8, 6, 8, 6)
+        out_form.setSpacing(4)
+        out_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.column_name_edit = QLineEdit()
+        self.column_name_edit.setPlaceholderText("Column name in table")
+        self._sync_default_column_name()
+        self.metric_combo.currentTextChanged.connect(self._sync_default_column_name)
+        out_form.addRow("Output column:", self.column_name_edit)
+        root.addWidget(output)
 
         btn_row = QHBoxLayout()
         self.compute_btn = QPushButton("Compute and Add Column")
