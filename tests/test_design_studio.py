@@ -203,17 +203,9 @@ def test_studio_strip_scores_a_loaded_molecule(qapp):
         assert panel.load_molecule(Chem.MolFromSmiles("Cc1ccccc1"), caption="toluene")
         qapp.processEvents()
         panel._strip._refresh_now()
-        assert panel._strip._caption.text() == "toluene"
-        panel._strip.set_caption("Row 4. R1=C")
-        assert panel._strip._caption.text() == "R1=C"
-        assert panel._strip._caption.isHidden() is False
-        panel._strip.set_caption("Row 4")
-        assert panel._strip._caption.isHidden() is True
-        assert panel._strip._mpo_value.text() != "—"
         assert panel._strip._value_labels["MW"].text().startswith("92")
         assert panel._strip._druglike_details.isHidden() is False
         assert panel._strip._hbd.text() == "0"
-        assert panel._strip._ro5.text().startswith("Ro5")
     finally:
         panel.shutdown()
         panel.close()
@@ -339,6 +331,62 @@ def test_design_studio_keeps_other_shortcuts_and_takes_undo(qapp):
         assert panel._sketcher.isWindow() is False
     finally:
         panel.shutdown()
+        dialog._force_close = True
+        dialog.close()
+        host.close()
+        qapp.processEvents()
+
+
+def test_design_studio_has_chemistry_between_view_and_settings(qapp):
+    from PyQt5.QtWidgets import QMenuBar, QWidget
+
+    from molmanager.ui.design_studio_panel import DesignStudioPanel
+    from molmanager.ui.sketcher.dialog import SketcherDialog
+
+    panel = DesignStudioPanel(None)
+    try:
+        bar = panel._sketcher.findChild(QMenuBar)
+        names = [action.text() for action in bar.actions()]
+        assert names.index("Chemistry") == names.index("View") + 1
+        assert names.index("Settings") == names.index("Chemistry") + 1
+        chemistry = bar.actions()[names.index("Chemistry")].menu()
+        assert [action.text() for action in chemistry.actions()] == [
+            "Bioisosteric Replacement…"
+        ]
+    finally:
+        panel.shutdown()
+        panel.close()
+
+    sketcher = SketcherDialog(QWidget())
+    try:
+        bar = sketcher.findChild(QMenuBar)
+        assert "Chemistry" not in [action.text() for action in bar.actions()]
+    finally:
+        sketcher.close()
+
+
+def test_closing_the_design_studio_asks_first(qapp, monkeypatch):
+    from PyQt5.QtWidgets import QMessageBox, QWidget
+
+    from molmanager.ui.design_studio_panel import DesignStudioPanel
+
+    host = QWidget()
+    panel = DesignStudioPanel(host)
+    dialog = panel.create_floating_dialog(host)
+    answers = {"value": QMessageBox.No}
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_k: answers["value"])
+    try:
+        dialog.show()
+        qapp.processEvents()
+        dialog.close()
+        qapp.processEvents()
+        assert dialog.isVisible()
+        answers["value"] = QMessageBox.Yes
+        dialog.close()
+        qapp.processEvents()
+        assert dialog.isVisible() is False
+    finally:
+        dialog._force_close = True
         dialog.close()
         host.close()
         qapp.processEvents()
@@ -399,5 +447,6 @@ def test_design_studio_has_original_size_clear_and_ring_pictures(qapp):
         assert panel._status.currentMessage() == "Sketch cleared."
     finally:
         panel.shutdown()
+        dialog._force_close = True
         dialog.close()
         qapp.processEvents()

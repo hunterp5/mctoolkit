@@ -33,6 +33,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -62,23 +63,6 @@ from .strings import TOOL_DESIGN_STUDIO
 from .threadpool_access import start_runnable_on_app_pool
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_CAPTION = "Draw a structure. Scores update as the sketch changes."
-
-
-def _property_caption(text: str) -> str:
-    """Drop a leading table row id. Keep any substituent or suggestion text after it."""
-    shown = (text or "").strip()
-    if not shown.startswith("Row "):
-        return shown
-    rest = shown[4:]
-    head, separator, tail = rest.partition(".")
-    if not head.strip().split(" ", 1)[0].isdigit():
-        return shown
-    if not separator:
-        return ""
-    return tail.strip()
-
 
 _PKA_FAILED = "pKa calculation failed"
 _TERM_DIGITS = {"MW": 2, "LogP": 2, "TPSA": 1, "QED": 3, "RotBonds": 0}
@@ -186,37 +170,6 @@ class DesignPropertyStrip(QWidget):
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(6)
 
-        self._caption = QLabel(_DEFAULT_CAPTION)
-        self._caption.setWordWrap(True)
-        root.addWidget(self._caption)
-
-        druglike = _section_label("Druglike")
-        druglike.setToolTip(
-            "Geometric mean of desirability for MW, LogP, TPSA, QED, and rotatable bonds. "
-            "MW scores 1 at or below 350 and 0 at or above 500. "
-            "LogP is 1 at 2.5 and 0 outside 0–5. "
-            "TPSA is 1 at 75 and 0 outside 20–140. "
-            "QED scores 0 at or below 0.3 and 1 at or above 0.7. "
-            "Rotatable bonds score 1 at or below 5 and 0 at or above 10. "
-            "One property outside its gate pulls this score to zero."
-        )
-        root.addWidget(druglike)
-
-        summary = QHBoxLayout()
-        self._mpo_value = QLabel("—")
-        mpo_font = QFont(self._mpo_value.font())
-        mpo_font.setPointSize(mpo_font.pointSize() + 6)
-        mpo_font.setBold(True)
-        self._mpo_value.setFont(mpo_font)
-        self._mpo_value.setToolTip("Druglike MPO, from 0 to 1.")
-        summary.addWidget(self._mpo_value)
-        summary.addStretch(1)
-        self._ro5 = QLabel("Ro5")
-        self._ro5.setAlignment(Qt.AlignCenter)
-        self._ro5.setToolTip("Lipinski Rule of Five. Yes means no violations.")
-        summary.addWidget(self._ro5)
-        root.addLayout(summary)
-
         self._druglike_details = QWidget(self)
         detail_grid = QGridLayout(self._druglike_details)
         detail_grid.setContentsMargins(0, 4, 0, 0)
@@ -291,13 +244,8 @@ class DesignPropertyStrip(QWidget):
         self._timer.timeout.connect(self._refresh_now)
 
     def set_caption(self, text: str) -> None:
-        shown = _property_caption(text)
-        if not shown:
-            self._caption.hide()
-            self._caption.setText("")
-            return
-        self._caption.setText(shown)
-        self._caption.show()
+        """Captions are no longer shown above the property table."""
+        _ = text
 
     def schedule_refresh(self) -> None:
         """Debounce sketch edits before recomputing."""
@@ -338,8 +286,6 @@ class DesignPropertyStrip(QWidget):
 
     def _show_snapshot(self, snapshot: DesignSnapshot) -> None:
         if snapshot.error or not snapshot.terms:
-            self._mpo_value.setText("—")
-            self._set_ro5(None, None)
             for label in self._value_labels.values():
                 label.setText("—")
             for label in self._desirability_labels.values():
@@ -353,8 +299,6 @@ class DesignPropertyStrip(QWidget):
             self._ab_mps.setText("—")
             self._ab_mps_score.setText("—")
             return
-        self._mpo_value.setText(_fmt_num(snapshot.mpo, 2))
-        self._set_ro5(snapshot.ro5_pass, snapshot.ro5_violations)
         by_key = {term.key: term for term in snapshot.terms}
         for key, label in self._value_labels.items():
             term = by_key.get(key)
@@ -369,26 +313,6 @@ class DesignPropertyStrip(QWidget):
         self._set_ionization_pair(self._logd, None, snapshot.logd)
         self._set_ionization_pair(self._cns, self._cns_score, snapshot.cns_mpo)
         self._set_ionization_pair(self._ab_mps, self._ab_mps_score, snapshot.ab_mps)
-
-    def _set_ro5(self, passed: str | None, violations: int | None) -> None:
-        if passed is None:
-            self._ro5.setText("Ro5")
-            self._ro5.setStyleSheet("")
-            self._ro5.setToolTip("Lipinski Rule of Five. Yes means no violations.")
-            return
-        self._ro5.setText(f"Ro5 {passed}")
-        violations_text = "" if violations is None else f" {int(violations)} violation(s)."
-        self._ro5.setToolTip(f"Lipinski Rule of Five.{violations_text}")
-        if passed == "Yes":
-            self._ro5.setStyleSheet(
-                "background-color: #aad6ba; color: #141414; padding: 2px 6px; border-radius: 3px;"
-            )
-        elif passed == "No":
-            self._ro5.setStyleSheet(
-                "background-color: #fcdcdc; color: #141414; padding: 2px 6px; border-radius: 3px;"
-            )
-        else:
-            self._ro5.setStyleSheet("")
 
     def _set_ionization_pair(
         self, value_label: QLabel, score_label: QLabel | None, value: float | None
@@ -578,6 +502,7 @@ class DesignStudioPanel(QWidget):
         apply_browser_body_layout(root)
 
         self._sketcher = SketcherDialog(self, app=parent_app)
+        self._sketcher.install_chemistry_menu()
         self._sketcher.set_embedded(True)
         self._sketcher.prefer_host_window_edit_keys()
         self._sketcher.setMinimumSize(480, 320)
@@ -822,6 +747,26 @@ class DesignStudioWindow(BrowserHostDialog):
         sync = getattr(sketcher, "_sync_parent_edit_hotkeys", None)
         if callable(sync):
             sync()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        if not getattr(self, "_force_close", False):
+            answer = QMessageBox.question(
+                self,
+                self.close_title,
+                self.close_message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                event.ignore()
+                return
+        else:
+            self._force_close = False
+        panel = getattr(self, "_panel", None)
+        shutdown = getattr(panel, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
+        event.accept()
 
     default_title = TOOL_DESIGN_STUDIO
     close_title = "Close Design Studio"

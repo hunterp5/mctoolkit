@@ -17,10 +17,11 @@ The strip reads the molecule on the canvas. SAR Matrix can send a row's structur
 ## Options
 
 - **Canvas** — the sketcher. **Edit → Clear Sketch** empties the drawing. **View → Fit structure to window** scales it to the canvas, and **Original size** restores the size it had when it was opened. Ring templates show the heavy atoms they place. **File → Add to Table** asks, then adds new rows, as in the standalone sketcher.
+- **Chemistry → Bioisosteric Replacement** — select one or more atoms, then choose a replacement that matches that selection. The rest of the sketch stays.
 - **Suggestions** — **Update** reads the last MMP run and the table's R-group columns. Click a row to put that analog on the canvas. MMP rows with a small structural change and a large activity shift are marked **activity cliff**, with a SALI value, so the median is not treated as a smooth trend. R-group rows are one-substituent swaps, scored as the reference activity plus the difference in substituent means. Each row also shows the druglike MPO.
 - **Accept** — add the sketch to the table, if it is not already there, and to the **Design queue** list.
 - **Add to table** — append the current sketch as a new row without adding it to the list.
-- **Druglike** — sits beside the canvas, in the same row as the tool rail. The large number is the geometric mean. **Ro5** beside it is Yes or No. The table lists MW, LogP, TPSA, QED, rotatable bonds, and hydrogen-bond donors and acceptors. The score column is the 0–1 desirability, and only that column is colored.
+- **Properties** — sit beside the canvas, in the same row as the tool rail. The table lists MW, LogP, TPSA, QED, rotatable bonds, and hydrogen-bond donors and acceptors. The score column is the 0–1 desirability, and only that column is colored. The combined druglike score is that column’s geometric mean.
   - **MW** is 1 at or below 350 and 0 at or above 500.
   - **LogP** is 1 at 2.5 and 0 outside 0–5.
   - **TPSA** is 1 at 75 and 0 outside 20–140.
