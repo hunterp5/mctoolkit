@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QMessageBox
 
 from ...platform_support.config import load_config
 from ..analysis_job_support import enqueue_process_queue_job
@@ -40,21 +39,14 @@ class FastPrepareToolsMixin:
         dlg.show()
 
     def _on_fast_prepare_dialog_accepted(self, dlg) -> None:
+        from ...workflows.macro_record import fast_prepare_step
+        from ..command_dispatch import dispatch_step
+
         cfg = dlg.config()
         allowed = self._selected_oids_set() if cfg.only_selected else None
         if self._abort_if_only_selected_but_empty(cfg.only_selected, allowed, "Fast Prepare"):
             return
-        prepare_col = cfg.source_column if cfg.update_target else cfg.largest_column
-        self._fast_prepare_source = prepare_col
-        self._fast_prepare_allowed_oids = allowed
-        self._fast_prepare_fragments_col = cfg.fragments_column
-        self._fast_prepare_update_target = cfg.update_target
-        self._enqueue_fast_prepare(
-            cfg.source_column,
-            prepare_col,
-            only_selected=cfg.only_selected,
-            neutralize=cfg.neutralize,
-        )
+        dispatch_step(self, fast_prepare_step(cfg), {})
 
     def _fast_prepare_target_is_text(self, prepare_col: str) -> bool:
         """True when the Fast Prepare output column holds SMILES text rather than a depiction.
@@ -80,53 +72,88 @@ class FastPrepareToolsMixin:
             return [(oid, text) for oid, _blob, text in rows]
         return [(oid, blob or b"", text or None) for oid, blob, text in rows]
 
-    def _enqueue_fast_prepare(
-        self, src: str, prepare_col: str, *, only_selected: bool, neutralize: bool = False
-    ) -> None:
-        """Queue the fused disconnect (and optional neutralize) pass over the rows in scope."""
+    def start_fast_prepare_job(self, params: dict, *, allowed: set[int] | None, on_done) -> None:
+        """Prepare structures. ``on_done`` runs after the columns are written, before Render 2D."""
+        from PyQt5.QtCore import Qt
+
         from ...workers.fast_prepare import FastPrepareParams, FastPrepareWorker
+        from ..job_signals import FastPrepareJobSignals, release_job_signals, retain_job_signals
+        from ..macro_recorder import report_unless_replaying
 
-        allowed = self._selected_oids_set() if only_selected else None
-        is_smiles = src != "Structure"
-        data = self._collect_fast_prepare_items(src, allowed)
-
-        if not data:
-            QMessageBox.information(
-                self,
-                "Fast Prepare",
-                "No rows match the current scope and structure field.",
-            )
+        source = str(params.get("structure_source") or "").strip()
+        update_target = bool(params.get("update_target", True))
+        largest = params.get("largest_column")
+        prepare_col = source if update_target else str(largest or "").strip()
+        fragments = str(params.get("fragments_column") or "Fragments").strip()
+        if not source or not prepare_col:
+            message = "Choose a structure column."
             self.status_label.setText("Ready.")
+            if on_done is not None:
+                on_done(message, {})
+            report_unless_replaying(self, "Fast Prepare", message)
             return
-
-        # The mol store keeps a SMILES beside every blob (session save reads it), so the child
-        # processes always canonicalize; the GUI thread never runs MolToSmiles. Structure output
-        # also comes back with a depiction scene, so drawing does not start a second job.
+        data = self._collect_fast_prepare_items(source, allowed)
+        if not data:
+            message = "No rows match the current scope and structure field."
+            self.status_label.setText("Ready.")
+            if on_done is not None:
+                on_done(message, {})
+            report_unless_replaying(self, "Fast Prepare", message, warning=False)
+            return
         cfg = load_config()
-        params = FastPrepareParams(
-            is_smiles=is_smiles,
+        worker_params = FastPrepareParams(
+            is_smiles=source != "Structure",
             need_smiles=True,
-            neutralize=bool(neutralize),
+            neutralize=bool(params.get("neutralize")),
             batch_size=int(cfg.fast_prepare_batch_size),
             process_pool_min_rows=int(cfg.fast_prepare_process_pool_min_rows),
             want_scene=prepare_col == "Structure",
         )
+        job = _FastPrepareJob(prepare_col, fragments, update_target, on_done)
+        sig = FastPrepareJobSignals(self)
+        retain_job_signals(self, sig)
+
+        def _batch(rows, is_last, state=job, held=sig) -> None:
+            self._fast_prepare_on_batch(state, rows, is_last)
+            if is_last:
+                release_job_signals(self, held)
+
+        def _finished(results, state=job, held=sig) -> None:
+            release_job_signals(self, held)
+            self._fast_prepare_on_finished(state, results)
+
+        sig.fast_prepared_batch.connect(_batch, Qt.QueuedConnection)
+        sig.fast_prepared.connect(_finished, Qt.QueuedConnection)
         enqueue_process_queue_job(
             self,
             "Fast prepare",
             len(data),
-            lambda ev, ps, d=data, p=params, s=self.signals: FastPrepareWorker(
+            lambda ev, ps, d=data, p=worker_params, s=sig: FastPrepareWorker(
                 d, p, s, cancel_event=ev, progress_state=ps
             ),
             queue_label="Fast prepare: prepare structures",
         )
 
+    def _enqueue_fast_prepare(
+        self, src: str, prepare_col: str, *, only_selected: bool, neutralize: bool = False
+    ) -> None:
+        """Queue the fused disconnect (and optional neutralize) pass over the rows in scope."""
+        update_target = prepare_col == src
+        self.start_fast_prepare_job(
+            {
+                "structure_source": src,
+                "update_target": update_target,
+                "largest_column": None if update_target else prepare_col,
+                "fragments_column": getattr(self, "_fast_prepare_fragments_col", "Fragments"),
+                "neutralize": bool(neutralize),
+            },
+            allowed=self._selected_oids_set() if only_selected else None,
+            on_done=None,
+        )
+
     def on_fast_prepare_batch(self, rows, is_last: bool) -> None:
         """Write one streamed Structure batch. The last signal finishes the job."""
-        if rows or not getattr(self, "_fast_prepare_applying", False):
-            self._apply_fast_prepare_rows(rows or [])
-        if is_last:
-            self._finish_fast_prepare(structure_scenes=True)
+        self._fast_prepare_on_batch(self._fast_prepare_job_from_window(), rows, is_last)
 
     def on_fast_prepare_finished(self, results) -> None:
         """Apply fused disconnect + neutralize results, then render depictions that still need it.
@@ -135,37 +162,51 @@ class FastPrepareToolsMixin:
         immediately overwrote it with the neutralized molecule. A Structure job that already
         carried scenes is applied as a single streamed batch.
         """
+        self._fast_prepare_on_finished(self._fast_prepare_job_from_window(), results)
+
+    def _fast_prepare_job_from_window(self) -> "_FastPrepareJob":
+        job = getattr(self, "_fast_prepare_window_job", None)
+        if isinstance(job, _FastPrepareJob) and job.applying and not job.settled:
+            return job
+        job = _FastPrepareJob(
+            getattr(self, "_fast_prepare_source", "Structure"),
+            getattr(self, "_fast_prepare_fragments_col", "Fragments"),
+            getattr(self, "_fast_prepare_update_target", True),
+        )
+        self._fast_prepare_window_job = job
+        return job
+
+    def _fast_prepare_on_batch(self, job: "_FastPrepareJob", rows, is_last: bool) -> None:
+        if rows or not job.applying:
+            self._apply_fast_prepare_rows(rows or [], job)
+        if is_last:
+            self._finish_fast_prepare_job(job, structure_scenes=True)
+
+    def _fast_prepare_on_finished(self, job: "_FastPrepareJob", results) -> None:
         if results and len(results[0]) >= 6:
-            self.on_fast_prepare_batch(results, True)
+            self._fast_prepare_on_batch(job, results, True)
             return
-        self._apply_fast_prepare_rows(results or [])
-        self._finish_fast_prepare(structure_scenes=False)
+        self._apply_fast_prepare_rows(results or [], job)
+        self._finish_fast_prepare_job(job, structure_scenes=False)
 
-    def _fast_prepare_job_columns(self) -> tuple[str, str, bool]:
-        if getattr(self, "_fast_prepare_applying", False):
-            return (
-                self._fast_prepare_apply_col,
-                self._fast_prepare_apply_fragments,
-                self._fast_prepare_apply_update,
-            )
-        prepare_col = getattr(self, "_fast_prepare_source", "Structure")
-        fragments_col = getattr(self, "_fast_prepare_fragments_col", "Fragments")
-        update_target = getattr(self, "_fast_prepare_update_target", True)
-        self._fast_prepare_apply_col = prepare_col
-        self._fast_prepare_apply_fragments = fragments_col
-        self._fast_prepare_apply_update = update_target
-        self._fast_prepare_fallback_oids = []
-        self._fast_prepare_written_oids = []
-        self._fast_prepare_applying = True
+    def _begin_fast_prepare_apply(self, job: "_FastPrepareJob") -> tuple[str, str, bool]:
+        if job.applying:
+            return job.apply_col, job.apply_fragments, job.apply_update
+        job.apply_col = job.prepare_col
+        job.apply_fragments = job.fragments_col
+        job.apply_update = job.update_target
+        job.fallback_oids = []
+        job.written_oids = []
+        job.applying = True
         self.table.setSortingEnabled(False)
-        self._ensure_disconnect_output_column(fragments_col)
-        if not update_target:
-            self._ensure_disconnect_output_column(prepare_col)
-        return prepare_col, fragments_col, update_target
+        self._ensure_disconnect_output_column(job.apply_fragments)
+        if not job.apply_update:
+            self._ensure_disconnect_output_column(job.apply_col)
+        return job.apply_col, job.apply_fragments, job.apply_update
 
-    def _apply_fast_prepare_rows(self, results) -> None:
+    def _apply_fast_prepare_rows(self, results, job: "_FastPrepareJob") -> None:
         """Write one batch of ``(oid, blob, fragments, smiles[, scene, xy])`` rows."""
-        prepare_col, fragments_col, _update_target = self._fast_prepare_job_columns()
+        prepare_col, fragments_col, _update_target = self._begin_fast_prepare_apply(job)
         prepared: list[tuple[int, bytes, str, str]] = []
         scenes: list[tuple[int, bytes]] = []
         coords: list[tuple[int, bytes]] = []
@@ -182,13 +223,13 @@ class FastPrepareToolsMixin:
             if scene:
                 scenes.append((oid, scene))
             elif prepare_col == "Structure":
-                self._fast_prepare_fallback_oids.append(oid)
+                job.fallback_oids.append(oid)
             if xy:
                 coords.append((oid, xy))
         oids = self._write_tool_structures(
             prepare_col, [(oid, blob, smiles) for oid, blob, _fragments, smiles in prepared]
         )
-        self._fast_prepare_written_oids.extend(oids)
+        job.written_oids.extend(oids)
         if fragments_col in self.headers:
             self._table_model.set_column_text_by_oids(
                 fragments_col, [(oid, fragments) for oid, _blob, fragments, _smiles in prepared]
@@ -223,20 +264,32 @@ class FastPrepareToolsMixin:
         if callable(repaint):
             repaint({oid for oid, _scene in scenes})
 
-    def _finish_fast_prepare(self, *, structure_scenes: bool) -> None:
-        prepare_col = getattr(self, "_fast_prepare_apply_col", "Structure")
-        written = list(getattr(self, "_fast_prepare_written_oids", []))
-        fallbacks = list(getattr(self, "_fast_prepare_fallback_oids", []))
-        self._fast_prepare_source = "Structure"
-        self._fast_prepare_allowed_oids = None
-        self._fast_prepare_fragments_col = "Fragments"
-        self._fast_prepare_update_target = True
-        self._fast_prepare_applying = False
-        self._fast_prepare_fallback_oids = []
-        self._fast_prepare_written_oids = []
+    def _finish_fast_prepare_job(self, job: "_FastPrepareJob", *, structure_scenes: bool) -> None:
+        if job.settled:
+            return
+        job.settled = True
+        job.applying = False
+        prepare_col = job.apply_col
+        written = list(job.written_oids)
+        fallbacks = list(job.fallback_oids)
+        if getattr(self, "_fast_prepare_window_job", None) is job:
+            self._fast_prepare_window_job = None
+            self._fast_prepare_source = "Structure"
+            self._fast_prepare_allowed_oids = None
+            self._fast_prepare_fragments_col = "Fragments"
+            self._fast_prepare_update_target = True
+            self._fast_prepare_applying = False
 
         self.schedule_calculate_global_bounds()
         self._clear_tool_progress()
+        if job.on_done is not None:
+            if self.has_partial_results_notice():
+                job.on_done("Cancelled.", {})
+            else:
+                job.on_done(
+                    None,
+                    {"output": prepare_col, "fragments": job.fragments_col},
+                )
 
         # Scenes already cover the Structure rows. Only the builder's leftovers are redrawn,
         # and they still have the coordinates just stored, so that redraw keeps the layout.
@@ -247,3 +300,20 @@ class FastPrepareToolsMixin:
             self.status_label.setText("Fast prepare: rendering 2D…")
             return
         self.status_label.setText(self._consume_partial_results_notice() or "Fast prepare done.")
+
+
+class _FastPrepareJob:
+    """Columns and completion for one Fast Prepare writeback."""
+
+    def __init__(self, prepare_col: str, fragments_col: str, update_target: bool, on_done=None):
+        self.prepare_col = prepare_col
+        self.fragments_col = fragments_col
+        self.update_target = bool(update_target)
+        self.on_done = on_done
+        self.applying = False
+        self.settled = False
+        self.apply_col = prepare_col
+        self.apply_fragments = fragments_col
+        self.apply_update = bool(update_target)
+        self.fallback_oids: list[int] = []
+        self.written_oids: list[int] = []
