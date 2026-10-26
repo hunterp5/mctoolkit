@@ -19,6 +19,11 @@ A structure column, **Selected Rows Only**, or one pasted SMILES. The Python int
 - **Input** - table rows or a SMILES string.
 - **Source** - structure column when the input is the table.
 - **Selected Rows Only** - limit the table scope.
+- **Policies, filters, and stocks** - the names listed in ``config.yml``. Every policy is on until you clear one. AiZynthFinder would otherwise use only the first policy.
+- **Time limit, iterations, maximum reactions, routes to keep** - search limits for this run. The original ``config.yml`` is not rewritten.
+- **Algorithm** - Monte Carlo by default. Retro*, breadth-first, and proof-number search are available.
+- **Exploration (C)** - how widely Monte Carlo tries less likely reactions.
+- **Stop at the first solved route** and **Cluster similar routes** - optional.
 - **Search** - queue the job. Cancel keeps rows that already finished.
 
 ## Workflow
@@ -39,4 +44,4 @@ A structure column, **Selected Rows Only**, or one pasted SMILES. The Python int
 
 A molecule often takes a minute or more. Run a handful of rows, not a whole library, in one job. The same SMILES is searched once and written back to every matching row. Rows that already have AiZynth values are skipped on the next run; clear those cells to search them again.
 
-The job reads the model and stock files named in ``config.yml``. A config with ``use_remote_models: true``, or a MongoDB stock on a host other than localhost, is refused. **Routes…** keeps the routes from searches in this session and draws each route as a tree. In-stock molecules have a green frame; molecules that still need a route have an amber frame. Each branch line has a Step button. Click it to open that reaction's policy, probability, template, and other metadata, and click it again to close them. A log under the canvas repeats the route, its scores, and its metadata. Center-click and drag to pan the drawing. The target sits on the right and its precursors branch to the left. Right-click a card and choose Copy for SMILES or another structure format.
+The job reads the model and stock files named in ``config.yml``. A config with ``use_remote_models: true``, or a MongoDB stock on a host other than localhost, is refused. The search dialog chooses which of those policies, filters, and stocks to use, plus the time limit, iteration limit, maximum number of reactions, and how many routes to keep. Ringbreaker runs when its box is checked. **Routes…** keeps the routes from searches in this session and draws each route as a tree. In-stock molecules have a green frame; molecules that still need a route have an amber frame. Each branch line has a Step button. Click it to show that reaction's policy, probability, template, and other metadata in the table beside the canvas. Step 1 is the earliest reaction and the highest number is the step that makes the target. A log under the canvas repeats the route, its scores, and its metadata. Center-click and drag to move the drawing in any direction, including past the edges of the canvas. The target sits on the right and its precursors branch to the left. Right-click a card and choose Copy for SMILES or another structure format.

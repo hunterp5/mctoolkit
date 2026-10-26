@@ -368,7 +368,8 @@ def test_route_browser_lists_one_step(qapp, monkeypatch) -> None:  # noqa: ARG00
 
 
 def _assert_step_details_toggle(dialog) -> None:
-    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton
+    from PyQt5.QtCore import QPoint
+    from PyQt5.QtWidgets import QApplication, QPushButton, QSplitter
 
     dialog.show()
     QApplication.processEvents()
@@ -378,16 +379,22 @@ def _assert_step_details_toggle(dialog) -> None:
     assert cards
     assert max(card.width() for card in cards) <= 200
     assert buttons[0].parentWidget().width() > max(card.width() for card in cards)
-    labels = buttons[0].parentWidget().findChildren(QLabel)
-    detail = next(label for label in labels if label.text().startswith("uspto · 0.4210"))
-    assert not detail.isVisible()
-    assert "[C:1]>>[C:1]" in detail.text()
     buttons[0].click()
     QApplication.processEvents()
-    assert detail.isVisible()
-    buttons[0].click()
-    QApplication.processEvents()
-    assert not detail.isVisible()
+    fields = [dialog.step_table.item(row, 0).text() for row in range(dialog.step_table.rowCount())]
+    values = [dialog.step_table.item(row, 1).text() for row in range(dialog.step_table.rowCount())]
+    assert "policy_name" in fields
+    assert "uspto" in values
+    assert "[C:1]>>[C:1]" in values
+    splitter = dialog.step_table.parentWidget()
+    assert isinstance(splitter, QSplitter)
+    assert splitter.widget(0) is dialog.route_table
+    assert splitter.widget(2) is dialog.step_table
+    assert dialog.step_table.maximumWidth() > 2000
+    assert (
+        dialog.step_table.mapToGlobal(QPoint(0, 0)).x()
+        > dialog._route_scroll.mapToGlobal(QPoint(dialog._route_scroll.width() - 1, 0)).x()
+    )
 
 
 def _assert_tree_overflows(dialog) -> None:
@@ -396,24 +403,42 @@ def _assert_tree_overflows(dialog) -> None:
     dialog.show()
     QApplication.processEvents()
     dialog._route_scroll.setFixedWidth(220)
-    dialog._pin_canvas()
+    dialog._place_tree()
     QApplication.processEvents()
-    assert dialog._route_scroll.horizontalScrollBar().maximum() > 0
+    host = dialog._steps_host
+    canvas = dialog._route_scroll
+    assert host.width() > canvas.width()
+    assert host.x() < 0
+    assert host.x() + host.width() < canvas.width()
 
 
 def _assert_canvas_pans(dialog) -> None:
     from PyQt5.QtCore import QEvent, QPoint, Qt
     from PyQt5.QtGui import QMouseEvent
-    from PyQt5.QtWidgets import QApplication, QWidget
+    from PyQt5.QtWidgets import QApplication
+
+    import molmanager.ui.browsers.route_browser as route_browser
+
+    class _Spontaneous(QMouseEvent):
+        def spontaneous(self) -> bool:  # noqa: N802
+            return True
 
     canvas = dialog._route_scroll
-    bar = canvas.horizontalScrollBar()
-    bar.setRange(0, 400)
-    bar.setValue(200)
-    target = dialog._steps_host
-    child = target.findChild(QWidget) or canvas.viewport()
-    origin = child.mapToGlobal(QPoint(20, 20))
-    press = QMouseEvent(
+    host = dialog._steps_host
+    start = host.pos()
+    viewport = canvas
+    origin = viewport.mapToGlobal(QPoint(20, 20))
+    held = {"at": QPoint(origin)}
+
+    class _Cursor:
+        @staticmethod
+        def pos() -> QPoint:
+            return QPoint(held["at"])
+
+    previous = route_browser.QCursor
+    route_browser.QCursor = _Cursor
+    shift = QPoint(50, 30)
+    press = _Spontaneous(
         QEvent.MouseButtonPress,
         QPoint(20, 20),
         origin,
@@ -421,31 +446,263 @@ def _assert_canvas_pans(dialog) -> None:
         Qt.MiddleButton,
         Qt.NoModifier,
     )
-    QApplication.sendEvent(child, press)
-    shift = QPoint(50, 20)
-    move = QMouseEvent(
+    move = _Spontaneous(
         QEvent.MouseMove,
-        QPoint(8, 8),
+        QPoint(70, 50),
         origin + shift,
         Qt.NoButton,
-        Qt.NoButton,
+        Qt.MiddleButton,
         Qt.NoModifier,
     )
-    release = QMouseEvent(
+    drift = QMouseEvent(
+        QEvent.MouseMove,
+        QPoint(200, 20),
+        origin + QPoint(400, 0),
+        Qt.NoButton,
+        Qt.MiddleButton,
+        Qt.NoModifier,
+    )
+    release = _Spontaneous(
         QEvent.MouseButtonRelease,
-        QPoint(8, 8),
+        QPoint(70, 50),
         origin + shift,
         Qt.MiddleButton,
         Qt.NoButton,
         Qt.NoModifier,
     )
     try:
-        QApplication.sendEvent(dialog.summary_log, move)
-        assert bar.value() == 150
+        QApplication.sendEvent(viewport, press)
+        held["at"] = origin + shift
+        QApplication.sendEvent(viewport, move)
+        assert host.pos() == start + shift
+        QApplication.sendEvent(viewport, drift)
+        assert host.pos() == start + shift
+        far = QPoint(2500, -1800)
+        held["at"] = origin + far
+        QApplication.sendEvent(
+            viewport,
+            _Spontaneous(
+                QEvent.MouseMove,
+                QPoint(8, 8),
+                origin + far,
+                Qt.NoButton,
+                Qt.MiddleButton,
+                Qt.NoModifier,
+            ),
+        )
+        assert host.pos() == start + far
+        assert host.x() > canvas.width()
+        assert host.y() < 0
     finally:
-        QApplication.sendEvent(dialog.summary_log, release)
+        QApplication.sendEvent(viewport, release)
         canvas.end_pan()
+        route_browser.QCursor = previous
     assert canvas._pan is None
+
+
+def test_branch_lines_reach_reagent_cards(qapp) -> None:  # noqa: ARG001
+    from PyQt5.QtCore import QPoint
+    from PyQt5.QtWidgets import QApplication, QPushButton
+
+    from molmanager.ui.browsers.route_browser import (
+        _HStem,
+        _MoleculeNode,
+        _VBranch,
+        RouteBrowserDialog,
+    )
+
+    def leaf(smiles: str) -> dict:
+        return {"smiles": smiles, "in_stock": False, "reactions": []}
+
+    deep = {
+        "smiles": "O",
+        "in_stock": False,
+        "reactions": [
+            {
+                "smiles": "C.CO>>O",
+                "metadata": {},
+                "reactants": [
+                    leaf("C"),
+                    {
+                        "smiles": "CO",
+                        "in_stock": False,
+                        "reactions": [
+                            {
+                                "smiles": "C.O>>CO",
+                                "metadata": {},
+                                "reactants": [leaf("C"), leaf("O")],
+                            }
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+    dialog = RouteBrowserDialog()
+    dialog.set_targets(
+        [
+            {
+                "smiles": "CCO",
+                "routes": [
+                    {
+                        "score": "0.5",
+                        "solved": True,
+                        "steps": [{"product": "CCO", "reaction": "", "reactants": []}],
+                        "tree": {
+                            "smiles": "CCO",
+                            "in_stock": False,
+                            "reactions": [
+                                {
+                                    "smiles": "CC.O>>CCO",
+                                    "metadata": {},
+                                    "reactants": [leaf("CC"), deep],
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    dialog.resize(1100, 700)
+    dialog.show()
+    QApplication.processEvents()
+    dialog._place_tree()
+    host = dialog._steps_host
+    canvas = dialog._route_scroll
+    right = host.x() + host.width()
+    assert 0 < right <= canvas.width()
+    gaps: list[int] = []
+    for branch in host.findChildren(_VBranch):
+        left = branch.mapTo(host, QPoint(0, 0)).x()
+        column = branch.parentWidget().layout().itemAt(0).widget()
+        for index in range(column.layout().count()):
+            node = column.layout().itemAt(index).widget()
+            if not isinstance(node, _MoleculeNode):
+                continue
+            tail = node.layout().itemAt(node.layout().count() - 1).widget()
+            assert isinstance(tail, _HStem)
+            right = tail.mapTo(host, QPoint(tail.width(), 0)).x()
+            gaps.append(left - right)
+    assert gaps
+    assert max(gaps) <= 2
+    buttons = sorted(
+        (
+            button
+            for button in dialog.findChildren(QPushButton)
+            if button.objectName() == "route-step"
+        ),
+        key=lambda button: button.mapToGlobal(QPoint(0, 0)).x(),
+    )
+    assert [button.text() for button in buttons] == ["Step 1", "Step 2", "Step 3"]
+    dialog.close()
+
+
+def test_search_options_select_policies_and_limits() -> None:
+    text = _LOCAL_CONFIG + "\nfilter:\n  uspto: uspto_filter.onnx\n"
+    catalog = aizynth.config_catalog(text)
+    assert catalog["expansion"] == ["uspto"]
+    assert catalog["filter"] == ["uspto"]
+    assert catalog["stock"] == ["zinc"]
+    options = aizynth.SearchOptions(
+        policies=("uspto",),
+        filters=("uspto",),
+        stocks=("zinc",),
+        iteration_limit=40,
+        time_limit=180,
+        max_transforms=4,
+        max_routes=8,
+        exploration=1.8,
+        cluster=True,
+    )
+    restored = aizynth.SearchOptions.from_json(options.to_json())
+    assert restored.policies == ("uspto",)
+    assert restored.iteration_limit == 40
+    assert restored.time_limit == 180
+    assert restored.max_routes == 8
+    assert restored.exploration == 1.8
+    assert restored.cluster is True
+    command = aizynth.aizynthcli_command(
+        "python",
+        Path("config.yml"),
+        Path("smiles.txt"),
+        Path("out.json"),
+        Path("checkpoint.jsonl"),
+        options,
+    )
+    assert command[command.index("--policy") + 1] == "uspto"
+    assert "--filter" in command
+    assert "--stocks" in command
+    assert "--cluster" in command
+    assert "--nproc" not in command
+    overlay = options.overlay()
+    assert overlay["search"]["iteration_limit"] == 40
+    assert overlay["search"]["time_limit"] == 180
+    assert overlay["search"]["algorithm_config"]["C"] == 1.8
+    assert overlay["post_processing"]["max_routes"] == 8
+
+
+def test_retrosynthesis_dialog_lists_config_policies(qapp, monkeypatch, tmp_path: Path) -> None:
+    from PyQt5.QtWidgets import QGroupBox
+
+    from molmanager.ui.dialogs.aizynthfinder import AizynthFinderDialog
+
+    config = tmp_path / "config.yml"
+    config.write_text(
+        "expansion:\n"
+        "  uspto:\n"
+        "    - uspto_model.onnx\n"
+        "    - uspto_templates.csv.gz\n"
+        "  ringbreaker:\n"
+        "    - ring.onnx\n"
+        "    - ring.csv.gz\n"
+        "stock:\n"
+        "  zinc: zinc_stock.hdf5\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "molmanager.ui.dialogs.aizynthfinder.resolve_config",
+        lambda _text="": config,
+    )
+    monkeypatch.setattr(
+        "molmanager.ui.dialogs.aizynthfinder.load_search_options",
+        lambda: aizynth.SearchOptions(),
+    )
+    dialog = AizynthFinderDialog()
+    models = dialog.findChild(QGroupBox, "aizynth-models")
+    assert models is not None
+    assert models.sizeHint().height() <= 96
+    assert [box.text() for box in dialog._policy_boxes] == ["uspto", "ringbreaker"]
+    assert all(box.isChecked() for box in dialog._policy_boxes)
+    assert dialog.time_minutes.value() == 2
+    dialog._policy_boxes[1].setChecked(False)
+    chosen = dialog._search_options()
+    assert chosen.policies == ("uspto",)
+    assert chosen.time_limit == 120
+    dialog.close()
+
+
+def test_search_without_a_policy_is_refused(tmp_path: Path, monkeypatch) -> None:
+    python = tmp_path / "python.exe"
+    python.write_text("", encoding="utf-8")
+    config = tmp_path / "config.yml"
+    config.write_text(_LOCAL_CONFIG, encoding="utf-8")
+    monkeypatch.setattr(
+        aizynth.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("search started")),
+    )
+    try:
+        aizynth.run_search(
+            python=str(python),
+            config=config,
+            smiles=["CCO"],
+            options=aizynth.SearchOptions(),
+        )
+    except aizynth.AizynthRunError as exc:
+        assert "policy" in str(exc)
+    else:
+        raise AssertionError("a search with no policy should be refused")
 
 
 def test_conda_child_environment_prefixes_library_bin(tmp_path: Path, monkeypatch) -> None:

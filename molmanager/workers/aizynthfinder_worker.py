@@ -69,6 +69,7 @@ class AizynthFinderWorker(QRunnable):
         *,
         cancel_event: threading.Event | None = None,
         progress_state=None,
+        options=None,
     ):
         super().__init__()
         self.payloads = list(payloads)
@@ -78,6 +79,7 @@ class AizynthFinderWorker(QRunnable):
         self.aizynth_signals = aizynth_signals
         self.cancel_event = cancel_event
         self.progress_state = progress_state
+        self.options = options
 
     def run(self) -> None:
         from ..platform_support.tool_progress import report_tool_progress
@@ -139,6 +141,7 @@ class AizynthFinderWorker(QRunnable):
                 python=self.python,
                 config=Path(self.config),
                 smiles=order,
+                options=self.options,
                 cancel=_cancelled,
                 on_progress=_on_progress,
             )

@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import QEvent, QPoint, Qt, QTimer
-from PyQt5.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPalette, QPen, QPixmap
+from PyQt5.QtGui import QBrush, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -32,7 +32,6 @@ from PyQt5.QtWidgets import (
     QMenu,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QSplitter,
     QTableWidget,
@@ -70,20 +69,36 @@ _STEP_BUTTON_QSS = (
 _ROUTE_COLUMNS = ("#", "Status", "Score", "Steps", "In stock")
 
 
-class _RouteCanvas(QScrollArea):
-    """Route drawing. Center-click and drag to pan."""
+class _RouteCanvas(QFrame):
+    """Route drawing. Center-click and drag to move it past any edge."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._pan: tuple[QPoint, int, int] | None = None
+        self._content: QWidget | None = None
+        self._pan: tuple[QPoint, QPoint] | None = None
         self._app_filter = False
         self._pan_cursor = False
-        self.viewport().installEventFilter(self)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setAutoFillBackground(True)
+        self.setBackgroundRole(QPalette.Base)
+        self.setMinimumSize(120, 120)
+        self.installEventFilter(self)
 
-    def setWidget(self, widget) -> None:  # noqa: N802
-        super().setWidget(widget)
-        if widget is not None:
-            self.watch(widget)
+    def set_content(self, widget: QWidget) -> None:
+        widget.setParent(self)
+        self._content = widget
+        self.watch(widget)
+
+    def place_content(self) -> None:
+        """Park the drawing with its right side in view. It may extend past every edge."""
+        content = self._content
+        if content is None or self.width() < 2 or self.height() < 2:
+            return
+        margin = 12
+        content.move(
+            self.width() - content.width() - margin,
+            (self.height() - content.height()) // 2,
+        )
 
     def watch(self, root: QWidget) -> None:
         """Listen for center-clicks on *root* and the cards added under it."""
@@ -93,8 +108,8 @@ class _RouteCanvas(QScrollArea):
 
     def end_pan(self) -> None:
         self._pan = None
-        if QWidget.mouseGrabber() is self.viewport():
-            self.viewport().releaseMouse()
+        if QWidget.mouseGrabber() is self:
+            self.releaseMouse()
         if self._app_filter:
             app = QApplication.instance()
             if app is not None:
@@ -109,17 +124,19 @@ class _RouteCanvas(QScrollArea):
         if kind == QEvent.MouseButtonPress and event.button() == Qt.MiddleButton:
             if not self._on_canvas(obj):
                 return super().eventFilter(obj, event)
-            self._begin_pan(event.globalPos())
-            return False
+            self._begin_pan(QCursor.pos() if event.spontaneous() else event.globalPos())
+            return True
         if self._pan is not None and kind == QEvent.MouseMove:
-            buttons = event.buttons()
+            if not event.spontaneous():
+                return True
+            buttons = event.buttons() or QApplication.mouseButtons()
             if buttons and not (buttons & Qt.MiddleButton):
                 self.end_pan()
                 return False
-            origin, horizontal, vertical = self._pan
-            delta = event.globalPos() - origin
-            self.horizontalScrollBar().setValue(horizontal - delta.x())
-            self.verticalScrollBar().setValue(vertical - delta.y())
+            origin, start = self._pan
+            delta = QCursor.pos() - origin
+            if self._content is not None:
+                self._content.move(start + delta)
             return True
         if self._pan is not None and kind == QEvent.WindowDeactivate:
             self.end_pan()
@@ -134,11 +151,8 @@ class _RouteCanvas(QScrollArea):
         return super().eventFilter(obj, event)
 
     def _begin_pan(self, origin: QPoint) -> None:
-        self._pan = (
-            origin,
-            self.horizontalScrollBar().value(),
-            self.verticalScrollBar().value(),
-        )
+        start = self._content.pos() if self._content is not None else QPoint(0, 0)
+        self._pan = (origin, start)
         app = QApplication.instance()
         if app is not None and not self._app_filter:
             app.installEventFilter(self)
@@ -152,15 +166,18 @@ class _RouteCanvas(QScrollArea):
         """Take the mouse after the press, so the drag is not dropped."""
         if self._pan is None:
             return
-        viewport = self.viewport()
-        if QWidget.mouseGrabber() is not viewport:
-            viewport.grabMouse()
+        if QWidget.mouseGrabber() is not self:
+            self.grabMouse()
 
     def _on_canvas(self, obj) -> bool:
-        if obj is self.viewport() or obj is self.widget():
+        if obj is self:
             return True
-        widget = self.widget()
-        return isinstance(obj, QWidget) and widget is not None and widget.isAncestorOf(obj)
+        content = self._content
+        if content is None:
+            return False
+        if obj is content:
+            return True
+        return isinstance(obj, QWidget) and content.isAncestorOf(obj)
 
 
 def _route_log_view() -> QPlainTextEdit:
@@ -211,25 +228,27 @@ class RouteBrowserDialog(QDialog):
         self.route_table.currentCellChanged.connect(self._on_route_cell_changed)
         splitter.addWidget(self.route_table)
 
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(6)
-
         self._steps_host = QWidget()
+        self._steps_host.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._steps_layout = QVBoxLayout(self._steps_host)
         self._steps_layout.setContentsMargins(4, 4, 4, 4)
         self._steps_layout.setSpacing(12)
-        self._steps_layout.addStretch(1)
         self._route_scroll = _RouteCanvas()
-        self._route_scroll.setWidgetResizable(True)
-        self._route_scroll.setWidget(self._steps_host)
-        right_layout.addWidget(self._route_scroll, 1)
+        self._route_scroll.set_content(self._steps_host)
 
+        canvas_column = QWidget()
+        canvas_layout = QVBoxLayout(canvas_column)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
+        canvas_layout.setSpacing(6)
+        canvas_layout.addWidget(self._route_scroll, 1)
         self.summary_log = _route_log_view()
-        right_layout.addWidget(self.summary_log)
-        splitter.addWidget(right)
+        canvas_layout.addWidget(self.summary_log)
+
+        self.step_table = _step_table()
+        splitter.addWidget(canvas_column)
+        splitter.addWidget(self.step_table)
         splitter.setStretchFactor(1, 1)
+        splitter.setChildrenCollapsible(False)
         root.addWidget(splitter, 1)
 
         self._empty = QLabel("Run Retrosynthesis → Search to collect routes.")
@@ -323,15 +342,14 @@ class RouteBrowserDialog(QDialog):
         tree = route.get("tree")
         if isinstance(tree, dict) and str(tree.get("smiles") or "").strip():
             self._empty.hide()
-            self._steps_layout.insertWidget(
-                self._steps_layout.count() - 1,
+            self._steps_layout.addWidget(
                 _MoleculeNode(tree, self._pixmap_for),
                 0,
                 Qt.AlignRight | Qt.AlignTop,
             )
             self._route_scroll.watch(self._steps_host)
-            self._pin_canvas()
-            QTimer.singleShot(0, self._scroll_to_target)
+            self._place_tree()
+            QTimer.singleShot(0, self._place_tree)
             return
         steps = list(route.get("steps") or [])
         if not steps:
@@ -343,12 +361,10 @@ class RouteBrowserDialog(QDialog):
             return
         self._empty.hide()
         for number, step in enumerate(steps, start=1):
-            self._steps_layout.insertWidget(
-                self._steps_layout.count() - 1,
-                _StepWidget(number, step, self._reaction_pixmap_for),
-            )
+            self._steps_layout.addWidget(_StepWidget(number, step, self._reaction_pixmap_for))
         self._route_scroll.watch(self._steps_host)
-        self._pin_canvas()
+        self._place_tree()
+        QTimer.singleShot(0, self._place_tree)
 
     def _target_at(self, index: int) -> dict | None:
         if index < 0 or index >= len(self._targets):
@@ -366,25 +382,39 @@ class RouteBrowserDialog(QDialog):
             widget.setParent(None)
             widget.deleteLater()
         self.summary_log.setPlainText("" if message else self.summary_log.toPlainText())
+        self._clear_step_table()
         self._empty.setText(message)
         self._empty.setVisible(bool(message))
 
-    def _scroll_to_target(self) -> None:
-        self._pin_canvas()
-        bar = self._route_scroll.horizontalScrollBar()
-        bar.setValue(bar.maximum())
+    def _show_step_rows(self, button) -> None:
+        for other in self._steps_host.findChildren(QPushButton, "route-step"):
+            other.setChecked(other is button)
+        rows = list(getattr(button, "step_rows", []) or [])
+        table = self.step_table
+        table.setRowCount(len(rows))
+        for index, (field, value) in enumerate(rows):
+            field_item = QTableWidgetItem(field)
+            field_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            value_item = QTableWidgetItem(value)
+            value_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            value_item.setToolTip(value)
+            table.setItem(index, 0, field_item)
+            table.setItem(index, 1, value_item)
+        table.resizeColumnsToContents()
 
-    def _pin_canvas(self) -> None:
-        layout = self._steps_host.layout()
+    def _clear_step_table(self) -> None:
+        self.step_table.setRowCount(0)
+
+    def _place_tree(self) -> None:
+        host = self._steps_host
+        layout = host.layout()
         if layout is None:
             return
+        host.setMinimumSize(0, 0)
+        size = layout.totalMinimumSize()
+        host.resize(max(size.width(), 1), max(size.height(), 1))
         layout.activate()
-        content = layout.totalMinimumSize()
-        view = self._route_scroll.viewport().size()
-        self._steps_host.setMinimumSize(
-            content.width() + max(0, view.width()),
-            content.height() + max(0, view.height()),
-        )
+        self._route_scroll.place_content()
 
     def _pixmap_for(self, smiles: str) -> QPixmap | None:
         key = (smiles, _CARD_W, _CARD_H)
@@ -506,6 +536,22 @@ class _VBranch(QWidget):
         painter.drawLine(0, mid, self.width(), mid)
 
 
+def _step_table() -> QTableWidget:
+    table = QTableWidget(0, 2)
+    table.setHorizontalHeaderLabels(["Field", "Value"])
+    table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+    table.setSelectionBehavior(QAbstractItemView.SelectRows)
+    table.setSelectionMode(QAbstractItemView.SingleSelection)
+    table.setWordWrap(True)
+    table.setMinimumWidth(220)
+    table.verticalHeader().setVisible(False)
+    header = table.horizontalHeader()
+    header.setStretchLastSection(True)
+    header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+    style_browser_data_table(table)
+    return table
+
+
 def _route_table() -> QTableWidget:
     table = QTableWidget(0, len(_ROUTE_COLUMNS))
     table.setHorizontalHeaderLabels(list(_ROUTE_COLUMNS))
@@ -595,8 +641,6 @@ def _add_reaction(
     pixmap_for,
     counter: list[int],
 ) -> None:
-    counter[0] += 1
-    number = counter[0]
     if len(reactants) == 1:
         layout.addWidget(
             _MoleculeNode(reactants[0], pixmap_for, joined=True, counter=counter),
@@ -610,7 +654,11 @@ def _add_reaction(
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(8)
         for reactant in reactants:
-            col.addWidget(_MoleculeNode(reactant, pixmap_for, joined=True, counter=counter))
+            col.addWidget(
+                _MoleculeNode(reactant, pixmap_for, joined=True, counter=counter),
+                0,
+                Qt.AlignRight | Qt.AlignVCenter,
+            )
         pair = QWidget()
         pair.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
         pair_layout = QHBoxLayout(pair)
@@ -619,18 +667,19 @@ def _add_reaction(
         pair_layout.addWidget(column)
         pair_layout.addWidget(_VBranch())
         layout.addWidget(pair, 0, Qt.AlignVCenter)
-    layout.addWidget(_StepBranch(number, reaction), 0, Qt.AlignVCenter)
+    counter[0] += 1
+    layout.addWidget(_StepBranch(counter[0], reaction), 0, Qt.AlignVCenter)
 
 
 class _StepBranch(QWidget):
-    """Branch line with a Step button that opens and closes the reaction details."""
+    """Branch line with a Step button. Details open in the table beside the canvas."""
 
     def __init__(self, number: int, reaction: dict) -> None:
         super().__init__()
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(4)
+        root.setSpacing(0)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
@@ -641,46 +690,35 @@ class _StepBranch(QWidget):
         self._button.setCursor(Qt.PointingHandCursor)
         self._button.setFixedHeight(22)
         self._button.setStyleSheet(_STEP_BUTTON_QSS)
-        self._button.toggled.connect(self._toggle)
+        self._button.step_number = number
+        self._button.step_rows = _step_rows(reaction)
+        self._button.clicked.connect(self._select)
         row.addWidget(self._button, 0, Qt.AlignVCenter)
         row.addWidget(_HStem(_BRANCH_LEN), 0, Qt.AlignVCenter)
         root.addLayout(row)
-        self._detail = _reaction_label(_step_detail(reaction), None)
-        self._detail.setMaximumWidth(220)
-        self._detail.hide()
-        root.addWidget(self._detail)
 
-    def _toggle(self, expanded: bool) -> None:
-        self._detail.setVisible(expanded and bool(self._detail.text()))
-        QTimer.singleShot(0, self._repin)
-
-    def _repin(self) -> None:
+    def _select(self) -> None:
         parent = self.parentWidget()
         while parent is not None:
-            pin = getattr(parent, "_pin_canvas", None)
-            if callable(pin):
-                pin()
+            show = getattr(parent, "_show_step_rows", None)
+            if callable(show):
+                show(self._button)
                 return
             parent = parent.parentWidget()
 
 
-def _step_detail(reaction: dict) -> str:
-    caption = _reaction_caption(reaction)
-    metadata = _metadata_tooltip(reaction.get("metadata"))
-    if caption and metadata:
-        return f"{caption}\n{metadata}"
-    return caption or metadata
-
-
-def _reaction_label(caption: str, metadata: object) -> QLabel:
-    label = QLabel(caption)
-    label.setAlignment(Qt.AlignCenter)
-    label.setWordWrap(True)
-    label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    tip = _metadata_tooltip(metadata)
-    if tip:
-        label.setToolTip(tip)
-    return label
+def _step_rows(reaction: dict) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    smiles = str(reaction.get("smiles") or "").strip()
+    if smiles:
+        rows.append(("reaction", smiles))
+    metadata = reaction.get("metadata")
+    if isinstance(metadata, dict):
+        for key, value in metadata.items():
+            if value in (None, ""):
+                continue
+            rows.append((str(key), str(value)))
+    return rows
 
 
 def _branch_span(branch: QWidget) -> tuple[int, int]:

@@ -252,15 +252,178 @@ def child_environment(python: Path) -> dict[str, str]:
     return env
 
 
+_SEARCH_SETTINGS_KEY = "tools/aizynthfinder_search"
+_ALGORITHMS = (
+    ("Monte Carlo", "mcts"),
+    ("Retro*", "aizynthfinder.search.retrostar.search_tree.SearchTree"),
+    ("Breadth-first", "aizynthfinder.search.breadth_first.search_tree.SearchTree"),
+    ("Proof number", "aizynthfinder.search.dfpn.search_tree.SearchTree"),
+)
+_OVERLAY_SCRIPT = """
+import json
+import sys
+from pathlib import Path
+
+import yaml
+
+src, dst, payload_path = sys.argv[1:4]
+loaded = yaml.safe_load(Path(src).read_text(encoding="utf-8")) or {}
+if not isinstance(loaded, dict):
+    raise SystemExit("config.yml must be a mapping")
+extra = json.loads(Path(payload_path).read_text(encoding="utf-8"))
+search = dict(loaded.get("search") or {})
+incoming = dict(extra.get("search") or {})
+algorithm = dict(search.get("algorithm_config") or {})
+algorithm.update(incoming.pop("algorithm_config", {}) or {})
+search.update(incoming)
+if algorithm:
+    search["algorithm_config"] = algorithm
+loaded["search"] = search
+post = dict(loaded.get("post_processing") or {})
+post.update(extra.get("post_processing") or {})
+loaded["post_processing"] = post
+for section in ("expansion", "filter", "stock"):
+    chosen = extra.get(section)
+    if chosen is None:
+        continue
+    block = loaded.get(section) or {}
+    if not isinstance(block, dict):
+        block = {}
+    loaded[section] = {key: block[key] for key in chosen if key in block}
+Path(dst).write_text(yaml.safe_dump(loaded, sort_keys=False), encoding="utf-8")
+"""
+
+
+@dataclass
+class SearchOptions:
+    """One retrosynthesis run. Names come from the user's config.yml."""
+
+    policies: tuple[str, ...] = ()
+    filters: tuple[str, ...] = ()
+    stocks: tuple[str, ...] = ()
+    algorithm: str = "mcts"
+    exploration: float = 1.4
+    max_transforms: int = 6
+    iteration_limit: int = 100
+    time_limit: int = 120
+    return_first: bool = False
+    exclude_target_from_stock: bool = True
+    max_routes: int = 25
+    cluster: bool = False
+
+    def overlay(self) -> dict:
+        return {
+            "search": {
+                "algorithm": self.algorithm,
+                "max_transforms": int(self.max_transforms),
+                "iteration_limit": int(self.iteration_limit),
+                "time_limit": int(self.time_limit),
+                "return_first": bool(self.return_first),
+                "exclude_target_from_stock": bool(self.exclude_target_from_stock),
+                "algorithm_config": {"C": float(self.exploration)},
+            },
+            "post_processing": {"max_routes": int(self.max_routes)},
+            "expansion": list(self.policies),
+            "filter": list(self.filters),
+            "stock": list(self.stocks),
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.overlay() | {"cluster": self.cluster})
+
+    @classmethod
+    def from_json(cls, raw: str) -> SearchOptions:
+        try:
+            payload = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            return cls()
+        if not isinstance(payload, dict):
+            return cls()
+        search = payload.get("search") if isinstance(payload.get("search"), dict) else {}
+        post = payload.get("post_processing")
+        post = post if isinstance(post, dict) else {}
+        algorithm_config = search.get("algorithm_config")
+        algorithm_config = algorithm_config if isinstance(algorithm_config, dict) else {}
+        return cls(
+            policies=_names(payload.get("expansion")),
+            filters=_names(payload.get("filter")),
+            stocks=_names(payload.get("stock")),
+            algorithm=str(search.get("algorithm") or "mcts"),
+            exploration=_float(algorithm_config.get("C"), 1.4),
+            max_transforms=_int(search.get("max_transforms"), 6),
+            iteration_limit=_int(search.get("iteration_limit"), 100),
+            time_limit=_int(search.get("time_limit"), 120),
+            return_first=bool(search.get("return_first", False)),
+            exclude_target_from_stock=bool(search.get("exclude_target_from_stock", True)),
+            max_routes=_int(post.get("max_routes"), 25),
+            cluster=bool(payload.get("cluster", False)),
+        )
+
+
+def _names(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(str(item) for item in value if str(item).strip())
+
+
+def _int(value: object, default: int) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _float(value: object, default: float) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def config_catalog(text: str) -> dict[str, list[str]]:
+    """Policy, filter, and stock names in a config.yml."""
+    sections = {"expansion": [], "filter": [], "stock": []}
+    current: str | None = None
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if indent == 0 and stripped.endswith(":"):
+            name = stripped[:-1].strip()
+            current = name if name in sections else None
+            continue
+        if current is None or indent != 2 or ":" not in stripped:
+            continue
+        name = stripped.split(":", 1)[0].strip().strip("'\"")
+        if name:
+            sections[current].append(name)
+    return sections
+
+
+def load_search_options() -> SearchOptions:
+    from PyQt5.QtCore import QSettings
+
+    raw = QSettings("MolManager", "MolManager").value(_SEARCH_SETTINGS_KEY, "")
+    return SearchOptions.from_json(str(raw or ""))
+
+
+def save_search_options(options: SearchOptions) -> None:
+    from PyQt5.QtCore import QSettings
+
+    QSettings("MolManager", "MolManager").setValue(_SEARCH_SETTINGS_KEY, options.to_json())
+
+
 def aizynthcli_command(
     python: str,
     config: Path,
     smiles_file: Path,
     output: Path,
     checkpoint: Path,
+    options: SearchOptions | None = None,
 ) -> list[str]:
     """Argv for one local ``aizynthcli`` batch. A file is used even for one SMILES."""
-    return [
+    command = [
         python,
         "-c",
         "from aizynthfinder.interfaces.aizynthcli import main; main()",
@@ -273,6 +436,17 @@ def aizynthcli_command(
         "--checkpoint",
         str(checkpoint),
     ]
+    if options is None:
+        return command
+    if options.policies:
+        command.extend(["--policy", *options.policies])
+    if options.filters:
+        command.extend(["--filter", *options.filters])
+    if options.stocks:
+        command.extend(["--stocks", *options.stocks])
+    if options.cluster:
+        command.append("--cluster")
+    return command
 
 
 def summary_columns(stats: dict) -> dict[str, str]:
@@ -714,11 +888,35 @@ def probe_install(python_text: str = "", config_text: str = "") -> tuple[bool, s
     return False, f"That Python could not import aizynthfinder.\n{tail}"
 
 
+def _write_search_config(python: str, source: Path, dest: Path, payload: Path) -> None:
+    """Ask the AiZynthFinder interpreter to merge this run into a temporary config."""
+    try:
+        proc = subprocess.run(
+            [python, "-c", _OVERLAY_SCRIPT, str(source), str(dest), str(payload)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            check=False,
+            env=child_environment(Path(python)),
+            cwd=str(source.parent),
+            **_no_window_kwargs(),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise AizynthRunError(f"Could not prepare the search config: {exc}") from exc
+    if proc.returncode != 0 or not dest.is_file():
+        detail = ((proc.stderr or "") + "\n" + (proc.stdout or "")).strip()
+        tail = detail[-_TAIL_LIMIT:] if detail else f"exit code {proc.returncode}"
+        raise AizynthRunError(f"Could not prepare the search config.\n{tail}")
+
+
 def run_search(
     *,
     python: str,
     config: Path,
     smiles: list[str],
+    options: SearchOptions | None = None,
     cancel: CancelFn | None = None,
     on_progress: ProgressFn | None = None,
 ) -> SearchResult:
@@ -735,7 +933,15 @@ def run_search(
         smiles_file.write_text("\n".join(targets) + "\n", encoding="utf-8")
         output = work / "output.json.gz"
         checkpoint = work / "checkpoint.jsonl"
-        command = aizynthcli_command(python, config, smiles_file, output, checkpoint)
+        config_path = config
+        if options is not None:
+            if not options.policies:
+                raise AizynthRunError("Select at least one expansion policy.")
+            config_path = work / "config.yml"
+            payload = work / "search.json"
+            payload.write_text(json.dumps(options.overlay()), encoding="utf-8")
+            _write_search_config(python, config, config_path, payload)
+        command = aizynthcli_command(python, config_path, smiles_file, output, checkpoint, options)
         try:
             proc = subprocess.Popen(
                 command,
