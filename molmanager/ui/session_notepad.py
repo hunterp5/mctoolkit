@@ -189,7 +189,7 @@ class NotepadWidget(QWidget):
         self._size.setValue(DEFAULT_NOTE_PT)
         self._size.setSuffix(" pt")
         self._size.setFixedHeight(FORMAT_GLYPH_BTN_SIZE)
-        self._size.setToolTip("Text size. Settings → Font does not change the notepad.")
+        self._size.setToolTip("Text size. Settings → GUI → Font does not change the notepad.")
         self._bold = self._format_button(bold_glyph_icon(), "Bold")
         self._italic = self._format_button(italic_glyph_icon(), "Italic")
         self._underline = self._format_button(underline_glyph_icon(), "Underline")
