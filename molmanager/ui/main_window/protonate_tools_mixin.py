@@ -46,48 +46,30 @@ class ProtonateToolsMixin:
         dlg.accepted.connect(lambda *_, d=dlg: self._on_protonate_dialog_accepted(d))
         dlg.show()
 
-    def _ensure_protonate_signals(self):
-        sig = getattr(self, "_protonate_signals", None)
-        if sig is not None:
-            return sig
-        from ...workers.protonate_worker import ProtonateSignals
-
-        sig = ProtonateSignals(self)
-        sig.finished.connect(self._on_protonate_finished, Qt.QueuedConnection)
-        sig.failed.connect(self._on_protonate_failed, Qt.QueuedConnection)
-        self._protonate_signals = sig
-        return sig
-
     def _on_protonate_dialog_accepted(self, dlg) -> None:
-        src, ph, out_col, only_selected, render_2d = dlg.config()
+        from ...workflows.macro_recipe import ROW_SCOPE_SELECTION
+
+        request = dlg.request()
+        only_selected = request.row_scope == ROW_SCOPE_SELECTION
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, "Protonate"):
             return
-        self.start_protonate_job(
-            source=src,
-            ph=float(ph),
-            output_column=out_col,
-            render_2d=bool(render_2d),
-            allowed=None if not only_selected else set(allowed or ()),
-            on_done=None,
-        )
+        from ...workflows.macro_record import protonate_step
+        from ..command_dispatch import dispatch_step
 
-    def start_protonate_job(
-        self,
-        *,
-        source: str,
-        ph: float,
-        output_column: str,
-        render_2d: bool,
-        allowed: set[int] | None,
-        on_done,
-    ) -> None:
+        dispatch_step(self, protonate_step(request), {})
+
+    def start_protonate_job(self, request, *, allowed: set[int] | None, on_done) -> None:
         """Write the dominant protomer. ``on_done(error, outputs)`` maps output, percent, and pka.
 
         *allowed* ``None`` uses every row. The dialog passes ``on_done=None``.
         """
         from ...workers.protonate_worker import ProtonateWorker, protomer_percent_column_name
 
+        source = request.structure_source
+        ph = float(request.ph)
+        output_column = request.output_column
+        render_2d = bool(request.render_2d)
         out_col = (output_column or "").strip() or "Protonated"
         if source not in getattr(self, "headers", []):
             message = f'Column "{source}" is not in the table.'
@@ -110,15 +92,29 @@ class ProtonateToolsMixin:
                 QMessageBox.information(self, "Protonate", message)
             return
 
-        self._protonate_on_done = on_done
-        self._protonate_run_ctx = {
+        from PyQt5.QtCore import Qt
+
+        from ..job_signals import ProtonateJobSignals, release_job_signals, retain_job_signals
+
+        ctx = {
             "out_col": out_col,
             "ph": float(ph),
             "render_2d": bool(render_2d),
             "allowed_oids": set(oid for oid, _ in data),
         }
+        sig = ProtonateJobSignals(self)
+        retain_job_signals(self, sig)
 
-        sig = self._ensure_protonate_signals()
+        def _finished(rows, context=ctx, done=on_done, held=sig) -> None:
+            release_job_signals(self, held)
+            self._complete_protonate_job(rows, context, done)
+
+        def _failed(msg, done=on_done, held=sig) -> None:
+            release_job_signals(self, held)
+            self._fail_protonate_job(msg, done)
+
+        sig.finished.connect(_finished, Qt.QueuedConnection)
+        sig.failed.connect(_failed, Qt.QueuedConnection)
         n = len(data)
         enqueue_process_queue_job(
             self,
@@ -136,13 +132,13 @@ class ProtonateToolsMixin:
             queue_label=f"Protonate ({n} molecules)",
         )
 
-    def _notify_protonate_done(self, error: str | None, written: list[str] | None = None) -> None:
-        done = getattr(self, "_protonate_on_done", None)
-        self._protonate_on_done = None
-        if done is None:
+    def _notify_protonate_done(
+        self, on_done, error: str | None, written: list[str] | None = None
+    ) -> None:
+        if on_done is None:
             return
         if error:
-            done(error, {})
+            on_done(error, {})
             return
         headers = [str(header) for header in (written or []) if header]
         outputs: dict[str, str] = {}
@@ -152,24 +148,22 @@ class ProtonateToolsMixin:
             outputs["percent"] = headers[1]
         if len(headers) > 2:
             outputs["pka"] = headers[2]
-        done(None, outputs)
+        on_done(None, outputs)
 
-    def _on_protonate_finished(self, rows: list) -> None:
+    def _complete_protonate_job(self, rows: list, ctx: dict, on_done) -> None:
         from ...workers.protonate_worker import protomer_percent_column_name
 
-        ctx = getattr(self, "_protonate_run_ctx", {}) or {}
         out_col = str(ctx.get("out_col") or "Protonated")
         pct_col = protomer_percent_column_name(float(ctx.get("ph", 7.4)))
         render_2d = bool(ctx.get("render_2d"))
         allowed = ctx.get("allowed_oids") or None
-        self._protonate_run_ctx = None
 
         if not rows:
             self._finish_tool_progress("Protonate")
             self.status_label.setText(
                 self._consume_partial_results_notice() or "Protonate: no results."
             )
-            self._notify_protonate_done("Protonate produced no results.")
+            self._notify_protonate_done(on_done, "Protonate produced no results.")
             return
 
         res = []
@@ -186,9 +180,9 @@ class ProtonateToolsMixin:
                 )
             )
 
-        def _after(cols: list[str], a=allowed, render=render_2d) -> None:
+        def _after(cols: list[str], a=allowed, render=render_2d, done=on_done) -> None:
             self._protonate_after_table_write(cols, a, render)
-            self._notify_protonate_done(None, cols)
+            self._notify_protonate_done(done, None, cols)
 
         self.on_calc_finished(
             res,
@@ -196,6 +190,16 @@ class ProtonateToolsMixin:
             progress_label="Protonate",
             on_complete=_after,
         )
+
+    def _fail_protonate_job(self, msg: str, on_done) -> None:
+        self._finish_tool_progress("Protonate")
+        if msg == "Cancelled.":
+            self.status_label.setText(self._consume_partial_results_notice() or "Cancelled.")
+            self._notify_protonate_done(on_done, "Cancelled.")
+        else:
+            text = msg or "Computation failed."
+            self.status_label.setText(f"Protonate failed: {text}")
+            self._notify_protonate_done(on_done, text)
 
     def _protonate_after_table_write(
         self,
@@ -221,13 +225,3 @@ class ProtonateToolsMixin:
                 )
         except Exception:
             logger.exception("Protonate: render 2D scheduling failed")
-
-    def _on_protonate_failed(self, msg: str) -> None:
-        self._finish_tool_progress("Protonate")
-        if msg == "Cancelled.":
-            self.status_label.setText(self._consume_partial_results_notice() or "Cancelled.")
-            self._notify_protonate_done("Cancelled.")
-        else:
-            text = msg or "Computation failed."
-            self.status_label.setText(f"Protonate failed: {text}")
-            self._notify_protonate_done(text)
