@@ -456,7 +456,7 @@ class TableMenuMixin:
             sketch_act = menu.addAction("Open in Sketcher…")
             design_act = menu.addAction("Open in Design Studio")
             design_act.setToolTip(
-                "Open this structure in the Drug Design Studio. The table row stays unchanged."
+                "Open this structure in the Design Studio. The table row stays unchanged."
             )
             structure_menu = True
         if packed_confs_b64 is not None and pose_column:

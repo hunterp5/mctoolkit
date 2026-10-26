@@ -200,7 +200,7 @@ def test_panel_leaves_an_unmade_cell_blank(qapp):
         assert empty is not None
         assert empty.text() == ""
         assert empty.toolTip() == (
-            "Not made. Click to build this analog in the Drug Design Studio."
+            "Not made. Click to build this analog in the Design Studio."
         )
         filled = panel._table.item(1, 0)
         assert filled is not None

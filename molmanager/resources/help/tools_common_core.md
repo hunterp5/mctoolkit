@@ -4,7 +4,7 @@
 
 ## Goal
 
-Get a core you can paste into **Core-Based Decomposition** or **Free-Wilson**, and see which rows do not contain it.
+Get a core you can paste into **Structure Decomposition → Core-Based** or **Free-Wilson**, and see which rows do not contain it.
 
 ## When to use
 
@@ -29,7 +29,7 @@ At least two valid molecules in the chosen **Target Column**. **Selected Rows On
 ## Use cases
 
 - Propose the core for a Free-Wilson analysis.
-- Copy the core SMARTS into **Chemistry → Structure Decomposition → Core-Based Decomposition**.
+- Copy the core SMARTS into **Chemistry → Structure Decomposition → Core-Based**.
 
 ## Tips and limits
 

@@ -66,7 +66,7 @@ class SarMatrixMixin:
                 self,
                 TOOL_SAR_MATRIX,
                 "SAR matrix needs two substituent columns, usually R1 and R2 from "
-                "Chemistry → Structure Decomposition → Core-Based Decomposition.",
+                "Chemistry → Structure Decomposition → Core-Based.",
             )
             return
         from ..dialogs.sar_matrix import SarMatrixDialog

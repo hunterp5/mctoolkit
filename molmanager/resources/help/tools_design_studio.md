@@ -1,6 +1,6 @@
-# Drug Design Studio
+# Design Studio
 
-The Drug Design Studio is a sketcher with a live property strip. Descriptors and a druglike MPO score update as the sketch changes. An empty SAR Matrix cell can be built into that sketch.
+The Design Studio is a sketcher with a live property strip and a suggestion rail. Descriptors and a druglike MPO score update as the sketch changes. The status bar along the bottom reports the same sketch messages as the sketcher. An empty SAR Matrix cell can be built into that sketch.
 
 ## Goal
 
@@ -8,17 +8,19 @@ Edit one analog and see molecular weight, lipophilicity, polarity, QED, and a co
 
 ## When to use
 
-Use **Tools → Drug Design Studio** to draw or edit a structure in its own window. Use it from **Data → SAR Matrix** when a cell is a combination you have not made and you want that structure on the canvas.
+Use **Tools → Design Studio** to draw or edit a structure in its own window. Use it from **Data → SAR Matrix**, or right-click a structure and choose **Open in Design Studio**, when you want that structure on the canvas. The window is not docked into the table.
 
 ## Inputs / scope
 
-The strip reads the molecule on the canvas. SAR Matrix can send a row's structure, or build one from a Core column plus the R-group labels on the axes. Those labels are the SMILES from **Chemistry → Structure Decomposition → Core-Based Decomposition** (`[*:1]`, `[H][*:2]`, and so on). The rows in the matrix need to share one core SMILES.
+The strip reads the molecule on the canvas. SAR Matrix can send a row's structure, or build one from a Core column plus the R-group labels on the axes. Those labels are the SMILES from **Chemistry → Structure Decomposition → Core-Based** (`[*:1]`, `[H][*:2]`, and so on). The rows in the matrix need to share one core SMILES.
 
 ## Options
 
 - **Canvas** — the sketcher. Drawing, templates, and **File → Export to Table** work as they do in the standalone sketcher.
 - **Add to table** — append the current sketch as a new row.
-- **Dock beside the table** — the footer button moves the studio into the workspace. **Open in a separate window** sends a docked studio back out.
+- **Suggestions** — **Update** reads the last MMP run and the table's R-group columns. Click a row to put that analog on the canvas. MMP rows with a small structural change and a large activity shift are marked **activity cliff**, with a SALI value, so the median is not treated as a smooth trend. R-group rows are one-substituent swaps, scored as the reference activity plus the difference in substituent means. Each row also shows the druglike MPO.
+- **Accept** — add the sketch to the table, if it is not already there, and to the **Design queue** list.
+- **Add to table** — append the current sketch as a new row without adding it to the list.
 - **Druglike MPO** — geometric mean of five desirabilities:
   - **MW** is 1 at or below 350 and 0 at or above 500.
   - **LogP** is 1 at 2.5 and 0 outside 0–5.
@@ -30,7 +32,7 @@ The strip reads the molecule on the canvas. SAR Matrix can send a row's structur
 
 ## Workflow
 
-1. Open **Tools → Drug Design Studio**, or right-click a structure cell and choose **Open in Design Studio**. It opens in its own window. The table row stays unchanged.
+1. Open **Tools → Design Studio**, or right-click a structure cell and choose **Open in Design Studio**. It opens in its own window. The table row stays unchanged. Undo, copy, paste, and delete edit the sketch. The other application shortcuts, such as open, save, and search, still run.
 2. Draw or edit. The strip refreshes shortly after each change.
 3. **Add to table** when the analog is one you want to keep.
 4. From a SAR Matrix, click an empty or predicted cell. **Design** sends the selected cell, including one that already has a compound.
@@ -43,4 +45,4 @@ The strip reads the molecule on the canvas. SAR Matrix can send a row's structur
 
 ## Tips and limits
 
-The druglike score is a fixed profile, not the criteria from **Data → MPO Scoring**. A property outside its gate makes the geometric mean zero. Building a cell needs one shared Core SMILES and R-group labels that each contain an attachment point. A series with two different cores, or labels that are names rather than SMILES, stays on the status line and does not change the sketch. pKa stays blank when Uni-pKa cannot assign a value; the other scores keep the fast estimate. If the studio is already docked, opening it again shows that pane instead of a second window.
+The druglike score is a fixed profile, not the criteria from **Data → MPO Scoring**. A property outside its gate makes the geometric mean zero. Suggestions need a finished **Data → MMP** run, or R-group columns from core-based decomposition plus one numeric activity column. The sketch has to match a row in that series before an R-group swap is offered. There is no stored QSAR model to score a structure that is not in the table. Building a SAR cell needs one shared Core SMILES and R-group labels that each contain an attachment point. pKa stays blank when Uni-pKa cannot assign a value; the other scores keep the fast estimate.

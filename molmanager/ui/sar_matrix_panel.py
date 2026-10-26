@@ -132,7 +132,7 @@ class SarMatrixPanel(QWidget):
         footer = QHBoxLayout()
         self._design_btn = QPushButton("Design", self)
         self._design_btn.setToolTip(
-            "Open the selected cell in the Drug Design Studio. "
+            "Open the selected cell in the Design Studio. "
             "A filled cell loads that row. An empty cell builds the analog from the "
             "core and the R-group labels."
         )
@@ -287,7 +287,7 @@ class SarMatrixPanel(QWidget):
     ) -> QTableWidgetItem:
         if cell is None and predicted is None:
             item = QTableWidgetItem("")
-            item.setToolTip("Not made. Click to build this analog in the Drug Design Studio.")
+            item.setToolTip("Not made. Click to build this analog in the Design Studio.")
             item.setBackground(self.palette().alternateBase())
             return item
         if cell is None:
@@ -299,7 +299,7 @@ class SarMatrixPanel(QWidget):
             item.setFont(font)
             item.setToolTip(
                 f"Free-Wilson prediction: {predicted:.4g}\n"
-                "Not made. Click to open it in the Drug Design Studio.\n"
+                "Not made. Click to open it in the Design Studio.\n"
                 f"{detail}"
             )
             self._paint_activity(item, float(predicted), low, high)
@@ -311,7 +311,7 @@ class SarMatrixPanel(QWidget):
         for oid, activity in zip(cell.oids, cell.activities):
             shown = "—" if activity is None else f"{activity:.4g}"
             lines.append(f"Row {oid}: {shown}")
-        lines.append("Design opens this structure in the Drug Design Studio.")
+        lines.append("Design opens this structure in the Design Studio.")
         item.setToolTip("\n".join(lines))
         value = cell.display_value()
         if value is not None:
@@ -436,7 +436,7 @@ class SarMatrixPanel(QWidget):
         app = self._app
         status = getattr(app, "status_label", None) if app is not None else None
         if status is not None:
-            status.setText(f"Drug Design Studio: {message}")
+            status.setText(f"Design Studio: {message}")
 
     def _export_current_page(self) -> None:
         matrix = self._matrix

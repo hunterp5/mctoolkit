@@ -32,7 +32,7 @@ File on disk. Structure columns are parsed when the format carries molecules; CS
 
 - Load an HTS SDF (or ``.sdf.gz``) for clustering and diverse subset picking.
 - Open a CSV or Excel sheet of SMILES plus assay columns for QSAR.
-- Open an MDL ``.rxn`` file to inspect the transform as **Reaction SMARTS** and run **Chemistry → Structure Enumeration → Reaction Based Enumeration**.
+- Open an MDL ``.rxn`` file to inspect the transform as **Reaction SMARTS** and run **Chemistry → Structure Enumeration → Reaction Based**.
 - Reload a vendor catalog before fingerprint similarity searches.
 - Bring Gnina ligand PDBQT or MOL2 files into the table.
 

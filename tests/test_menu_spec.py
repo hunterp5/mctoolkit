@@ -140,7 +140,7 @@ def test_reaction_menu_outline():
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(tools.items)]
     assert "Reaction" not in labels
     assert "Extract Info…" not in labels
-    assert "Reaction Based Enumeration…" not in labels
+    assert "Reaction Based…" not in labels
     assert labels.index("Structure Decomposition") == labels.index("Predict") + 1
     assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
     assert labels.index("REINVENT Sampling…") == labels.index("Structure Enumeration") + 1
@@ -150,16 +150,16 @@ def test_reaction_menu_outline():
     assert menu_outline(retrosynthesis.items) == ["Search…"]
     decomp = find_submenu(tools.items, "Structure Decomposition")
     assert menu_outline(decomp.items) == [
-        "Core-Based Decomposition…",
-        "BRICS Decomposition…",
-        "RECAP Decomposition…",
+        "Core-Based…",
+        "BRICS…",
+        "RECAP…",
     ]
     enum = find_submenu(tools.items, "Structure Enumeration")
     assert menu_outline(enum.items) == [
-        "R-Group Enumeration…",
-        "BRICS Recomposition…",
-        "RECAP Recomposition…",
-        "Reaction Based Enumeration…",
+        "R-Group…",
+        "BRICS…",
+        "RECAP…",
+        "Reaction Based…",
     ]
 
 
@@ -226,7 +226,7 @@ def test_hansch_follows_free_wilson():
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]
     assert labels.index("Hansch…") == labels.index("Free-Wilson…") + 1
     assert labels.index("SAR Matrix…") == labels.index("Hansch…") + 1
-    assert "Drug Design Studio…" not in labels
+    assert "Design Studio…" not in labels
 
 
 def test_data_table_operations_submenu():
@@ -261,7 +261,7 @@ def test_tools_menu_expands_calculator_random_and_notepad():
         "Notepad",
         "",
         "Sketcher…",
-        "Drug Design Studio…",
+        "Design Studio…",
     ]
     random = find_submenu(tools.items, "Random")
     assert menu_outline(random.items) == ["Number…", "Molecule…"]

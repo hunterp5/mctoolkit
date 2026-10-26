@@ -312,11 +312,10 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltip="Open the structure sketcher to draw or edit molecules.",
         ),
         action(
-            "Drug Design Studio…",
+            "Design Studio…",
             "open_design_studio",
             tooltip=(
-                "Open a sketcher with a live descriptor and druglike MPO strip in its own window. "
-                "Dock it beside the table from the window footer. "
+                "Open a sketcher with a live descriptor strip and suggestion rail. "
                 "An empty SAR Matrix cell builds that analog here."
             ),
         ),
@@ -514,17 +513,17 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
         submenu(
             "Structure &Decomposition",
             action(
-                "Core-Based Decomposition…",
+                "Core-Based…",
                 "open_core_based_decomposition",
                 tooltip="Decompose structures against a labeled core scaffold (substituent columns).",
             ),
             action(
-                "BRICS Decomposition…",
+                "BRICS…",
                 "open_brics_decomposition",
                 tooltip="Split structures into BRICS retrosynthetic fragments (new SMILES columns).",
             ),
             action(
-                "RECAP Decomposition…",
+                "RECAP…",
                 "open_recap_decomposition",
                 tooltip="Split structures into RECAP retrosynthetic fragments (new SMILES columns).",
             ),
@@ -533,7 +532,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
         submenu(
             "Structure &Enumeration",
             action(
-                "R-Group Enumeration…",
+                "R-Group…",
                 "open_rgroup_enumeration",
                 tooltip=(
                     "Attach building-block lists to a core with numbered * points and append the "
@@ -541,17 +540,17 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 ),
             ),
             action(
-                "BRICS Recomposition…",
+                "BRICS…",
                 "open_brics_recomposition",
                 tooltip="Combine BRICS fragment columns into new product structures (new rows).",
             ),
             action(
-                "RECAP Recomposition…",
+                "RECAP…",
                 "open_recap_recomposition",
                 tooltip="Combine RECAP fragment columns into new product structures (new rows).",
             ),
             action(
-                "Reaction Based Enumeration…",
+                "Reaction Based…",
                 "open_reaction_enumeration",
                 tooltip=(
                     "Run a named reaction (Suzuki, Buchwald, amide coupling, etc.) across two reactant "

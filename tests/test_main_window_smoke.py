@@ -1466,7 +1466,7 @@ def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
     labels = [a.text().replace("&", "") for a in tools.actions()]
     assert "Reaction" not in labels
     assert "Extract Info…" not in labels
-    assert "Reaction Based Enumeration…" not in labels
+    assert "Reaction Based…" not in labels
     assert labels.index("Structure Decomposition") == labels.index("Predict") + 1
     assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
     assert labels.index("REINVENT Sampling…") == labels.index("Structure Enumeration") + 1
@@ -1478,19 +1478,19 @@ def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
     )
     decomp_labels = [a.text().replace("&", "") for a in decomp.actions()]
     assert decomp_labels == [
-        "Core-Based Decomposition…",
-        "BRICS Decomposition…",
-        "RECAP Decomposition…",
+        "Core-Based…",
+        "BRICS…",
+        "RECAP…",
     ]
     enum = next(
         a.menu() for a in tools.actions() if a.text().replace("&", "") == "Structure Enumeration"
     )
     enum_labels = [a.text().replace("&", "") for a in enum.actions()]
     assert enum_labels == [
-        "R-Group Enumeration…",
-        "BRICS Recomposition…",
-        "RECAP Recomposition…",
-        "Reaction Based Enumeration…",
+        "R-Group…",
+        "BRICS…",
+        "RECAP…",
+        "Reaction Based…",
     ]
     w.close()
 

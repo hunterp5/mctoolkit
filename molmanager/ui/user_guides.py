@@ -249,9 +249,9 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
             ),
             _e(
                 "tools_design_studio",
-                "Drug Design Studio",
-                "Drug Design Studio",
-                "Tools → Drug Design Studio. Floating sketcher with a live descriptor and MPO strip.",
+                "Design Studio",
+                "Design Studio",
+                "Tools → Design Studio. Floating sketcher, property strip, and suggestion rail.",
             ),
             _e(
                 "tools_gen_conformations",

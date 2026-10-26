@@ -25,7 +25,7 @@ import logging
 import threading
 from typing import Any
 
-from PyQt5.QtCore import QObject, QRunnable, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QEvent, QObject, QRunnable, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QGridLayout,
@@ -687,6 +687,16 @@ def _oid_with_smiles(app, smiles: str) -> int | None:
 
 class DesignStudioWindow(BrowserHostDialog):
     """Floating shell for :class:`DesignStudioPanel`."""
+
+    def changeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().changeEvent(event)
+        if event.type() != QEvent.ActivationChange:
+            return
+        panel = getattr(self, "_panel", None)
+        sketcher = getattr(panel, "_sketcher", None) if panel is not None else None
+        sync = getattr(sketcher, "_sync_parent_edit_hotkeys", None)
+        if callable(sync):
+            sync()
 
     default_title = TOOL_DESIGN_STUDIO
     close_title = "Close Design Studio"

@@ -148,7 +148,7 @@ class CommonCoreDialog(QDialog):
         self.complete_rings.setChecked(True)
         self.complete_rings.setToolTip(
             "Keep the core from ending in the middle of a ring, so it can be pasted "
-            "into Core-Based Decomposition or Free-Wilson."
+            "into Structure Decomposition → Core-Based or Free-Wilson."
         )
         root.addWidget(self.complete_rings)
 
