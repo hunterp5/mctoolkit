@@ -8,7 +8,7 @@ See the series as the R1 × R2 table used in a review, including the combination
 
 ## When to use
 
-Use **Data → SAR Matrix** after **Chemistry → Reaction → R-Group Decomposition** has written R columns. The grid's Free-Wilson numbers are the additive prediction for an unmade pair. Use **Free-Wilson** when you want those structures built and added to the table.
+Use **Data → SAR Matrix** after **Chemistry → R-Group Decomposition** has written R columns. The grid's Free-Wilson numbers are the additive prediction for an unmade pair. Use **Free-Wilson** when you want those structures built and added to the table.
 
 ## Inputs / scope
 
