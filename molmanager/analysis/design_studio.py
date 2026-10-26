@@ -27,6 +27,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from statistics import fmean
 
 from rdkit import Chem
 from rdkit.Chem import Crippen, Descriptors, Lipinski, QED
@@ -39,7 +40,10 @@ from molmanager.descriptors.medchem_descriptors import (
     ro5_pass,
 )
 
+from .activity_cliff_analysis import change_heavy_atom_count, fragment_tanimoto_distance
+from .mmp_analysis import MmpPair, aggregate_transforms, apply_transform_summary_to_mol
 from .mpo_scoring import DesirabilitySpec, score_mpo_row
+from .sali_analysis import sali_index
 
 _RDKIT_ERRORS = (RuntimeError, ValueError, TypeError, OSError)
 _BLANK = frozenset({"", "n/a", "na", "none", "null", "nan"})
@@ -56,6 +60,11 @@ DRUGLIKE_MPO_SPECS: tuple[DesirabilitySpec, ...] = (
     DesirabilitySpec("QED", "linear", "maximize", low=0.3, high=0.7),
     DesirabilitySpec("RotBonds", "linear", "minimize", low=5.0, high=10.0),
 )
+
+DESIGN_QUEUE_NAME = "Design queue"
+_CLIFF_HEAVY_ATOMS = 4
+_CLIFF_ABS_DELTA = 1.0
+_SUGGESTION_LIMIT = 8
 
 _TERM_LABELS = {
     "MW": "MW",
@@ -210,6 +219,252 @@ def compute_design_snapshot(mol: Chem.Mol | None) -> DesignSnapshot:
         )
     except _RDKIT_ERRORS:
         return DesignSnapshot(error="invalid")
+
+
+@dataclass(frozen=True)
+class SeriesRow:
+    """One decomposed table row the suggestion rail can swap a substituent on."""
+
+    core_smiles: str
+    substituents: tuple[tuple[str, str], ...]
+    activity: float | None
+    product_smiles: str = ""
+
+
+@dataclass(frozen=True)
+class DesignSuggestion:
+    """One analog the rail can drop onto the canvas."""
+
+    smiles: str
+    title: str
+    detail: str
+    source: str
+
+
+def mmp_suggestions(
+    mol: Chem.Mol | None,
+    pairs: Sequence[MmpPair],
+    *,
+    limit: int = _SUGGESTION_LIMIT,
+) -> list[DesignSuggestion]:
+    """Transforms from *pairs* that apply to *mol*, best median activity gain first.
+
+    A suggestion is marked as a cliff when the change is small and the median
+    activity shift is large. SALI uses that median and the fragment similarity.
+    """
+    if mol is None or not pairs:
+        return []
+    seed = _canonical_smiles(mol)
+    if not seed:
+        return []
+    ranked = [
+        summary
+        for summary in aggregate_transforms(pairs)
+        if summary.median_delta > 0.0 and summary.n > 0
+    ]
+    ranked.sort(key=lambda summary: (summary.median_delta, summary.n), reverse=True)
+    found: list[DesignSuggestion] = []
+    seen = {seed}
+    for summary in ranked:
+        if len(found) >= limit:
+            break
+        try:
+            products = apply_transform_summary_to_mol(mol, summary)
+        except _RDKIT_ERRORS:
+            continue
+        product = next((smiles for smiles in products if _canonical_text(smiles) not in seen), "")
+        if not product:
+            continue
+        canon = _canonical_text(product)
+        seen.add(canon)
+        found.append(_mmp_suggestion(summary, canon))
+    return found
+
+
+def rgroup_swap_suggestions(
+    current_smiles: str,
+    rows: Sequence[SeriesRow],
+    *,
+    limit: int = _SUGGESTION_LIMIT,
+) -> list[DesignSuggestion]:
+    """One-position substituent swaps away from *current_smiles* on a shared core.
+
+    The activity estimate is the reference row's activity plus the difference
+    between the mean activity of the new substituent and the one it replaces.
+    """
+    seed = _canonical_text(current_smiles)
+    if not seed or not rows:
+        return []
+    prepared = [_PreparedRow.from_series(row) for row in rows]
+    prepared = [row for row in prepared if row is not None and row.product]
+    if not prepared:
+        return []
+    reference = next((row for row in prepared if row.product == seed), None)
+    if reference is None:
+        return []
+    known = {row.product for row in prepared}
+    found: list[tuple[float, DesignSuggestion]] = []
+    for axis, old_label in reference.substituents:
+        others = []
+        for row in prepared:
+            label = row.label_at(axis)
+            if label and label != old_label and label not in others:
+                others.append(label)
+        mean_old = _mean_activity(prepared, axis, old_label)
+        for new_label in others:
+            mean_new = _mean_activity(prepared, axis, new_label)
+            if mean_old is None or mean_new is None:
+                continue
+            swapped = tuple(
+                (name, new_label if name == axis else label)
+                for name, label in reference.substituents
+            )
+            try:
+                product = assemble_rgroup_product(reference.core_smiles, swapped)
+            except DesignAssemblyError:
+                continue
+            canon = _canonical_text(product)
+            if not canon or canon in known:
+                continue
+            shift = mean_new - mean_old
+            predicted = (
+                reference.activity + shift if reference.activity is not None else mean_new
+            )
+            known.add(canon)
+            found.append(
+                (
+                    predicted,
+                    DesignSuggestion(
+                        smiles=canon,
+                        title=f"{axis}: {_short(old_label)} → {_short(new_label)}",
+                        detail=_rgroup_detail(predicted, shift, canon),
+                        source="rgroup",
+                    ),
+                )
+            )
+    found.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in found[:limit]]
+
+
+def _mmp_suggestion(summary, smiles: str) -> DesignSuggestion:
+    heavy = change_heavy_atom_count(summary.sidechain_from, summary.sidechain_to)
+    distance = fragment_tanimoto_distance(summary.sidechain_from, summary.sidechain_to)
+    similarity = max(0.0, min(1.0, 1.0 - distance))
+    sali = sali_index(abs(summary.median_delta), similarity)
+    cliff = heavy <= _CLIFF_HEAVY_ATOMS and abs(summary.median_delta) >= _CLIFF_ABS_DELTA
+    sign = "+" if summary.median_delta >= 0 else ""
+    bits = [
+        f"MMP median Δ {sign}{summary.median_delta:.2f}",
+        f"n={summary.n}",
+        f"SALI {sali:.1f}",
+    ]
+    if cliff:
+        bits.append("activity cliff")
+    note = suggestion_mpo_note(smiles)
+    if note:
+        bits.append(note)
+    title = f"{_short(summary.sidechain_from)} → {_short(summary.sidechain_to)}"
+    return DesignSuggestion(
+        smiles=smiles,
+        title=title,
+        detail=" · ".join(bits),
+        source="mmp",
+    )
+
+
+def _rgroup_detail(predicted: float, shift: float, smiles: str) -> str:
+    sign = "+" if shift >= 0 else ""
+    text = f"Series estimate {predicted:.2f} ({sign}{shift:.2f})"
+    note = suggestion_mpo_note(smiles)
+    if note:
+        return f"{text} · {note}"
+    return text
+
+
+def suggestion_mpo_note(smiles: str) -> str:
+    """Druglike MPO for a suggestion, or an empty string when it cannot be scored."""
+    snapshot = compute_design_snapshot(_canonical_mol_text(smiles))
+    if snapshot.mpo is None:
+        return ""
+    return f"MPO {snapshot.mpo:.2f}"
+
+
+class _PreparedRow:
+    def __init__(self, core_smiles: str, substituents, activity, product: str) -> None:
+        self.core_smiles = core_smiles
+        self.substituents = substituents
+        self.activity = activity
+        self.product = product
+
+    @classmethod
+    def from_series(cls, row: SeriesRow) -> _PreparedRow | None:
+        core = (row.core_smiles or "").strip()
+        if not core or core.casefold() in _BLANK:
+            return None
+        labels = tuple(
+            (axis, label)
+            for axis, label in row.substituents
+            if (label or "").strip() and (label or "").strip().casefold() not in _BLANK
+        )
+        if not labels:
+            return None
+        product = _canonical_text(row.product_smiles)
+        if not product:
+            try:
+                product = _canonical_text(assemble_rgroup_product(core, labels))
+            except DesignAssemblyError:
+                return None
+        if not product:
+            return None
+        return cls(core, labels, row.activity, product)
+
+    def label_at(self, axis: str) -> str:
+        for name, label in self.substituents:
+            if name == axis:
+                return label
+        return ""
+
+
+def _mean_activity(rows: Sequence[_PreparedRow], axis: str, label: str) -> float | None:
+    values = [
+        row.activity
+        for row in rows
+        if row.label_at(axis) == label and row.activity is not None
+    ]
+    if not values:
+        return None
+    return float(fmean(values))
+
+
+def _short(text: str, limit: int = 28) -> str:
+    body = (text or "").strip()
+    if len(body) <= limit:
+        return body
+    return body[: limit - 1] + "…"
+
+
+def _canonical_smiles(mol: Chem.Mol | None) -> str:
+    if mol is None:
+        return ""
+    try:
+        return Chem.MolToSmiles(Chem.Mol(mol), canonical=True) or ""
+    except _RDKIT_ERRORS:
+        return ""
+
+
+def _canonical_text(smiles: str) -> str:
+    text = (smiles or "").strip()
+    if not text:
+        return ""
+    mol = Chem.MolFromSmiles(text)
+    return _canonical_smiles(mol)
+
+
+def _canonical_mol_text(smiles: str) -> Chem.Mol | None:
+    text = _canonical_text(smiles)
+    if not text:
+        return None
+    return Chem.MolFromSmiles(text)
 
 
 def _attachment_mol(smiles: str, *, axis: str) -> Chem.Mol:
