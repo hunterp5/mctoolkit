@@ -238,6 +238,51 @@ def test_panel_draws_a_prediction_in_italic(qapp):
         panel.close()
 
 
+def test_opening_sar_matrix_docks_without_a_transient_window(qapp):
+    from PyQt5.QtWidgets import QDialog
+
+    from molmanager.ui.main_window import ChemistryWorkspaceWindow
+    from molmanager.ui.sar_matrix_panel import SarMatrixPanel, SarMatrixWindow
+
+    window = ChemistryWorkspaceWindow()
+    window.headers = ["ID_HIDDEN", "Structure", "R1", "R2", "pIC50"]
+    window._table_model.set_headers(list(window.headers))
+    window._table_model.append_row(0, {"R1": "H", "R2": "H", "pIC50": "1"})
+    window._table_model.append_row(1, {"R1": "Me", "R2": "H", "pIC50": "2"})
+    window._table_model.append_row(2, {"R1": "H", "R2": "F", "pIC50": "3"})
+    window.next_oid = 3
+    window._reveal_workspace_ready()
+    try:
+        window.open_sar_matrix_dialog()
+        qapp.processEvents()
+        settings = [
+            dialog
+            for dialog in qapp.topLevelWidgets()
+            if isinstance(dialog, QDialog)
+            and dialog.windowTitle() == "SAR Matrix"
+            and not isinstance(dialog, SarMatrixWindow)
+        ]
+        assert len(settings) == 1
+        settings[0].accept()
+        qapp.processEvents()
+        panels = [
+            widget
+            for widget in window.iter_docked_plot_widgets()
+            if isinstance(widget, SarMatrixPanel)
+        ]
+        assert len(panels) == 1
+        assert "Best unmade" in panels[0]._summary.text()
+        floating = [
+            dialog
+            for dialog in qapp.topLevelWidgets()
+            if isinstance(dialog, SarMatrixWindow) and dialog.isVisible()
+        ]
+        assert floating == []
+        assert "docked" in window.status_label.text()
+    finally:
+        window.close()
+
+
 def test_sar_matrix_dialog_groups_options(qapp) -> None:  # noqa: ARG001
     from PyQt5.QtWidgets import QGroupBox
 
