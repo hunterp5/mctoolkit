@@ -44,6 +44,7 @@ from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
 from ..filters import FilterPanelMixin
 from .row_lists_mixin import RowListsMixin
 from .table_edit_mixin import TableEditMixin
+from .table_find_replace_mixin import TableFindReplaceMixin
 from .table_menu_mixin import TableMenuMixin
 from .table_search_mixin import TableSearchMixin
 
@@ -54,6 +55,7 @@ class TableUIMixin(
     TableEditMixin,
     TableMenuMixin,
     TableSearchMixin,
+    TableFindReplaceMixin,
     RowListsMixin,
     FilterPanelMixin,
 ):
@@ -299,9 +301,13 @@ class TableUIMixin(
         self._session_plot_wait_deadline = None
         self._session_search_want_visible = False
         self._session_search_rerun = False
+        self._session_find_replace_want_visible = False
         reset_search = getattr(self, "_reset_table_search_panel", None)
         if callable(reset_search):
             reset_search()
+        reset_replace = getattr(self, "_reset_find_replace_panel", None)
+        if callable(reset_replace):
+            reset_replace()
         self.clear_row_lists()
         self.clear_notepad()
         if not keep_loading:
