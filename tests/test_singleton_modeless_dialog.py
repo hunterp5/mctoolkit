@@ -231,7 +231,7 @@ def test_dimension_reduction_menu_kinds_are_all_registered() -> None:
     from molmanager.ui.dialogs.dimensionality_reduction import DIMRED_FLOATING_DIALOGS
     from molmanager.ui.main_window.menu_spec import MAIN_WINDOW_MENUS, find_submenu
 
-    dimred = find_submenu(find_submenu(MAIN_WINDOW_MENUS, "Data").items, "DimRed Plots")
+    dimred = find_submenu(find_submenu(MAIN_WINDOW_MENUS, "Data").items, "Dimensionality Reduction")
     kinds = [
         item.slot.removeprefix("open_").removesuffix("_dialog")
         for item in dimred.items
