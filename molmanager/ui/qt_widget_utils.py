@@ -33,6 +33,7 @@ from PyQt5.QtWidgets import (
     QErrorMessage,
     QFileDialog,
     QFontDialog,
+    QFormLayout,
     QGroupBox,
     QInputDialog,
     QMessageBox,
@@ -112,6 +113,16 @@ def make_dialog_non_resizable(widget: QWidget) -> None:
     flags &= ~Qt.WindowMaximizeButtonHint
     widget.setWindowFlags(flags)
     _disable_size_grip(widget)
+
+
+def boxed_form(title: str) -> tuple[QGroupBox, QFormLayout]:
+    """Titled option group used by tool dialogs."""
+    box = QGroupBox(title)
+    form = QFormLayout(box)
+    form.setContentsMargins(8, 6, 8, 6)
+    form.setSpacing(4)
+    form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+    return box, form
 
 
 def make_window_minimizable(widget: QWidget) -> None:
