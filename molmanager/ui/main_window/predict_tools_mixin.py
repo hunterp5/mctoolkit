@@ -405,13 +405,58 @@ class PredictToolsMixin:
         self._aizynthfinder_signals = sig
         return sig
 
-    def _on_aizynthfinder_finished(self, results: list, warning: str = "") -> None:
+    def _has_aizynth_routes(self) -> bool:
+        targets = getattr(self, "_aizynth_route_targets", None) or []
+        return any(target.get("routes") for target in targets)
+
+    def _sync_retrosynthesis_actions(self) -> None:
+        act = getattr(self, "_act_aizynth_routes", None)
+        if act is None:
+            return
+        try:
+            act.setEnabled(self._has_aizynth_routes())
+        except RuntimeError:
+            return
+
+    def _remember_aizynth_routes(self, results: list, routes_by_smiles: dict) -> str:
+        """Merge this search into the in-memory route list. Returns a SMILES to focus."""
+        fresh: list[dict] = []
+        by_smiles: dict[str, dict] = {}
+        focus = ""
+        for oid, smiles, _columns in results:
+            text = str(smiles or "").strip()
+            if not text:
+                continue
+            target = by_smiles.get(text)
+            if target is None:
+                routes = list((routes_by_smiles or {}).get(text) or [])
+                target = {"smiles": text, "oids": [], "routes": routes}
+                by_smiles[text] = target
+                fresh.append(target)
+                if routes and not focus:
+                    focus = text
+            if oid is not None:
+                target["oids"].append(int(oid))
+        previous = [
+            target
+            for target in (getattr(self, "_aizynth_route_targets", None) or [])
+            if target.get("smiles") not in by_smiles
+        ]
+        self._aizynth_route_targets = fresh + previous
+        self._sync_retrosynthesis_actions()
+        return focus
+
+    def _on_aizynthfinder_finished(
+        self, results: list, warning: str = "", routes_by_smiles: object = None
+    ) -> None:
         if self._host_unavailable():
             return
         from ...predictions.aizynthfinder_run import OUTPUT_COLUMNS
 
-        table_rows = [(oid, columns) for oid, columns in results if oid is not None]
-        lone = [columns for oid, columns in results if oid is None]
+        route_map = routes_by_smiles if isinstance(routes_by_smiles, dict) else {}
+        table_rows = [(oid, columns) for oid, _smiles, columns in results if oid is not None]
+        lone = [columns for oid, _smiles, columns in results if oid is None]
+        focus = self._remember_aizynth_routes(results, route_map)
         if table_rows:
             self.on_calc_finished(
                 table_rows,
@@ -420,7 +465,7 @@ class PredictToolsMixin:
             )
         else:
             self._finish_tool_progress(TOOL_RETROSYNTHESIS)
-        if lone:
+        if lone and not focus:
             lines = [
                 f"{header}: {value}"
                 for header, value in lone[0].items()
@@ -433,6 +478,8 @@ class PredictToolsMixin:
             )
         if warning and warning != "Cancelled.":
             QMessageBox.warning(self, TOOL_RETROSYNTHESIS, warning)
+        if focus:
+            self.open_aizynth_routes(focus_smiles=focus)
 
     def _on_aizynthfinder_failed(self, msg: str) -> None:
         if self._host_unavailable():
@@ -443,6 +490,40 @@ class PredictToolsMixin:
             msg,
             progress_label=TOOL_RETROSYNTHESIS,
             failure_fallback="Retrosynthesis failed.",
+        )
+
+    def open_aizynth_routes(self, *, focus_smiles: str = "") -> None:
+        targets = [
+            target
+            for target in (getattr(self, "_aizynth_route_targets", None) or [])
+            if target.get("routes")
+        ]
+        if not targets:
+            QMessageBox.information(
+                self,
+                TOOL_RETROSYNTHESIS,
+                "Run Retrosynthesis → Search first. Routes from that search stay available "
+                "until you close MolManager.",
+            )
+            return
+        from ..browsers.route_browser import RouteBrowserDialog
+        from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
+
+        def _factory() -> RouteBrowserDialog:
+            dlg = RouteBrowserDialog(self)
+            dlg.set_targets(targets, focus_smiles=focus_smiles)
+            return dlg
+
+        def _reuse(dlg) -> None:
+            set_targets = getattr(dlg, "set_targets", None)
+            if callable(set_targets):
+                set_targets(targets, focus_smiles=focus_smiles)
+
+        reuse_or_show_modeless_singleton(
+            self,
+            "_aizynth_route_dialog",
+            _factory,
+            on_reused_visible=_reuse,
         )
 
     def open_aizynthfinder(self) -> None:

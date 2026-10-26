@@ -586,7 +586,15 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                     "(Settings → Configure → AiZynthFinder)."
                 ),
             ),
+            action(
+                "Routes…",
+                "open_aizynth_routes",
+                tooltip="Browse routes from the latest AiZynthFinder search.",
+                attr="_act_aizynth_routes",
+                enabled=False,
+            ),
             tooltips_visible=True,
+            about_to_show="_sync_retrosynthesis_actions",
         ),
         tooltips_visible=True,
     ),

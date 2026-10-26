@@ -147,7 +147,7 @@ def test_reaction_menu_outline():
     assert labels.index("Extract Reaction Info…") == labels.index("REINVENT Sampling…") + 1
     assert labels.index("Retrosynthesis") == labels.index("Extract Reaction Info…") + 1
     retrosynthesis = find_submenu(tools.items, "Retrosynthesis")
-    assert menu_outline(retrosynthesis.items) == ["Search…"]
+    assert menu_outline(retrosynthesis.items) == ["Search…", "Routes…"]
     decomp = find_submenu(tools.items, "Structure Decomposition")
     assert menu_outline(decomp.items) == [
         "Core-Based…",

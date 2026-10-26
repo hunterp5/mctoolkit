@@ -22,7 +22,6 @@ from PyQt5.QtWidgets import (
     QDialog,
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -60,14 +59,6 @@ class AizynthFinderDialog(QDialog):
         struct_lyt.setContentsMargins(8, 6, 8, 6)
         attach_structure_input(self, struct_lyt, selected_row_count=n_sel)
         root.addWidget(structures)
-
-        note = QLabel(
-            "Each molecule usually takes a minute or more. "
-            "Policy models and the stock file are read from the local config. "
-            "Finished rows gain AiZynth summary columns."
-        )
-        note.setWordWrap(True)
-        root.addWidget(note)
 
         buttons = QHBoxLayout()
         buttons.addStretch()

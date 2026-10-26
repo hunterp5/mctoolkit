@@ -33,7 +33,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..platform_support.tool_paths import (
@@ -78,11 +78,12 @@ class AizynthRunError(RuntimeError):
 
 @dataclass(frozen=True)
 class SearchResult:
-    """Column maps keyed by the SMILES string that was written to the input file."""
+    """Column maps and compact routes keyed by the SMILES written to the input file."""
 
     summaries: dict[str, dict[str, str]]
     warning: str = ""
     cancelled: bool = False
+    routes: dict[str, list[dict]] = field(default_factory=dict)
 
 
 def configured_python() -> str:
@@ -238,13 +239,55 @@ def summary_columns(stats: dict) -> dict[str, str]:
 
 def summaries_from_checkpoint(path: Path) -> dict[str, dict[str, str]]:
     """Parse the JSONL checkpoint. Incomplete trailing lines are skipped."""
+    return _load_checkpoint(path)[0]
+
+
+def routes_from_checkpoint(path: Path) -> dict[str, list[dict]]:
+    """Compact routes from the same checkpoint, keyed by processed SMILES."""
+    return _load_checkpoint(path)[1]
+
+
+def summaries_from_output(path: Path) -> dict[str, dict[str, str]]:
+    """Parse an ``aizynthcli`` JSON or JSON.GZ table when the checkpoint is empty."""
+    return _load_output(path)[0]
+
+
+def routes_from_output(path: Path) -> dict[str, list[dict]]:
+    """Compact routes from an ``aizynthcli`` output table."""
+    return _load_output(path)[1]
+
+
+def routes_from_trees(trees: object) -> list[dict]:
+    """Turn AiZynthFinder route dicts into score, solved, and reaction steps."""
+    if not isinstance(trees, list):
+        return []
+    routes: list[dict] = []
+    for tree in trees:
+        if not isinstance(tree, dict):
+            continue
+        smiles = str(tree.get("smiles") or "").strip()
+        if not smiles:
+            continue
+        scores = tree.get("scores") if isinstance(tree.get("scores"), dict) else {}
+        routes.append(
+            {
+                "score": _route_score(scores),
+                "solved": _route_is_solved(tree),
+                "steps": _reaction_steps(tree),
+            }
+        )
+    return routes
+
+
+def _load_checkpoint(path: Path) -> tuple[dict[str, dict[str, str]], dict[str, list[dict]]]:
+    summaries: dict[str, dict[str, str]] = {}
+    routes: dict[str, list[dict]] = {}
     if not path.is_file():
-        return {}
-    out: dict[str, dict[str, str]] = {}
+        return summaries, routes
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
-        return {}
+        return summaries, routes
     for line in lines:
         text = line.strip()
         if not text:
@@ -257,27 +300,106 @@ def summaries_from_checkpoint(path: Path) -> dict[str, dict[str, str]]:
         stats = row.get("results")
         if not smiles or not isinstance(stats, dict):
             continue
-        out[smiles] = summary_columns(stats)
-    return out
+        summaries[smiles] = summary_columns(stats)
+        parsed = routes_from_trees(stats.get("trees"))
+        if parsed:
+            routes[smiles] = parsed
+    return summaries, routes
 
 
-def summaries_from_output(path: Path) -> dict[str, dict[str, str]]:
-    """Parse an ``aizynthcli`` JSON or JSON.GZ table when the checkpoint is empty."""
+def _load_output(path: Path) -> tuple[dict[str, dict[str, str]], dict[str, list[dict]]]:
+    summaries: dict[str, dict[str, str]] = {}
+    routes: dict[str, list[dict]] = {}
+    if not path.is_file():
+        return summaries, routes
     try:
         payload = json.loads(_read_maybe_gzip(path))
     except (OSError, UnicodeError, json.JSONDecodeError):
-        return {}
+        return summaries, routes
     data = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(data, list):
-        return {}
-    out: dict[str, dict[str, str]] = {}
+        return summaries, routes
     for row in data:
         if not isinstance(row, dict):
             continue
         smiles = str(row.get("target") or row.get("processed_smiles") or "").strip()
-        if smiles:
-            out[smiles] = summary_columns(row)
-    return out
+        if not smiles:
+            continue
+        summaries[smiles] = summary_columns(row)
+        parsed = routes_from_trees(row.get("trees"))
+        if parsed:
+            routes[smiles] = parsed
+    return summaries, routes
+
+
+def _reaction_steps(mol_node: dict) -> list[dict]:
+    steps: list[dict] = []
+    _collect_steps(mol_node, steps)
+    return steps
+
+
+def _collect_steps(mol_node: dict, steps: list[dict]) -> None:
+    for child in mol_node.get("children") or []:
+        if not isinstance(child, dict):
+            continue
+        if not _is_reaction_node(child):
+            _collect_steps(child, steps)
+            continue
+        reactants = []
+        pending: list[dict] = []
+        for reactant in child.get("children") or []:
+            if not isinstance(reactant, dict):
+                continue
+            reactants.append(
+                {
+                    "smiles": str(reactant.get("smiles") or "").strip(),
+                    "in_stock": bool(reactant.get("in_stock")),
+                }
+            )
+            pending.append(reactant)
+        steps.append(
+            {
+                "product": str(mol_node.get("smiles") or "").strip(),
+                "reaction": str(child.get("smiles") or "").strip(),
+                "reactants": reactants,
+            }
+        )
+        for reactant in pending:
+            _collect_steps(reactant, steps)
+
+
+def _is_reaction_node(node: dict) -> bool:
+    return node.get("type") == "reaction" or bool(node.get("is_reaction"))
+
+
+def _route_is_solved(mol_node: dict) -> bool:
+    leaves: list[bool] = []
+
+    def walk(node: dict) -> None:
+        reactions = [
+            child
+            for child in node.get("children") or []
+            if isinstance(child, dict) and _is_reaction_node(child)
+        ]
+        if not reactions:
+            leaves.append(bool(node.get("in_stock")))
+            return
+        for reaction in reactions:
+            for reactant in reaction.get("children") or []:
+                if isinstance(reactant, dict):
+                    walk(reactant)
+
+    walk(mol_node)
+    return bool(leaves) and all(leaves)
+
+
+def _route_score(scores: dict) -> str:
+    if not scores:
+        return ""
+    for key in ("state score", "State score"):
+        if key in scores:
+            return _number(scores[key], 3)
+    return _number(next(iter(scores.values())), 3)
 
 
 def probe_install(python_text: str = "", config_text: str = "") -> tuple[bool, str]:
@@ -374,9 +496,9 @@ def run_search(
                 thread.join(timeout=2)
         if on_progress is not None:
             on_progress(_checkpoint_count(checkpoint), total)
-        summaries = summaries_from_checkpoint(checkpoint)
+        summaries, routes = _load_checkpoint(checkpoint)
         if not summaries:
-            summaries = summaries_from_output(output)
+            summaries, routes = _load_output(output)
     if cancelled and not summaries:
         raise AizynthRunError("Cancelled.")
     if not summaries:
@@ -384,7 +506,7 @@ def run_search(
     warning = ""
     if not cancelled and proc.returncode not in (0, None):
         warning = _failure_text(proc.returncode, tails)
-    return SearchResult(summaries, warning=warning, cancelled=cancelled)
+    return SearchResult(summaries, warning=warning, cancelled=cancelled, routes=routes)
 
 
 def _conda_root(python: Path) -> Path | None:

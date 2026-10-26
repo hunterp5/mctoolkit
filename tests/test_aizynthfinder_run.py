@@ -69,6 +69,47 @@ def test_saved_paths_roundtrip_into_ready_message(tmp_path: Path) -> None:
     assert aizynth.resolve_config() == config
 
 
+def test_routes_from_trees_keeps_step_order_and_stock() -> None:
+    trees = [
+        {
+            "type": "mol",
+            "smiles": "CCO",
+            "in_stock": False,
+            "scores": {"state score": 0.5},
+            "children": [
+                {
+                    "type": "reaction",
+                    "smiles": "CC.O>>CCO",
+                    "children": [
+                        {"type": "mol", "smiles": "CC", "in_stock": True},
+                        {
+                            "type": "mol",
+                            "smiles": "O",
+                            "in_stock": True,
+                            "children": [
+                                {
+                                    "type": "reaction",
+                                    "smiles": "O>>O",
+                                    "children": [{"type": "mol", "smiles": "O", "in_stock": False}],
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ],
+        }
+    ]
+    routes = aizynth.routes_from_trees(trees)
+    assert len(routes) == 1
+    assert routes[0]["score"] == "0.500"
+    assert routes[0]["solved"] is False
+    assert routes[0]["steps"][0]["product"] == "CCO"
+    assert routes[0]["steps"][0]["reactants"][0] == {"smiles": "CC", "in_stock": True}
+    assert routes[0]["steps"][1]["product"] == "O"
+    assert routes[0]["steps"][1]["reactants"][0]["in_stock"] is False
+    assert aizynth.routes_from_trees([{"huge": True}]) == []
+
+
 def test_checkpoint_and_output_table_become_columns(tmp_path: Path) -> None:
     checkpoint = tmp_path / "checkpoint.jsonl"
     checkpoint.write_text(
@@ -123,6 +164,39 @@ def test_checkpoint_and_output_table_become_columns(tmp_path: Path) -> None:
     assert parsed[aizynth.COLUMN_SOLVED] == "no"
     assert parsed[aizynth.COLUMN_IN_STOCK] == "CC"
     assert parsed[aizynth.COLUMN_NOT_IN_STOCK] == "N"
+
+
+def test_route_browser_lists_one_step(qapp) -> None:  # noqa: ARG001
+    from molmanager.ui.browsers.route_browser import RouteBrowserDialog
+
+    dialog = RouteBrowserDialog()
+    dialog.set_targets(
+        [
+            {
+                "smiles": "CCO",
+                "routes": [
+                    {
+                        "score": "0.500",
+                        "solved": True,
+                        "steps": [
+                            {
+                                "product": "CCO",
+                                "reaction": "",
+                                "reactants": [
+                                    {"smiles": "CC", "in_stock": True},
+                                    {"smiles": "O", "in_stock": False},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+    assert dialog.route_list.count() == 1
+    assert "solved" in dialog.route_list.item(0).text()
+    assert dialog._steps_layout.count() >= 2
+    dialog.close()
 
 
 def test_conda_child_environment_prefixes_library_bin(tmp_path: Path, monkeypatch) -> None:

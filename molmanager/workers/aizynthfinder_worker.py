@@ -52,7 +52,7 @@ def _safe_emit(obj, emitter_name: str, *args) -> None:
 class AizynthFinderSignals(QObject):
     """Emits from :class:`AizynthFinderWorker` (owned on the GUI thread)."""
 
-    finished = pyqtSignal(list, str)
+    finished = pyqtSignal(list, str, object)
     failed = pyqtSignal(str)
 
 
@@ -147,12 +147,12 @@ class AizynthFinderWorker(QRunnable):
             return
 
         blank = {header: "" for header in OUTPUT_COLUMNS}
-        emitted: list[tuple[int | None, dict[str, str]]] = []
+        emitted: list[tuple[int | None, str, dict[str, str]]] = []
         for oid, smiles in rows:
             columns = result.summaries.get(smiles)
             if columns is None:
                 continue
-            emitted.append((oid, columns or blank))
+            emitted.append((oid, smiles, columns or blank))
         if result.cancelled:
             emit_partial_results_if_cancelled(
                 self.worker_signals,
@@ -168,4 +168,10 @@ class AizynthFinderWorker(QRunnable):
                 result.warning or "AiZynthFinder returned no route summary.",
             )
             return
-        _safe_emit(self.aizynth_signals, "finished", emitted, result.warning)
+        _safe_emit(
+            self.aizynth_signals,
+            "finished",
+            emitted,
+            result.warning,
+            dict(result.routes),
+        )

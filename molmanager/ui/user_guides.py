@@ -403,7 +403,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_aizynthfinder",
                 "Retrosynthesis",
                 "Retrosynthesis",
-                "Local AiZynthFinder route search (Chemistry → Retrosynthesis → Search).",
+                "Local AiZynthFinder search and the route browser (Chemistry → Retrosynthesis).",
             ),
             _e(
                 "tools_predict_metabolites",
