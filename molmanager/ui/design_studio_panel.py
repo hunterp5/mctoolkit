@@ -450,6 +450,7 @@ class DesignStudioPanel(QWidget):
 
         self._sketcher = SketcherDialog(self, app=parent_app)
         self._sketcher.set_embedded(True)
+        self._sketcher.prefer_host_window_edit_keys()
         self._sketcher.setMinimumSize(480, 320)
 
         self._strip = DesignPropertyStrip(self._sketcher, self)

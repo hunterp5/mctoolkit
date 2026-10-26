@@ -17,7 +17,6 @@ The strip reads the molecule on the canvas. SAR Matrix can send a row's structur
 ## Options
 
 - **Canvas** — the sketcher. Drawing, templates, and **File → Export to Table** work as they do in the standalone sketcher.
-- **Add to table** — append the current sketch as a new row.
 - **Suggestions** — **Update** reads the last MMP run and the table's R-group columns. Click a row to put that analog on the canvas. MMP rows with a small structural change and a large activity shift are marked **activity cliff**, with a SALI value, so the median is not treated as a smooth trend. R-group rows are one-substituent swaps, scored as the reference activity plus the difference in substituent means. Each row also shows the druglike MPO.
 - **Accept** — add the sketch to the table, if it is not already there, and to the **Design queue** list.
 - **Add to table** — append the current sketch as a new row without adding it to the list.
@@ -33,8 +32,8 @@ The strip reads the molecule on the canvas. SAR Matrix can send a row's structur
 ## Workflow
 
 1. Open **Tools → Design Studio**, or right-click a structure cell and choose **Open in Design Studio**. It opens in its own window. The table row stays unchanged. Undo, copy, paste, and delete edit the sketch. The other application shortcuts, such as open, save, and search, still run.
-2. Draw or edit. The strip refreshes shortly after each change.
-3. **Add to table** when the analog is one you want to keep.
+2. Draw or edit. The strip refreshes shortly after each change. **Update** rebuilds the suggestion rail.
+3. **Accept** when the analog should join the **Design queue** list. **Add to table** keeps a row without that list.
 4. From a SAR Matrix, click an empty or predicted cell. **Design** sends the selected cell, including one that already has a compound.
 
 ## Use cases

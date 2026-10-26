@@ -236,25 +236,19 @@ def test_mmp_suggestion_applies_a_gain_and_marks_a_cliff():
 
 
 def test_rgroup_swap_estimates_the_series_shift():
+    core = "c1ccc([*:1])c([*:2])c1"
     rows = [
-        SeriesRow(
-            "c1ccc([*:1])cc1",
-            (("R1", "C[*:1]"),),
-            5.0,
-            "Cc1ccccc1",
-        ),
-        SeriesRow(
-            "c1ccc([*:1])cc1",
-            (("R1", "Cl[*:1]"),),
-            7.0,
-            "Clc1ccccc1",
-        ),
+        SeriesRow(core, (("R1", "C[*:1]"), ("R2", "[H][*:2]")), 5.0, "Cc1ccccc1"),
+        SeriesRow(core, (("R1", "Cl[*:1]"), ("R2", "[H][*:2]")), 7.0, "Clc1ccccc1"),
+        SeriesRow(core, (("R1", "C[*:1]"), ("R2", "F[*:2]")), 9.0, ""),
     ]
-    found = rgroup_swap_suggestions("Cc1ccccc1", rows)
+    found = rgroup_swap_suggestions("Clc1ccccc1", rows)
     assert len(found) == 1
-    assert found[0].smiles == "Clc1ccccc1"
-    assert "7.00" in found[0].detail
-    assert "+2.00" in found[0].detail
+    assert found[0].smiles == assemble_rgroup_product(
+        core, (("R1", "Cl[*:1]"), ("R2", "F[*:2]"))
+    )
+    assert "10.00" in found[0].detail
+    assert "+3.00" in found[0].detail
 
 
 def test_structure_menu_opens_design_studio(qapp, monkeypatch):

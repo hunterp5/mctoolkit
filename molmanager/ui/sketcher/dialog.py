@@ -782,6 +782,7 @@ class SketcherDialog(QDialog):
 
         self._parent_hotkeys_blocked = False
         self._claimed_parent_actions: list[QAction] = []
+        self._host_window_edit_keys = False
         self._sketch_key_filters_installed = False
         make_window_resizable(self)
 
@@ -824,7 +825,10 @@ class SketcherDialog(QDialog):
             if not isinstance(action, QAction) or id(action) in seen:
                 continue
             overlaps = bool(_shortcut_texts(action) & sketch_keys)
-            if action_id in _SKETCH_EDIT_PARENT_ACTION_IDS or overlaps:
+            edit_key = action_id in _SKETCH_EDIT_PARENT_ACTION_IDS
+            if self._host_window_edit_keys:
+                overlaps = False
+            if edit_key or overlaps:
                 seen.add(id(action))
                 found.append(action)
         return found
@@ -837,9 +841,12 @@ class SketcherDialog(QDialog):
         """
         if not self.isVisible():
             return False
-        if self._embedded:
+        if self._embedded and self._host_window_edit_keys:
             window = self.window()
             return window is not None and bool(window.isActiveWindow())
+        if self._embedded:
+            focus = QApplication.focusWidget()
+            return focus is not None and (focus is self or self.isAncestorOf(focus))
         return self.isActiveWindow()
 
     def _claim_parent_edit_hotkeys(self) -> None:
@@ -1688,6 +1695,30 @@ class SketcherDialog(QDialog):
         # Window shortcuts follow the host window, so undo and the other sketch
         # keys work anywhere in the Design Studio, not only on the canvas.
         self._sync_parent_edit_hotkeys()
+
+    def prefer_host_window_edit_keys(self) -> None:
+        """Keep undo, copy, paste, and delete on the sketch while the host window is active.
+
+        Application shortcuts that are not those edit keys stay enabled. A sketch
+        tool that uses the same key, such as lasso on Ctrl+Shift+L, yields.
+        """
+        self._host_window_edit_keys = True
+        self._yield_shortcuts_to_application()
+        self._sync_parent_edit_hotkeys()
+
+    def _yield_shortcuts_to_application(self) -> None:
+        host_actions = self._host_hotkey_actions()
+        protected: set[str] = set()
+        for action_id, action in host_actions.items():
+            if action_id in _SKETCH_EDIT_PARENT_ACTION_IDS or not isinstance(action, QAction):
+                continue
+            protected.update(_shortcut_texts(action))
+        if not protected:
+            return
+        for action in self.findChildren(QAction):
+            keys = _shortcut_texts(action)
+            if keys and keys <= protected:
+                action.setShortcuts([])
 
     def _escape_asks_close(self) -> None:
         if self._embedded:
