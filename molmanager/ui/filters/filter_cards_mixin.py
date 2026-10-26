@@ -130,6 +130,19 @@ class FilterCardsMixin:
         self.apply_filters()
         self._sync_filter_panel_scroll_content()
 
+    def replace_filter_cards(self, cards: list) -> None:
+        """Drop every filter card and install *cards* without applying them."""
+        for card in list(self.filters):
+            self.f_container.removeWidget(card)
+            card.deleteLater()
+        self.filters.clear()
+        for card in cards:
+            card.changed.connect(self.apply_filters)
+            card.removed.connect(lambda c=card: self.remove_filter(c))
+            self.f_container.addWidget(card)
+            self.filters.append(card)
+        self._sync_filter_panel_scroll_content()
+
     def remove_filter(self, card):
         if card in self.filters:
             self.filters.remove(card)
