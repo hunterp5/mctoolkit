@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 
 from PyQt5.QtCore import QEvent, QPoint, QSize, Qt, QTimer
-from PyQt5.QtGui import QCursor, QFont, QIcon, QKeySequence
+from PyQt5.QtGui import QCursor, QFont, QFontMetrics, QIcon, QKeySequence
 from PyQt5.QtWidgets import (
     QAction,
     QApplication,
@@ -35,6 +35,7 @@ from PyQt5.QtWidgets import (
     QMenuBar,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QShortcut,
     QStatusBar,
     QSizePolicy,
@@ -53,6 +54,7 @@ from ...workers import ExportWorker
 
 from ..mol_viewer_3d import Molecule3DEmbedView
 from ..qt_widget_utils import make_window_resizable
+from ..theme import default_app_font_pt, status_bar_font_pt
 from .chem import _parse_periodic_element_symbol
 from .constants import SKETCH_RAIL_ELEMENTS, SKETCH_RING_TEMPLATES, WILDCARD_ELEMENT
 from .contracted_labels import TABLE_CONTRACTED_LABELS
@@ -81,9 +83,12 @@ from .toolbar_glyphs import (
     mode_select_icon,
     mode_text_icon,
     ring_icon,
+    ring_template_icon,
+    fused_ring_icon,
     status_caution_icon,
     status_error_icon,
     status_ok_icon,
+    TOOLBAR_RING_TEMPLATES,
     view_3d_icon,
     reaction_arrow_icon,
 )
@@ -105,23 +110,98 @@ def _toolbar_vsep() -> QFrame:
     return line
 
 
+_RAIL_COLUMNS = 2
+_RAIL_BUTTON_SIZE = 28
+_RAIL_H_SPACING = 2
+_RAIL_V_SPACING = 2
+_RAIL_MARGIN_X = 2
+_RAIL_SCROLLBAR = 8
+
+
+def _rail_content_width() -> int:
+    """Width of two buttons and the gap between them."""
+    return _RAIL_BUTTON_SIZE * _RAIL_COLUMNS + _RAIL_H_SPACING * (_RAIL_COLUMNS - 1)
+
+
+def _rail_panel_width() -> int:
+    """Left rail width: the button grid, side margins, and a narrow scrollbar."""
+    return _rail_content_width() + _RAIL_MARGIN_X * 2 + _RAIL_SCROLLBAR
+
+
+def _configure_rail_grid(grid: QGridLayout) -> None:
+    """Give every rail block the same two columns so the buttons share x positions."""
+    grid.setContentsMargins(0, 0, 0, 0)
+    grid.setHorizontalSpacing(_RAIL_H_SPACING)
+    grid.setVerticalSpacing(_RAIL_V_SPACING)
+    for column in range(_RAIL_COLUMNS):
+        grid.setColumnMinimumWidth(column, _RAIL_BUTTON_SIZE)
+        grid.setColumnStretch(column, 0)
+
+
 def _toolbar_hsep() -> QFrame:
     line = QFrame()
     line.setFrameShape(QFrame.HLine)
     line.setFrameShadow(QFrame.Sunken)
-    line.setFixedHeight(8)
+    line.setFixedSize(_rail_content_width(), 8)
     return line
 
 
-def _toolbar_header(text: str) -> QLabel:
-    lab = QLabel(text)
-    lab.setObjectName("SketcherToolbarHeader")
-    lab.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
-    lab.setStyleSheet(
-        "color: palette(mid); font-size: 11px; font-weight: 600; letter-spacing: 0.3px; "
-        "padding-top: 2px; padding-bottom: 2px;"
-    )
-    return lab
+def _rail_more_button(text: str, tip: str) -> QPushButton:
+    """Full-width label under a two-column block, the same height as the buttons."""
+    button = QPushButton(text)
+    font = QFont("Sans", 9)
+    font.setStyleHint(QFont.SansSerif)
+    button.setFont(font)
+    button.setToolTip(tip)
+    button.setFocusPolicy(Qt.NoFocus)
+    button.setFixedHeight(_RAIL_BUTTON_SIZE)
+    button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    button.setStyleSheet("padding: 0px;")
+    return button
+
+
+def _rail_tool_section(widgets: list[QWidget], *, more: QPushButton | None = None) -> QWidget:
+    """One unlabeled block of the left tool rail, two buttons across."""
+    box = QWidget()
+    box.setFixedWidth(_rail_content_width())
+    lay = QVBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(0)
+    grid = QGridLayout()
+    _configure_rail_grid(grid)
+    for index, widget in enumerate(widgets):
+        grid.addWidget(widget, index // _RAIL_COLUMNS, index % _RAIL_COLUMNS)
+    if more is not None:
+        row = (len(widgets) + _RAIL_COLUMNS - 1) // _RAIL_COLUMNS
+        grid.addWidget(more, row, 0, 1, _RAIL_COLUMNS)
+    lay.addLayout(grid)
+    return box
+
+
+def _status_message_font() -> QFont:
+    """Same point size as the main-window status line."""
+    app = QApplication.instance()
+    font = QFont(app.font() if app is not None else QFont())
+    point = font.pointSize()
+    if point <= 0:
+        point = default_app_font_pt()
+    font.setPointSize(status_bar_font_pt(point))
+    return font
+
+
+def _workspace_status_bar_height() -> int:
+    """Main-window status row: the message line plus 6px above and below."""
+    return QFontMetrics(_status_message_font()).height() + 12
+
+
+def _apply_status_bar_metrics(bar: QStatusBar) -> None:
+    """Match the main-window status row and leave the right edge for one widget."""
+    bar.setFixedHeight(_workspace_status_bar_height())
+    bar.setFont(_status_message_font())
+    layout = bar.layout()
+    if layout is not None:
+        layout.setContentsMargins(8, 0, 0, 0)
+        layout.setSpacing(6)
 
 
 def _glyph_tool_button(
@@ -129,7 +209,7 @@ def _glyph_tool_button(
     tip: str,
     *,
     checkable: bool = True,
-    size: int = 34,
+    size: int = _RAIL_BUTTON_SIZE,
 ) -> QPushButton:
     b = QPushButton()
     b.setIcon(icon)
@@ -137,7 +217,7 @@ def _glyph_tool_button(
     b.setFixedSize(size, size)
     b.setCheckable(checkable)
     b.setToolTip(tip)
-    b.setStyleSheet("padding: 1px;")
+    b.setStyleSheet("padding: 0px;")
     b.setFocusPolicy(Qt.NoFocus)
     return b
 
@@ -203,7 +283,6 @@ class SketcherDialog(QDialog):
         *,
         element_symbols: list[str] | None = None,
         source_oid: int | None = None,
-        update_on_close: bool = False,
         app=None,
     ):
         super().__init__(parent)
@@ -213,7 +292,6 @@ class SketcherDialog(QDialog):
             initial_mol = None
         self._initial_mol = initial_mol
         self._source_oid = int(source_oid) if source_oid is not None else None
-        self._update_on_close = bool(update_on_close) and self._source_oid is not None
         self._element_symbols_override = element_symbols
         self.setWindowTitle("Sketcher")
         self.resize(*_sketcher_preferred_dialog_size())
@@ -231,11 +309,21 @@ class SketcherDialog(QDialog):
         export_act = QAction("Save Sketch…", self)
         export_act.triggered.connect(self._save_sketch)
         file_menu.addAction(export_act)
-        export_table_act = QAction("Export to Table", self)
+        export_table_act = QAction("Add to Table", self)
         export_table_act.triggered.connect(self._add_to_table)
         export_table_act.setShortcut(QKeySequence("Ctrl+Shift+T"))
         export_table_act.setShortcutContext(Qt.WindowShortcut)
+        export_table_act.setToolTip("Add the sketch to the table as new rows.")
         file_menu.addAction(export_table_act)
+        self._act_add_to_table = export_table_act
+        self._act_update_table_entry = QAction("Update Table Entry", self)
+        self._act_update_table_entry.setToolTip(
+            "Replace the table row this sketch was opened from."
+        )
+        self._act_update_table_entry.triggered.connect(self._update_table_entry)
+        self._act_update_table_entry.setVisible(self._source_oid is not None)
+        file_menu.addAction(self._act_update_table_entry)
+        file_menu.aboutToShow.connect(self._sync_table_entry_action)
 
         edit_menu = menubar.addMenu("Edit")
         undo_act = QAction("Undo", self)
@@ -372,10 +460,16 @@ class SketcherDialog(QDialog):
         self._act_canvas_ungroup.setShortcut(QKeySequence("Ctrl+Shift+G"))
         self._act_canvas_ungroup.setShortcutContext(Qt.WindowShortcut)
 
-        self._act_canvas_clear = QAction("Clear sketch", self)
+        self._act_canvas_clear = QAction("Clear Sketch", self)
+        self._act_canvas_clear.setToolTip(
+            "Remove every atom and bond from the canvas (Ctrl+Shift+K)."
+        )
         self._act_canvas_clear.triggered.connect(self._clear_sketch)
         self._act_canvas_clear.setShortcut(QKeySequence("Ctrl+Shift+K"))
         self._act_canvas_clear.setShortcutContext(Qt.WindowShortcut)
+        edit_menu.addMenu(self._build_copy_as_menu())
+        edit_menu.addSeparator()
+        edit_menu.addAction(self._act_canvas_clear)
 
         self._act_canvas_cleanup = QAction("Clean Up", self)
         self._act_canvas_cleanup.triggered.connect(self._on_cleanup_layout)
@@ -418,6 +512,14 @@ class SketcherDialog(QDialog):
         fit_v_act.setToolTip("Scale and center so the whole sketch fits in the canvas with margin.")
         fit_v_act.triggered.connect(self._on_view_fit_structure)
         view_menu.addAction(fit_v_act)
+        self._act_original_size = QAction("Original size", self)
+        self._act_original_size.setToolTip(
+            "Restore the size this structure had when it was opened from the table."
+        )
+        self._act_original_size.triggered.connect(self._on_view_original_size)
+        self._act_original_size.setEnabled(False)
+        view_menu.addAction(self._act_original_size)
+        view_menu.aboutToShow.connect(self._sync_original_size_action)
         center_draw_act = QAction("Center Drawing", self)
         center_draw_act.setToolTip(
             "Move the whole sketch so it is centered in the canvas (undo: Ctrl+Z)."
@@ -441,30 +543,6 @@ class SketcherDialog(QDialog):
         phys_props_act.triggered.connect(self._open_physical_properties)
         view_menu.addAction(phys_props_act)
 
-        tools = menubar.addMenu("Tools")
-
-        copy_act = QAction("Copy SMILES", self)
-        copy_act.triggered.connect(self._copy_smiles)
-        copy_act.setShortcut(QKeySequence("Ctrl+Shift+C"))
-        tools.addAction(copy_act)
-        copy_sel_act = QAction("Copy Selected as SMILES", self)
-        copy_sel_act.setToolTip(
-            "Copy SMILES (or SMARTS) for the currently selected atoms/bonds only."
-        )
-        copy_sel_act.triggered.connect(self._copy_selected_smiles)
-        tools.addAction(copy_sel_act)
-        copy_smarts_act = QAction("Copy SMARTS", self)
-        copy_smarts_act.triggered.connect(self._copy_smarts)
-        tools.addAction(copy_smarts_act)
-        copy_mol_act = QAction("Copy Molfile", self)
-        copy_mol_act.setToolTip("Copy a molfile of the selection, or of the whole sketch.")
-        copy_mol_act.triggered.connect(self._copy_molfile)
-        tools.addAction(copy_mol_act)
-        copy_png_act = QAction("Copy Image", self)
-        copy_png_act.setToolTip("Copy a PNG of the structure, without selection marks.")
-        copy_png_act.triggered.connect(self._copy_image)
-        tools.addAction(copy_png_act)
-
         settings_menu = menubar.addMenu("Settings")
         customize_el_act = QAction("Customize Elements", self)
         customize_el_act.setToolTip(
@@ -475,41 +553,22 @@ class SketcherDialog(QDialog):
 
         l.setMenuBar(menubar)
 
-        # --- Top glyph toolbar: modes, bonds, rings, charge, 3D, reaction arrow ---
-        top_bar = QHBoxLayout()
-        top_bar.setSpacing(4)
-        top_bar.setContentsMargins(6, 4, 6, 4)
-        top_bar.addStretch(1)
-
-        top_bar.addWidget(self.tb_draw)
-        top_bar.addWidget(self.tb_erase)
-        top_bar.addWidget(self.select_btn)
-        top_bar.addWidget(self.lasso_btn)
-        top_bar.addWidget(self.tb_text)
-        top_bar.addWidget(self.tb_groups)
+        # Tools live in the left rail, under the menu. The canvas starts beside that rail.
         self.tb_clear = _glyph_tool_button(
             clear_sketch_icon(),
             "Clear the sketch (also in the right-click empty-canvas menu).",
             checkable=False,
         )
         self.tb_clear.clicked.connect(self._clear_sketch)
-        top_bar.addWidget(self.tb_clear)
         self.tb_chain = _glyph_tool_button(
             mode_chain_icon(),
             "Chain: drag a zigzag carbon chain on the 30° grid. A short click places one atom.",
         )
         self.tb_chain.toggled.connect(self._toggle_chain)
-        top_bar.addWidget(self.tb_chain)
-        top_bar.addWidget(_toolbar_vsep())
 
         self._bond_tool_group = QButtonGroup(self)
         self._bond_tool_group.setExclusive(True)
         self._bond_tool_buttons: list[tuple[QPushButton, int, int]] = []
-        self._bond_palette = QFrame(self, Qt.Popup)
-        self._bond_palette.setFrameShape(QFrame.StyledPanel)
-        bond_row = QHBoxLayout(self._bond_palette)
-        bond_row.setContentsMargins(6, 6, 6, 6)
-        bond_row.setSpacing(4)
 
         def _add_bond_tool(
             icon, tip: str, order: int, stereo: int, *, checked: bool = False
@@ -519,7 +578,6 @@ class SketcherDialog(QDialog):
             btn.clicked.connect(lambda _=False, o=order, s=stereo: self._on_bond_tool(o, s))
             self._bond_tool_group.addButton(btn)
             self._bond_tool_buttons.append((btn, order, stereo))
-            bond_row.addWidget(btn)
             return btn
 
         self.bond_plain = _add_bond_tool(
@@ -549,19 +607,18 @@ class SketcherDialog(QDialog):
             1,
             BOND_STEREO_DATIVE,
         )
-        self.tb_bond = _glyph_tool_button(
-            bond_plain_icon(),
-            "Bond style. Click to choose single, double, triple, wedge, hash, wavy, or dative. "
-            "Keys 1, 2, and 3 set the order.",
-            checkable=False,
-        )
-        self.tb_bond.clicked.connect(self._show_bond_palette)
-        top_bar.addWidget(self.tb_bond)
-        top_bar.addWidget(_toolbar_vsep())
+        self.tb_bond = None
 
         self._ring_button_group = QButtonGroup(self)
         self._ring_button_group.setExclusive(False)
         self._ring_btn_by_key: dict[str, QPushButton] = {}
+        self._rail_ring_keys = tuple(key for key, *_rest in TOOLBAR_RING_TEMPLATES)
+        rail_rings = [self._new_ring_button(key) for key in self._rail_ring_keys]
+        self.tb_rings = _rail_more_button(
+            "More…",
+            "Other ring templates, including heterocycles and fused systems.",
+        )
+        self.tb_rings.clicked.connect(self._show_ring_palette)
         self._ring_palette = QFrame(self, Qt.Popup)
         self._ring_palette.setFrameShape(QFrame.StyledPanel)
         ring_grid = QGridLayout(self._ring_palette)
@@ -576,30 +633,9 @@ class SketcherDialog(QDialog):
             ring_grid.addWidget(header, ring_row, 0, 1, ring_columns)
             ring_row += 1
             for index, key in enumerate(names):
-                if key in SKETCH_RING_TEMPLATES:
-                    n_atoms, _elements, orders = SKETCH_RING_TEMPLATES[key]
-                    aromatic = any(order == 2 for order in orders)
-                else:
-                    graph = fused_template(key)
-                    n_atoms = len(graph.elements) if graph is not None else 6
-                    aromatic = True
-                tip = f"{key} ({n_atoms} atoms)"
-                rb = _glyph_tool_button(ring_icon(n_atoms, aromatic=aromatic), tip)
-                rb.clicked.connect(
-                    lambda checked=False, k=key: self._on_ring_tool_clicked(k, checked)
-                )
-                self._ring_button_group.addButton(rb)
-                self._ring_btn_by_key[key] = rb
-                ring_grid.addWidget(rb, ring_row + index // ring_columns, index % ring_columns)
+                button = self._new_ring_button(key)
+                ring_grid.addWidget(button, ring_row + index // ring_columns, index % ring_columns)
             ring_row += (len(names) + ring_columns - 1) // ring_columns
-        self.tb_rings = _glyph_tool_button(
-            ring_icon(6, aromatic=True),
-            "Ring templates, including fused systems such as naphthalene and indole.",
-            checkable=False,
-        )
-        self.tb_rings.clicked.connect(self._show_ring_palette)
-        top_bar.addWidget(self.tb_rings)
-        top_bar.addWidget(_toolbar_vsep())
 
         self.charge_plus = _glyph_tool_button(
             charge_plus_icon(), "Set formal charge +1 on the next atom click."
@@ -613,8 +649,6 @@ class SketcherDialog(QDialog):
         self.charge_minus.clicked.connect(
             lambda checked: self._toggle_charge(-1 if checked else None)
         )
-        top_bar.addWidget(self.charge_plus)
-        top_bar.addWidget(self.charge_minus)
 
         self.tb_3d = _glyph_tool_button(
             view_3d_icon(),
@@ -622,79 +656,135 @@ class SketcherDialog(QDialog):
         )
         self.tb_3d.setChecked(False)
         self.tb_3d.toggled.connect(self._toggle_3d_view)
-        top_bar.addWidget(self.tb_3d)
-        top_bar.addWidget(_toolbar_vsep())
         self.tb_rxn_arrow = _glyph_tool_button(
             reaction_arrow_icon(),
             "Reaction arrow: drag to draw. Fragments on the tail are reactants; "
-            "fragments on the head are products. Export to Table adds Reaction SMARTS "
+            "fragments on the head are products. Add to Table adds Reaction SMARTS "
             "and renders the 2D scheme. Hold Shift to snap.",
         )
         self.tb_rxn_arrow.toggled.connect(self._toggle_reaction_arrow)
-        top_bar.addWidget(self.tb_rxn_arrow)
-        top_bar.addStretch(1)
 
+        health = max(16, _workspace_status_bar_height() - 6)
         self.tb_structure_status = _glyph_tool_button(
-            status_ok_icon(),
-            "Structure status: click for valence and stereochemistry issues.",
+            status_ok_icon(health),
+            "Structure health: click for valence and stereochemistry issues.",
             checkable=False,
+            size=health,
+        )
+        self.tb_structure_status.setIconSize(QSize(health - 2, health - 2))
+        self.tb_structure_status.setStyleSheet(
+            "QPushButton { padding: 0px; border: none; background: transparent; }"
+            "QPushButton:hover { background: palette(midlight); border-radius: 3px; }"
         )
         self.tb_structure_status.clicked.connect(self._on_structure_status_clicked)
-        top_bar.addWidget(self.tb_structure_status)
-
-        top_toolbar = QWidget()
-        top_toolbar.setObjectName("SketcherTopToolbar")
-        top_toolbar.setStyleSheet(
-            "#SketcherTopToolbar {"
-            " background-color: palette(window);"
-            " border: none;"
-            " border-bottom: 1px solid palette(mid);"
-            "}"
-            "QPushButton:checked {"
-            " background-color: #d6e6f8;"
-            " border: 1px solid #6f93c4;"
-            " border-radius: 3px;"
-            "}"
-        )
-        top_toolbar.setLayout(top_bar)
-        top_toolbar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self._top_toolbar = top_toolbar
-        l.addWidget(top_toolbar)
-
-        main_h = QHBoxLayout()
-        main_h.setContentsMargins(0, 0, 0, 0)
-        main_h.setSpacing(0)
-
+        self._top_toolbar = None
         toolbar_outer = QVBoxLayout()
         toolbar_outer.setSpacing(4)
-        toolbar_outer.setContentsMargins(8, 4, 8, 6)
-        toolbar_outer.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-        self._toolbar_outer = toolbar_outer
+        toolbar_outer.setContentsMargins(_RAIL_MARGIN_X, 4, _RAIL_MARGIN_X, 6)
+        toolbar_outer.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self._rail_blocks: list[QWidget] = []
+        sections: tuple[tuple[list[QWidget], QPushButton | None], ...] = (
+            (
+                [
+                    self.tb_draw,
+                    self.tb_erase,
+                    self.select_btn,
+                    self.lasso_btn,
+                    self.tb_text,
+                    self.tb_groups,
+                    self.tb_clear,
+                    self.tb_chain,
+                ],
+                None,
+            ),
+            (
+                [
+                    self.bond_plain,
+                    self.bond_double,
+                    self.bond_triple,
+                    self.bond_wedge,
+                    self.bond_hash,
+                    self.bond_wavy,
+                    self.bond_dative,
+                ],
+                None,
+            ),
+            (rail_rings, self.tb_rings),
+            (
+                [self.charge_plus, self.charge_minus, self.tb_3d, self.tb_rxn_arrow],
+                None,
+            ),
+        )
+        for widgets, more in sections:
+            if self._rail_blocks:
+                toolbar_outer.addWidget(_toolbar_hsep())
+            block = _rail_tool_section(widgets, more=more)
+            self._rail_blocks.append(block)
+            toolbar_outer.addWidget(block)
 
-        # --- Elements by informal PT family; Custom: *, ?, R1, R2 ---
+        # Elements, then a sunken line, then * / ? / R.
         self.element_buttons: list[QPushButton] = []
         self._element_btn_by_symbol: dict[str, QPushButton] = {}
         self._element_button_group = QButtonGroup(self)
         self._element_button_group.setExclusive(True)
         self._el_btn_font = QFont("Sans", 9)
         self._el_btn_font.setStyleHint(QFont.SansSerif)
-        self._el_ncols = 4
+        self._el_ncols = _RAIL_COLUMNS
+        elements_page = QWidget()
+        elements_page.setFixedWidth(_rail_content_width())
+        elements_lay = QVBoxLayout(elements_page)
+        elements_lay.setContentsMargins(0, 0, 0, 0)
+        elements_lay.setSpacing(0)
         self._el_grid = QGridLayout()
-        self._el_grid.setHorizontalSpacing(4)
-        self._el_grid.setVerticalSpacing(3)
+        _configure_rail_grid(self._el_grid)
+        elements_lay.addLayout(self._el_grid)
+        toolbar_outer.addWidget(_toolbar_hsep())
+        self._rail_blocks.append(elements_page)
+        toolbar_outer.addWidget(elements_page)
+
+        custom_page = QWidget()
+        custom_page.setFixedWidth(_rail_content_width())
+        custom_lay = QVBoxLayout(custom_page)
+        custom_lay.setContentsMargins(0, 0, 0, 0)
+        custom_lay.setSpacing(0)
+        self._custom_grid = QGridLayout()
+        _configure_rail_grid(self._custom_grid)
+        custom_lay.addLayout(self._custom_grid)
+        toolbar_outer.addWidget(_toolbar_hsep())
+        self._rail_blocks.append(custom_page)
+        toolbar_outer.addWidget(custom_page)
+        toolbar_outer.addStretch(1)
+
         self._any_element_symbol: str | None = None
         self.tb_wildcard = QPushButton("*")
         self.tb_any_element = QPushButton("?")
         self.tb_r1 = QPushButton("R1")
         self.tb_r2 = QPushButton("R2")
         self._rgroup_buttons = {1: self.tb_r1, 2: self.tb_r2}
-        toolbar_outer.addLayout(self._el_grid)
         initial_els = (
             list(self._element_symbols_override)
             if self._element_symbols_override is not None
             else load_toolbar_element_symbols()
         )
         self._populate_element_toolbar(initial_els)
+
+        rail_page = QWidget()
+        rail_page.setLayout(toolbar_outer)
+        rail_scroll = QScrollArea()
+        rail_scroll.setWidgetResizable(True)
+        rail_scroll.setFrameShape(QFrame.NoFrame)
+        rail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        rail_scroll.setWidget(rail_page)
+        rail_scroll.setStyleSheet("QScrollBar:vertical { width: 8px; margin: 0px; }")
+
+        main_h = QHBoxLayout()
+        main_h.setContentsMargins(0, 0, 0, 0)
+        main_h.setSpacing(0)
+
+        panel_layout = QVBoxLayout()
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(4)
+        panel_layout.addWidget(rail_scroll, 1)
 
         toolbar_widget = QWidget()
         toolbar_widget.setObjectName("SketcherToolbarPanel")
@@ -710,9 +800,9 @@ class SketcherDialog(QDialog):
             " border-radius: 3px;"
             "}"
         )
-        toolbar_widget.setFixedWidth(148)
+        toolbar_widget.setFixedWidth(_rail_panel_width())
         toolbar_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        toolbar_widget.setLayout(toolbar_outer)
+        toolbar_widget.setLayout(panel_layout)
         self._toolbar_panel = toolbar_widget
         main_h.addWidget(toolbar_widget, 0)
 
@@ -736,18 +826,21 @@ class SketcherDialog(QDialog):
         self._canvas_splitter.setStretchFactor(1, 1)
         self._canvas_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         main_h.addWidget(self._canvas_splitter, 1)
+        self._body_row = main_h
         l.addLayout(main_h, 1)
 
         self._status_bar = QStatusBar(self)
         self._status_bar.setObjectName("SketcherStatusBar")
-        self._status_bar.setSizeGripEnabled(True)
+        self._status_bar.setSizeGripEnabled(False)
         self._status_bar.setStyleSheet(
             "#SketcherStatusBar {"
             " background-color: palette(window);"
             " border-top: 1px solid palette(mid);"
             "}"
-            "#SketcherStatusBar QLabel { padding-left: 8px; background: transparent; }"
+            "#SketcherStatusBar::item { border: none; }"
         )
+        _apply_status_bar_metrics(self._status_bar)
+        self._status_bar.addPermanentWidget(self.tb_structure_status)
         self._status_bar.showMessage("Ready.")
         l.addWidget(self._status_bar)
 
@@ -1014,6 +1107,18 @@ class SketcherDialog(QDialog):
         self.canvas.fit_sketch_to_viewport()
         self._update_sketch_status()
 
+    def _sync_original_size_action(self) -> None:
+        action = getattr(self, "_act_original_size", None)
+        if action is not None:
+            action.setEnabled(self.canvas.has_opened_render())
+
+    def _on_view_original_size(self) -> None:
+        if self.canvas.restore_opened_render():
+            self.show_sketch_status("Restored the size from when this structure was opened.")
+        else:
+            self.show_sketch_status("Open a structure from the table to restore its original size.")
+        self._update_sketch_status()
+
     def _on_menu_mode_draw(self, checked: bool) -> None:
         if checked:
             self._enter_draw_mode()
@@ -1087,8 +1192,31 @@ class SketcherDialog(QDialog):
         self.tb_wildcard.blockSignals(False)
         self._on_wildcard_tool_toggled(True)
 
+    def _new_ring_button(self, key: str) -> QPushButton:
+        """Checkable button whose picture is the heavy-atom graph *key* places."""
+        if key in SKETCH_RING_TEMPLATES:
+            _count, elements, orders = SKETCH_RING_TEMPLATES[key]
+            icon = ring_template_icon(elements, orders)
+            n_atoms = len(elements)
+        else:
+            graph = fused_template(key)
+            if graph is None:
+                icon = ring_icon(6, aromatic=True)
+                n_atoms = 6
+            else:
+                icon = fused_ring_icon(graph)
+                n_atoms = len(graph.elements)
+        button = _glyph_tool_button(icon, f"{key} ({n_atoms} atoms)")
+        button.clicked.connect(
+            lambda checked=False, name=key: self._on_ring_tool_clicked(name, checked)
+        )
+        self._ring_button_group.addButton(button)
+        self._ring_btn_by_key[key] = button
+        return button
+
     def _ring_palette_groups(self) -> list[tuple[str, list[str]]]:
-        """Ring template names grouped the way the palette shows them."""
+        """Ring templates that are not already buttons on the left rail."""
+        on_rail = set(getattr(self, "_rail_ring_keys", ()))
         buckets: dict[str, list[str]] = {
             "Carbocycles": [],
             "Nitrogen": [],
@@ -1096,6 +1224,8 @@ class SketcherDialog(QDialog):
             "Sulfur": [],
         }
         for name, (_count, elements, _orders) in SKETCH_RING_TEMPLATES.items():
+            if name in on_rail:
+                continue
             present = set(elements)
             if present <= {"C"}:
                 buckets["Carbocycles"].append(name)
@@ -1106,7 +1236,9 @@ class SketcherDialog(QDialog):
             else:
                 buckets["Nitrogen"].append(name)
         groups = [(title, names) for title, names in buckets.items() if names]
-        groups.append(("Fused", list(FUSED_TEMPLATE_SMILES)))
+        fused = [name for name in FUSED_TEMPLATE_SMILES if name not in on_rail]
+        if fused:
+            groups.append(("Fused", fused))
         return groups
 
     def _popup_under(self, palette: QFrame, button: QPushButton) -> None:
@@ -1115,7 +1247,11 @@ class SketcherDialog(QDialog):
         palette.show()
 
     def _show_bond_palette(self) -> None:
-        self._popup_under(self._bond_palette, self.tb_bond)
+        palette = getattr(self, "_bond_palette", None)
+        button = getattr(self, "tb_bond", None)
+        if palette is None or button is None:
+            return
+        self._popup_under(palette, button)
 
     def _show_ring_palette(self) -> None:
         self._popup_under(self._ring_palette, self.tb_rings)
@@ -1428,79 +1564,32 @@ class SketcherDialog(QDialog):
         self.canvas.update()
 
     def _clear_element_grid_widgets(self) -> None:
-        """Remove element-panel widgets; keep wildcard/? buttons for reuse."""
+        """Remove element buttons so the rail can be rebuilt."""
         while self._el_grid.count():
             item = self._el_grid.takeAt(0)
-            w = item.widget()
-            if w is None:
+            widget = item.widget()
+            if widget is None:
                 continue
-            if (
-                w is self.tb_wildcard
-                or w is self.tb_any_element
-                or w in self._rgroup_buttons.values()
-            ):
-                w.setParent(None)
-                continue
-            if isinstance(w, QPushButton) and w.property("sketch_element"):
-                self._element_button_group.removeButton(w)
-            w.deleteLater()
+            if isinstance(widget, QPushButton) and widget.property("sketch_element"):
+                self._element_button_group.removeButton(widget)
+            widget.deleteLater()
         self.element_buttons.clear()
         self._element_btn_by_symbol.clear()
 
-    def _populate_element_toolbar(self, symbols: list[str]) -> None:
-        """Short element rail, plus Custom * / ? / R1 / R2. Other saved symbols sit under More."""
-        self._visible_element_symbols = list(symbols)
-        self._clear_element_grid_widgets()
-        el_ncols = self._el_ncols
+    def _place_custom_rail(self) -> None:
+        """Put *, ?, R1, R2, and Rn below the element buttons."""
+        while self._custom_grid.count():
+            item = self._custom_grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
         btn_font = self._el_btn_font
-        grid_row = 0
-        self._el_grid.addWidget(_toolbar_header("Elements"), grid_row, 0, 1, el_ncols)
-        grid_row += 1
-        rail = list(SKETCH_RAIL_ELEMENTS)
-        for i, el in enumerate(rail):
-            b = QPushButton(el)
-            b.setCheckable(True)
-            b.setProperty("sketch_element", el)
-            b.setFont(btn_font)
-            b.setFixedSize(28, 26)
-            b.setStyleSheet("padding: 0px;")
-            row, col = i // el_ncols, i % el_ncols
-            if el == "C":
-                b.setToolTip(
-                    "Carbon: click empty space to place C; drag to draw a bond; "
-                    "click any other atom to replace it with carbon."
-                )
-            else:
-                b.setToolTip(f"Place {el}.")
-            b.clicked.connect(lambda checked, e=el: self._on_element_tool_clicked(e, checked))
-            self._element_button_group.addButton(b)
-            self._el_grid.addWidget(b, grid_row + row, col)
-            self.element_buttons.append(b)
-            self._element_btn_by_symbol[el] = b
-        grid_row += (len(rail) + el_ncols - 1) // el_ncols
-        rail_set = set(rail)
-        self._more_element_symbols = [s for s in symbols if s not in rail_set]
-        if self._more_element_symbols:
-            self._more_elements_btn = QPushButton("More…")
-            self._more_elements_btn.setFont(btn_font)
-            self._more_elements_btn.setToolTip(
-                "Other elements from Customize Elements, including isotopes."
-            )
-            self._more_elements_btn.clicked.connect(self._show_more_elements)
-            self._el_grid.addWidget(self._more_elements_btn, grid_row, 0, 1, el_ncols)
-            grid_row += 1
-
-        self._el_grid.addWidget(_toolbar_hsep(), grid_row, 0, 1, el_ncols)
-        grid_row += 1
-        self._el_grid.addWidget(_toolbar_header("Custom"), grid_row, 0, 1, el_ncols)
-        grid_row += 1
-
         self.tb_wildcard.setCheckable(True)
         self.tb_wildcard.setFont(btn_font)
         self.tb_wildcard.setToolTip(
             "Wildcard atom: SMARTS query over selected elements. Right-click a wildcard to edit choices."
         )
-        self.tb_wildcard.setFixedSize(28, 26)
+        self.tb_wildcard.setFixedSize(_RAIL_BUTTON_SIZE, _RAIL_BUTTON_SIZE)
         self.tb_wildcard.setStyleSheet("padding: 0px;")
         try:
             self.tb_wildcard.toggled.disconnect()
@@ -1513,7 +1602,7 @@ class SketcherDialog(QDialog):
         self.tb_any_element.setToolTip(
             "Type any periodic-table element symbol (e.g. Au, Ru, Se) to place or replace atoms."
         )
-        self.tb_any_element.setFixedSize(28, 26)
+        self.tb_any_element.setFixedSize(_RAIL_BUTTON_SIZE, _RAIL_BUTTON_SIZE)
         self.tb_any_element.setStyleSheet("padding: 0px;")
         try:
             self.tb_any_element.clicked.disconnect()
@@ -1526,7 +1615,7 @@ class SketcherDialog(QDialog):
         for label, button in self._rgroup_buttons.items():
             button.setCheckable(True)
             button.setFont(r_font)
-            button.setFixedSize(32, 26)
+            button.setFixedSize(_RAIL_BUTTON_SIZE, _RAIL_BUTTON_SIZE)
             button.setStyleSheet("padding: 0px;")
             button.setToolTip(
                 f"R{label}: click an atom to attach this point for R-group enumeration. "
@@ -1538,17 +1627,58 @@ class SketcherDialog(QDialog):
                 pass
             button.toggled.connect(lambda on, lab=label: self._on_rgroup_tool_toggled(lab, on))
 
-        self._el_grid.addWidget(self.tb_wildcard, grid_row, 0)
-        self._el_grid.addWidget(self.tb_any_element, grid_row, 1)
-        self._el_grid.addWidget(self.tb_r1, grid_row, 2)
-        self._el_grid.addWidget(self.tb_r2, grid_row, 3)
-        self.tb_rn = QPushButton("Rn")
-        self.tb_rn.setFont(r_font)
-        self.tb_rn.setFixedSize(32, 26)
-        self.tb_rn.setStyleSheet("padding: 0px;")
-        self.tb_rn.setToolTip("Choose Rn (R3, R4, …). Exports as [*:n].")
-        self.tb_rn.clicked.connect(self._on_rn_clicked)
-        self._el_grid.addWidget(self.tb_rn, grid_row + 1, 0)
+        if getattr(self, "tb_rn", None) is None:
+            self.tb_rn = QPushButton("Rn")
+            self.tb_rn.setFont(r_font)
+            self.tb_rn.setFixedSize(_RAIL_BUTTON_SIZE, _RAIL_BUTTON_SIZE)
+            self.tb_rn.setStyleSheet("padding: 0px;")
+            self.tb_rn.setToolTip("Choose Rn (R3, R4, …). Exports as [*:n].")
+            self.tb_rn.clicked.connect(self._on_rn_clicked)
+        self._custom_grid.addWidget(self.tb_wildcard, 0, 0)
+        self._custom_grid.addWidget(self.tb_any_element, 0, 1)
+        self._custom_grid.addWidget(self.tb_r1, 1, 0)
+        self._custom_grid.addWidget(self.tb_r2, 1, 1)
+        self._custom_grid.addWidget(self.tb_rn, 2, 0)
+
+    def _populate_element_toolbar(self, symbols: list[str]) -> None:
+        """Short element rail. Other saved symbols sit under More. * / ? / R stay below a sunken line."""
+        self._visible_element_symbols = list(symbols)
+        self._clear_element_grid_widgets()
+        el_ncols = self._el_ncols
+        btn_font = self._el_btn_font
+        rail = list(SKETCH_RAIL_ELEMENTS)
+        for i, el in enumerate(rail):
+            button = QPushButton(el)
+            button.setCheckable(True)
+            button.setProperty("sketch_element", el)
+            button.setFont(btn_font)
+            button.setFixedSize(_RAIL_BUTTON_SIZE, _RAIL_BUTTON_SIZE)
+            button.setStyleSheet("padding: 0px;")
+            row, col = i // el_ncols, i % el_ncols
+            if el == "C":
+                button.setToolTip(
+                    "Carbon: click empty space to place C; drag to draw a bond; "
+                    "click any other atom to replace it with carbon."
+                )
+            else:
+                button.setToolTip(f"Place {el}.")
+            button.clicked.connect(lambda checked, e=el: self._on_element_tool_clicked(e, checked))
+            self._element_button_group.addButton(button)
+            self._el_grid.addWidget(button, row, col)
+            self.element_buttons.append(button)
+            self._element_btn_by_symbol[el] = button
+        grid_row = (len(rail) + el_ncols - 1) // el_ncols
+        rail_set = set(rail)
+        self._more_element_symbols = [s for s in symbols if s not in rail_set]
+        if self._more_element_symbols:
+            self._more_elements_btn = _rail_more_button(
+                "More…",
+                "Other elements from Customize Elements, including isotopes.",
+            )
+            self._more_elements_btn.clicked.connect(self._show_more_elements)
+            self._el_grid.addWidget(self._more_elements_btn, grid_row, 0, 1, el_ncols)
+
+        self._place_custom_rail()
 
         # Drop place-tool if the selected element was removed from the panel.
         place = getattr(self.canvas, "place_element", None) if hasattr(self, "canvas") else None
@@ -1578,15 +1708,24 @@ class SketcherDialog(QDialog):
         from .physical_properties import SketchPhysicalPropertiesDialog
 
         dlg = self._phys_props_dlg
+        if dlg is not None:
+            try:
+                dlg.objectName()
+            except RuntimeError:
+                dlg = None
+                self._phys_props_dlg = None
         if dlg is None:
             dlg = SketchPhysicalPropertiesDialog(self)
             self._phys_props_dlg = dlg
-            dlg.destroyed.connect(lambda *_: setattr(self, "_phys_props_dlg", None))
+            dlg.destroyed.connect(self._forget_physical_properties)
             self.canvas.sketchChanged.connect(dlg.schedule_refresh)
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
         dlg.schedule_refresh()
+
+    def _forget_physical_properties(self, *_args) -> None:
+        self._phys_props_dlg = None
 
     def _undo_sketch(self) -> None:
         self.canvas.undo()
@@ -1677,6 +1816,15 @@ class SketcherDialog(QDialog):
             ),
         )
 
+    def place_structure_status(self, bar: QStatusBar) -> None:
+        """Pin the structure-health indicator on the right of another status bar."""
+        home = getattr(self, "_status_bar", None)
+        if home is not None and home is not bar:
+            home.removeWidget(self.tb_structure_status)
+        _apply_status_bar_metrics(bar)
+        bar.setSizeGripEnabled(False)
+        bar.addPermanentWidget(self.tb_structure_status)
+
     def set_embedded(self, embedded: bool) -> None:
         """Host this dialog inside another widget. Escape no longer closes it.
 
@@ -1695,6 +1843,14 @@ class SketcherDialog(QDialog):
         # Window shortcuts follow the host window, so undo and the other sketch
         # keys work anywhere in the Design Studio, not only on the canvas.
         self._sync_parent_edit_hotkeys()
+
+    def place_beside_canvas(self, widget: QWidget) -> None:
+        """Put *widget* in the row under the top toolbar, to the right of the canvas."""
+        row = getattr(self, "_body_row", None)
+        if row is None:
+            return
+        widget.setParent(self)
+        row.addWidget(widget, 0)
 
     def prefer_host_window_edit_keys(self) -> None:
         """Keep undo, copy, paste, and delete on the sketch while the host window is active.
@@ -2009,12 +2165,6 @@ class SketcherDialog(QDialog):
             panel.setStyleSheet(
                 "#SketcherToolbarPanel { background-color: palette(window); border: none; }"
             )
-        header_qss = (
-            "color: palette(mid); font-size: 11px; font-weight: 600; letter-spacing: 0.3px; "
-            "padding-top: 2px; padding-bottom: 2px;"
-        )
-        for lab in self.findChildren(QLabel, "SketcherToolbarHeader"):
-            lab.setStyleSheet(header_qss)
         if hasattr(self, "canvas") and self.canvas is not None:
             self.canvas.update()
         self.update()
@@ -2083,14 +2233,15 @@ class SketcherDialog(QDialog):
         if btn is None:
             return
         level, msgs = self.canvas.structure_issue_report()
+        icon_px = max(12, btn.iconSize().width())
         if level == "error":
-            btn.setIcon(status_error_icon())
+            btn.setIcon(status_error_icon(icon_px))
             tip = "Structure has errors (click for details)."
         elif level == "caution":
-            btn.setIcon(status_caution_icon())
+            btn.setIcon(status_caution_icon(icon_px))
             tip = "Structure has warnings (click for details)."
         else:
-            btn.setIcon(status_ok_icon())
+            btn.setIcon(status_ok_icon(icon_px))
             tip = "No valence or stereochemistry issues flagged (click for details)."
         if msgs:
             tip = tip + "\n" + "\n".join(f"• {m}" for m in msgs[:6])
@@ -2101,7 +2252,7 @@ class SketcherDialog(QDialog):
         self._structure_status_messages = msgs
 
     def _on_structure_status_clicked(self) -> None:
-        """Show a silent status dropdown under the toolbar button, kept inside this window."""
+        """Show a silent status dropdown from the health indicator, kept inside this window."""
         level, msgs = self.canvas.structure_issue_report()
         self._update_sketch_status()
         title = {
@@ -2280,6 +2431,7 @@ class SketcherDialog(QDialog):
 
     def _clear_sketch(self) -> None:
         self.canvas.clear()
+        self._sync_original_size_action()
 
     def _on_center_molecule(self) -> None:
         self.canvas.center_sketch_in_viewport(True)
@@ -2308,14 +2460,50 @@ class SketcherDialog(QDialog):
             return
         self.load_structure_from_mol(mol, confirm_if_nonempty=False)
 
-    def set_source_entry(self, oid: int | None, *, update_on_close: bool = False) -> None:
-        """Remember the table row this sketch edits.
+    def _build_copy_as_menu(self) -> QMenu:
+        """Edit → Copy as: SMILES, SMARTS, molfile, and a depiction image."""
+        menu = QMenu("Copy as", self)
+        smiles = QAction("SMILES", self)
+        smiles.setShortcut(QKeySequence("Ctrl+Shift+C"))
+        smiles.setShortcutContext(Qt.WindowShortcut)
+        smiles.setToolTip(
+            "Copy the sketch as SMILES, or as reaction SMARTS when an arrow is present."
+        )
+        smiles.triggered.connect(self._copy_smiles)
+        menu.addAction(smiles)
+        selected = QAction("Selected SMILES", self)
+        selected.setToolTip("Copy SMILES (or SMARTS) for the currently selected atoms and bonds.")
+        selected.triggered.connect(self._copy_selected_smiles)
+        menu.addAction(selected)
+        smarts = QAction("SMARTS", self)
+        smarts.setToolTip(
+            "Copy the sketch as SMARTS, or as reaction SMARTS when an arrow is present."
+        )
+        smarts.triggered.connect(self._copy_smarts)
+        menu.addAction(smarts)
+        molfile = QAction("Molfile", self)
+        molfile.setToolTip("Copy a molfile of the selection, or of the whole sketch.")
+        molfile.triggered.connect(self._copy_molfile)
+        menu.addAction(molfile)
+        image = QAction("Image", self)
+        image.setToolTip("Copy a PNG of the structure, without selection marks.")
+        image.triggered.connect(self._copy_image)
+        menu.addAction(image)
+        return menu
 
-        *update_on_close* asks, when the sketcher closes, whether to write the sketch
-        into that row. Structure → Edit in Sketcher sets it; other opens leave it off.
+    def _sync_table_entry_action(self) -> None:
+        action = getattr(self, "_act_update_table_entry", None)
+        if action is not None:
+            action.setVisible(self._source_oid is not None)
+
+    def set_source_entry(self, oid: int | None) -> None:
+        """Remember the table row this sketch was opened from.
+
+        File → Update Table Entry writes the sketch into that row. Without a source
+        row, only Add to Table is available.
         """
         self._source_oid = int(oid) if oid is not None else None
-        self._update_on_close = bool(update_on_close) and self._source_oid is not None
+        self._sync_table_entry_action()
 
     def load_structure_from_mol(
         self, mol: Chem.Mol | None, confirm_if_nonempty: bool = True
@@ -2347,6 +2535,7 @@ class SketcherDialog(QDialog):
                 "Could not build a 2D layout for this structure. It may be unsupported or invalid.",
             )
             return False
+        QTimer.singleShot(0, self._sync_original_size_action)
         self.tb_erase.blockSignals(True)
         self.tb_erase.setChecked(False)
         self.tb_erase.blockSignals(False)
@@ -2452,6 +2641,23 @@ class SketcherDialog(QDialog):
                 "Could not copy SMARTS (empty sketch or invalid structure).",
             )
 
+    def _confirm_table_write(self, title: str, message: str) -> bool:
+        """Ask before Add to Table or Update Table Entry changes the table.
+
+        The offscreen test platform crashes inside the native question dialog.
+        """
+        app = QApplication.instance()
+        if app is not None and app.platformName() == "offscreen":
+            return True
+        answer = QMessageBox.question(
+            self,
+            title,
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return answer == QMessageBox.Yes
+
     def _add_to_table(self):
         app = self.parent_app
 
@@ -2460,10 +2666,15 @@ class SketcherDialog(QDialog):
                 app.status_label.setText(msg)
 
         if self.canvas.reaction_arrow is not None:
+            if not self._confirm_table_write(
+                "Add to Table",
+                "Add this reaction to the table as new rows?",
+            ):
+                return
             n = self._append_reaction_from_sketch()
             if n == 0:
                 msg = (
-                    "Sketcher: could not export a reaction. Draw reactants on the "
+                    "Sketcher: could not add a reaction. Draw reactants on the "
                     "arrow tail and products on the head."
                 )
                 _main_status(msg)
@@ -2476,6 +2687,11 @@ class SketcherDialog(QDialog):
             _main_status(msg)
             QMessageBox.warning(self, "Add to Table", msg)
             return
+        if not self._confirm_table_write(
+            "Add to Table",
+            "Add this sketch to the table as new rows?",
+        ):
+            return
         n = self._append_molecules_from_smiles_parts(parts)
         if n == 0:
             msg = "Sketcher: could not parse fragments when adding to the table."
@@ -2483,15 +2699,31 @@ class SketcherDialog(QDialog):
             QMessageBox.warning(self, "Add to Table", msg)
             return
 
-    def _sketched_molecule(self):
-        """The canvas as one molecule, or ``None`` when it is empty, a reaction, or unreadable."""
-        app = self.parent_app
-        if app is None or self.canvas.reaction_arrow is not None or not self.canvas.nodes:
-            return None
-        text = (self.canvas.to_smiles() or "").strip()
-        if not text or not hasattr(app, "_mol_from_structure_text"):
-            return None
-        return app._mol_from_structure_text(text)
+    def _update_table_entry(self) -> None:
+        """Write the sketch into the table row it was opened from."""
+        if self._source_oid is None:
+            return
+        if self.canvas.reaction_arrow is not None:
+            QMessageBox.information(
+                self,
+                "Update Table Entry",
+                "A reaction is added as new rows. Use Add to Table.",
+            )
+            return
+        parts = self.canvas.fragment_smiles_parts()
+        if len(parts) != 1:
+            QMessageBox.information(
+                self,
+                "Update Table Entry",
+                "Update Table Entry needs a single structure. Use Add to Table for separate fragments.",
+            )
+            return
+        if not self._confirm_table_write(
+            "Update Table Entry",
+            "Update this table entry with the sketch?",
+        ):
+            return
+        self._update_source_row(parts[0])
 
     def _row_already_has_molecule(self, app, oid: int, mol) -> bool:
         current = app.mols.get(int(oid))
@@ -2502,54 +2734,58 @@ class SketcherDialog(QDialog):
         except Exception:  # noqa: BLE001 — RDKit raises varied C++ wrap errors
             return False
 
-    def _confirm_close_updates_row(self) -> bool:
-        """Ask before writing an edited sketch back. Return False to keep the sketcher open."""
+    def _update_source_row(self, smiles: str) -> bool:
+        """Write one sketched molecule into the row the sketcher was opened from."""
         app = self.parent_app
         oid = self._source_oid
         if app is None or oid is None or not hasattr(app, "replace_row_structure"):
-            return True
-        if self.canvas.reaction_arrow is not None:
-            QMessageBox.information(
-                self,
-                "Edit in Sketcher",
-                "This sketch is a reaction, so the table row was left unchanged. "
-                "Use Export to Table to add it as a new row.",
-            )
-            return True
-        mol = self._sketched_molecule()
-        if mol is None:
-            if self.canvas.nodes:
-                QMessageBox.warning(
-                    self,
-                    "Edit in Sketcher",
-                    "Could not build a structure from this sketch, so the table row was left unchanged.",
-                )
-            return True
-        if self._row_already_has_molecule(app, int(oid), mol):
-            return True
-        choice = QMessageBox.question(
-            self,
-            "Edit in Sketcher",
-            "Update this table row with the edited structure?",
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-            QMessageBox.Yes,
-        )
-        if choice == QMessageBox.Cancel:
             return False
-        if choice == QMessageBox.Yes and not app.replace_row_structure(int(oid), mol):
+        mol = None
+        if hasattr(app, "_mol_from_structure_text"):
+            mol = app._mol_from_structure_text(smiles)
+        if mol is None:
+            mol = Chem.MolFromSmiles(smiles) or Chem.MolFromSmarts(smiles)
+        if mol is None:
             QMessageBox.warning(
-                self, "Edit in Sketcher", "That table row is no longer in the table."
+                self,
+                "Update Table Entry",
+                "Could not build a structure from this sketch, so the table row was left unchanged.",
             )
+            return False
+        if self._row_already_has_molecule(app, int(oid), mol):
+            if hasattr(app, "status_label"):
+                app.status_label.setText("That table row already has this structure.")
+            return True
+        if not app.replace_row_structure(int(oid), mol, description="Update row from sketcher"):
+            QMessageBox.warning(
+                self, "Update Table Entry", "That table row is no longer in the table."
+            )
+            return False
         return True
+
+    def _ask_close(self) -> int:
+        """Confirm closing. The offscreen test platform crashes inside the native dialog."""
+        app = QApplication.instance()
+        if app is not None and app.platformName() == "offscreen":
+            return QMessageBox.Yes
+        return QMessageBox.question(
+            self,
+            "Close Sketcher",
+            "Close the sketcher?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+
+    def _confirm_close(self) -> bool:
+        return self._ask_close() == QMessageBox.Yes
 
     def closeEvent(self, event):
         if self._embedded:
             event.ignore()
             return
-        if self._update_on_close and not self._confirm_close_updates_row():
+        if self.isVisible() and not self._confirm_close():
             event.ignore()
             return
-        self._update_on_close = False
         self._release_parent_edit_hotkeys()
         self._remove_sketch_key_filters()
         event.accept()
