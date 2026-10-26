@@ -23,6 +23,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLineEdit,
     QSpinBox,
@@ -36,8 +37,8 @@ from ...workers.superpose_types import (
     SUPERPOSE_GEOMETRY_LABELS,
     SUPERPOSE_TARGET_LABELS,
 )
-from ..qt_widget_utils import make_window_minimizable
-from .conformer_output import add_centered_run_button, conformer_options_group
+from ..qt_widget_utils import boxed_form, make_window_minimizable
+from .conformer_output import add_centered_run_button
 from .scope import selection_scope_checked
 
 
@@ -106,9 +107,7 @@ class SuperposeDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
-        form.setSpacing(6)
-        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        target, self._target_form = boxed_form("Target")
 
         self.target_combo = QComboBox()
         _fill_combo(self.target_combo, SUPERPOSE_TARGET_LABELS)
@@ -125,7 +124,7 @@ class SuperposeDialog(QDialog):
                 "Add a confs column first (Chemistry → Conformations) to superpose ensembles."
             )
         _set_combo_current_data(self.target_combo, self._default_target)
-        form.addRow("Align:", self.target_combo)
+        self._target_form.addRow("Align:", self.target_combo)
 
         self.geom_combo = QComboBox()
         _fill_combo(self.geom_combo, SUPERPOSE_GEOMETRY_LABELS)
@@ -134,7 +133,7 @@ class SuperposeDialog(QDialog):
             "2D topological: regenerate drawings on a shared core "
             "(GenerateDepictionMatching2DStructure)."
         )
-        form.addRow("Geometry:", self.geom_combo)
+        self._target_form.addRow("Geometry:", self.geom_combo)
 
         self.src_combo = QComboBox()
         self.src_combo.addItems(self._source_columns)
@@ -142,7 +141,30 @@ class SuperposeDialog(QDialog):
             "Where to read coordinates for structure overlay. Prefer confs when present; "
             "Structure uses the in-memory molecule (embeds 3D when Geometry is 3D spatial)."
         )
-        form.addRow("Source:", self.src_combo)
+        self._target_form.addRow("Source:", self.src_combo)
+
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(
+                f"{self._only_selected_scope_prefix} ({self._selected_row_count} row(s))"
+            )
+            if self._default_target == "structures":
+                self.only_selected_cb.setChecked(True)
+        else:
+            self.only_selected_cb.setEnabled(False)
+        self._target_form.addRow("", self.only_selected_cb)
+        root.addWidget(target)
+
+        alignment = QGroupBox("Alignment")
+        align_outer = QVBoxLayout(alignment)
+        align_outer.setContentsMargins(8, 6, 8, 6)
+        align_outer.setSpacing(4)
+        self._align_form = QFormLayout()
+        self._align_form.setContentsMargins(0, 0, 0, 0)
+        self._align_form.setSpacing(4)
+        self._align_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        align_outer.addLayout(self._align_form)
 
         self.ref_sb = QSpinBox()
         self.ref_sb.setRange(0, 499)
@@ -151,7 +173,7 @@ class SuperposeDialog(QDialog):
             "0-based index into the conformer list for each row (sorted by RDKit conformer id). "
             "If a row has fewer conformers than this index, the last conformer is used as reference."
         )
-        form.addRow("Reference index:", self.ref_sb)
+        self._align_form.addRow("Reference index:", self.ref_sb)
 
         self.align_on_combo = QComboBox()
         _fill_combo(self.align_on_combo, SUPERPOSE_ALIGN_ON_LABELS)
@@ -161,7 +183,7 @@ class SuperposeDialog(QDialog):
             "(3D coordinates when present, otherwise graph distance). "
             "Custom pattern restricts alignment to a SMILES/SMARTS match."
         )
-        form.addRow("Align on:", self.align_on_combo)
+        self._align_form.addRow("Align on:", self.align_on_combo)
 
         self.align_pat_edit = QLineEdit()
         self.align_pat_edit.setPlaceholderText("SMILES or SMARTS")
@@ -178,7 +200,7 @@ class SuperposeDialog(QDialog):
         pat_row.setSpacing(6)
         pat_row.addWidget(self.align_pat_edit, 1)
         pat_row.addWidget(self.align_smarts_cb)
-        form.addRow("Pattern:", self._pattern_host)
+        self._align_form.addRow("Pattern:", self._pattern_host)
 
         self.max_align_sb = QSpinBox()
         self.max_align_sb.setRange(10, 500)
@@ -186,9 +208,7 @@ class SuperposeDialog(QDialog):
         self.max_align_sb.setToolTip(
             "Maximum iterations for RDKit AlignMol when an atom map is used."
         )
-        form.addRow("Max iterations:", self.max_align_sb)
-        self._form = form
-        root.addLayout(form)
+        self._align_form.addRow("Max iterations:", self.max_align_sb)
 
         self.heavy_cb = QCheckBox("Heavy atoms only")
         self.heavy_cb.setChecked(True)
@@ -214,26 +234,9 @@ class SuperposeDialog(QDialog):
             "3D only: if pattern, ring, and MCS do not yield an atom map, overlay with Crippen / MMFF O3A."
         )
 
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(
-                f"{self._only_selected_scope_prefix} ({self._selected_row_count} row(s))"
-            )
-            if self._default_target == "structures":
-                self.only_selected_cb.setChecked(True)
-        else:
-            self.only_selected_cb.setEnabled(False)
-
-        root.addWidget(
-            conformer_options_group(
-                self.heavy_cb,
-                self.reflect_cb,
-                self.mcs_cb,
-                self.o3a_cb,
-                self.only_selected_cb,
-            )
-        )
+        for flag in (self.heavy_cb, self.reflect_cb, self.mcs_cb, self.o3a_cb):
+            align_outer.addWidget(flag)
+        root.addWidget(alignment)
 
         self.run_btn = add_centered_run_button(root)
         self.run_btn.clicked.connect(self.accept)
@@ -259,9 +262,11 @@ class SuperposeDialog(QDialog):
 
     def _set_form_row_visible(self, field, visible: bool) -> None:
         field.setVisible(visible)
-        lab = self._form.labelForField(field)
-        if lab is not None:
-            lab.setVisible(visible)
+        for form in (self._target_form, self._align_form):
+            lab = form.labelForField(field)
+            if lab is not None:
+                lab.setVisible(visible)
+                return
 
     def _align_payload(self) -> tuple[str, str, bool]:
         mode = str(self.align_on_combo.currentData() or "")
