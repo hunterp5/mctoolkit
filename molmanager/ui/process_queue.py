@@ -82,6 +82,10 @@ class ProcessQueueManager(QObject):
     def has_pending_jobs(self) -> bool:
         return bool(self._queue)
 
+    def has_outstanding_work(self) -> bool:
+        """True when a queued tool is running, waiting, or on the fast lane."""
+        return self.has_running_job() or self.has_pending_jobs() or bool(self._fast_running)
+
     def is_blocked_by_external_activity(self) -> bool:
         """True when Render 2D is running outside the current queue job (legacy parallel path)."""
         fn = getattr(self._app, "render2d_batch_active", None)
