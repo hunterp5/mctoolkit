@@ -116,7 +116,7 @@ def test_sketch_reaction_arrow_undo(qapp) -> None:  # noqa: ARG001
 
 
 class _FakeTableApp(QWidget):
-    """Minimal table host for sketcher Export to Table."""
+    """Minimal table host for sketcher Add to Table."""
 
     def __init__(self, headers: list[str] | None = None) -> None:
         super().__init__()
