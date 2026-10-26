@@ -24,7 +24,7 @@ A structure column, **Selected Rows Only**, or one pasted SMILES. The Python int
 ## Workflow
 
 1. Create a conda environment with Python 3.10–3.12. Leave MolManager's environment alone: AiZynthFinder 4.4.1 requires RDKit 2023.x, and MolManager uses RDKit 2025.9 or newer.
-2. In that environment run ``python -m pip install aizynthfinder``, then ``download_public_data`` into a folder you choose (about 1.8 GB: ONNX models, templates, and ``zinc_stock.hdf5``).
+2. In that environment run ``python -m pip install aizynthfinder "pyarrow>=19,<26"``, then ``download_public_data`` into a folder you choose (about 1.8 GB: ONNX models, templates, and ``zinc_stock.hdf5``). AiZynthFinder 4.4.1 stays on NumPy 1.26, and PyArrow 26 will not import on that NumPy.
 3. Open **Settings → Configure → AiZynthFinder**, set that environment's ``python.exe`` and the ``config.yml`` next to the model files, and click **Test**.
 4. Open **Chemistry → Retrosynthesis → Search**, choose the rows, and run it.
 5. Read the ``AiZynth`` columns: solved, solved-route count, score, steps, search time, and precursor SMILES in and out of stock.
