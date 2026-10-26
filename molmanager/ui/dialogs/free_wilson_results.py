@@ -61,7 +61,9 @@ _DRAW_ERRORS = (RuntimeError, ValueError, TypeError, OSError)
 _FRAG_W = 128
 _FRAG_H = 80
 _CAPTION_H = 18
-_STRIP_GAP = 8
+# Wide channel so neighboring R groups read as separate drawings, not one molecule.
+_STRIP_GAP = 48
+_GAP_RULE = QColor(196, 196, 196)
 _MOL_W = 220
 _MOL_H = 96
 _STRUCTURE_ROW_H = 112
@@ -341,10 +343,6 @@ class FreeWilsonResultsDialog(QDialog):
     def _missing_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        self._preview = QLabel("Select a row to preview the structure.")
-        self._preview.setAlignment(Qt.AlignCenter)
-        self._preview.setMinimumHeight(160)
-        layout.addWidget(self._preview)
         if self._result.enumeration_message:
             note = QLabel(self._result.enumeration_message)
             note.setWordWrap(True)
@@ -368,7 +366,6 @@ class FreeWilsonResultsDialog(QDialog):
                 2,
                 _structure_item(analog.smiles, self._depict_smiles(analog.smiles, _MOL_W, _MOL_H)),
             )
-        self._missing_table.itemSelectionChanged.connect(self._preview_selection)
         layout.addWidget(self._missing_table, 1)
         button_row = QHBoxLayout()
         self._add_selected_btn = QPushButton("Add selected to table")
@@ -396,18 +393,28 @@ class FreeWilsonResultsDialog(QDialog):
         return self._depictions[key]
 
     def _depict_substituents(self, pairs: tuple[tuple[str, str], ...]) -> QPixmap | None:
-        """One captioned fragment per R position. Hydrogen stays the letter H."""
+        """One captioned fragment per R position, with a gap between neighbors.
+
+        Hydrogen stays the letter H. The rule in each gap keeps adjacent drawings
+        from reading as a single structure.
+        """
         if not pairs:
             return None
-        width = len(pairs) * _FRAG_W + _STRIP_GAP * (len(pairs) - 1)
+        gaps = max(0, len(pairs) - 1)
+        width = len(pairs) * _FRAG_W + _STRIP_GAP * gaps
         image = QPixmap(max(1, width), _CAPTION_H + _FRAG_H)
         image.fill(Qt.white)
         painter = QPainter(image)
         try:
-            painter.setPen(_CELL_INK)
             metrics = QFontMetrics(painter.font())
             x = 0
-            for position, label in pairs:
+            for index, (position, label) in enumerate(pairs):
+                if index:
+                    rule_x = x + _STRIP_GAP // 2
+                    painter.setPen(_GAP_RULE)
+                    painter.drawLine(rule_x, _CAPTION_H + 6, rule_x, _CAPTION_H + _FRAG_H - 6)
+                    x += _STRIP_GAP
+                painter.setPen(_CELL_INK)
                 painter.drawText(x, 0, _FRAG_W, _CAPTION_H, Qt.AlignCenter, position)
                 pixmap = self._depict_smiles(label, _FRAG_W, _FRAG_H)
                 if pixmap is not None and not pixmap.isNull():
@@ -422,33 +429,10 @@ class FreeWilsonResultsDialog(QDialog):
                         int(Qt.AlignCenter),
                         shown,
                     )
-                x += _FRAG_W + _STRIP_GAP
+                x += _FRAG_W
         finally:
             painter.end()
         return image
-
-    def _preview_selection(self) -> None:
-        analogs = self._selected_analogs()
-        if not analogs:
-            self._preview.setText("Select a row to preview the structure.")
-            self._preview.setPixmap(QPixmap())
-            return
-        self._show_smiles(analogs[0].smiles)
-
-    def _show_smiles(self, smiles: str) -> None:
-        mol = Chem.MolFromSmiles(smiles or "")
-        if mol is None:
-            self._preview.setText(smiles)
-            self._preview.setPixmap(QPixmap())
-            return
-        try:
-            pixmap = molecule_pixmap(mol, 240, 160)
-        except _DRAW_ERRORS:
-            self._preview.setText(smiles)
-            self._preview.setPixmap(QPixmap())
-            return
-        self._preview.setText("")
-        self._preview.setPixmap(pixmap)
 
     def _selected_analogs(self) -> list[MissingAnalog]:
         rows = sorted({item.row() for item in self._missing_table.selectedItems()})

@@ -277,7 +277,13 @@ def _painted_has_ink(table, row: int, column: int) -> bool:
 
 
 def test_results_dialog_draws_smiles(qapp) -> None:  # noqa: ARG001
-    from molmanager.ui.dialogs.free_wilson_results import FreeWilsonResultsDialog
+    from PyQt5.QtWidgets import QLabel
+
+    from molmanager.ui.dialogs.free_wilson_results import (
+        _FRAG_W,
+        _STRIP_GAP,
+        FreeWilsonResultsDialog,
+    )
 
     result = run_free_wilson(
         _records(
@@ -302,16 +308,24 @@ def test_results_dialog_draws_smiles(qapp) -> None:  # noqa: ARG001
         assert _painted_has_ink(contributions, labels[drawn], 1)
 
         observed = _table_by_header(dialog, "Residual")
-        assert _cell_pixmap(observed, 0, 4) is not None
+        observed_pix = _cell_pixmap(observed, 0, 4)
+        assert observed_pix is not None
+        assert observed_pix.width() == 2 * _FRAG_W + _STRIP_GAP
+        assert _STRIP_GAP >= 40
         assert "=" in _cell_text(observed, 0, 4)
         assert _painted_has_ink(observed, 0, 4)
 
         missing = _table_by_header(dialog, "SMILES")
+        assert not any(
+            "preview" in (label.text() or "").lower() for label in dialog.findChildren(QLabel)
+        )
+        missing_pix = _cell_pixmap(missing, 0, 0)
+        assert missing_pix is not None
+        assert missing_pix.width() == observed_pix.width()
         smiles = result.missing[0].smiles
         assert _cell_text(missing, 0, 2) == smiles
         assert missing.item(0, 2).toolTip() == smiles
         assert _cell_pixmap(missing, 0, 2) is not None
         assert _painted_has_ink(missing, 0, 2)
-        assert _cell_pixmap(missing, 0, 0) is not None
     finally:
         dialog.deleteLater()
