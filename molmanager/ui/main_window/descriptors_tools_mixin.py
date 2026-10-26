@@ -34,16 +34,22 @@ _MISSING_ROW_SCOPE = object()
 
 class DescriptorsToolsMixin:
     def _on_calculated_results(self, res, calc_h) -> None:
-        """Write calculated columns, then depict new Murcko and common-core structures."""
+        """Write calculated columns from the shared worker signals."""
+        self._apply_calculated_results(res, calc_h, listener=None)
+
+    def _apply_calculated_results(self, res, calc_h, listener) -> None:
+        """Write *res*, then call *listener* with the headers that landed.
+
+        *listener* belongs to one descriptor job. Shared signals (Murcko,
+        common core, a dialog run) pass None.
+        """
         oids = {int(oid) for oid, _row in (res or []) if oid is not None}
-        listener = getattr(self, "_macro_descriptor_done", None)
 
         def _after_write(written: list[str]) -> None:
             render = getattr(self, "_queue_murcko_column_renders", None)
             if callable(render):
                 render(written, oids)
-            if listener is not None and getattr(self, "_macro_descriptor_done", None) is listener:
-                self._macro_descriptor_done = None
+            if listener is not None:
                 listener(written)
 
         self.on_calc_finished(res, calc_h, on_complete=_after_write)
@@ -145,28 +151,24 @@ class DescriptorsToolsMixin:
         d.show()
 
     def _on_calc_descriptors_dialog_accepted(self, d) -> None:
-        disp, fns = d.get_selected()
-        src = d.src_combo.currentText()
-        only_selected = d.only_selected_rows()
+        from ...workflows.macro_recipe import ROW_SCOPE_SELECTION
+
+        request = d.request()
+        only_selected = request.row_scope == ROW_SCOPE_SELECTION
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, "Calculate Descriptors"):
             return
-        self.start_descriptor_calculation(
-            source=src,
-            keys=list(fns),
-            displays=list(disp),
-            allowed=None if not only_selected else set(allowed or ()),
-            on_done=None,
-        )
+        from ...workflows.macro_record import descriptor_step
+        from ..command_dispatch import dispatch_step
+
+        dispatch_step(self, descriptor_step(request), {})
 
     def start_descriptor_calculation(
         self,
+        request,
         *,
-        source: str,
-        keys: list[str],
         allowed: set[int] | None,
         on_done,
-        displays: list[str] | None = None,
         title: str = "Calculate descriptors",
     ) -> None:
         """Calculate *keys* for *allowed* rows (``None`` means every row).
@@ -178,6 +180,9 @@ class DescriptorsToolsMixin:
         from ...descriptors.orbitals import int_fns_need_orbitals
         from ...workflows.macro_recipe import descriptor_display_by_key
 
+        source = request.structure_source
+        keys = list(request.keys)
+        displays = list(request.displays) or None
         clean_keys = [str(key).strip() for key in keys if str(key).strip()]
         if on_done is not None and not clean_keys:
             on_done("Choose at least one descriptor.", {})
@@ -232,8 +237,24 @@ class DescriptorsToolsMixin:
                 return
             done(None, outputs)
 
+        signals = None
         if on_done is not None:
-            self._macro_descriptor_done = _listen
+            from PyQt5.QtCore import Qt
+
+            from ..job_signals import (
+                DescriptorJobSignals,
+                release_job_signals,
+                retain_job_signals,
+            )
+
+            signals = DescriptorJobSignals(self)
+            retain_job_signals(self, signals)
+
+            def _slot(res, headers, listen=_listen, bridge=signals) -> None:
+                release_job_signals(self, bridge)
+                self._apply_calculated_results(res, headers, listen)
+
+            signals.calculated.connect(_slot, Qt.QueuedConnection)
         self._enqueue_column_calc(
             title=title,
             data=data,
@@ -243,6 +264,7 @@ class DescriptorsToolsMixin:
             confs_by_idx=packed_confs,
             confs_col_by_idx=confs_cols,
             ensemble_db=ensemble_db,
+            signals=signals,
         )
 
     def _rows_for_structure_column_job(
@@ -315,6 +337,7 @@ class DescriptorsToolsMixin:
         confs_by_idx=None,
         confs_col_by_idx=None,
         ensemble_db=None,
+        signals=None,
     ) -> None:
         data = self._filter_rows_for_resume(data, disp_headers)
         req = workers.CalcDescriptorsRequest(
@@ -327,13 +350,14 @@ class DescriptorsToolsMixin:
             ensemble_db=ensemble_db,
             progress_label=title,
         )
+        worker_signals = self.signals if signals is None else signals
         enqueue_process_queue_job(
             self,
             title,
             len(data),
-            lambda ev, ps, request=req: workers.CalcWorker(
+            lambda ev, ps, request=req, sigs=worker_signals: workers.CalcWorker(
                 request,
-                self.signals,
+                sigs,
                 cancel_event=ev,
                 progress_state=ps,
             ),
