@@ -29,13 +29,24 @@ from dataclasses import dataclass
 from .macro_recipe import (
     STEP_CALCULATOR,
     STEP_DESCRIPTORS,
+    STEP_EXPLICIT_H,
+    STEP_EXTRACT,
+    STEP_FAST_PREPARE,
     STEP_FILTER,
+    STEP_NEUTRALIZE,
+    STEP_PLOT,
+    STEP_POTENCY,
     STEP_PROTONATE,
+    STEP_RANDOM,
     STEP_REACTION,
+    STEP_REMOVE_H,
+    STEP_RGROUP,
 )
 
 COMPLETION_PROCESS_QUEUE = "process_queue"
 COMPLETION_BACKGROUND = "background"
+COMPLETION_WRITEBACK = "writeback"
+COMPLETION_SYNC = "sync"
 
 # Stable ids. Menus and the recorder use these, not widget method names.
 COMMAND_DESCRIPTORS = "chemistry.descriptors"
@@ -43,6 +54,15 @@ COMMAND_CALCULATOR = "tools.calculator"
 COMMAND_PROTONATE = "chemistry.protonate"
 COMMAND_FILTER = "table.filter.apply"
 COMMAND_REACTION = "chemistry.reaction_enumeration"
+COMMAND_RANDOM = "tools.random_number"
+COMMAND_EXTRACT = "chemistry.reaction_extract"
+COMMAND_PLOT = "view.plot.apply"
+COMMAND_POTENCY = "tools.potency"
+COMMAND_RGROUP = "chemistry.rgroup_enumeration"
+COMMAND_EXPLICIT_H = "chemistry.explicit_hydrogens.add"
+COMMAND_REMOVE_H = "chemistry.explicit_hydrogens.remove"
+COMMAND_NEUTRALIZE = "chemistry.neutralize"
+COMMAND_FAST_PREPARE = "chemistry.fast_prepare"
 
 
 @dataclass(frozen=True)
@@ -90,6 +110,69 @@ COMMANDS: tuple[CommandSpec, ...] = (
         STEP_REACTION,
         "Reaction enumeration",
         "Chemistry → Structure Enumeration → Reaction Based",
+        COMPLETION_PROCESS_QUEUE,
+    ),
+    CommandSpec(
+        COMMAND_RANDOM,
+        STEP_RANDOM,
+        "Random number",
+        "Tools → Random → Number",
+        COMPLETION_WRITEBACK,
+    ),
+    CommandSpec(
+        COMMAND_EXTRACT,
+        STEP_EXTRACT,
+        "Extract reaction",
+        "Chemistry → Extract Reaction Info",
+        COMPLETION_WRITEBACK,
+    ),
+    CommandSpec(
+        COMMAND_PLOT,
+        STEP_PLOT,
+        "Plot",
+        "Tools → Macros → Add plot",
+        COMPLETION_SYNC,
+    ),
+    CommandSpec(
+        COMMAND_POTENCY,
+        STEP_POTENCY,
+        "Potency",
+        "Tools → Potency Standardization",
+        COMPLETION_WRITEBACK,
+    ),
+    CommandSpec(
+        COMMAND_RGROUP,
+        STEP_RGROUP,
+        "R-group enumeration",
+        "Chemistry → Structure Enumeration → R-Group",
+        COMPLETION_PROCESS_QUEUE,
+    ),
+    CommandSpec(
+        COMMAND_EXPLICIT_H,
+        STEP_EXPLICIT_H,
+        "Add explicit hydrogens",
+        "Chemistry → Prepare Structures → Explicit Hydrogens → Add",
+        COMPLETION_PROCESS_QUEUE,
+    ),
+    CommandSpec(
+        COMMAND_REMOVE_H,
+        STEP_REMOVE_H,
+        "Remove explicit hydrogens",
+        "Chemistry → Prepare Structures → Explicit Hydrogens → Remove",
+        COMPLETION_PROCESS_QUEUE,
+    ),
+    CommandSpec(
+        COMMAND_NEUTRALIZE,
+        STEP_NEUTRALIZE,
+        "Neutralize",
+        "Chemistry → Prepare Structures → Protonate → Neutralize",
+        COMPLETION_PROCESS_QUEUE,
+    ),
+    CommandSpec(
+        COMMAND_FAST_PREPARE,
+        STEP_FAST_PREPARE,
+        "Fast prepare",
+        "Chemistry → Prepare Structures → Fast Prepare",
         COMPLETION_PROCESS_QUEUE,
     ),
 )
