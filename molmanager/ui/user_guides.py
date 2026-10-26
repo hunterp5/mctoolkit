@@ -138,7 +138,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
     GuideSection(
         "3 — Edit and table",
         (
-            _e("edit_menu", "Edit", "Edit", "Undo/redo, clipboard, and selection commands."),
+            _e("edit_menu", "Edit", "Edit", "Undo/redo, clipboard, find and replace, and selection."),
             _e("table", "Table", "Table", "Columns, sorting, context menus, and precision."),
             _e(
                 "tools_filter",
@@ -147,6 +147,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Filter panel cards, titles, reorder, and enable/disable.",
             ),
             _e("tools_search", "Search", "Search", "Multi-column search with AND/OR criteria."),
+            _e(
+                "tools_find_replace",
+                "Find and Replace",
+                "Find and Replace",
+                "Find and replace text, wildcards, or comparisons in editable columns.",
+            ),
         ),
     ),
     GuideSection(
@@ -219,6 +225,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "New numeric column from a math expression.",
             ),
             _e(
+                "tools_macros",
+                "Macros",
+                "Macros",
+                "Saved sequences of descriptors, calculator columns, filters, protonation, and reactions.",
+            ),
+            _e(
                 "tools_potency",
                 "Potency Standardization",
                 "Potency Standardization",
@@ -280,24 +292,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "6 — Fingerprints",
-        (
-            _e(
-                "tools_fp_similarity",
-                "Fingerprint Similarity",
-                "Fingerprint Similarity",
-                "Similarity scores vs a query molecule.",
-            ),
-            _e(
-                "tools_diverse_subset",
-                "Diverse Subset",
-                "Diverse Subset",
-                "Pick a chemically diverse subset of rows.",
-            ),
-        ),
-    ),
-    GuideSection(
-        "7 — Dock Ligand",
+        "6 — Dock Ligand",
         (
             _e(
                 "tools_prepare_pdb",
@@ -320,7 +315,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "8 — Protein",
+        "7 — Protein",
         (
             _e(
                 "protein_viewer",
@@ -349,7 +344,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "9 — Design and modeling",
+        "8 — Design and modeling",
         (
             _e(
                 "tools_rgroup",
@@ -439,7 +434,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "10 — Random",
+        "9 — Random",
         (
             _e(
                 "tools_random_number",
@@ -456,7 +451,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "11 — Charts and analysis",
+        "10 — Charts and analysis",
         (
             _e(
                 "data_analyze_table",
@@ -480,55 +475,67 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "data_binning",
                 "Binning",
                 "Binning",
-                "Data → Binning. Write bin ranges and classification labels to separate columns.",
+                "Data → Similarity → Binning. Write bin ranges and classification labels to separate columns.",
+            ),
+            _e(
+                "tools_fp_similarity",
+                "Fingerprint Similarity",
+                "Fingerprint Similarity",
+                "Data → Similarity. Scores vs a query molecule.",
+            ),
+            _e(
+                "tools_diverse_subset",
+                "Diverse Subset",
+                "Diverse Subset",
+                "Data → Similarity. Pick a chemically diverse subset of rows.",
             ),
             _e(
                 "tools_cluster",
                 "Cluster",
                 "Cluster",
-                "Data → Cluster. Group rows by fingerprint, numeric columns, or both.",
+                "Data → Similarity → Cluster. Group rows by fingerprint, numeric columns, or both.",
             ),
             _e(
                 "data_pca",
                 "PCA",
                 "PCA",
-                "Data → DimRed Plots → Principal Component Analysis.",
+                "Data → Dimensionality Reduction → Principal Component Analysis.",
             ),
             _e(
                 "data_tsne",
                 "t-SNE",
                 "t-SNE",
-                "Data → DimRed Plots → t-SNE Visualization.",
+                "Data → Dimensionality Reduction → t-SNE Visualization.",
             ),
             _e(
                 "data_umap",
                 "UMAP",
                 "UMAP",
-                "Data → DimRed Plots → UMAP Visualization.",
+                "Data → Dimensionality Reduction → UMAP Visualization.",
             ),
             _e(
                 "data_som",
                 "SOM",
                 "Self-Organizing Map",
-                "Data → DimRed Plots → Self-Organizing Map.",
+                "Data → Dimensionality Reduction → Self-Organizing Map.",
             ),
             _e(
                 "data_boiled_egg",
                 "BOILED-Egg",
                 "BOILED-Egg",
-                "Data → MedChem Plots → BOILED-Egg plot.",
+                "Data → MedChem Plots → BOILED-Egg.",
             ),
             _e(
                 "data_golden_triangle",
                 "Golden Triangle",
                 "Golden Triangle",
-                "Data → MedChem Plots → Golden Triangle plot.",
+                "Data → MedChem Plots → Golden Triangle.",
             ),
             _e(
                 "data_lipe",
                 "LipE",
                 "Lipophilic efficiency",
-                "Data → MedChem Plots → LipE plot.",
+                "Data → MedChem Plots → LipE.",
             ),
             _e(
                 "data_sali",
@@ -551,7 +558,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         ),
     ),
     GuideSection(
-        "12 — Query Database",
+        "11 — Query Database",
         (
             _e(
                 "ext_sql", "SQL Database", "SQL Database", "Load query results from a SQL database."
