@@ -63,7 +63,7 @@ def test_package_import_opens_a_blank_sketcher(qapp) -> None:  # noqa: ARG001
 
 
 def test_open_sketcher_loads_a_structure(qapp) -> None:  # noqa: ARG001
-    """Edit in Sketcher shows the molecule after the dialog's deferred load."""
+    """Opening the sketcher on a molecule shows it after the dialog's deferred load."""
     mol = Chem.MolFromSmiles("c1ccccc1O")
     assert mol is not None
     dialog = SketcherDialog(initial_mol=mol)
