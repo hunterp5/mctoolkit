@@ -58,7 +58,7 @@ from ...workers.cluster_worker import (
     TANIMOTO_CLUSTER_METHODS,
 )
 from ..analysis_job_support import enqueue_process_queue_job, prepare_scoped_structure_payloads
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 from ..table_dataframe import scoped_table_column_names, table_to_dataframe
 from .scope import selection_scope_checked
 
@@ -112,21 +112,19 @@ class ClusterDialog(QDialog):
         root.setContentsMargins(8, 4, 8, 6)
         root.setSpacing(4)
 
-        src_row = QHBoxLayout()
-        src_row.setSpacing(6)
-        src_row.addWidget(QLabel("Source:"))
+        structures, src_form = boxed_form("Structures")
         self.src_combo = QComboBox()
         self.src_combo.setMinimumWidth(180)
         self.src_combo.setToolTip("Structure column used to build fingerprints.")
-        src_row.addWidget(self.src_combo, 1)
+        src_form.addRow("Source:", self.src_combo)
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
         if self._have_selection:
             self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
         else:
             self.only_selected_cb.setEnabled(False)
-        src_row.addWidget(self.only_selected_cb)
-        root.addLayout(src_row)
+        src_form.addRow("", self.only_selected_cb)
+        root.addWidget(structures)
 
         feat = QGroupBox("Features")
         feat_lyt = QVBoxLayout(feat)
