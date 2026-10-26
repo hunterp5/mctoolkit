@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -66,13 +67,34 @@ class SplitColumnDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
+        source = QGroupBox("Column")
+        source_form = QFormLayout(source)
+        source_form.setContentsMargins(8, 6, 8, 6)
+        source_form.setSpacing(4)
+        source_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.col_combo = QComboBox()
         self.col_combo.addItems(columns)
         self.col_combo.setToolTip("Column whose cells are split into new columns.")
         self.col_combo.currentTextChanged.connect(self._on_source_changed)
-        form.addRow("Column:", self.col_combo)
+        source_form.addRow("Column:", self.col_combo)
 
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(
+                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
+            )
+        else:
+            self.only_selected_cb.setEnabled(False)
+        self.only_selected_cb.toggled.connect(self._update_preview)
+        source_form.addRow("", self.only_selected_cb)
+        root.addWidget(source)
+
+        separator = QGroupBox("Separator")
+        sep_form = QFormLayout(separator)
+        sep_form.setContentsMargins(8, 6, 8, 6)
+        sep_form.setSpacing(4)
+        sep_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self._delim = DelimiterPicker(
             DELIMITER_MODES,
             combo_tooltip=(
@@ -82,10 +104,16 @@ class SplitColumnDialog(QDialog):
             custom_tooltip="Used when Separator is Custom. \\t is a tab.",
             custom_max_length=8,
         )
-        self._delim.add_rows(form, combo_label="Separator:")
+        self._delim.add_rows(sep_form, combo_label="Separator:")
         self.delim_combo = self._delim.combo
         self.custom_input = self._delim.custom_input
+        root.addWidget(separator)
 
+        output = QGroupBox("Output")
+        out_form = QFormLayout(output)
+        out_form.setContentsMargins(8, 6, 8, 6)
+        out_form.setSpacing(4)
+        out_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.prefix_input = QLineEdit()
         self.prefix_input.setPlaceholderText("New column prefix")
         self.prefix_input.setToolTip(
@@ -93,8 +121,7 @@ class SplitColumnDialog(QDialog):
             "Defaults to the source column name. Existing names get a (1) suffix."
         )
         self.prefix_input.textChanged.connect(self._update_preview)
-        form.addRow("Prefix:", self.prefix_input)
-        root.addLayout(form)
+        out_form.addRow("Prefix:", self.prefix_input)
 
         self.largest_cb = QCheckBox("Only Split Largest Value")
         self.largest_cb.setToolTip(
@@ -108,24 +135,14 @@ class SplitColumnDialog(QDialog):
         )
         self.largest_cb.toggled.connect(self._on_largest_toggled)
         self.smallest_cb.toggled.connect(self._on_smallest_toggled)
-        root.addWidget(self.largest_cb)
-        root.addWidget(self.smallest_cb)
+        out_form.addRow("", self.largest_cb)
+        out_form.addRow("", self.smallest_cb)
+        root.addWidget(output)
 
         self.preview_label = QLabel("")
         self.preview_label.setWordWrap(True)
         self.preview_label.setStyleSheet("color: #444;")
         root.addWidget(self.preview_label)
-
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(
-                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
-            )
-        else:
-            self.only_selected_cb.setEnabled(False)
-        self.only_selected_cb.toggled.connect(self._update_preview)
-        root.addWidget(self.only_selected_cb)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)
