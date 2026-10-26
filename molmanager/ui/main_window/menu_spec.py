@@ -195,6 +195,17 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
         action("&Paste", "edit_paste", hotkey="edit.paste"),
         SEPARATOR,
         action(
+            "Find and &Replace…",
+            "toggle_find_replace_panel",
+            hotkey="edit.find_replace",
+            tooltip=(
+                "Open or hide Find and Replace (Ctrl+H). "
+                "Text, wildcards (* and ?), or comparisons (>10, empty) in editable columns. "
+                "ID, Structure, and image columns are skipped."
+            ),
+        ),
+        SEPARATOR,
+        action(
             "Invert Selection",
             "invert_table_selection",
             hotkey="edit.invert_selection",
@@ -268,6 +279,15 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltip="Add a numeric column from a math expression using existing column names (e.g. sqrt, log10, exp).",
         ),
         action(
+            "Macros…",
+            "open_macros",
+            hotkey="tools.macros",
+            tooltip=(
+                "Run a saved sequence of descriptors, a calculator column, filters, "
+                "protonation, and reaction enumeration."
+            ),
+        ),
+        action(
             "Potency Standardization…",
             "open_potency_standardization",
             tooltip=(
@@ -281,7 +301,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             "open_notepad",
             tooltip=(
                 "Open a floating notepad for session notes. Dock it like a plot or browser. "
-                "Size, color, and style stay independent of Settings → Font."
+                "Size, color, and style stay independent of Settings → GUI → Font."
             ),
         ),
         SEPARATOR,
@@ -429,24 +449,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltips_visible=True,
         ),
         submenu(
-            "&Fingerprints",
-            action(
-                "Fingerprint Similarity...",
-                "open_fp_similarity",
-                hotkey="tools.fingerprint_similarity",
-                tooltip="Search the table by 2D fingerprint similarity to a query structure.",
-            ),
-            action(
-                "Diverse Subset…",
-                "open_diverse_subset",
-                tooltip=(
-                    "Pick a maximally diverse subset of compounds "
-                    "(MaxMin on fingerprint Tanimoto distance)."
-                ),
-            ),
-            tooltips_visible=True,
-        ),
-        submenu(
             "&Substructure",
             action(
                 "Bemis–Murcko…",
@@ -501,6 +503,43 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             about_to_show="_sync_predict_viewer_actions",
         ),
         submenu(
+            "&R-Group Decomposition",
+            action(
+                "Core-Based Decomposition…",
+                "open_core_based_decomposition",
+                tooltip="Decompose structures against a labeled core scaffold (substituent columns).",
+            ),
+            action(
+                "BRICS Decomposition…",
+                "open_brics_decomposition",
+                tooltip="Split structures into BRICS retrosynthetic fragments (new SMILES columns).",
+            ),
+            action(
+                "BRICS Recomposition…",
+                "open_brics_recomposition",
+                tooltip="Combine BRICS fragment columns into new product structures (new rows).",
+            ),
+            action(
+                "RECAP Decomposition…",
+                "open_recap_decomposition",
+                tooltip="Split structures into RECAP retrosynthetic fragments (new SMILES columns).",
+            ),
+            action(
+                "RECAP Recomposition…",
+                "open_recap_recomposition",
+                tooltip="Combine RECAP fragment columns into new product structures (new rows).",
+            ),
+            tooltips_visible=True,
+        ),
+        action(
+            "R-Group Enumeration…",
+            "open_rgroup_enumeration",
+            tooltip=(
+                "Attach building-block lists to a core with numbered * points and append the "
+                "products. The same property limits used for fragment recomposition can cap the set."
+            ),
+        ),
+        submenu(
             "&Reaction",
             action(
                 "Extract…",
@@ -510,35 +549,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                     "product columns."
                 ),
             ),
-            submenu(
-                "&R-Group Decomposition",
-                action(
-                    "Core-Based Decomposition…",
-                    "open_core_based_decomposition",
-                    tooltip="Decompose structures against a labeled core scaffold (substituent columns).",
-                ),
-                action(
-                    "BRICS Decomposition…",
-                    "open_brics_decomposition",
-                    tooltip="Split structures into BRICS retrosynthetic fragments (new SMILES columns).",
-                ),
-                action(
-                    "BRICS Recomposition…",
-                    "open_brics_recomposition",
-                    tooltip="Combine BRICS fragment columns into new product structures (new rows).",
-                ),
-                action(
-                    "RECAP Decomposition…",
-                    "open_recap_decomposition",
-                    tooltip="Split structures into RECAP retrosynthetic fragments (new SMILES columns).",
-                ),
-                action(
-                    "RECAP Recomposition…",
-                    "open_recap_recomposition",
-                    tooltip="Combine RECAP fragment columns into new product structures (new rows).",
-                ),
-                tooltips_visible=True,
-            ),
             action(
                 "Reaction Based Enumeration…",
                 "open_reaction_enumeration",
@@ -546,14 +556,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                     "Run a named reaction (Suzuki, Buchwald, amide coupling, etc.) across two reactant "
                     "pools from structure files or pasted SMILES, then append products to the table "
                     "and/or an SDF file."
-                ),
-            ),
-            action(
-                "R-Group Enumeration…",
-                "open_rgroup_enumeration",
-                tooltip=(
-                    "Attach building-block lists to a core with numbered * points and append the "
-                    "products. The same property limits used for fragment recomposition can cap the set."
                 ),
             ),
             tooltips_visible=True,
@@ -664,6 +666,12 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 tooltip="Save the selected rows as a named list (Ctrl+L). An existing name adds to that list.",
                 attr="_act_add_selected_to_list",
             ),
+            action(
+                "Remove Selected from List…",
+                "remove_selected_from_list",
+                tooltip="Remove the selected rows from an existing list. The table rows are kept.",
+                attr="_act_remove_selected_from_list",
+            ),
             MenuItem(kind=KIND_SEPARATOR, attr="_act_lists_footer_separator"),
             action(
                 "Manage Lists…",
@@ -705,23 +713,41 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "into an overall MPO score."
             ),
         ),
-        action(
-            "Cluster…",
-            "open_cluster_dialog",
-            hotkey="data.cluster",
-            tooltip=(
-                "Cluster compounds by fingerprint, numeric columns, or both "
-                "(K-Means, Butina, sphere exclusion, etc.)."
+        submenu(
+            "Simila&rity",
+            action(
+                "Fingerprint Similarity...",
+                "open_fp_similarity",
+                hotkey="tools.fingerprint_similarity",
+                tooltip="Search the table by 2D fingerprint similarity to a query structure.",
             ),
-        ),
-        action(
-            "Binning…",
-            "open_binning_dialog",
-            hotkey="data.binning",
-            tooltip=(
-                "Assign numeric values to bins and write the range and classification "
-                "into separate columns."
+            action(
+                "Diverse Subset…",
+                "open_diverse_subset",
+                tooltip=(
+                    "Pick a maximally diverse subset of compounds "
+                    "(MaxMin on fingerprint Tanimoto distance)."
+                ),
             ),
+            action(
+                "Cluster…",
+                "open_cluster_dialog",
+                hotkey="data.cluster",
+                tooltip=(
+                    "Cluster compounds by fingerprint, numeric columns, or both "
+                    "(K-Means, Butina, sphere exclusion, etc.)."
+                ),
+            ),
+            action(
+                "Binning…",
+                "open_binning_dialog",
+                hotkey="data.binning",
+                tooltip=(
+                    "Assign numeric values to bins and write the range and classification "
+                    "into separate columns."
+                ),
+            ),
+            tooltips_visible=True,
         ),
         SEPARATOR,
         action(
@@ -768,10 +794,10 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
         SEPARATOR,
         submenu(
             "&MedChem Plots",
-            action("BOILED-Egg plot…", "open_boiled_egg_plot"),
-            action("Golden Triangle plot…", "open_golden_triangle_plot"),
+            action("BOILED-Egg…", "open_boiled_egg_plot"),
+            action("Golden Triangle…", "open_golden_triangle_plot"),
             action(
-                "LipE plot…",
+                "LipE…",
                 "open_lipe_plot",
                 tooltip=(
                     "Plot pActivity against LogP with lines of constant "
@@ -781,7 +807,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltips_visible=True,
         ),
         submenu(
-            "&DimRed Plots",
+            "&Dimensionality Reduction",
             action("Principal Component Analysis…", "open_pca_dialog"),
             action("t-SNE Visualization…", "open_tsne_dialog"),
             action("UMAP Visualization…", "open_umap_dialog"),
