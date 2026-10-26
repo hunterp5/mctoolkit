@@ -21,21 +21,27 @@ from __future__ import annotations
 _SETTINGS_ORG = "MolManager"
 _SETTINGS_APP = "MolManager"
 
+TOOL_AIZYNTH_CONFIG = "aizynthfinder_config"
+TOOL_AIZYNTH_PYTHON = "aizynthfinder_python"
 TOOL_AMBER = "ambertools"
 TOOL_CONFGEN = "confgen"
 TOOL_GNINA = "gnina"
 TOOL_JAVA = "java"
 TOOL_MAFFT = "mafft"
 TOOL_OBABEL = "obabel"
+TOOL_REINVENT = "reinvent"
 TOOL_XTB = "xtb"
 
 _SETTINGS_KEYS = {
+    TOOL_AIZYNTH_CONFIG: "tools/aizynthfinder_config",
+    TOOL_AIZYNTH_PYTHON: "tools/aizynthfinder_python",
     TOOL_AMBER: "tools/ambertools_executable",
     TOOL_CONFGEN: "tools/confgen_executable",
     TOOL_GNINA: "tools/gnina_executable",
     TOOL_JAVA: "tools/java_executable",
     TOOL_MAFFT: "tools/mafft_executable",
     TOOL_OBABEL: "tools/obabel_executable",
+    TOOL_REINVENT: "tools/reinvent_executable",
     TOOL_XTB: "tools/xtb_executable",
 }
 

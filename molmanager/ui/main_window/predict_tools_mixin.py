@@ -27,7 +27,7 @@ from ..analysis_job_support import (
     report_cancellable_job_failure,
 )
 from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
-from ..strings import TOOL_PREDICT_METABOLITES
+from ..strings import TOOL_PREDICT_METABOLITES, TOOL_RETROSYNTHESIS
 
 
 class PredictToolsMixin:
@@ -392,6 +392,70 @@ class PredictToolsMixin:
             progress_label=TOOL_PREDICT_METABOLITES,
             failure_fallback="Prediction failed.",
         )
+
+    def _ensure_aizynthfinder_signals(self):
+        sig = getattr(self, "_aizynthfinder_signals", None)
+        if sig is not None:
+            return sig
+        from ...workers.aizynthfinder_worker import AizynthFinderSignals
+
+        sig = AizynthFinderSignals(self)
+        sig.finished.connect(self._on_aizynthfinder_finished, Qt.QueuedConnection)
+        sig.failed.connect(self._on_aizynthfinder_failed, Qt.QueuedConnection)
+        self._aizynthfinder_signals = sig
+        return sig
+
+    def _on_aizynthfinder_finished(self, results: list, warning: str = "") -> None:
+        if self._host_unavailable():
+            return
+        from ...predictions.aizynthfinder_run import OUTPUT_COLUMNS
+
+        table_rows = [(oid, columns) for oid, columns in results if oid is not None]
+        lone = [columns for oid, columns in results if oid is None]
+        if table_rows:
+            self.on_calc_finished(
+                table_rows,
+                list(OUTPUT_COLUMNS),
+                progress_label=TOOL_RETROSYNTHESIS,
+            )
+        else:
+            self._finish_tool_progress(TOOL_RETROSYNTHESIS)
+        if lone:
+            lines = [
+                f"{header}: {value}"
+                for header, value in lone[0].items()
+                if str(value or "").strip()
+            ]
+            QMessageBox.information(
+                self,
+                TOOL_RETROSYNTHESIS,
+                "\n".join(lines) or "No route summary was returned.",
+            )
+        if warning and warning != "Cancelled.":
+            QMessageBox.warning(self, TOOL_RETROSYNTHESIS, warning)
+
+    def _on_aizynthfinder_failed(self, msg: str) -> None:
+        if self._host_unavailable():
+            return
+        report_cancellable_job_failure(
+            self,
+            TOOL_RETROSYNTHESIS,
+            msg,
+            progress_label=TOOL_RETROSYNTHESIS,
+            failure_fallback="Retrosynthesis failed.",
+        )
+
+    def open_aizynthfinder(self) -> None:
+        if not ensure_table_ready_for_tool(self, TOOL_RETROSYNTHESIS):
+            return
+        from ..dialogs import AizynthFinderDialog
+
+        dlg = AizynthFinderDialog(self)
+        self._prepare_tool_dialog(dlg)
+        dlg.setAttribute(Qt.WA_DeleteOnClose, True)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def open_biotransformer_predictor(self) -> None:
         if not ensure_table_ready_for_tool(self, TOOL_PREDICT_METABOLITES):
