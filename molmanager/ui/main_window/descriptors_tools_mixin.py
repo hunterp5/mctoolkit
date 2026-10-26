@@ -28,16 +28,23 @@ from ... import workers
 from ..analysis_job_support import enqueue_process_queue_job
 from ..strings import TOOL_BEMIS_MURCKO, TOOL_COMMON_CORE
 
+# ``allowed`` omitted means "use only_selected". None means every row.
+_MISSING_ROW_SCOPE = object()
+
 
 class DescriptorsToolsMixin:
     def _on_calculated_results(self, res, calc_h) -> None:
         """Write calculated columns, then depict new Murcko and common-core structures."""
         oids = {int(oid) for oid, _row in (res or []) if oid is not None}
+        listener = getattr(self, "_macro_descriptor_done", None)
 
         def _after_write(written: list[str]) -> None:
             render = getattr(self, "_queue_murcko_column_renders", None)
             if callable(render):
                 render(written, oids)
+            if listener is not None and getattr(self, "_macro_descriptor_done", None) is listener:
+                self._macro_descriptor_done = None
+                listener(written)
 
         self.on_calc_finished(res, calc_h, on_complete=_after_write)
 
@@ -138,58 +145,161 @@ class DescriptorsToolsMixin:
         d.show()
 
     def _on_calc_descriptors_dialog_accepted(self, d) -> None:
-        from ...descriptors.descriptors_3d import int_fns_need_3d
-
         disp, fns = d.get_selected()
         src = d.src_combo.currentText()
         only_selected = d.only_selected_rows()
-        rows = self._rows_for_structure_column_job(src, only_selected, "Calculate Descriptors")
+        allowed = self._selected_oids_set() if only_selected else None
+        if self._abort_if_only_selected_but_empty(only_selected, allowed, "Calculate Descriptors"):
+            return
+        self.start_descriptor_calculation(
+            source=src,
+            keys=list(fns),
+            displays=list(disp),
+            allowed=None if not only_selected else set(allowed or ()),
+            on_done=None,
+        )
+
+    def start_descriptor_calculation(
+        self,
+        *,
+        source: str,
+        keys: list[str],
+        allowed: set[int] | None,
+        on_done,
+        displays: list[str] | None = None,
+        title: str = "Calculate descriptors",
+    ) -> None:
+        """Calculate *keys* for *allowed* rows (``None`` means every row).
+
+        *on_done* is ``(error, outputs)`` where outputs maps each internal key to
+        the column header that was written. The dialog passes ``None``.
+        """
+        from ...descriptors.descriptors_3d import int_fns_need_3d
+        from ...descriptors.orbitals import int_fns_need_orbitals
+        from ...workflows.macro_recipe import descriptor_display_by_key
+
+        clean_keys = [str(key).strip() for key in keys if str(key).strip()]
+        if on_done is not None and not clean_keys:
+            on_done("Choose at least one descriptor.", {})
+            return
+        if displays is None:
+            catalog = descriptor_display_by_key()
+            missing = [key for key in clean_keys if key not in catalog]
+            if missing:
+                message = f"Unknown descriptor {missing[0]}."
+                if on_done is not None:
+                    on_done(message, {})
+                else:
+                    QMessageBox.warning(self, title, message)
+                return
+            displays = [catalog[key] for key in clean_keys]
+        if source not in self.headers:
+            message = f'Column "{source}" is not in the table.'
+            if on_done is not None:
+                on_done(message, {})
+            else:
+                QMessageBox.warning(self, title, message)
+                self.status_label.setText("Ready.")
+            return
+        rows = self._rows_for_structure_column_job(
+            source,
+            False,
+            title,
+            allowed=allowed,
+            notify=on_done is None,
+        )
         if rows is None:
+            if on_done is not None:
+                on_done("No rows to process for this scope and source.", {})
             return
         data, oids_list, is_text = rows
-        calc_headers = self._result_column_names(disp, oids_list)
+        calc_headers = self._result_column_names(displays, oids_list)
+        need_coords = int_fns_need_3d(clean_keys) or int_fns_need_orbitals(clean_keys)
         packed_confs, confs_cols, ensemble_db = (
-            self._ensemble_inputs_for_descriptor_job(oids_list, src)
-            if int_fns_need_3d(fns)
+            self._ensemble_inputs_for_descriptor_job(oids_list, source)
+            if need_coords
             else ({}, {}, None)
         )
+
+        def _listen(written: list[str], bound=list(clean_keys), done=on_done) -> None:
+            if done is None:
+                return
+            outputs = {
+                str(key): str(header) for key, header in zip(bound, written) if key and header
+            }
+            if bound and not outputs:
+                done("Descriptors produced no columns.", {})
+                return
+            done(None, outputs)
+
+        if on_done is not None:
+            self._macro_descriptor_done = _listen
         self._enqueue_column_calc(
-            title="Calculate descriptors",
+            title=title,
             data=data,
             disp_headers=calc_headers,
-            int_fns=fns,
+            int_fns=clean_keys,
             is_text=is_text,
             confs_by_idx=packed_confs,
             confs_col_by_idx=confs_cols,
             ensemble_db=ensemble_db,
         )
 
-    def _rows_for_structure_column_job(self, src: str, only_selected: bool, title: str):
+    def _rows_for_structure_column_job(
+        self,
+        src: str,
+        only_selected: bool,
+        title: str,
+        *,
+        allowed=_MISSING_ROW_SCOPE,
+        notify: bool = True,
+    ):
         """Return ``(row inputs, oids, text source)`` or None when the job should not start.
 
         A text source is any column other than Structure: those cells are parsed as
         molecule text. Structure uses the stored molecule.
+
+        *allowed* overrides *only_selected* when it is passed. ``None`` means every
+        row. Omit it to keep the dialog's selected-rows checkbox.
         """
+        if src not in self.headers:
+            if notify:
+                QMessageBox.warning(self, title, f'Column "{src}" is not in the table.')
+            self.status_label.setText("Ready.")
+            return None
         is_text = src != "Structure"
         s_idx = self.headers.index(src)
-        allowed = self._selected_oids_set() if only_selected else None
-        if self._abort_if_only_selected_but_empty(only_selected, allowed, title):
-            return None
+        if allowed is _MISSING_ROW_SCOPE:
+            allowed_set = self._selected_oids_set() if only_selected else None
+            if self._abort_if_only_selected_but_empty(only_selected, allowed_set, title):
+                return None
+        else:
+            allowed_set = None if allowed is None else {int(oid) for oid in allowed}
+            if allowed_set is not None and not allowed_set:
+                if notify:
+                    QMessageBox.information(
+                        self,
+                        title,
+                        "No rows to process for this scope and source.",
+                    )
+                self.status_label.setText("Ready.")
+                return None
         oids_list = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids_list = [o for o in oids_list if o in allowed]
+        if allowed_set is not None:
+            oids_list = [o for o in oids_list if o in allowed_set]
         if not is_text:
-            data = self._structure_tool_inputs(src, allowed)
+            data = self._structure_tool_inputs(src, allowed_set)
         else:
             data = [
                 (o, self._table_cell_text(self.logical_row_for_oid(o), s_idx)) for o in oids_list
             ]
         if not data:
-            QMessageBox.information(
-                self,
-                title,
-                "No rows to process for this scope and source.",
-            )
+            if notify:
+                QMessageBox.information(
+                    self,
+                    title,
+                    "No rows to process for this scope and source.",
+                )
             self.status_label.setText("Ready.")
             return None
         return data, oids_list, is_text
