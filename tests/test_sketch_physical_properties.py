@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+import threading
+
+from PyQt5.QtCore import QThreadPool
 from PyQt5.QtWidgets import QMenuBar, QWidget
 from rdkit import Chem
 
@@ -120,6 +123,51 @@ def test_physical_properties_view_action(qapp) -> None:  # noqa: ARG001
     assert dlg._phys_props_dlg.isVisible()
     assert not hasattr(dlg._phys_props_dlg, "_val_smiles")
     dlg._phys_props_dlg.close()
+    qapp.processEvents()
+    dlg.close()
+
+
+def test_closing_physical_properties_survives_a_late_ionization_report(qapp, monkeypatch) -> None:
+    """The background pKa job must not emit on the window after it has been destroyed."""
+    from molmanager.ui.sketcher.physical_properties import (
+        _IonizationSignals,
+        _IonizationWorker,
+    )
+
+    def _cancelled(mol, cancel_event=None):  # noqa: ARG001
+        raise ValueError("cancelled")
+
+    monkeypatch.setattr(
+        "molmanager.ui.sketcher.physical_properties.compute_ionization_properties",
+        _cancelled,
+    )
+    mol = Chem.MolFromSmiles("CCO")
+    assert mol is not None
+    signals = _IonizationSignals()
+    worker = _IonizationWorker(mol, 1, signals, threading.Event())
+    signals.deleteLater()
+    qapp.processEvents()
+    worker.run()
+
+    dlg = SketcherDialog(QWidget())
+    dlg.show()
+    qapp.processEvents()
+    assert dlg.canvas.load_from_rdkit_mol(mol)
+    dlg._open_physical_properties()
+    props = dlg._phys_props_dlg
+    assert props is not None
+    props._refresh_now()
+    props.close()
+    qapp.processEvents()
+    QThreadPool.globalInstance().waitForDone(3000)
+    qapp.processEvents()
+    assert dlg._phys_props_dlg is None or not dlg._phys_props_dlg.isVisible()
+    dlg._open_physical_properties()
+    reopened = dlg._phys_props_dlg
+    assert reopened is not None
+    assert reopened.isVisible()
+    assert reopened._shutting_down is False
+    reopened.close()
     dlg.close()
 
 
