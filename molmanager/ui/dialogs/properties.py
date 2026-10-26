@@ -35,6 +35,7 @@ from PyQt5.QtWidgets import (
 from ...chem.structural_alerts import available_alert_catalogs
 from ...descriptors.catalog import iter_descriptor_tab_items
 from ...reference.descriptor_tooltips import descriptor_checkbox_tooltip
+from ...workflows.tool_requests import DescriptorCalculationRequest, row_scope_from_only_selected
 from ..qt_widget_utils import make_window_minimizable
 from .scope import selection_scope_checked
 
@@ -181,6 +182,16 @@ class PropertyDialog(QDialog):
                     sel_disp.append(header)
                     sel_int.append(internal)
         return sel_disp, sel_int
+
+    def request(self) -> DescriptorCalculationRequest:
+        """Checked descriptors plus the structure column, without row ids."""
+        displays, keys = self.get_selected()
+        return DescriptorCalculationRequest(
+            structure_source=self.src_combo.currentText(),
+            keys=tuple(keys),
+            displays=tuple(displays),
+            row_scope=row_scope_from_only_selected(self.only_selected_rows()),
+        )
 
     def only_selected_rows(self) -> bool:
         return selection_scope_checked(self)
