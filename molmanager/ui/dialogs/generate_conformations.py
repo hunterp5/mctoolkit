@@ -23,7 +23,6 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QDoubleSpinBox,
-    QFormLayout,
     QHBoxLayout,
     QLineEdit,
     QSpinBox,
@@ -35,12 +34,11 @@ from ...workers.conformer_generation import (
     DEFAULT_CONFORMER_FORCE_FIELD,
     ConformerGenParams,
 )
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 from .conformer_output import (
     ConformerOutputOptions,
     ConformerOutputOptionsPanel,
     add_centered_run_button,
-    conformer_options_group,
 )
 from .scope import selection_scope_checked
 
@@ -84,8 +82,7 @@ class GenerateConformationsDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
-        form = QFormLayout()
-        form.setSpacing(6)
+        embed, embed_form = boxed_form("Embed")
         self.num_confs_sb = QSpinBox()
         self.num_confs_sb.setRange(1, _STOCHASTIC_NUM_CONFS_MAX)
         self.num_confs_sb.setValue(_STOCHASTIC_NUM_CONFS_DEFAULT)
@@ -93,7 +90,78 @@ class GenerateConformationsDialog(QDialog):
             "ETKDG search budget: how many conformers to embed before minimization and pruning. "
             "Use Max keep (and the energy / RMS filters) to limit what is stored."
         )
-        form.addRow("Conformers:", self.num_confs_sb)
+        embed_form.addRow("Conformers:", self.num_confs_sb)
+
+        self.seed_sb = QSpinBox()
+        self.seed_sb.setRange(0, 2_147_483_647)
+        self.seed_sb.setValue(0xC0FFEE)
+        self.seed_sb.setToolTip("Random seed passed to the ETKDG embedder.")
+        embed_form.addRow("Seed:", self.seed_sb)
+
+        self.max_embed_sb = QSpinBox()
+        self.max_embed_sb.setRange(0, 2000)
+        self.max_embed_sb.setValue(0)
+        self.max_embed_sb.setSpecialValueText("0 = ETKDG default")
+        self.max_embed_sb.setToolTip(
+            "Max embedding attempts per conformer (ETKDG maxIterations). "
+            "0 leaves the RDKit default (typically 10 × number of atoms)."
+        )
+        embed_form.addRow("Max embed attempts:", self.max_embed_sb)
+
+        self.prune_rms_sb = QDoubleSpinBox()
+        self.prune_rms_sb.setRange(-1.0, 3.0)
+        self.prune_rms_sb.setDecimals(3)
+        self.prune_rms_sb.setSingleStep(0.05)
+        self.prune_rms_sb.setValue(-1.0)
+        self.prune_rms_sb.setSpecialValueText("default (ETKDG)")
+        self.prune_rms_sb.setToolTip(
+            "ETKDG pruneRmsThresh during embed; −1 uses the parameter object default."
+        )
+        embed_form.addRow("RMS prune (embed):", self.prune_rms_sb)
+
+        self.enforce_chirality_cb = QCheckBox("Enforce chirality")
+        self.enforce_chirality_cb.setChecked(True)
+        self.enforce_chirality_cb.setToolTip(
+            "Preserve specified stereochemistry during ETKDG embedding."
+        )
+        self.random_coords_cb = QCheckBox("Use random coordinates")
+        self.random_coords_cb.setChecked(False)
+        self.random_coords_cb.setToolTip(
+            "Start from random coords instead of distance-geometry embedding. "
+            "Can help stubborn rings, usually slower and noisier."
+        )
+        self.exp_torsions_cb = QCheckBox("Experimental torsion preferences")
+        self.exp_torsions_cb.setChecked(True)
+        self.exp_torsions_cb.setToolTip(
+            "Use ETKDG experimental torsion-angle preferences (recommended)."
+        )
+        self.small_ring_cb = QCheckBox("Small-ring torsions")
+        self.small_ring_cb.setChecked(True)
+        self.small_ring_cb.setToolTip("ETKDG small-ring torsion corrections.")
+        self.macrocycle_cb = QCheckBox("Macrocycle torsions")
+        self.macrocycle_cb.setChecked(True)
+        self.macrocycle_cb.setToolTip("ETKDG macrocycle torsion corrections.")
+        self.basic_knowledge_cb = QCheckBox("Basic knowledge terms")
+        self.basic_knowledge_cb.setChecked(True)
+        self.basic_knowledge_cb.setToolTip("ETKDG basic-knowledge terms (planar aromatics, etc.).")
+        for flag in (
+            self.enforce_chirality_cb,
+            self.random_coords_cb,
+            self.exp_torsions_cb,
+            self.small_ring_cb,
+            self.macrocycle_cb,
+            self.basic_knowledge_cb,
+        ):
+            embed_form.addRow("", flag)
+        root.addWidget(embed)
+
+        minimize, min_form = boxed_form("Minimize")
+        self.ff_combo = QComboBox()
+        for name in CONFORMER_FORCE_FIELDS:
+            self.ff_combo.addItem(name, name)
+        _set_combo_current_data(self.ff_combo, DEFAULT_CONFORMER_FORCE_FIELD)
+        self.ff_combo.setToolTip(_CONFORMER_FF_TOOLTIP)
+        min_form.addRow("Force field:", self.ff_combo)
 
         self.energy_win_sb = QDoubleSpinBox()
         self.energy_win_sb.setRange(0.0, 200.0)
@@ -106,31 +174,13 @@ class GenerateConformationsDialog(QDialog):
             "Keep only conformers within this energy above the lowest-energy conformer. "
             "Set to 0 to skip energy pruning."
         )
-        form.addRow("Energy window:", self.energy_win_sb)
+        min_form.addRow("Energy window:", self.energy_win_sb)
 
-        self.ff_combo = QComboBox()
-        for name in CONFORMER_FORCE_FIELDS:
-            self.ff_combo.addItem(name, name)
-        _set_combo_current_data(self.ff_combo, DEFAULT_CONFORMER_FORCE_FIELD)
-        self.ff_combo.setToolTip(_CONFORMER_FF_TOOLTIP)
-        form.addRow("Force field:", self.ff_combo)
-
-        self.seed_sb = QSpinBox()
-        self.seed_sb.setRange(0, 2_147_483_647)
-        self.seed_sb.setValue(0xC0FFEE)
-        self.seed_sb.setToolTip("Random seed passed to the ETKDG embedder.")
-        form.addRow("Seed:", self.seed_sb)
-
-        self.prune_rms_sb = QDoubleSpinBox()
-        self.prune_rms_sb.setRange(-1.0, 3.0)
-        self.prune_rms_sb.setDecimals(3)
-        self.prune_rms_sb.setSingleStep(0.05)
-        self.prune_rms_sb.setValue(-1.0)
-        self.prune_rms_sb.setSpecialValueText("default (ETKDG)")
-        self.prune_rms_sb.setToolTip(
-            "ETKDG pruneRmsThresh during embed; −1 uses the parameter object default."
-        )
-        form.addRow("RMS prune (embed):", self.prune_rms_sb)
+        self.max_iters_sb = QSpinBox()
+        self.max_iters_sb.setRange(20, 2000)
+        self.max_iters_sb.setValue(200)
+        self.max_iters_sb.setToolTip("Maximum minimizer iterations per conformer.")
+        min_form.addRow("Max iterations:", self.max_iters_sb)
 
         self.post_min_rms_sb = QDoubleSpinBox()
         self.post_min_rms_sb.setRange(0.0, 3.0)
@@ -142,7 +192,7 @@ class GenerateConformationsDialog(QDialog):
             "After minimization, drop higher-energy conformers within this heavy-atom RMS "
             "of a kept pose. 0 skips this extra prune."
         )
-        form.addRow("RMS prune (post-min):", self.post_min_rms_sb)
+        min_form.addRow("RMS prune (post-min):", self.post_min_rms_sb)
 
         self.max_keep_sb = QSpinBox()
         self.max_keep_sb.setRange(0, _STOCHASTIC_MAX_KEEP_MAX)
@@ -153,24 +203,17 @@ class GenerateConformationsDialog(QDialog):
             "pruning. Default 100 keeps table cells and the 3D viewer compact. "
             "0 stores every survivor (coordinates go to the disk-backed ensemble store)."
         )
-        form.addRow("Max keep:", self.max_keep_sb)
+        min_form.addRow("Max keep:", self.max_keep_sb)
 
-        self.max_iters_sb = QSpinBox()
-        self.max_iters_sb.setRange(20, 2000)
-        self.max_iters_sb.setValue(200)
-        self.max_iters_sb.setToolTip("Maximum minimizer iterations per conformer.")
-        form.addRow("Max iterations:", self.max_iters_sb)
-
-        self.max_embed_sb = QSpinBox()
-        self.max_embed_sb.setRange(0, 2000)
-        self.max_embed_sb.setValue(0)
-        self.max_embed_sb.setSpecialValueText("0 = ETKDG default")
-        self.max_embed_sb.setToolTip(
-            "Max embedding attempts per conformer (ETKDG maxIterations). "
-            "0 leaves the RDKit default (typically 10 × number of atoms)."
+        self.heavy_rms_cb = QCheckBox("Heavy atoms only for RMS")
+        self.heavy_rms_cb.setChecked(True)
+        self.heavy_rms_cb.setToolTip(
+            "Embed RMS prune and post-minimize RMS prune ignore hydrogens."
         )
-        form.addRow("Max embed attempts:", self.max_embed_sb)
+        min_form.addRow("", self.heavy_rms_cb)
+        root.addWidget(minimize)
 
+        align, align_form = boxed_form("Align")
         self.align_pat_edit = QLineEdit()
         self.align_pat_edit.setPlaceholderText("optional SMILES/SMARTS")
         self.align_pat_edit.setToolTip(
@@ -185,52 +228,16 @@ class GenerateConformationsDialog(QDialog):
         pat_row.setSpacing(6)
         pat_row.addWidget(self.align_pat_edit, 1)
         pat_row.addWidget(self.align_smarts_cb)
-        form.addRow("Align on:", pat_row)
+        align_form.addRow("Align on:", pat_row)
+        root.addWidget(align)
 
-        root.addLayout(form)
-
-        self.enforce_chirality_cb = QCheckBox("Enforce chirality")
-        self.enforce_chirality_cb.setChecked(True)
-        self.enforce_chirality_cb.setToolTip(
-            "Preserve specified stereochemistry during ETKDG embedding."
-        )
-
-        self.random_coords_cb = QCheckBox("Use random coordinates")
-        self.random_coords_cb.setChecked(False)
-        self.random_coords_cb.setToolTip(
-            "Start from random coords instead of distance-geometry embedding. "
-            "Can help stubborn rings, usually slower and noisier."
-        )
-
-        self.exp_torsions_cb = QCheckBox("Experimental torsion preferences")
-        self.exp_torsions_cb.setChecked(True)
-        self.exp_torsions_cb.setToolTip(
-            "Use ETKDG experimental torsion-angle preferences (recommended)."
-        )
-
-        self.small_ring_cb = QCheckBox("Small-ring torsions")
-        self.small_ring_cb.setChecked(True)
-        self.small_ring_cb.setToolTip("ETKDG small-ring torsion corrections.")
-
-        self.macrocycle_cb = QCheckBox("Macrocycle torsions")
-        self.macrocycle_cb.setChecked(True)
-        self.macrocycle_cb.setToolTip("ETKDG macrocycle torsion corrections.")
-
-        self.basic_knowledge_cb = QCheckBox("Basic knowledge terms")
-        self.basic_knowledge_cb.setChecked(True)
-        self.basic_knowledge_cb.setToolTip("ETKDG basic-knowledge terms (planar aromatics, etc.).")
-
-        self.heavy_rms_cb = QCheckBox("Heavy atoms only for RMS")
-        self.heavy_rms_cb.setChecked(True)
-        self.heavy_rms_cb.setToolTip(
-            "Embed RMS prune and post-minimize RMS prune ignore hydrogens."
-        )
-
+        output, out_form = boxed_form("Output")
         self.keep_hs_cb = QCheckBox("Keep explicit hydrogens")
         self.keep_hs_cb.setChecked(False)
         self.keep_hs_cb.setToolTip(
             "Leave hydrogens on after minimization (useful for some docking exports)."
         )
+        out_form.addRow("", self.keep_hs_cb)
 
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
@@ -240,23 +247,12 @@ class GenerateConformationsDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
+        out_form.addRow("", self.only_selected_cb)
 
         self.output_panel = ConformerOutputOptionsPanel(self)
-        root.addWidget(
-            conformer_options_group(
-                self.enforce_chirality_cb,
-                self.random_coords_cb,
-                self.exp_torsions_cb,
-                self.small_ring_cb,
-                self.macrocycle_cb,
-                self.basic_knowledge_cb,
-                self.heavy_rms_cb,
-                self.keep_hs_cb,
-                self.only_selected_cb,
-                self.output_panel.add_to_table_cb,
-            )
-        )
-        root.addWidget(self.output_panel)
+        out_form.addRow("", self.output_panel.add_to_table_cb)
+        out_form.addRow(self.output_panel)
+        root.addWidget(output)
 
         self.run_btn = add_centered_run_button(root)
 
