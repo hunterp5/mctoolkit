@@ -104,17 +104,12 @@ def _desirability_color(value: float | None) -> QColor | None:
     )
 
 
-def _paint_desirability(label: QLabel, value: float | None, *, compact: bool = False) -> None:
+def _paint_desirability(label: QLabel, value: float | None) -> None:
     color = _desirability_color(value)
     if color is None:
         label.setStyleSheet("")
         return
-    pad = "0" if compact else "1px 4px"
-    radius = "2px" if compact else "0"
-    label.setStyleSheet(
-        f"background-color: {color.name()}; color: #141414; "
-        f"padding: {pad}; border-radius: {radius};"
-    )
+    label.setStyleSheet(f"background-color: {color.name()}; color: #141414; padding: 1px 4px;")
 
 
 def _section_label(text: str) -> QLabel:
@@ -129,22 +124,6 @@ def _value_label() -> QLabel:
     label = QLabel("—")
     label.setTextInteractionFlags(Qt.TextSelectableByMouse)
     return label
-
-
-class _DetailToggle(QWidget):
-    """Five desirability marks. A click shows or hides the druglike value grid."""
-
-    toggled = pyqtSignal()
-
-    def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("Show or hide molecular weight, LogP, TPSA, QED, and rotatable bonds.")
-
-    def mousePressEvent(self, event) -> None:  # noqa: N802 — Qt API
-        if event.button() == Qt.LeftButton:
-            self.toggled.emit()
-        super().mousePressEvent(event)
 
 
 class _StudioIonSignals(QObject):
@@ -238,26 +217,6 @@ class DesignPropertyStrip(QWidget):
         summary.addWidget(self._ro5)
         root.addLayout(summary)
 
-        self._marks = _DetailToggle(self)
-        mark_row = QHBoxLayout(self._marks)
-        mark_row.setContentsMargins(0, 0, 0, 0)
-        mark_row.setSpacing(8)
-        self._mark_labels: dict[str, QLabel] = {}
-        for key in ("MW", "LogP", "TPSA", "QED", "RotBonds"):
-            column = QVBoxLayout()
-            column.setSpacing(2)
-            mark = QLabel(self._marks)
-            mark.setFixedSize(18, 10)
-            column.addWidget(mark, 0, Qt.AlignHCenter)
-            name = QLabel(_term_label(key), self._marks)
-            name.setAlignment(Qt.AlignHCenter)
-            column.addWidget(name)
-            mark_row.addLayout(column)
-            self._mark_labels[key] = mark
-        mark_row.addStretch(1)
-        self._marks.toggled.connect(self._toggle_druglike_details)
-        root.addWidget(self._marks)
-
         self._druglike_details = QWidget(self)
         detail_grid = QGridLayout(self._druglike_details)
         detail_grid.setContentsMargins(0, 4, 0, 0)
@@ -286,7 +245,6 @@ class DesignPropertyStrip(QWidget):
         detail_grid.addWidget(QLabel("HBA"), hba_row, 0)
         self._hba = _value_label()
         detail_grid.addWidget(self._hba, hba_row, 1)
-        self._druglike_details.hide()
         root.addWidget(self._druglike_details)
 
         root.addWidget(_section_label("Ionization"))
@@ -378,9 +336,6 @@ class DesignPropertyStrip(QWidget):
             logger.debug("design studio could not read the sketch", exc_info=True)
             return None
 
-    def _toggle_druglike_details(self) -> None:
-        self._druglike_details.setVisible(not self._druglike_details.isVisible())
-
     def _show_snapshot(self, snapshot: DesignSnapshot) -> None:
         if snapshot.error or not snapshot.terms:
             self._mpo_value.setText("—")
@@ -390,8 +345,6 @@ class DesignPropertyStrip(QWidget):
             for label in self._desirability_labels.values():
                 label.setText("—")
                 _paint_desirability(label, None)
-            for mark in self._mark_labels.values():
-                _paint_desirability(mark, None, compact=True)
             self._hbd.setText("—")
             self._hba.setText("—")
             self._logd.setText("—")
@@ -409,11 +362,8 @@ class DesignPropertyStrip(QWidget):
             desir = None if term is None else term.desirability
             score = self._desirability_labels[key]
             score.setText(_fmt_num(desir, 2))
+            score.setToolTip(f"{_term_label(key)} desirability {_fmt_num(desir, 2)}")
             _paint_desirability(score, desir)
-            mark = self._mark_labels[key]
-            _paint_desirability(mark, desir, compact=True)
-            shown = "—" if term is None else label.text()
-            mark.setToolTip(f"{_term_label(key)} {shown}, desirability {_fmt_num(desir, 2)}")
         self._hbd.setText("—" if snapshot.hbd is None else str(snapshot.hbd))
         self._hba.setText("—" if snapshot.hba is None else str(snapshot.hba))
         self._set_ionization_pair(self._logd, None, snapshot.logd)
@@ -634,32 +584,27 @@ class DesignStudioPanel(QWidget):
 
         self._strip = DesignPropertyStrip(self._sketcher, self)
         self._strip.setMinimumWidth(240)
-        scroll = QScrollArea(self)
+        scroll = QScrollArea(self._sketcher)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setWidget(self._strip)
         scroll.setMinimumWidth(250)
+        scroll.setMaximumWidth(320)
 
         self._rail = SuggestionRail(self)
-        right = QSplitter(Qt.Vertical, self)
+        right = QSplitter(Qt.Vertical, self._sketcher)
         right.setChildrenCollapsible(False)
         right.addWidget(scroll)
         right.addWidget(self._rail)
         right.setStretchFactor(0, 1)
         right.setStretchFactor(1, 1)
-
-        splitter = QSplitter(Qt.Horizontal, self)
-        splitter.setChildrenCollapsible(False)
-        splitter.addWidget(self._sketcher)
-        splitter.addWidget(right)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 0)
+        self._sketcher.place_beside_canvas(right)
         self._sketcher.show()
-        root.addWidget(splitter, 1)
+        root.addWidget(self._sketcher, 1)
 
         self._status = QStatusBar(self)
-        self._status.setSizeGripEnabled(False)
+        self._sketcher.place_structure_status(self._status)
         self._status.showMessage("Ready.")
         root.addWidget(self._status)
 
