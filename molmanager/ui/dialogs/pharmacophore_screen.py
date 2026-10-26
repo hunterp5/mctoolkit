@@ -27,7 +27,6 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -48,7 +47,7 @@ from ...protein.pharmacophore_screen import (
 from ...workers.pharmacophore_screen import PharmacophoreScreenWorker
 from ...workers.signals import PharmacophoreScreenSignals
 from ..chunked_table_write import ChunkedTableWriter
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 from ..analysis_job_support import enqueue_fast_process_queue_job
 from .scope import selection_scope_checked
 
@@ -90,11 +89,9 @@ class PharmacophoreScreenDialog(QDialog):
         self._writer: ChunkedTableWriter | None = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 6, 8, 8)
-        root.setSpacing(6)
-        form = QFormLayout()
-        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        root.addLayout(form)
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
+        query, form = boxed_form("Query")
 
         self.edit_pharmacophore = QLineEdit()
         self.edit_pharmacophore.setPlaceholderText("pharmacophore.json")
@@ -158,10 +155,12 @@ class PharmacophoreScreenDialog(QDialog):
         min_wrap.setLayout(min_row)
         form.addRow("", min_wrap)
         self.chk_require_all.toggled.connect(self.spin_min.setDisabled)
+        root.addWidget(query)
 
+        output, out_form = boxed_form("Output")
         self.edit_prefix = QLineEdit("pharma")
         self.edit_prefix.setToolTip("Output columns are {prefix}Match, Score, RMSD, and Conf.")
-        form.addRow("Column prefix:", self.edit_prefix)
+        out_form.addRow("Column prefix:", self.edit_prefix)
 
         self.only_selected_cb = QCheckBox("Only selected rows")
         self._only_selected_scope_prefix = "Only selected rows"
@@ -169,14 +168,15 @@ class PharmacophoreScreenDialog(QDialog):
             self.only_selected_cb.setText(f"{self._only_selected_scope_prefix} ({n_sel} row(s))")
         else:
             self.only_selected_cb.setEnabled(False)
-        form.addRow("", self.only_selected_cb)
+        out_form.addRow("", self.only_selected_cb)
 
         self.chk_select_hits = QCheckBox("Select Hits in Table")
         self.chk_select_hits.setChecked(True)
         self.chk_select_hits.setToolTip(
             "After the screen finishes, select every row that matched the pharmacophore."
         )
-        form.addRow("", self.chk_select_hits)
+        out_form.addRow("", self.chk_select_hits)
+        root.addWidget(output)
         self._select_hits = True
 
         btn_row = QHBoxLayout()
