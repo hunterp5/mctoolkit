@@ -23,8 +23,9 @@ each tool. Click-by-click recording is a separate architecture; see
 
 Column references look like ``${stepId.key}``. Descriptor steps publish each
 internal descriptor key (``MolWt``, not the column title ``Mol Weight``).
-Calculator steps publish ``output``. Protonate steps publish ``output``,
-``percent``, and ``pka``.
+Calculator and random-number steps publish ``output``. Protonate steps publish
+``output``, ``percent``, and ``pka``. Reaction-extract steps publish ``col_1``,
+``col_2``, and so on, in the order the columns were written.
 """
 
 from __future__ import annotations
@@ -41,6 +42,15 @@ STEP_CALCULATOR = "calculator"
 STEP_PROTONATE = "protonate"
 STEP_FILTER = "filter"
 STEP_REACTION = "reaction"
+STEP_RANDOM = "random_number"
+STEP_EXTRACT = "reaction_extract"
+STEP_PLOT = "plot"
+STEP_POTENCY = "potency"
+STEP_RGROUP = "rgroup"
+STEP_EXPLICIT_H = "explicit_hydrogens"
+STEP_REMOVE_H = "remove_explicit_hydrogens"
+STEP_NEUTRALIZE = "neutralize"
+STEP_FAST_PREPARE = "fast_prepare"
 
 STEP_KINDS: tuple[str, ...] = (
     STEP_DESCRIPTORS,
@@ -56,6 +66,15 @@ STEP_LABELS: dict[str, str] = {
     STEP_PROTONATE: "Protonate",
     STEP_FILTER: "Filter",
     STEP_REACTION: "Reaction enumeration",
+    STEP_RANDOM: "Random number",
+    STEP_EXTRACT: "Extract reaction",
+    STEP_PLOT: "Plot",
+    STEP_POTENCY: "Potency",
+    STEP_RGROUP: "R-group enumeration",
+    STEP_EXPLICIT_H: "Add explicit hydrogens",
+    STEP_REMOVE_H: "Remove explicit hydrogens",
+    STEP_NEUTRALIZE: "Neutralize",
+    STEP_FAST_PREPARE: "Fast prepare",
 }
 
 ROW_SCOPE_TABLE = "table"
@@ -82,6 +101,15 @@ _KIND_PREFIX = {
     STEP_PROTONATE: "prot",
     STEP_FILTER: "filt",
     STEP_REACTION: "rxn",
+    STEP_RANDOM: "rand",
+    STEP_EXTRACT: "ext",
+    STEP_PLOT: "plot",
+    STEP_POTENCY: "pot",
+    STEP_RGROUP: "rgrp",
+    STEP_EXPLICIT_H: "hadd",
+    STEP_REMOVE_H: "hrem",
+    STEP_NEUTRALIZE: "neut",
+    STEP_FAST_PREPARE: "prep",
 }
 
 # Two-reactant amide coupling. Used when a new reaction step needs a valid SMARTS.
@@ -185,7 +213,37 @@ def output_keys(kind: str, params: Mapping[str, Any]) -> tuple[str, ...]:
         return ("output",)
     if kind == STEP_PROTONATE:
         return ("output", "percent", "pka")
+    if kind == STEP_RANDOM:
+        return ("output",)
+    if kind == STEP_EXTRACT:
+        return _identifier_keys(params.get("published"))
+    if kind == STEP_POTENCY:
+        return potency_output_keys(params)
+    if kind in (STEP_EXPLICIT_H, STEP_REMOVE_H, STEP_NEUTRALIZE):
+        return ("output",)
+    if kind == STEP_FAST_PREPARE:
+        return ("output", "fragments")
     return ()
+
+
+def potency_output_keys(params: Mapping[str, Any]) -> tuple[str, ...]:
+    """Stable names for the columns one potency step writes, in write order."""
+    from ..chem.potency import PKI_HEADER, activity_header, p_header
+
+    measure = str(params.get("measure") or "")
+    unit = str(params.get("desired_unit") or "")
+    write_p = bool(params.get("write_p"))
+    write_ki = bool(params.get("write_ki"))
+    pairs: list[tuple[str, str]] = [("activity", activity_header(measure, unit))]
+    if write_p:
+        pairs.append(("p", p_header(measure)))
+    if write_ki:
+        ki_header = activity_header("Ki", unit)
+        if ki_header not in [header for _key, header in pairs]:
+            pairs.append(("ki", ki_header))
+        if write_p and PKI_HEADER not in [header for _key, header in pairs]:
+            pairs.append(("pki", PKI_HEADER))
+    return tuple(key for key, _header in pairs)
 
 
 def step_summary(step: MacroStep) -> str:
@@ -372,6 +430,68 @@ def _default_params(kind: str) -> dict[str, Any]:
                 }
             ],
         }
+    if kind == STEP_RANDOM:
+        return {
+            "row_scope": ROW_SCOPE_TABLE,
+            "column": "Random",
+            "distribution": "uniform",
+            "low": 0.0,
+            "high": 1.0,
+            "mean": 0.0,
+            "std": 1.0,
+            "seed": None,
+            "decimals": 4,
+            "clip_normal": False,
+        }
+    if kind == STEP_EXTRACT:
+        return {
+            "row_scope": ROW_SCOPE_TABLE,
+            "source_column": "Reaction",
+            "mode": "both",
+            "reactant_prefix": "Reactant",
+            "product_prefix": "Product",
+            "published": [],
+        }
+    if kind == STEP_PLOT:
+        return {"state": {"kind": "plotter", "plot_type": "scatter", "x": "", "y": ""}}
+    if kind == STEP_POTENCY:
+        return {
+            "row_scope": ROW_SCOPE_TABLE,
+            "column": "IC50",
+            "unit_column": "Unit",
+            "measure": "IC50",
+            "desired_unit": "nM",
+            "write_p": True,
+            "write_ki": False,
+            "assay_concentrations": [],
+            "mw_column": None,
+        }
+    if kind == STEP_RGROUP:
+        return {
+            "core_smiles": "[*:1]c1ccccc1",
+            "core_id": "core",
+            "pools": [{"label": 1, "mode": "smiles", "file_path": "", "smiles_text": "CCN*"}],
+            "max_products": 10,
+            "output_filters": "",
+            "add_to_table": True,
+            "save_to_file": False,
+            "save_path": "",
+        }
+    if kind in (STEP_EXPLICIT_H, STEP_REMOVE_H, STEP_NEUTRALIZE):
+        return {
+            "row_scope": ROW_SCOPE_TABLE,
+            "structure_source": "Structure",
+            "no_render_2d": False,
+        }
+    if kind == STEP_FAST_PREPARE:
+        return {
+            "row_scope": ROW_SCOPE_TABLE,
+            "structure_source": "Structure",
+            "update_target": True,
+            "largest_column": None,
+            "fragments_column": "Fragments",
+            "neutralize": False,
+        }
     return {
         "reaction_name": "Amide coupling",
         "smarts": _DEFAULT_REACTION_SMARTS,
@@ -422,7 +542,118 @@ def _validate_step(step: MacroStep, descriptor_keys: set[str] | None) -> list[Ma
         return _validate_protonate(step, params)
     if step.kind == STEP_FILTER:
         return _validate_filter(step, params)
+    if step.kind == STEP_RANDOM:
+        return _validate_random(step, params)
+    if step.kind == STEP_EXTRACT:
+        return _validate_extract(step, params)
+    if step.kind == STEP_PLOT:
+        return _validate_plot(step, params)
+    if step.kind == STEP_POTENCY:
+        return _validate_potency(step, params)
+    if step.kind == STEP_RGROUP:
+        return _validate_rgroup(step, params)
+    if step.kind in (STEP_EXPLICIT_H, STEP_REMOVE_H, STEP_NEUTRALIZE):
+        return _validate_structure_edit(step, params)
+    if step.kind == STEP_FAST_PREPARE:
+        return _validate_fast_prepare(step, params)
     return _validate_reaction(step, params)
+
+
+def _validate_random(step: MacroStep, params: Mapping[str, Any]) -> list[MacroIssue]:
+    issues = _scope_issues(step, params)
+    column = params.get("column", "")
+    if not isinstance(column, str) or not column.strip():
+        issues.append(MacroIssue("Enter a name for the random-number column.", step.id))
+    distribution = params.get("distribution", "")
+    if distribution not in ("uniform", "integer", "normal"):
+        issues.append(MacroIssue("Choose a uniform, integer, or normal distribution.", step.id))
+    return issues
+
+
+def _validate_extract(step: MacroStep, params: Mapping[str, Any]) -> list[MacroIssue]:
+    issues = _scope_issues(step, params)
+    source = params.get("source_column", "")
+    if not isinstance(source, str) or not source.strip():
+        issues.append(MacroIssue("Choose a reaction column to extract.", step.id))
+    if params.get("mode") not in ("reactants", "products", "both"):
+        issues.append(MacroIssue("Choose reactants, products, or both.", step.id))
+    return issues
+
+
+def _validate_plot(step: MacroStep, params: Mapping[str, Any]) -> list[MacroIssue]:
+    state = params.get("state")
+    if not isinstance(state, dict) or not state.get("plot_type"):
+        return [MacroIssue("This plot step has no saved plot settings.", step.id)]
+    return []
+
+
+def _validate_potency(step: MacroStep, params: Mapping[str, Any]) -> list[MacroIssue]:
+    from ..chem.potency import DESIRED_UNITS, MEASURES
+
+    issues = _scope_issues(step, params)
+    column = params.get("column", "")
+    unit_column = params.get("unit_column", "")
+    if not isinstance(column, str) or not column.strip():
+        issues.append(MacroIssue("Choose the activity column.", step.id))
+    if not isinstance(unit_column, str) or not unit_column.strip():
+        issues.append(MacroIssue("Choose the unit column.", step.id))
+    if params.get("measure") not in MEASURES:
+        issues.append(MacroIssue("Choose an activity measure.", step.id))
+    if params.get("desired_unit") not in DESIRED_UNITS:
+        issues.append(MacroIssue("Choose nM or uM for the written activity.", step.id))
+    if params.get("write_ki"):
+        assays = params.get("assay_concentrations")
+        if not isinstance(assays, list) or not assays:
+            issues.append(MacroIssue("Add an assay concentration for the Ki conversion.", step.id))
+    return issues
+
+
+def _validate_rgroup(step: MacroStep, params: Mapping[str, Any]) -> list[MacroIssue]:
+    issues: list[MacroIssue] = []
+    core = params.get("core_smiles", "")
+    if not isinstance(core, str) or not core.strip():
+        issues.append(MacroIssue("Enter a core SMILES.", step.id))
+    pools = params.get("pools")
+    if not isinstance(pools, list) or not pools:
+        issues.append(MacroIssue("Add a building-block list for each attachment point.", step.id))
+    else:
+        for pool in pools:
+            if not isinstance(pool, dict):
+                issues.append(MacroIssue("Each building-block list must be an object.", step.id))
+                break
+            mode = pool.get("mode")
+            text = pool.get("file_path") if mode == "file" else pool.get("smiles_text")
+            if mode not in ("file", "smiles") or not str(text or "").strip():
+                issues.append(
+                    MacroIssue("Each attachment point needs a file or SMILES list.", step.id)
+                )
+                break
+    try:
+        if int(params.get("max_products") or 0) < 1:
+            issues.append(MacroIssue("Set a product limit of at least 1.", step.id))
+    except (TypeError, ValueError):
+        issues.append(MacroIssue("Set a product limit of at least 1.", step.id))
+    return issues
+
+
+def _validate_structure_edit(step: MacroStep, params: Mapping[str, Any]) -> list[MacroIssue]:
+    issues = _scope_issues(step, params)
+    source = params.get("structure_source", "")
+    if not isinstance(source, str) or not source.strip():
+        issues.append(MacroIssue("Choose a structure column.", step.id))
+    return issues
+
+
+def _validate_fast_prepare(step: MacroStep, params: Mapping[str, Any]) -> list[MacroIssue]:
+    issues = _validate_structure_edit(step, params)
+    fragments = params.get("fragments_column", "")
+    if not isinstance(fragments, str) or not fragments.strip():
+        issues.append(MacroIssue("Name the fragments column.", step.id))
+    if not params.get("update_target"):
+        largest = params.get("largest_column", "")
+        if not isinstance(largest, str) or not largest.strip():
+            issues.append(MacroIssue("Name the column for the largest fragment.", step.id))
+    return issues
 
 
 def _validate_descriptors(
@@ -631,6 +862,17 @@ def _validate_refs(
             if key not in declared.get(step_id, set()):
                 issues.append(MacroIssue(f"Step {step_id} does not write {token}.", step.id))
     return issues
+
+
+def _identifier_keys(raw: Any) -> tuple[str, ...]:
+    if not isinstance(raw, list):
+        return ()
+    keys: list[str] = []
+    for key in raw:
+        text = str(key).strip()
+        if _STEP_ID.match(text) and text not in keys:
+            keys.append(text)
+    return tuple(keys)
 
 
 def _scope_issues(step: MacroStep, params: Mapping[str, Any]) -> list[MacroIssue]:
