@@ -27,7 +27,7 @@ A structure column, **Selected Rows Only**, or one pasted SMILES. The Python int
 2. In that environment run ``python -m pip install aizynthfinder "pyarrow>=19,<26"``, then ``download_public_data`` into a folder you choose (about 1.8 GB: ONNX models, templates, and ``zinc_stock.hdf5``). AiZynthFinder 4.4.1 stays on NumPy 1.26, and PyArrow 26 will not import on that NumPy.
 3. Open **Settings → Configure → AiZynthFinder**, set that environment's ``python.exe`` and the ``config.yml`` next to the model files, and click **Test**.
 4. Open **Chemistry → Retrosynthesis → Search**, choose the rows, and run it.
-5. Read the ``AiZynth`` columns: solved, solved-route count, score, steps, search time, and precursor SMILES in and out of stock. **Routes…** opens the step drawings from that search.
+5. Read the ``AiZynth`` columns. They keep the solved state, score, step count, search time, precursor lists, and the other search statistics AiZynthFinder reports, including when the first route was found, the size of the search, and which policies and stocks were used. **Routes…** opens the route tree from that search.
 
 ## Use cases
 
@@ -39,4 +39,4 @@ A structure column, **Selected Rows Only**, or one pasted SMILES. The Python int
 
 A molecule often takes a minute or more. Run a handful of rows, not a whole library, in one job. The same SMILES is searched once and written back to every matching row. Rows that already have AiZynth values are skipped on the next run; clear those cells to search them again.
 
-The job reads the model and stock files named in ``config.yml``. A config with ``use_remote_models: true``, or a MongoDB stock on a host other than localhost, is refused. **Routes…** keeps the routes from searches in this session and draws each step with its precursors marked in stock or not in stock.
+The job reads the model and stock files named in ``config.yml``. A config with ``use_remote_models: true``, or a MongoDB stock on a host other than localhost, is refused. **Routes…** keeps the routes from searches in this session and draws each route as a tree. In-stock molecules have a green frame; molecules that still need a route have an amber frame. Each branch line has a Step button. Click it to open that reaction's policy, probability, template, and other metadata, and click it again to close them. A log under the canvas repeats the route, its scores, and its metadata. Center-click and drag to pan the drawing. The target sits on the right and its precursors branch to the left. Right-click a card and choose Copy for SMILES or another structure format.
