@@ -25,7 +25,6 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QFormLayout,
     QGroupBox,
     QLineEdit,
     QMessageBox,
@@ -39,7 +38,7 @@ from ...chem.fragment_recomposition_filters import (
     parse_recomposition_filter_text,
     recomposition_filter_property_help,
 )
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 from ..strings import TOOL_CORE_DECOMP
 from .scope import selection_scope_checked
 
@@ -80,18 +79,10 @@ class FragmentDecompositionDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
+        structures, struct_form = boxed_form("Structures")
         self.src_combo = QComboBox()
         self.src_combo.addItems(structure_sources)
-        form.addRow("Molecules from:", self.src_combo)
-
-        self.prefix_edit = QLineEdit()
-        self.prefix_edit.setText(default_prefix)
-        self.prefix_edit.setToolTip(
-            "New columns are named PREFIX_1, PREFIX_2, … (one per fragment)."
-        )
-        form.addRow("Column name prefix:", self.prefix_edit)
-        root.addLayout(form)
+        struct_form.addRow("Molecules from:", self.src_combo)
 
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
@@ -101,14 +92,24 @@ class FragmentDecompositionDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
+        struct_form.addRow("", self.only_selected_cb)
+        root.addWidget(structures)
+
+        output, out_form = boxed_form("Output")
+        self.prefix_edit = QLineEdit()
+        self.prefix_edit.setText(default_prefix)
+        self.prefix_edit.setToolTip(
+            "New columns are named PREFIX_1, PREFIX_2, … (one per fragment)."
+        )
+        out_form.addRow("Column name prefix:", self.prefix_edit)
 
         self.render_2d_cb = QCheckBox("Render 2D after decomposition")
         self.render_2d_cb.setChecked(False)
         self.render_2d_cb.setToolTip(
             "Render the new fragment columns as 2D depictions (pixmap-only) after decomposition finishes."
         )
-        root.addWidget(self.render_2d_cb)
+        out_form.addRow("", self.render_2d_cb)
+        root.addWidget(output)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)
@@ -167,7 +168,7 @@ class FragmentRecompositionDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
+        fragments, form = boxed_form("Fragments")
         self.prefix_combo = QComboBox()
         self.prefix_combo.setEditable(True)
         prefixes = detect_fragment_column_prefixes(self._table_headers)
@@ -196,7 +197,17 @@ class FragmentRecompositionDialog(QDialog):
             "Stop after this many accepted product SMILES that meet generation constraints."
         )
         form.addRow("Max products:", self.max_products_sb)
-        root.addLayout(form)
+
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(
+                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
+            )
+        else:
+            self.only_selected_cb.setEnabled(False)
+        form.addRow("", self.only_selected_cb)
+        root.addWidget(fragments)
 
         filters_box = QGroupBox("Generation constraints")
         filters_lyt = QVBoxLayout(filters_box)
@@ -213,16 +224,6 @@ class FragmentRecompositionDialog(QDialog):
         self.output_filters_edit.setMaximumHeight(88)
         filters_lyt.addWidget(self.output_filters_edit)
         root.addWidget(filters_box)
-
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(
-                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
-            )
-        else:
-            self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self._on_accept)
@@ -282,7 +283,7 @@ class CoreBasedDecompositionDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        form = QFormLayout()
+        core, form = boxed_form("Core")
         self.core_edit = QLineEdit()
         self.core_edit.setPlaceholderText("e.g. c1ccc([*:1])cc1 or SMARTS with dummy labels")
         self.core_edit.setToolTip(
@@ -290,15 +291,6 @@ class CoreBasedDecompositionDialog(QDialog):
             "that map to substituents in the row molecules."
         )
         form.addRow("Core (SMARTS or SMILES):", self.core_edit)
-
-        self.src_combo = QComboBox()
-        self.src_combo.addItems(structure_sources)
-        form.addRow("Molecules from:", self.src_combo)
-
-        self.prefix_edit = QLineEdit()
-        self.prefix_edit.setText("RGD")
-        self.prefix_edit.setToolTip("New columns are named PREFIX_Core, PREFIX_R1, â€¦")
-        form.addRow("Column name prefix:", self.prefix_edit)
 
         self.only_rg_cb = QCheckBox("Only match at R-groups (onlyMatchAtRGroups)")
         self.only_rg_cb.setChecked(True)
@@ -312,8 +304,12 @@ class CoreBasedDecompositionDialog(QDialog):
         self.match_combo.addItems(["Greedy", "Exhaustive"])
         self.match_combo.setToolTip("Greedy is faster; Exhaustive explores more matchings.")
         form.addRow("Matching strategy:", self.match_combo)
+        root.addWidget(core)
 
-        root.addLayout(form)
+        structures, struct_form = boxed_form("Structures")
+        self.src_combo = QComboBox()
+        self.src_combo.addItems(structure_sources)
+        struct_form.addRow("Molecules from:", self.src_combo)
 
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
@@ -323,7 +319,15 @@ class CoreBasedDecompositionDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
+        struct_form.addRow("", self.only_selected_cb)
+        root.addWidget(structures)
+
+        output, out_form = boxed_form("Output")
+        self.prefix_edit = QLineEdit()
+        self.prefix_edit.setText("RGD")
+        self.prefix_edit.setToolTip("New columns are named PREFIX_Core, PREFIX_R1, …")
+        out_form.addRow("Column name prefix:", self.prefix_edit)
+        root.addWidget(output)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self._on_accept)
