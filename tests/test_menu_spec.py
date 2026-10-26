@@ -88,6 +88,7 @@ def test_edit_selection_actions_are_on_edit_menu():
     edit = find_submenu(MAIN_WINDOW_MENUS, "Edit")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(edit.items)]
     assert "Selection" not in labels
+    assert "Find and Replace…" in labels
     assert labels[-3:] == ["Invert Selection", "Clear Selection", "Delete Selection"]
 
 
@@ -120,10 +121,12 @@ def test_prepare_structures_nests_protonate_and_hydrogens():
     assert menu_outline(hydrogens.items) == ["Add…", "Remove…"]
 
 
-def test_substructure_menu_sits_between_fingerprints_and_predict():
+def test_substructure_menu_sits_between_conformations_and_predict():
     tools = find_submenu(MAIN_WINDOW_MENUS, "Chemistry")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(tools.items)]
-    assert labels.index("Fingerprints") + 1 == labels.index("Substructure")
+    assert "Fingerprints" not in labels
+    assert "Similarity" not in labels
+    assert labels.index("Substructure") == labels.index("Conformations") + 1
     assert labels.index("Substructure") + 1 == labels.index("Predict")
     sub = find_submenu(tools.items, "Substructure")
     assert menu_outline(sub.items) == [
@@ -135,16 +138,16 @@ def test_substructure_menu_sits_between_fingerprints_and_predict():
 def test_reaction_menu_outline():
     tools = find_submenu(MAIN_WINDOW_MENUS, "Chemistry")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(tools.items)]
-    assert "R-Group Decomposition" not in labels
     assert "Reaction Based Enumeration…" not in labels
-    assert "Reaction" in labels
+    assert labels.index("R-Group Decomposition") == labels.index("Predict") + 1
+    assert labels.index("R-Group Enumeration…") == labels.index("R-Group Decomposition") + 1
+    assert labels.index("Reaction") == labels.index("R-Group Enumeration…") + 1
     reaction = find_submenu(tools.items, "Reaction")
-    rxn_labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(reaction.items)]
-    assert rxn_labels.index("Extract…") < rxn_labels.index("R-Group Decomposition")
-    assert rxn_labels.index("Reaction Based Enumeration…") < rxn_labels.index(
-        "R-Group Enumeration…"
-    )
-    decomp = find_submenu(reaction.items, "R-Group Decomposition")
+    assert menu_outline(reaction.items) == [
+        "Extract…",
+        "Reaction Based Enumeration…",
+    ]
+    decomp = find_submenu(tools.items, "R-Group Decomposition")
     assert menu_outline(decomp.items) == [
         "Core-Based Decomposition…",
         "BRICS Decomposition…",
@@ -175,6 +178,7 @@ def test_lists_menu_sits_under_data_below_table():
     assert add_to_list.hotkey == "data.add_to_list"
     assert menu_outline(lists.items) == [
         "Add Selected to List…",
+        "Remove Selected from List…",
         "",
         "Manage Lists…",
     ]
@@ -191,10 +195,24 @@ def test_help_menu_sits_inside_settings():
     assert HELP_MENU.attr == "_help_menu"
 
 
-def test_binning_follows_cluster():
+def test_similarity_menu_contains_cluster():
     data = find_submenu(MAIN_WINDOW_MENUS, "Data")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]
-    assert labels.index("Binning…") == labels.index("Cluster…") + 1
+    assert "Cluster…" not in labels
+    assert "Binning…" not in labels
+    similarity = find_submenu(data.items, "Similarity")
+    assert menu_outline(similarity.items) == [
+        "Fingerprint Similarity...",
+        "Diverse Subset…",
+        "Cluster…",
+        "Binning…",
+    ]
+    fp = next(item for item in similarity.items if item.title == "Fingerprint Similarity...")
+    assert fp.hotkey == "tools.fingerprint_similarity"
+    cluster = next(item for item in similarity.items if item.title == "Cluster…")
+    assert cluster.hotkey == "data.cluster"
+    binning = next(item for item in similarity.items if item.title == "Binning…")
+    assert binning.hotkey == "data.binning"
 
 
 def test_hansch_follows_free_wilson():
@@ -231,6 +249,7 @@ def test_tools_menu_expands_calculator_random_and_notepad():
         "",
         "Random",
         "Calculator…",
+        "Macros…",
         "Potency Standardization…",
         "Notepad",
         "",
@@ -278,19 +297,19 @@ def test_data_menu_plot_submenu_titles():
     data = find_submenu(MAIN_WINDOW_MENUS, "Data")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]
     assert "MedChem" not in labels
-    assert "Dimensionality Reduction" not in labels
+    assert "DimRed Plots" not in labels
     assert "MedChem Plots" in labels
-    assert "DimRed Plots" in labels
+    assert "Dimensionality Reduction" in labels
     assert "Plotter…" in labels
-    assert labels.index("DimRed Plots") == labels.index("MedChem Plots") + 1
-    assert labels.index("Plotter…") == labels.index("DimRed Plots") + 1
+    assert labels.index("Dimensionality Reduction") == labels.index("MedChem Plots") + 1
+    assert labels.index("Plotter…") == labels.index("Dimensionality Reduction") + 1
     medchem = find_submenu(data.items, "MedChem Plots")
     assert menu_outline(medchem.items) == [
-        "BOILED-Egg plot…",
-        "Golden Triangle plot…",
-        "LipE plot…",
+        "BOILED-Egg…",
+        "Golden Triangle…",
+        "LipE…",
     ]
-    dimred = find_submenu(data.items, "DimRed Plots")
+    dimred = find_submenu(data.items, "Dimensionality Reduction")
     assert menu_outline(dimred.items) == [
         "Principal Component Analysis…",
         "t-SNE Visualization…",
