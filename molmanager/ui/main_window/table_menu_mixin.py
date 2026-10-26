@@ -134,6 +134,12 @@ class TableMenuMixin:
             menu.addSeparator()
             search_act = menu.addAction("Search")
             search_act.setObjectName("header_search")
+            replace_act = menu.addAction("Find and Replace…")
+            replace_act.setObjectName("header_find_replace")
+            replace_act.setToolTip(
+                "Find and replace text, wildcards, or comparisons. "
+                "ID, Structure, and image columns cannot be edited."
+            )
             if col >= 2 and not self._table_model.is_pixmap_data_column(old_n):
                 color_act = menu.addAction("Color")
                 color_act.setObjectName("header_color")
@@ -200,6 +206,8 @@ class TableMenuMixin:
             self._apply_table_sort(col, False, "alphabetic")
         elif name == "header_search":
             self.open_table_search_with_column(col)
+        elif name == "header_find_replace":
+            self.open_find_replace_with_column(col)
         elif name == "header_color":
             self._open_column_color_dialog(col)
         elif name == "header_mmp_transform_ledger":
