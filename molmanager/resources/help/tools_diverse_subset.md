@@ -1,6 +1,6 @@
 # Diverse Subset
 
-Diverse Subset picks a chemically diverse subset of rows using MaxMin-style algorithms (Auto / Exact / Fast) with optional rank column and table selection.
+Diverse Subset picks a chemically diverse subset of rows using MaxMin-style algorithms (Auto / Exact / Fast) with optional rank column and table selection. Open it from **Data → Similarity**.
 
 ## Goal
 
