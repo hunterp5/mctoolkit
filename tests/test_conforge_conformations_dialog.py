@@ -24,7 +24,6 @@ pytest.importorskip("PyQt5.QtWidgets")
 
 from PyQt5.QtWidgets import QGroupBox
 
-from molmanager.platform_support.bundled_paths import default_external_executable
 from molmanager.ui.dialogs.conforge_conformations import ConforgeConformationsDialog
 
 
@@ -42,7 +41,7 @@ def test_conforge_conformations_dialog_defaults(qapp):  # noqa: ARG001
     assert p.keep_hydrogens is False
     assert p.from_scratch is True
     assert dlg.output_panel.add_to_table_cb.text() == "Add as Entries"
-    assert dlg.confgen_edit.text() == default_external_executable("confgen")
+    assert p.confgen_path == ""
     option_boxes = [b for b in dlg.findChildren(QGroupBox) if b.title() == "Options"]
     assert option_boxes
     assert dlg.output_panel.add_to_table_cb.parent() is option_boxes[0]
@@ -64,7 +63,6 @@ def test_conforge_conformations_dialog_params(qapp):  # noqa: ARG001
     dlg.mode_combo.setCurrentIndex(midx)
     dlg.original_cb.setChecked(True)
     dlg.keep_hs_cb.setChecked(True)
-    dlg.confgen_edit.setText("/opt/confgen")
     p = dlg.params()
     assert p.num_confs == 40
     assert p.rmsd_cutoff == pytest.approx(0.8)
@@ -74,5 +72,5 @@ def test_conforge_conformations_dialog_params(qapp):  # noqa: ARG001
     assert p.mode == "STOCHASTIC"
     assert p.include_input is True
     assert p.keep_hydrogens is True
-    assert p.confgen_path == "/opt/confgen"
+    assert p.confgen_path == ""
     dlg.close()

@@ -43,8 +43,9 @@ CDPKIT_RELEASES_URL = "https://github.com/molinfo-vienna/CDPKit/releases"
 MISSING_CONFORGE_MSG = (
     "CONFORGE (CDPKit) is required. On Windows, PyPI has no cdpkit wheel for Python 3.11, "
     "so `pip install cdpkit` tries to compile from source and fails without Boost. "
-    f"Install the CDPKit Windows MSVC package from {CDPKIT_RELEASES_URL}, then Browse to "
-    r"confgen.exe (usually C:\Program Files\CDPKit\Bin\confgen.exe) or add that Bin folder "
+    f"Install the CDPKit Windows MSVC package from {CDPKIT_RELEASES_URL}, then set "
+    r"confgen.exe under Settings → Configure → CONFORGE "
+    r"(usually C:\Program Files\CDPKit\Bin\confgen.exe) or add that Bin folder "
     "to PATH. On Linux/macOS, `pip install cdpkit` works when a wheel exists for your Python."
 )
 

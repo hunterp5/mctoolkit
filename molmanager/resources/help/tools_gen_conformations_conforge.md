@@ -16,7 +16,7 @@ Use when you want CONFORGE’s published knowledge-based sampling instead of RDK
 
 Scoped rows with valid structures; **Selected Rows Only** when checked. Output may go to table and/or SDF file. CONFORGE is optional.
 
-**Windows (Python 3.11):** PyPI has no `cdpkit` wheel, so `pip install cdpkit` compiles from source and fails without Boost. Install the CDPKit **MSVC** installer from [GitHub Releases](https://github.com/molinfo-vienna/CDPKit/releases), then Browse to `confgen.exe` (usually `C:\Program Files\CDPKit\Bin\confgen.exe`) or add that `Bin` folder to PATH.
+**Windows (Python 3.11):** PyPI has no `cdpkit` wheel, so `pip install cdpkit` compiles from source and fails without Boost. Install the CDPKit **MSVC** installer from [GitHub Releases](https://github.com/molinfo-vienna/CDPKit/releases), then set `confgen.exe` under **Settings → Configure → CONFORGE** (usually `C:\Program Files\CDPKit\Bin\confgen.exe`) or add that `Bin` folder to PATH.
 
 **Linux/macOS:** `pip install cdpkit` (or `pip install -e ".[conforge]"`) when a wheel exists. You can also place `confgen` on PATH or under `resources/bin`.
 
@@ -30,7 +30,6 @@ CONFORGE generates from the connection table. 3D input is only needed if you che
 - **Preset** - SMALL/MEDIUM/LARGE × diverse or dense (`-C`, default Medium diverse). Energy, RMSD, and max conformers still apply after the preset.
 - **Sampling** - Auto, Systematic, or Stochastic (`-m`, default Auto). Auto uses systematic sampling until a large macrocycle rotatable-bond threshold, then stochastic DG.
 - **Timeout** - per-molecule limit (`-T`, default 3600 s; 0 = no limit).
-- **CONFORGE** - `confgen` executable. On Windows after the CDPKit installer, usually `C:\Program Files\CDPKit\Bin\confgen.exe`. Leave the default when `cdpkit` Python bindings are already importable.
 - **Options** - **Include input conformation**, **Keep explicit hydrogens**, **Selected Rows Only**, and **Add as Entries**.
 - **Save to SDF** - path and **Browse...** on one line below Options.
 

@@ -22,7 +22,7 @@ config.json
 
 Older docs used `biotransformer-3.0.0.jar` and `database/` (`bkdb/` in some snapshots). MolManager accepts any of those knowledge-base folder names next to the JAR.
 
-You can also **Browse JAR…** in Predict Metabolites, or set `MOLMANAGER_BIOTRANSFORMER_JAR` (the knowledge-base folder and `supportfiles/` must sit next to that JAR).
+You can also **Browse JAR…** under **Settings → Configure → BioTransformer**, or set `MOLMANAGER_BIOTRANSFORMER_JAR` (the knowledge-base folder and `supportfiles/` must sit next to that JAR).
 
 Manual download: https://bitbucket.org/wishartlab/biotransformer3.0jar (source: https://github.com/Wishartlab-openscience/Biotransformer).
 

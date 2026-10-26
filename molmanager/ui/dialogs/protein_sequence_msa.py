@@ -28,12 +28,10 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -46,12 +44,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from ...platform_support.bundled_paths import (
-    default_external_executable,
-    ensure_mafft_ready,
-    resolve_mafft_executable,
-)
-from ...platform_support.tool_paths import TOOL_MAFFT, configured_executable
+from ...platform_support.bundled_paths import ensure_mafft_ready, resolve_mafft_executable
 from ...protein.protein_msa import (
     FastaRecord,
     alignment_html,
@@ -184,26 +177,6 @@ class ProteinSequenceMsaDialog(QDialog):
         run_row.addWidget(self.btn_export_fa)
         run_row.addWidget(self.btn_export_aln)
         root.addLayout(run_row)
-
-        exe_form = QFormLayout()
-        exe_row = QHBoxLayout()
-        saved_mafft = configured_executable(TOOL_MAFFT)
-        resolved = saved_mafft or resolve_mafft_executable() or default_external_executable("mafft")
-        self.mafft_edit = QLineEdit(resolved)
-        self.mafft_edit.setToolTip(
-            "MAFFT executable or install folder (Windows: mafft.bat, or the all-in-one directory)."
-        )
-        exe_row.addWidget(self.mafft_edit, 1)
-        btn_file = QPushButton("Browse…")
-        btn_file.clicked.connect(self._browse_mafft_file)
-        btn_dir = QPushButton("Folder…")
-        btn_dir.clicked.connect(self._browse_mafft_folder)
-        exe_row.addWidget(btn_file)
-        exe_row.addWidget(btn_dir)
-        exe_w = QWidget()
-        exe_w.setLayout(exe_row)
-        exe_form.addRow("MAFFT:", exe_w)
-        root.addLayout(exe_form)
 
         self.status = QLabel("Add at least two sequences, then Align.")
         self.status.setWordWrap(True)
@@ -349,36 +322,19 @@ class ProteinSequenceMsaDialog(QDialog):
         self.btn_export_fa.setEnabled(has)
         self.btn_export_aln.setEnabled(has)
 
-    def _browse_mafft_file(self) -> None:
-        path, _filt = QFileDialog.getOpenFileName(
-            self,
-            "MAFFT executable",
-            self.mafft_edit.text(),
-            "MAFFT (mafft.bat mafft.exe mafft);;All files (*)",
-        )
-        if path:
-            self.mafft_edit.setText(path)
-
-    def _browse_mafft_folder(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "MAFFT folder", self.mafft_edit.text())
-        if path:
-            self.mafft_edit.setText(path)
-
     def _align(self) -> None:
         records = self.pool_records()
         if len(records) < 2:
             QMessageBox.information(self, "Align", "Need at least two sequences to align.")
             return
-        user_path = self.mafft_edit.text().strip()
-        missing = ensure_mafft_ready(user_path)
+        missing = ensure_mafft_ready()
         if missing:
             QMessageBox.warning(self, "MAFFT not found", missing)
             return
-        exe = resolve_mafft_executable(user_path)
+        exe = resolve_mafft_executable()
         if not exe:
             QMessageBox.warning(self, "MAFFT not found", missing or "MAFFT was not found.")
             return
-        self.mafft_edit.setText(exe)
         self._cancel_event = threading.Event()
         worker = MafftAlignWorker(records, exe, cancel_event=self._cancel_event)
         worker.signals.finished.connect(self._on_aligned)

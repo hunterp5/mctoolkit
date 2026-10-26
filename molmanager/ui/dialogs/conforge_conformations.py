@@ -23,19 +23,12 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QDoubleSpinBox,
-    QFileDialog,
     QFormLayout,
-    QHBoxLayout,
-    QLineEdit,
     QMessageBox,
-    QPushButton,
     QSpinBox,
     QVBoxLayout,
-    QWidget,
 )
 
-from ...platform_support.bundled_paths import default_external_executable
-from ...platform_support.tool_paths import TOOL_CONFGEN, configured_executable
 from ...conformers.conforge_generation import (
     CONFORGE_MODES,
     CONFORGE_PRESETS,
@@ -146,24 +139,6 @@ class ConforgeConformationsDialog(QDialog):
         self.timeout_sb.setToolTip("Per-molecule timeout (confgen -T). Default 3600 s.")
         form.addRow("Timeout:", self.timeout_sb)
 
-        exe_row = QHBoxLayout()
-        exe_row.setContentsMargins(0, 0, 0, 0)
-        self.confgen_edit = QLineEdit(
-            configured_executable(TOOL_CONFGEN) or default_external_executable("confgen")
-        )
-        self.confgen_edit.setToolTip(
-            "confgen executable from a CDPKit install. Defaults to Settings → Configure → "
-            "CONFORGE. On Windows, Browse to "
-            r"C:\Program Files\CDPKit\Bin\confgen.exe after running the MSVC installer."
-        )
-        exe_row.addWidget(self.confgen_edit, 1)
-        btn_e = QPushButton("Browse…")
-        btn_e.clicked.connect(self._browse_confgen)
-        exe_row.addWidget(btn_e)
-        exe_w = QWidget()
-        exe_w.setLayout(exe_row)
-        form.addRow("CONFORGE:", exe_w)
-
         root.addLayout(form)
 
         self.original_cb = QCheckBox("Include input conformation")
@@ -200,17 +175,10 @@ class ConforgeConformationsDialog(QDialog):
         self.run_btn.clicked.connect(self._try_accept)
         make_window_minimizable(self)
 
-    def _browse_confgen(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "CONFORGE executable", self.confgen_edit.text() or "", "All files (*.*)"
-        )
-        if path:
-            self.confgen_edit.setText(path)
-
     def _try_accept(self) -> None:
         if not self.output_panel.validate(self):
             return
-        err = ensure_conforge_ready(self.confgen_edit.text())
+        err = ensure_conforge_ready()
         if err:
             QMessageBox.warning(self, self.windowTitle(), err)
             return
@@ -234,5 +202,4 @@ class ConforgeConformationsDialog(QDialog):
             timeout_s=int(self.timeout_sb.value()),
             include_input=bool(self.original_cb.isChecked()),
             keep_hydrogens=bool(self.keep_hs_cb.isChecked()),
-            confgen_path=(self.confgen_edit.text() or "").strip(),
         )

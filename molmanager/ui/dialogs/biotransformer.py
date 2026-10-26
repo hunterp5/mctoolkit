@@ -18,13 +18,10 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
-    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -43,10 +40,6 @@ from ...predictions.biotransformer_metabolites import (
     METABOLISM_OPTIONS,
     install_ready_message,
     uses_cyp_mode,
-)
-from ...platform_support.bundled_paths import (
-    biotransformer_models_dir,
-    set_configured_biotransformer_jar,
 )
 from ...platform_support.memory_guards import check_product_enumeration, clamp_max_products_ui
 from ...workers.biotransformer_worker import BiotransformerRequest, BiotransformerWorker
@@ -139,17 +132,6 @@ class BiotransformerDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
-        self.browse_btn = QPushButton("Browse JAR…")
-        self.browse_btn.setToolTip(
-            "Point at an existing BioTransformer JAR. supportfiles/ and btkb/ (or database/) "
-            "must sit next to it."
-        )
-        btn_row.addWidget(self.browse_btn)
-        self.install_btn = QPushButton("Install…")
-        self.install_btn.setToolTip(
-            "Download the official BioTransformer 3 package from Bitbucket (~120 MB)."
-        )
-        btn_row.addWidget(self.install_btn)
         btn_row.addStretch()
         self.predict_btn = QPushButton("Predict")
         btn_row.addWidget(self.predict_btn)
@@ -157,12 +139,9 @@ class BiotransformerDialog(QDialog):
 
     def _wire_biotransformer_ui(self) -> None:
         self.subset_combo.currentIndexChanged.connect(self._sync_cyp_mode)
-        self.browse_btn.clicked.connect(self._browse_jar)
-        self.install_btn.clicked.connect(self._install_from_bitbucket)
         self.predict_btn.clicked.connect(self._on_predict)
         self._refresh_structure_sources()
         self._sync_cyp_mode()
-        self._refresh_install_state()
         self.adjustSize()
         make_window_minimizable(self)
 
@@ -173,68 +152,10 @@ class BiotransformerDialog(QDialog):
         metabolism = str(self.subset_combo.currentData() or "allHuman")
         self.cyp_combo.setEnabled(uses_cyp_mode(metabolism))
 
-    def _refresh_install_state(self) -> None:
-        msg = install_ready_message()
-        need_package = msg is not None and (
-            "JAR not found" in msg or "knowledge-base" in msg or "supportfiles" in msg
-        )
-        self.install_btn.setEnabled(need_package)
-
-    def _browse_jar(self) -> None:
-        start = biotransformer_models_dir()
-        start.mkdir(parents=True, exist_ok=True)
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "BioTransformer JAR",
-            str(start),
-            "JAR files (*.jar);;All files (*.*)",
-        )
-        if not path:
-            return
-        set_configured_biotransformer_jar(path)
-        self._refresh_install_state()
-
-    def _install_from_bitbucket(self) -> None:
-        dest = biotransformer_models_dir()
-        reply = QMessageBox.question(
-            self,
-            TOOL_PREDICT_METABOLITES,
-            "Download BioTransformer 3 (~120 MB) from Bitbucket into:\n\n"
-            f"{dest}\n\n"
-            "The files are LGPL-3 and are not stored in git. Continue?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
-        if reply != QMessageBox.Yes:
-            return
-        from ...predictions.biotransformer_install import install_biotransformer
-
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            jar = install_biotransformer(dest, progress=None)
-        except Exception as exc:
-            QMessageBox.warning(
-                self,
-                TOOL_PREDICT_METABOLITES,
-                f"Could not install BioTransformer:\n{exc}\n\n"
-                "Run: python scripts/bootstrap_biotransformer.py",
-            )
-            return
-        finally:
-            QApplication.restoreOverrideCursor()
-        set_configured_biotransformer_jar(jar)
-        self._refresh_install_state()
-        still = install_ready_message()
-        if still:
-            QMessageBox.warning(self, TOOL_PREDICT_METABOLITES, still)
-        else:
-            QMessageBox.information(self, TOOL_PREDICT_METABOLITES, f"Installed:\n{jar}")
-
     def _on_predict(self) -> None:
         missing = install_ready_message()
         if missing:
             QMessageBox.warning(self, TOOL_PREDICT_METABOLITES, missing)
-            self._refresh_install_state()
             return
         if self.parent_app is None:
             return

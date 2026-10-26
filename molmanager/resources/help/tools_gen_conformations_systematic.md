@@ -14,7 +14,7 @@ Use for flexible ligands when you want a systematic (not stochastic) search, or 
 
 ## Inputs / scope
 
-Scoped rows with valid structures; **Selected Rows Only** when checked. Output may go to table and/or SDF file. Open Babel is installed with the project (`pip install openbabel`). The dialog defaults to that `obabel`. You can override the path or drop a copy under `resources/bin`.
+Scoped rows with valid structures; **Selected Rows Only** when checked. Output may go to table and/or SDF file. Open Babel is installed with the project (`pip install openbabel`). The `obabel` path is **Settings → Configure → Open Babel**. A copy under `resources/bin` is used when that path is blank.
 
 Confab requires a 3D starting geometry. If a row is 2D, MolManager embeds once with ETKDG before calling Confab.
 
@@ -23,7 +23,6 @@ Confab requires a 3D starting geometry. If a row is 2D, MolManager embeds once w
 - **Max conformers** - Confab `--conf` cap on how many poses to test (default 100). RMSD and energy cutoffs usually keep fewer.
 - **RMSD cutoff** - diversity cutoff (`--rcutoff`, default 0.5 Å).
 - **Energy cutoff** - keep poses within this window of the lowest Confab energy (`--ecutoff`, default 50 kcal/mol).
-- **Open Babel** - path to `obabel`. Defaults to the project pip install.
 - **Options** - **Include input conformation**, **Keep explicit hydrogens**, **Selected Rows Only**, and **Add as Entries**.
 - **Save to SDF** - path and **Browse...** on one line below Options.
 

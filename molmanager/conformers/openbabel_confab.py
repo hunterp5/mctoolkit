@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 MISSING_OPENBABEL_MSG = (
     "Open Babel is required for Systematic conformers. Install it with "
     "`pip install openbabel` (included in requirements-core), place obabel under "
-    "resources/bin, or put `obabel` on PATH."
+    "resources/bin, put `obabel` on PATH, or set it under Settings → Configure → Open Babel."
 )
 
 CONFAB_CLI_TIMEOUT_S = 600

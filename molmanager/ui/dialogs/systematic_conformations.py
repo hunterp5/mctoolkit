@@ -22,19 +22,12 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QDialog,
     QDoubleSpinBox,
-    QFileDialog,
     QFormLayout,
-    QHBoxLayout,
-    QLineEdit,
     QMessageBox,
-    QPushButton,
     QSpinBox,
     QVBoxLayout,
-    QWidget,
 )
 
-from ...platform_support.bundled_paths import default_external_executable
-from ...platform_support.tool_paths import TOOL_OBABEL, configured_executable
 from ...conformers.openbabel_confab import SystematicConfParams, ensure_openbabel_confab_ready
 from ..qt_widget_utils import make_window_minimizable
 from .conformer_output import (
@@ -92,23 +85,6 @@ class SystematicConformationsDialog(QDialog):
         )
         form.addRow("Energy cutoff:", self.energy_sb)
 
-        exe_row = QHBoxLayout()
-        exe_row.setContentsMargins(0, 0, 0, 0)
-        self.obabel_edit = QLineEdit(
-            configured_executable(TOOL_OBABEL) or default_external_executable("obabel")
-        )
-        self.obabel_edit.setToolTip(
-            "Open Babel executable. Defaults to Settings → Configure → Open Babel, "
-            "a bundled copy under resources/bin, or the pip wheel (`openbabel/bin/obabel`)."
-        )
-        exe_row.addWidget(self.obabel_edit, 1)
-        btn_e = QPushButton("Browse…")
-        btn_e.clicked.connect(self._browse_obabel)
-        exe_row.addWidget(btn_e)
-        exe_w = QWidget()
-        exe_w.setLayout(exe_row)
-        form.addRow("Open Babel:", exe_w)
-
         root.addLayout(form)
 
         self.original_cb = QCheckBox("Include input conformation")
@@ -145,17 +121,10 @@ class SystematicConformationsDialog(QDialog):
         self.run_btn.clicked.connect(self._try_accept)
         make_window_minimizable(self)
 
-    def _browse_obabel(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open Babel executable", self.obabel_edit.text() or "", "All files (*.*)"
-        )
-        if path:
-            self.obabel_edit.setText(path)
-
     def _try_accept(self) -> None:
         if not self.output_panel.validate(self):
             return
-        err = ensure_openbabel_confab_ready(self.obabel_edit.text())
+        err = ensure_openbabel_confab_ready()
         if err:
             QMessageBox.warning(self, self.windowTitle(), err)
             return
@@ -174,5 +143,4 @@ class SystematicConformationsDialog(QDialog):
             energy_cutoff=float(self.energy_sb.value()),
             include_original=bool(self.original_cb.isChecked()),
             keep_hydrogens=bool(self.keep_hs_cb.isChecked()),
-            obabel_path=(self.obabel_edit.text() or "").strip(),
         )

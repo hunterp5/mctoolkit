@@ -310,7 +310,7 @@ macOS has no official Gnina binary. See **Protein → Dock Ligand** in the app a
 
 ### Systematic conformers (Open Babel)
 
-**Chemistry → Conformations → Generate → Systematic…** uses Open Babel Confab. Open Babel is a project dependency (`pip install openbabel`, also in `requirements-core.txt`). The dialog defaults to that wheel’s `obabel` (`site-packages/openbabel/bin/obabel`). You can still override the path, or place `obabel.exe` / `obabel` under `molmanager/resources/bin/<platform>/` to prefer a bundled copy.
+**Chemistry → Conformations → Generate → Systematic…** uses Open Babel Confab. Open Babel is a project dependency (`pip install openbabel`, also in `requirements-core.txt`). A blank **Settings → Configure → Open Babel** path uses that wheel’s `obabel` (`site-packages/openbabel/bin/obabel`). Place `obabel.exe` / `obabel` under `molmanager/resources/bin/<platform>/` to prefer a bundled copy, or point Configure at a specific executable.
 
 Distance-geometry ensembles remain **Chemistry → Conformations → Generate → Stochastic…** (RDKit ETKDG; no Open Babel).
 
@@ -322,9 +322,9 @@ Distance-geometry ensembles remain **Chemistry → Conformations → Generate �
 
 **Chemistry → Conformations → Generate → CONFORGE…** uses CONFORGE from [CDPKit](https://cdpkit.org).
 
-On **Windows with Python 3.11**, `pip install cdpkit` (and `pip install -e ".[conforge]"`) will try to compile from source and fail — PyPI has wheels for Windows 3.10/3.12/3.14, not 3.11. Install the CDPKit **MSVC** package from [GitHub Releases](https://github.com/molinfo-vienna/CDPKit/releases), then Browse to `confgen.exe` (usually `C:\Program Files\CDPKit\Bin\confgen.exe`) or add that `Bin` folder to PATH. MolManager also looks in `Program Files\CDPKit\Bin` automatically.
+On **Windows with Python 3.11**, `pip install cdpkit` (and `pip install -e ".[conforge]"`) will try to compile from source and fail — PyPI has wheels for Windows 3.10/3.12/3.14, not 3.11. Install the CDPKit **MSVC** package from [GitHub Releases](https://github.com/molinfo-vienna/CDPKit/releases), then set `confgen.exe` under **Settings → Configure → CONFORGE** (usually `C:\Program Files\CDPKit\Bin\confgen.exe`) or add that `Bin` folder to PATH. MolManager also looks in `Program Files\CDPKit\Bin` automatically.
 
-On **Linux/macOS**, `pip install cdpkit` uses a wheel when one exists for your Python version. You can still use a `confgen` binary from PATH, `resources/bin/<platform>/`, or Browse.
+On **Linux/macOS**, `pip install cdpkit` uses a wheel when one exists for your Python version. You can still use a `confgen` binary from PATH, `resources/bin/<platform>/`, or **Settings → Configure → CONFORGE**.
 
 ### Guided optional setup script
 
@@ -358,7 +358,7 @@ The JAR is **not** in git. Install a JRE so `java` is on `PATH`, then download B
 python scripts/bootstrap_biotransformer.py
 ```
 
-That places the official Bitbucket package (`BioTransformer3.0_20230525.jar`, `btkb/`, `supportfiles/`) in `molmanager/resources/models/biotransformer/`. You can also **Browse JAR…** in Predict Metabolites, or set `MOLMANAGER_BIOTRANSFORMER_JAR` (the knowledge-base folder and `supportfiles/` must sit next to the JAR). Manual download: [Bitbucket](https://bitbucket.org/wishartlab/biotransformer3.0jar) / [GitHub](https://github.com/Wishartlab-openscience/Biotransformer). Official docs target UNIX; on Windows try a current JRE, or run the JAR under WSL.
+That places the official Bitbucket package (`BioTransformer3.0_20230525.jar`, `btkb/`, `supportfiles/`) in `molmanager/resources/models/biotransformer/`. You can also **Browse JAR…** under **Settings → Configure → BioTransformer**, or set `MOLMANAGER_BIOTRANSFORMER_JAR` (the knowledge-base folder and `supportfiles/` must sit next to the JAR). Manual download: [Bitbucket](https://bitbucket.org/wishartlab/biotransformer3.0jar) / [GitHub](https://github.com/Wishartlab-openscience/Biotransformer). Official docs target UNIX; on Windows try a current JRE, or run the JAR under WSL.
 
 ---
 

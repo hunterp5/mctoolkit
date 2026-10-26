@@ -301,7 +301,6 @@ def test_biotransformer_dialog_warns_on_predict_when_missing(qapp, monkeypatch) 
     ]
     assert dlg.cyp_combo.currentData() == DEFAULT_CYP_MODE
     assert dlg.predict_btn.isEnabled()
-    assert dlg.browse_btn.isEnabled()
     dlg.predict_btn.click()
     assert shown == ["Java is not on PATH."]
     dlg.subset_combo.setCurrentIndex(

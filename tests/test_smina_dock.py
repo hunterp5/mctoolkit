@@ -179,7 +179,7 @@ def test_smina_dialog_defaults_to_resolved_executable(qapp):  # noqa: ARG001
     from molmanager.platform_support.bundled_paths import default_external_executable
 
     dlg = GninaDockDialog(None)
-    assert dlg.edit_exe.text() == default_external_executable("gnina")
+    assert dlg._gnina_executable() == default_external_executable("gnina")
     assert not hasattr(dlg, "progress")
     assert dlg.save_sdf_cb.isChecked()
     assert not dlg.minimize_poses_cb.isChecked()

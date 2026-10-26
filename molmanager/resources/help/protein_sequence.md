@@ -23,8 +23,7 @@ You need at least two sequences to Align.
 ## Options
 
 - **Rename** / **Remove** — edit the pool (double-click a row to rename).
-- **Align** — run MAFFT. **Cancel** stops a long job.
-- **MAFFT** — executable (`mafft.bat` / `mafft` / `mafft.exe`) or the all-in-one install folder. **Browse…** picks a file; **Folder…** picks a directory. Defaults to PATH or `molmanager/resources/bin/<platform>/`.
+- **Align** — run MAFFT. **Cancel** stops a long job. The executable is **Settings → Configure → MAFFT** (a file or the all-in-one install folder). A blank path uses PATH or `molmanager/resources/bin/<platform>/`.
 - **Alignment** — monospace wrap with conservation coloring (green = identical column, gold = majority, gray = gap).
 - **Identity** — pairwise percent identity over columns where both sequences have a residue.
 - **Export FASTA…** / **Export Clustal…** — write the aligned result.
@@ -33,7 +32,7 @@ You need at least two sequences to Align.
 
 1. Choose **Protein → Sequence…**.
 2. Add sequences from FASTA, paste, and/or **Add from Protein Viewer**.
-3. Set the MAFFT path if the default is empty, then **Align**.
+3. Set the MAFFT path under **Settings → Configure → MAFFT** if it is not on PATH, then **Align**.
 4. Inspect the colored alignment and identity matrix; export FASTA or Clustal if needed.
 
 ## Use cases

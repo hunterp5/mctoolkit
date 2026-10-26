@@ -24,7 +24,6 @@ pytest.importorskip("PyQt5.QtWidgets")
 
 from PyQt5.QtWidgets import QGroupBox
 
-from molmanager.platform_support.bundled_paths import default_external_executable
 from molmanager.ui.dialogs.systematic_conformations import SystematicConformationsDialog
 
 
@@ -38,7 +37,7 @@ def test_systematic_conformations_dialog_defaults(qapp):  # noqa: ARG001
     assert p.include_original is False
     assert p.keep_hydrogens is False
     assert dlg.output_panel.add_to_table_cb.text() == "Add as Entries"
-    assert dlg.obabel_edit.text() == default_external_executable("obabel")
+    assert p.obabel_path == ""
     option_boxes = [b for b in dlg.findChildren(QGroupBox) if b.title() == "Options"]
     assert option_boxes
     assert dlg.output_panel.add_to_table_cb.parent() is option_boxes[0]
@@ -55,12 +54,11 @@ def test_systematic_conformations_dialog_params(qapp):  # noqa: ARG001
     dlg.energy_sb.setValue(25.0)
     dlg.original_cb.setChecked(True)
     dlg.keep_hs_cb.setChecked(True)
-    dlg.obabel_edit.setText("/opt/obabel")
     p = dlg.params()
     assert p.num_confs == 40
     assert p.rmsd_cutoff == pytest.approx(0.8)
     assert p.energy_cutoff == pytest.approx(25.0)
     assert p.include_original is True
     assert p.keep_hydrogens is True
-    assert p.obabel_path == "/opt/obabel"
+    assert p.obabel_path == ""
     dlg.close()

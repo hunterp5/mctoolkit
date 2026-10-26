@@ -198,16 +198,6 @@ class GninaDockDialog(QDialog):
         io_form = QFormLayout(io_gb)
         io_form.setContentsMargins(8, 6, 8, 6)
         io_form.setSpacing(4)
-        self.edit_exe = QLineEdit(
-            configured_executable(TOOL_GNINA) or default_external_executable("gnina")
-        )
-        self.edit_exe.setToolTip(
-            "Gnina command. On Windows this is the Linux binary on the WSL PATH (gnina). "
-            "On Linux, uses molmanager/resources/bin/<platform>/gnina when bundled, otherwise PATH. "
-            "The default comes from Settings → Configure → Gnina."
-        )
-        io_form.addRow("Gnina:", _browse_path_row(self.edit_exe, self._browse_exe))
-
         self.edit_receptor = QLineEdit()
         self.edit_receptor.setPlaceholderText("receptor.pdbqt")
         self.edit_receptor.setToolTip(
@@ -660,13 +650,6 @@ class GninaDockDialog(QDialog):
         self.raise_()
         self.activateWindow()
 
-    def _browse_exe(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Gnina executable", self.edit_exe.text(), "All files (*.*)"
-        )
-        if path:
-            self.edit_exe.setText(path)
-
     def _browse_receptor(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Receptor PDB / PDBQT", "", _RECEPTOR_FILE_FILTER
@@ -913,8 +896,7 @@ class GninaDockDialog(QDialog):
         return effective_out_path(text, save_sdf=self.save_sdf_cb.isChecked())
 
     def _gnina_executable(self) -> str:
-        text = (self.edit_exe.text() or "").strip()
-        return text or configured_executable(TOOL_GNINA) or default_external_executable("gnina")
+        return configured_executable(TOOL_GNINA) or default_external_executable("gnina")
 
     def _smina_executable(self) -> str:
         return self._gnina_executable()
@@ -1273,7 +1255,6 @@ class GninaDockDialog(QDialog):
     def gnina_session_state(self) -> dict:
         """Paths and options to restore this Gnina dialog in a later session."""
         return {
-            "exe": (self.edit_exe.text() or "").strip(),
             "receptor": (self.edit_receptor.text() or "").strip(),
             "ligand_source": str(self.combo_ligand_source.currentData() or "file"),
             "ligand": (self.edit_ligand.text() or "").strip(),
@@ -1344,9 +1325,6 @@ class GninaDockDialog(QDialog):
             if isinstance(state.get(key), bool):
                 widget.setChecked(state[key])
 
-        exe = str(state.get("exe") or "").strip()
-        if exe:
-            self.edit_exe.setText(exe)
         _set_line(self.edit_receptor, "receptor")
         _combo(self.combo_ligand_source, "ligand_source")
         _set_line(self.edit_ligand, "ligand")

@@ -32,8 +32,9 @@ from pathlib import Path
 from .structure_components import VALID_SEQUENCE_LETTERS
 
 MISSING_MAFFT_MSG = (
-    "MAFFT was not found. Install MAFFT, put it on PATH, or copy the all-in-one folder "
-    "into molmanager/resources/bin/<platform>/ (Windows: mafft.bat). "
+    "MAFFT was not found. Install MAFFT, put it on PATH, copy the all-in-one folder "
+    "into molmanager/resources/bin/<platform>/ (Windows: mafft.bat), "
+    "or set it under Settings → Configure → MAFFT. "
     "See Help → Protein Sequence."
 )
 

@@ -74,7 +74,7 @@ def test_gnina_dialog_uses_configured_executable(qapp) -> None:  # noqa: ARG001
 
     save_tool_path(TOOL_GNINA, "/usr/local/bin/gnina")
     dlg = GninaDockDialog(None)
-    assert dlg.edit_exe.text() == "/usr/local/bin/gnina"
+    assert dlg._gnina_executable() == "/usr/local/bin/gnina"
     dlg.close()
 
 
