@@ -211,8 +211,6 @@ def test_studio_strip_scores_a_loaded_molecule(qapp):
         assert panel._strip._caption.isHidden() is True
         assert panel._strip._mpo_value.text() != "—"
         assert panel._strip._value_labels["MW"].text().startswith("92")
-        assert panel._strip._druglike_details.isHidden()
-        panel._strip._toggle_druglike_details()
         assert panel._strip._druglike_details.isHidden() is False
         assert panel._strip._hbd.text() == "0"
         assert panel._strip._ro5.text().startswith("Ro5")
@@ -254,9 +252,7 @@ def test_rgroup_swap_estimates_the_series_shift():
     ]
     found = rgroup_swap_suggestions("Clc1ccccc1", rows)
     assert len(found) == 1
-    assert found[0].smiles == assemble_rgroup_product(
-        core, (("R1", "Cl[*:1]"), ("R2", "F[*:2]"))
-    )
+    assert found[0].smiles == assemble_rgroup_product(core, (("R1", "Cl[*:1]"), ("R2", "F[*:2]")))
     assert "10.00" in found[0].detail
     assert "+3.00" in found[0].detail
 
@@ -293,7 +289,7 @@ def test_structure_menu_opens_design_studio(qapp, monkeypatch):
         rect = window.table.visualRect(proxy.mapFromSource(source))
         window.show_table_menu(rect.center())
         texts = opened["texts"]
-        assert texts[texts.index("Open in Sketcher…") + 1] == "Open in Design Studio"
+        assert texts[texts.index("Open in Sketcher") + 1] == "Open in Design Studio"
         assert opened["kwargs"] == {}
         assert Chem.MolToSmiles(opened["mol"]) == "CCN"
     finally:
@@ -345,4 +341,63 @@ def test_design_studio_keeps_other_shortcuts_and_takes_undo(qapp):
         panel.shutdown()
         dialog.close()
         host.close()
+        qapp.processEvents()
+
+
+def _menu_labels(sketcher, title: str) -> list[str]:
+    bar = sketcher.layout().menuBar()
+    for action in bar.actions():
+        menu = action.menu()
+        if menu is not None and action.text() == title:
+            return [item.text().replace("&", "") for item in menu.actions()]
+    return []
+
+
+def test_design_studio_has_original_size_clear_and_ring_pictures(qapp):
+    from PyQt5.QtCore import QPoint
+
+    from molmanager.ui.design_studio_panel import DesignStudioPanel
+
+    panel = DesignStudioPanel(None)
+    panel._strip._start_or_coalesce_ionization = lambda *_args, **_kwargs: None
+    dialog = panel.create_floating_dialog(None)
+    dialog.resize(1100, 700)
+    dialog.show()
+    qapp.processEvents()
+    sketcher = panel._sketcher
+    try:
+        assert "Clear Sketch" in _menu_labels(sketcher, "Edit")
+        assert "Original size" in _menu_labels(sketcher, "View")
+        assert "Fit structure to window" in _menu_labels(sketcher, "View")
+        assert sketcher.tb_structure_status.parent() is panel._status
+        assert not sketcher._status_bar.isVisible()
+        assert panel._status.height() == sketcher._status_bar.height()
+        assert not panel._status.isSizeGripEnabled()
+        benzene = sketcher._ring_btn_by_key["Benzene"].icon()
+        pyridine = sketcher._ring_btn_by_key["Pyridine"].icon()
+        assert not benzene.isNull() and not pyridine.isNull()
+        assert benzene.cacheKey() != pyridine.cacheKey()
+
+        assert panel.load_molecule(Chem.MolFromSmiles("c1ccncc1"), caption="pyridine")
+        qapp.processEvents()
+        assert sketcher._act_original_size.isEnabled()
+        opened = [(node["id"], node["pos"].x(), node["pos"].y()) for node in sketcher.canvas.nodes]
+        for node in sketcher.canvas.nodes:
+            node["pos"] = QPoint(node["pos"].x() + 70, node["pos"].y() - 30)
+        sketcher.canvas._view_scale = 2.0
+        sketcher._act_original_size.trigger()
+        restored = [
+            (node["id"], node["pos"].x(), node["pos"].y()) for node in sketcher.canvas.nodes
+        ]
+        assert restored == opened
+        assert sketcher.canvas._view_scale == 1.0
+        assert panel._status.currentMessage().startswith("Restored the size")
+
+        sketcher._act_canvas_clear.trigger()
+        assert sketcher.canvas.nodes == []
+        assert sketcher._act_original_size.isEnabled() is False
+        assert panel._status.currentMessage() == "Sketch cleared."
+    finally:
+        panel.shutdown()
+        dialog.close()
         qapp.processEvents()
