@@ -211,6 +211,11 @@ def test_studio_strip_scores_a_loaded_molecule(qapp):
         assert panel._strip._caption.isHidden() is True
         assert panel._strip._mpo_value.text() != "—"
         assert panel._strip._value_labels["MW"].text().startswith("92")
+        assert panel._strip._druglike_details.isHidden()
+        panel._strip._toggle_druglike_details()
+        assert panel._strip._druglike_details.isHidden() is False
+        assert panel._strip._hbd.text() == "0"
+        assert panel._strip._ro5.text().startswith("Ro5")
     finally:
         panel.shutdown()
         panel.close()

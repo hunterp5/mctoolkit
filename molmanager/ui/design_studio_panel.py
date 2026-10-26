@@ -26,7 +26,7 @@ import threading
 from typing import Any
 
 from PyQt5.QtCore import QEvent, QObject, QRunnable, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QColor, QFont
 from PyQt5.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -88,6 +88,63 @@ def _fmt_num(value: float | None, digits: int = 2) -> str:
     if value is None:
         return "—"
     return f"{value:.{digits}f}"
+
+
+def _desirability_color(value: float | None) -> QColor | None:
+    """Blend a low score toward red and a high score toward green."""
+    if value is None:
+        return None
+    amount = min(1.0, max(0.0, float(value)))
+    worse = (252, 220, 220)
+    better = (170, 214, 186)
+    return QColor(
+        int(worse[0] * (1.0 - amount) + better[0] * amount),
+        int(worse[1] * (1.0 - amount) + better[1] * amount),
+        int(worse[2] * (1.0 - amount) + better[2] * amount),
+    )
+
+
+def _paint_desirability(label: QLabel, value: float | None, *, compact: bool = False) -> None:
+    color = _desirability_color(value)
+    if color is None:
+        label.setStyleSheet("")
+        return
+    pad = "0" if compact else "1px 4px"
+    radius = "2px" if compact else "0"
+    label.setStyleSheet(
+        f"background-color: {color.name()}; color: #141414; "
+        f"padding: {pad}; border-radius: {radius};"
+    )
+
+
+def _section_label(text: str) -> QLabel:
+    label = QLabel(text)
+    font = QFont(label.font())
+    font.setBold(True)
+    label.setFont(font)
+    return label
+
+
+def _value_label() -> QLabel:
+    label = QLabel("—")
+    label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    return label
+
+
+class _DetailToggle(QWidget):
+    """Five desirability marks. A click shows or hides the druglike value grid."""
+
+    toggled = pyqtSignal()
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Show or hide molecular weight, LogP, TPSA, QED, and rotatable bonds.")
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 — Qt API
+        if event.button() == Qt.LeftButton:
+            self.toggled.emit()
+        super().mousePressEvent(event)
 
 
 class _StudioIonSignals(QObject):
@@ -154,11 +211,8 @@ class DesignPropertyStrip(QWidget):
         self._caption.setWordWrap(True)
         root.addWidget(self._caption)
 
-        self._mpo_title = QLabel("Druglike MPO")
-        title_font = QFont(self._mpo_title.font())
-        title_font.setBold(True)
-        self._mpo_title.setFont(title_font)
-        self._mpo_title.setToolTip(
+        druglike = _section_label("Druglike")
+        druglike.setToolTip(
             "Geometric mean of desirability for MW, LogP, TPSA, QED, and rotatable bonds. "
             "MW scores 1 at or below 350 and 0 at or above 500. "
             "LogP is 1 at 2.5 and 0 outside 0–5. "
@@ -167,54 +221,110 @@ class DesignPropertyStrip(QWidget):
             "Rotatable bonds score 1 at or below 5 and 0 at or above 10. "
             "One property outside its gate pulls this score to zero."
         )
-        root.addWidget(self._mpo_title)
+        root.addWidget(druglike)
 
+        summary = QHBoxLayout()
         self._mpo_value = QLabel("—")
         mpo_font = QFont(self._mpo_value.font())
         mpo_font.setPointSize(mpo_font.pointSize() + 6)
         mpo_font.setBold(True)
         self._mpo_value.setFont(mpo_font)
-        root.addWidget(self._mpo_value)
+        self._mpo_value.setToolTip("Druglike MPO, from 0 to 1.")
+        summary.addWidget(self._mpo_value)
+        summary.addStretch(1)
+        self._ro5 = QLabel("Ro5")
+        self._ro5.setAlignment(Qt.AlignCenter)
+        self._ro5.setToolTip("Lipinski Rule of Five. Yes means no violations.")
+        summary.addWidget(self._ro5)
+        root.addLayout(summary)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(2)
-        grid.addWidget(QLabel("Property"), 0, 0)
-        grid.addWidget(QLabel("Value"), 0, 1)
-        score_header = QLabel("D")
-        score_header.setToolTip("Desirability, from 0 to 1.")
-        grid.addWidget(score_header, 0, 2)
+        self._marks = _DetailToggle(self)
+        mark_row = QHBoxLayout(self._marks)
+        mark_row.setContentsMargins(0, 0, 0, 0)
+        mark_row.setSpacing(8)
+        self._mark_labels: dict[str, QLabel] = {}
+        for key in ("MW", "LogP", "TPSA", "QED", "RotBonds"):
+            column = QVBoxLayout()
+            column.setSpacing(2)
+            mark = QLabel(self._marks)
+            mark.setFixedSize(18, 10)
+            column.addWidget(mark, 0, Qt.AlignHCenter)
+            name = QLabel(_term_label(key), self._marks)
+            name.setAlignment(Qt.AlignHCenter)
+            column.addWidget(name)
+            mark_row.addLayout(column)
+            self._mark_labels[key] = mark
+        mark_row.addStretch(1)
+        self._marks.toggled.connect(self._toggle_druglike_details)
+        root.addWidget(self._marks)
+
+        self._druglike_details = QWidget(self)
+        detail_grid = QGridLayout(self._druglike_details)
+        detail_grid.setContentsMargins(0, 4, 0, 0)
+        detail_grid.setHorizontalSpacing(10)
+        detail_grid.setVerticalSpacing(2)
+        detail_grid.addWidget(QLabel("Property"), 0, 0)
+        detail_grid.addWidget(QLabel("Value"), 0, 1)
+        score_header = QLabel("Score")
+        score_header.setToolTip("Desirability from 0 to 1. Color follows that score.")
+        detail_grid.addWidget(score_header, 0, 2)
         self._value_labels: dict[str, QLabel] = {}
         self._desirability_labels: dict[str, QLabel] = {}
         for row, key in enumerate(("MW", "LogP", "TPSA", "QED", "RotBonds"), start=1):
-            grid.addWidget(QLabel(_term_label(key)), row, 0)
-            value = QLabel("—")
-            value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            desir = QLabel("—")
-            desir.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            grid.addWidget(value, row, 1)
-            grid.addWidget(desir, row, 2)
+            detail_grid.addWidget(QLabel(_term_label(key)), row, 0)
+            value = _value_label()
+            desir = _value_label()
+            detail_grid.addWidget(value, row, 1)
+            detail_grid.addWidget(desir, row, 2)
             self._value_labels[key] = value
             self._desirability_labels[key] = desir
-        root.addLayout(grid)
+        hbd_row = 6
+        detail_grid.addWidget(QLabel("HBD"), hbd_row, 0)
+        self._hbd = _value_label()
+        detail_grid.addWidget(self._hbd, hbd_row, 1)
+        hba_row = 7
+        detail_grid.addWidget(QLabel("HBA"), hba_row, 0)
+        self._hba = _value_label()
+        detail_grid.addWidget(self._hba, hba_row, 1)
+        self._druglike_details.hide()
+        root.addWidget(self._druglike_details)
 
-        self._hbd_hba = QLabel("HBD / HBA  —")
-        self._ro5 = QLabel("Ro5  —")
-        root.addWidget(self._hbd_hba)
-        root.addWidget(self._ro5)
-
-        self._logd = QLabel("LogD (7.4)  —")
-        self._pka = QLabel("pKa  —")
-        self._cns = QLabel("CNS MPO  —")
-        self._ab_mps = QLabel("AB-MPS  —")
-        for label in (self._logd, self._pka, self._cns, self._ab_mps):
-            label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            root.addWidget(label)
+        root.addWidget(_section_label("Ionization"))
+        ion_grid = QGridLayout()
+        ion_grid.setHorizontalSpacing(10)
+        ion_grid.setVerticalSpacing(2)
+        ion_grid.addWidget(QLabel("Property"), 0, 0)
+        ion_grid.addWidget(QLabel("Value"), 0, 1)
+        ion_score = QLabel("Score")
+        ion_score.setToolTip(
+            "CNS MPO is 0–6, higher is better. AB-MPS is lower when a compound is more druglike. "
+            "Those scores are not desirabilities from 0 to 1."
+        )
+        ion_grid.addWidget(ion_score, 0, 2)
+        self._logd = _value_label()
+        self._pka = _value_label()
+        self._cns = _value_label()
+        self._ab_mps = _value_label()
+        self._cns_score = _value_label()
+        self._ab_mps_score = _value_label()
         self._logd.setToolTip("Heuristic until a Uni-pKa result replaces it.")
         self._cns.setToolTip("Wager CNS MPO (0–6). Heuristic until Uni-pKa finishes.")
+        self._cns_score.setToolTip(self._cns.toolTip())
         self._ab_mps.setToolTip(
             "AbbVie MPS. Lower is more druglike. Heuristic until Uni-pKa finishes."
         )
+        self._ab_mps_score.setToolTip(self._ab_mps.toolTip())
+        for row, name, value, score in (
+            (1, "LogD (7.4)", self._logd, None),
+            (2, "pKa", self._pka, None),
+            (3, "CNS MPO", self._cns, self._cns_score),
+            (4, "AB-MPS", self._ab_mps, self._ab_mps_score),
+        ):
+            ion_grid.addWidget(QLabel(name), row, 0)
+            ion_grid.addWidget(value, row, 1)
+            if score is not None:
+                ion_grid.addWidget(score, row, 2)
+        root.addLayout(ion_grid)
         root.addStretch(1)
 
         self._timer = QTimer(self)
@@ -249,15 +359,15 @@ class DesignPropertyStrip(QWidget):
         self._show_snapshot(snapshot)
         if snapshot.error or mol is None:
             self._pending_mol = None
-            self._pka.setText("pKa  —")
+            self._pka.setText("—")
             self._pka.setToolTip("")
             return
-        self._pka.setText("pKa  …")
+        self._pka.setText("…")
         self._pka.setToolTip("")
         try:
             mol_copy = Chem.Mol(mol)
         except TypeError:
-            self._pka.setText("pKa  —")
+            self._pka.setText("—")
             return
         self._start_or_coalesce_ionization(mol_copy, generation)
 
@@ -268,56 +378,103 @@ class DesignPropertyStrip(QWidget):
             logger.debug("design studio could not read the sketch", exc_info=True)
             return None
 
+    def _toggle_druglike_details(self) -> None:
+        self._druglike_details.setVisible(not self._druglike_details.isVisible())
+
     def _show_snapshot(self, snapshot: DesignSnapshot) -> None:
         if snapshot.error or not snapshot.terms:
             self._mpo_value.setText("—")
+            self._set_ro5(None, None)
             for label in self._value_labels.values():
                 label.setText("—")
             for label in self._desirability_labels.values():
                 label.setText("—")
-            self._hbd_hba.setText("HBD / HBA  —")
-            self._ro5.setText("Ro5  —")
-            self._logd.setText("LogD (7.4)  —")
-            self._cns.setText("CNS MPO  —")
-            self._ab_mps.setText("AB-MPS  —")
+                _paint_desirability(label, None)
+            for mark in self._mark_labels.values():
+                _paint_desirability(mark, None, compact=True)
+            self._hbd.setText("—")
+            self._hba.setText("—")
+            self._logd.setText("—")
+            self._cns.setText("—")
+            self._cns_score.setText("—")
+            self._ab_mps.setText("—")
+            self._ab_mps_score.setText("—")
             return
         self._mpo_value.setText(_fmt_num(snapshot.mpo, 2))
+        self._set_ro5(snapshot.ro5_pass, snapshot.ro5_violations)
         by_key = {term.key: term for term in snapshot.terms}
         for key, label in self._value_labels.items():
             term = by_key.get(key)
             label.setText("—" if term is None else _fmt_num(term.value, _TERM_DIGITS.get(key, 2)))
-        for key, label in self._desirability_labels.items():
-            term = by_key.get(key)
             desir = None if term is None else term.desirability
-            label.setText(_fmt_num(desir, 2))
-        self._hbd_hba.setText(f"HBD / HBA  {snapshot.hbd} / {snapshot.hba}")
-        violations = snapshot.ro5_violations
-        viol_text = "—" if violations is None else str(int(violations))
-        self._ro5.setText(f"Ro5  {snapshot.ro5_pass or '—'} ({viol_text})")
-        self._logd.setText(f"LogD (7.4)  {_fmt_num(snapshot.logd, 2)}")
-        self._cns.setText(f"CNS MPO  {_fmt_num(snapshot.cns_mpo, 2)}")
-        self._ab_mps.setText(f"AB-MPS  {_fmt_num(snapshot.ab_mps, 2)}")
+            score = self._desirability_labels[key]
+            score.setText(_fmt_num(desir, 2))
+            _paint_desirability(score, desir)
+            mark = self._mark_labels[key]
+            _paint_desirability(mark, desir, compact=True)
+            shown = "—" if term is None else label.text()
+            mark.setToolTip(f"{_term_label(key)} {shown}, desirability {_fmt_num(desir, 2)}")
+        self._hbd.setText("—" if snapshot.hbd is None else str(snapshot.hbd))
+        self._hba.setText("—" if snapshot.hba is None else str(snapshot.hba))
+        self._set_ionization_pair(self._logd, None, snapshot.logd)
+        self._set_ionization_pair(self._cns, self._cns_score, snapshot.cns_mpo)
+        self._set_ionization_pair(self._ab_mps, self._ab_mps_score, snapshot.ab_mps)
+
+    def _set_ro5(self, passed: str | None, violations: int | None) -> None:
+        if passed is None:
+            self._ro5.setText("Ro5")
+            self._ro5.setStyleSheet("")
+            self._ro5.setToolTip("Lipinski Rule of Five. Yes means no violations.")
+            return
+        self._ro5.setText(f"Ro5 {passed}")
+        violations_text = "" if violations is None else f" {int(violations)} violation(s)."
+        self._ro5.setToolTip(f"Lipinski Rule of Five.{violations_text}")
+        if passed == "Yes":
+            self._ro5.setStyleSheet(
+                "background-color: #aad6ba; color: #141414; padding: 2px 6px; border-radius: 3px;"
+            )
+        elif passed == "No":
+            self._ro5.setStyleSheet(
+                "background-color: #fcdcdc; color: #141414; padding: 2px 6px; border-radius: 3px;"
+            )
+        else:
+            self._ro5.setStyleSheet("")
+
+    def _set_ionization_pair(
+        self, value_label: QLabel, score_label: QLabel | None, value: float | None
+    ) -> None:
+        text = _fmt_num(value, 2)
+        value_label.setText(text)
+        if score_label is not None:
+            score_label.setText(text)
 
     def _apply_ionization(self, result: dict) -> None:
         logd = result.get("logd")
         cns = result.get("cns_mpo")
         ab_mps = result.get("ab_mps")
         if logd is not None:
-            self._logd.setText(f"LogD (7.4)  {_fmt_num(float(logd), 2)}")
+            self._logd.setText(_fmt_num(float(logd), 2))
             self._logd.setToolTip("Uni-pKa LogD at pH 7.4.")
         pkas = result.get("pka_values") or ()
         if isinstance(pkas, (list, tuple)) and pkas:
-            text = ", ".join(f"{float(value):.2f}" for value in pkas)
-            self._pka.setText(f"pKa  {text}")
+            self._pka.setText(", ".join(f"{float(value):.2f}" for value in pkas))
             self._pka.setToolTip("")
         else:
-            self._pka.setText("pKa  —")
+            self._pka.setText("—")
         if cns is not None:
-            self._cns.setText(f"CNS MPO  {_fmt_num(float(cns), 2)}")
-            self._cns.setToolTip("Wager CNS MPO (0–6) with Uni-pKa.")
+            text = _fmt_num(float(cns), 2)
+            self._cns.setText(text)
+            self._cns_score.setText(text)
+            tip = "Wager CNS MPO (0–6) with Uni-pKa."
+            self._cns.setToolTip(tip)
+            self._cns_score.setToolTip(tip)
         if ab_mps is not None:
-            self._ab_mps.setText(f"AB-MPS  {_fmt_num(float(ab_mps), 2)}")
-            self._ab_mps.setToolTip("AbbVie MPS with Uni-pKa LogD. Lower is more druglike.")
+            text = _fmt_num(float(ab_mps), 2)
+            self._ab_mps.setText(text)
+            self._ab_mps_score.setText(text)
+            tip = "AbbVie MPS with Uni-pKa LogD. Lower is more druglike."
+            self._ab_mps.setToolTip(tip)
+            self._ab_mps_score.setToolTip(tip)
 
     def _start_or_coalesce_ionization(self, mol: Chem.Mol, generation: int) -> None:
         if self._ion_busy:
@@ -351,7 +508,7 @@ class DesignPropertyStrip(QWidget):
             self._apply_ionization(result)
         except (TypeError, ValueError):
             logger.debug("design studio ionization result was unreadable", exc_info=True)
-            self._pka.setText("pKa  —")
+            self._pka.setText("—")
         self._drain_pending_ionization()
 
     def _on_ionization_failed(self, generation: int, msg: str) -> None:
@@ -360,7 +517,7 @@ class DesignPropertyStrip(QWidget):
             self._drain_pending_ionization()
             return
         if msg != "cancelled":
-            self._pka.setText("pKa  —")
+            self._pka.setText("—")
             self._pka.setToolTip(msg or _PKA_FAILED)
         self._drain_pending_ionization()
 

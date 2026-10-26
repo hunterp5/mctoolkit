@@ -20,13 +20,13 @@ The strip reads the molecule on the canvas. SAR Matrix can send a row's structur
 - **Suggestions** — **Update** reads the last MMP run and the table's R-group columns. Click a row to put that analog on the canvas. MMP rows with a small structural change and a large activity shift are marked **activity cliff**, with a SALI value, so the median is not treated as a smooth trend. R-group rows are one-substituent swaps, scored as the reference activity plus the difference in substituent means. Each row also shows the druglike MPO.
 - **Accept** — add the sketch to the table, if it is not already there, and to the **Design queue** list.
 - **Add to table** — append the current sketch as a new row without adding it to the list.
-- **Druglike MPO** — geometric mean of five desirabilities:
+- **Druglike** — the large number is the geometric mean. **Ro5** beside it is Yes or No. Five marks show MW, LogP, TPSA, QED, and rotatable-bond desirability; green is high and red is low. Click the marks to open the values. That table also lists hydrogen-bond donors and acceptors. The score column is the 0–1 desirability, and only that column is colored.
   - **MW** is 1 at or below 350 and 0 at or above 500.
   - **LogP** is 1 at 2.5 and 0 outside 0–5.
   - **TPSA** is 1 at 75 and 0 outside 20–140.
   - **QED** is 0 at or below 0.3 and 1 at or above 0.7.
   - **Rotatable bonds** are 1 at or below 5 and 0 at or above 10.
-- **LogD, pKa, CNS MPO, AB-MPS** — a fast estimate appears first. Uni-pKa replaces LogD, CNS MPO, and AB-MPS when it finishes, and fills pKa.
+- **Ionization** — LogD, pKa, CNS MPO, and AB-MPS. A fast estimate appears first. Uni-pKa replaces LogD, CNS MPO, and AB-MPS when it finishes, and fills pKa. CNS MPO (0–6) and AB-MPS sit in the score column on their own scales.
 - **Design** on the SAR Matrix — open the selected cell. A filled cell loads that row. An empty or predicted cell builds the analog.
 
 ## Workflow
