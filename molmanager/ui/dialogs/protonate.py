@@ -29,6 +29,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
+from ...workflows.tool_requests import ProtonateRequest, row_scope_from_only_selected
 from ..qt_widget_utils import make_window_minimizable
 from .scope import selection_scope_checked
 
@@ -106,10 +107,13 @@ class ProtonateDialog(QDialog):
         self.adjustSize()
         make_window_minimizable(self)
 
-    def config(self) -> tuple[str, float, str, bool, bool]:
-        src = self.src_combo.currentText()
-        ph = float(self.ph_spin.value())
-        col = (self.output_col.text() or "").strip() or "Protonated"
+    def request(self) -> ProtonateRequest:
+        """The protonation the user asked for, without a row snapshot."""
         only_selected = selection_scope_checked(self)
-        render_2d = bool(self.render_cb.isChecked())
-        return src, ph, col, only_selected, render_2d
+        return ProtonateRequest(
+            structure_source=self.src_combo.currentText(),
+            ph=float(self.ph_spin.value()),
+            output_column=(self.output_col.text() or "").strip() or "Protonated",
+            render_2d=bool(self.render_cb.isChecked()),
+            row_scope=row_scope_from_only_selected(only_selected),
+        )
