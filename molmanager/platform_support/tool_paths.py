@@ -27,6 +27,7 @@ TOOL_GNINA = "gnina"
 TOOL_JAVA = "java"
 TOOL_MAFFT = "mafft"
 TOOL_OBABEL = "obabel"
+TOOL_XTB = "xtb"
 
 _SETTINGS_KEYS = {
     TOOL_AMBER: "tools/ambertools_executable",
@@ -35,6 +36,7 @@ _SETTINGS_KEYS = {
     TOOL_JAVA: "tools/java_executable",
     TOOL_MAFFT: "tools/mafft_executable",
     TOOL_OBABEL: "tools/obabel_executable",
+    TOOL_XTB: "tools/xtb_executable",
 }
 
 
