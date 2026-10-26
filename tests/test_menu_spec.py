@@ -228,6 +228,7 @@ def test_hansch_follows_free_wilson():
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(data.items)]
     assert labels.index("Hansch…") == labels.index("Free-Wilson…") + 1
     assert labels.index("SAR Matrix…") == labels.index("Hansch…") + 1
+    assert "Drug Design Studio…" not in labels
 
 
 def test_data_table_operations_submenu():
@@ -262,6 +263,7 @@ def test_tools_menu_expands_calculator_random_and_notepad():
         "Notepad",
         "",
         "Sketcher…",
+        "Drug Design Studio…",
     ]
     random = find_submenu(tools.items, "Random")
     assert menu_outline(random.items) == ["Number…", "Molecule…"]

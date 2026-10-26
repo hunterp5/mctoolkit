@@ -248,6 +248,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Draw molecules and reactions interactively.",
             ),
             _e(
+                "tools_design_studio",
+                "Drug Design Studio",
+                "Drug Design Studio",
+                "Tools → Drug Design Studio. Floating sketcher with a live descriptor and MPO strip.",
+            ),
+            _e(
                 "tools_gen_conformations",
                 "Generate Conformations",
                 "Generate Conformations",

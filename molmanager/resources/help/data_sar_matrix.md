@@ -32,7 +32,7 @@ Two substituent columns and one numeric activity column. Optional third substitu
 
 1. Decompose the series so the table has R1 and R2 columns.
 2. Open **Data → SAR Matrix** and check the suggested columns.
-3. Click a filled cell to select those rows. A predicted cell reports its Free-Wilson value.
+3. Click a filled cell to select those rows. Click an empty or predicted cell to build that analog in the Drug Design Studio. **Design** does the same for the selected cell, including a filled one.
 4. Read the line under the grid. It names an unmade pair only when that prediction beats the best measured cell.
 5. Use the page list when a third substituent is set.
 6. **Export…** writes the current page as CSV. Predicted cells start with ≈. Blank cells were not made and could not be predicted.

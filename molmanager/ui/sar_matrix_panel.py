@@ -37,6 +37,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ..analysis.design_studio import DesignAssemblyError, assemble_rgroup_product
 from ..analysis.sar_matrix import SarCell, SarMatrix, sar_page_csv, sar_recommendation
 from .browsers.chrome import BrowserHostDialog, apply_browser_body_layout, style_browser_data_table
 from .dockable_plot import (
@@ -97,6 +98,8 @@ class SarMatrixPanel(QWidget):
         self._window_title = TOOL_SAR_MATRIX
         self._matrix: SarMatrix | None = None
         self._higher_is_better = True
+        self._series_core: str | None = None
+        self._series_core_state = "missing"
 
         root = QVBoxLayout(self)
         apply_browser_body_layout(root)
@@ -127,6 +130,14 @@ class SarMatrixPanel(QWidget):
         root.addWidget(self._table, 1)
 
         footer = QHBoxLayout()
+        self._design_btn = QPushButton("Design", self)
+        self._design_btn.setToolTip(
+            "Open the selected cell in the Drug Design Studio. "
+            "A filled cell loads that row. An empty cell builds the analog from the "
+            "core and the R-group labels."
+        )
+        style_plot_footer_text_button(self._design_btn)
+        self._design_btn.clicked.connect(self._design_selected_cell)
         self._export_btn = QPushButton("Export…", self)
         self._export_btn.setToolTip(
             "Save the current page as a CSV table. Predicted cells start with ≈. "
@@ -140,6 +151,7 @@ class SarMatrixPanel(QWidget):
         self._send_window_btn.clicked.connect(self._send_to_new_window)
         self._close_btn = make_close_plot_button(self, tooltip="Close this SAR matrix.")
         self._close_btn.clicked.connect(self._close_docked)
+        footer.addWidget(self._design_btn)
         footer.addWidget(self._export_btn)
         footer.addStretch(1)
         footer.addWidget(self._add_to_main_btn)
@@ -163,11 +175,31 @@ class SarMatrixPanel(QWidget):
         self.show()
         return SarMatrixWindow(parent_app, panel=self)
 
-    def set_matrix(self, matrix: SarMatrix, *, higher_is_better: bool) -> None:
-        """Replace the grid. The current page index is kept when the page count allows."""
+    def set_matrix(
+        self,
+        matrix: SarMatrix,
+        *,
+        higher_is_better: bool,
+        series_core: str | None = None,
+        series_core_state: str = "missing",
+    ) -> None:
+        """Replace the grid. The current page index is kept when the page count allows.
+
+        *series_core* is the shared Core SMILES from decomposition. ``conflict`` means
+        the rows do not share one core, so an empty cell cannot be built.
+        """
         previous = self._page_combo.currentIndex()
         self._matrix = matrix
         self._higher_is_better = bool(higher_is_better)
+        if series_core_state == "ok" and series_core:
+            self._series_core = series_core
+            self._series_core_state = "ok"
+        elif series_core_state == "conflict":
+            self._series_core = None
+            self._series_core_state = "conflict"
+        else:
+            self._series_core = None
+            self._series_core_state = "missing"
         self._page_combo.blockSignals(True)
         self._page_combo.clear()
         for page in matrix.pages:
@@ -255,7 +287,7 @@ class SarMatrixPanel(QWidget):
     ) -> QTableWidgetItem:
         if cell is None and predicted is None:
             item = QTableWidgetItem("")
-            item.setToolTip("Not made")
+            item.setToolTip("Not made. Click to build this analog in the Drug Design Studio.")
             item.setBackground(self.palette().alternateBase())
             return item
         if cell is None:
@@ -265,7 +297,11 @@ class SarMatrixPanel(QWidget):
             font = QFont(item.font())
             font.setItalic(True)
             item.setFont(font)
-            item.setToolTip(f"Free-Wilson prediction: {predicted:.4g}\nNot made. {detail}")
+            item.setToolTip(
+                f"Free-Wilson prediction: {predicted:.4g}\n"
+                "Not made. Click to open it in the Drug Design Studio.\n"
+                f"{detail}"
+            )
             self._paint_activity(item, float(predicted), low, high)
             return item
         item = QTableWidgetItem(cell.grid_text())
@@ -275,6 +311,7 @@ class SarMatrixPanel(QWidget):
         for oid, activity in zip(cell.oids, cell.activities):
             shown = "—" if activity is None else f"{activity:.4g}"
             lines.append(f"Row {oid}: {shown}")
+        lines.append("Design opens this structure in the Drug Design Studio.")
         item.setToolTip("\n".join(lines))
         value = cell.display_value()
         if value is not None:
@@ -311,16 +348,95 @@ class SarMatrixPanel(QWidget):
                     f"SAR matrix: Free-Wilson predicts {activity} ≈ {float(value):.4g} "
                     f"for {detail}. Not made."
                 )
+            self._open_cell_in_studio(row, col)
             return
         oids = item.data(Qt.UserRole)
         if not oids:
             status = getattr(app, "status_label", None)
             if status is not None:
                 status.setText("SAR matrix: that combination has not been made.")
+            self._open_cell_in_studio(row, col)
             return
         select = getattr(app, "select_table_oids", None)
         if callable(select):
             select(list(oids), extra_status="SAR matrix", reveal=True)
+
+    def _design_selected_cell(self) -> None:
+        row = self._table.currentRow()
+        col = self._table.currentColumn()
+        if row < 0 or col < 0:
+            self._studio_status("select a SAR cell first.")
+            return
+        self._open_cell_in_studio(row, col)
+
+    def _open_cell_in_studio(self, row: int, col: int) -> None:
+        """Load a filled cell's row, or build an unmade pair, into the design studio."""
+        matrix = self._matrix
+        page = self._current_page()
+        app = self._app
+        item = self._table.item(row, col)
+        if matrix is None or page is None or app is None or item is None:
+            return
+        if row >= len(page.row_labels) or col >= len(page.col_labels):
+            return
+        row_label = page.row_labels[row]
+        col_label = page.col_labels[col]
+        detail = self._pair_detail(row_label, col_label)
+        oids = item.data(Qt.UserRole) or []
+        if oids:
+            self._open_filled_cell(oids, detail)
+            return
+        self._open_unmade_cell(matrix, page, row_label, col_label, detail, item)
+
+    def _open_filled_cell(self, oids: list, detail: str) -> None:
+        app = self._app
+        opener = getattr(app, "open_design_studio_for_molecule", None)
+        mols = getattr(app, "mols", None)
+        mol = mols.get(int(oids[0])) if mols is not None else None
+        if mol is None or not callable(opener):
+            self._studio_status("that row has no structure.")
+            return
+        extra = f" ({len(oids)} in this cell)" if len(oids) > 1 else ""
+        opener(mol, caption=f"Row {oids[0]}{extra}. {detail}")
+
+    def _open_unmade_cell(
+        self,
+        matrix: SarMatrix,
+        page,
+        row_label: str,
+        col_label: str,
+        detail: str,
+        item: QTableWidgetItem,
+    ) -> None:
+        app = self._app
+        opener = getattr(app, "open_design_studio_for_smiles", None)
+        if not callable(opener):
+            return
+        if self._series_core_state == "conflict":
+            self._studio_status("this series has more than one core, so that cell cannot be built.")
+            return
+        if not self._series_core:
+            self._studio_status("no Core column was found, so that cell cannot be built.")
+            return
+        pieces = [(matrix.row_axis, row_label), (matrix.col_axis, col_label)]
+        if matrix.page_axis and page.label:
+            pieces.append((matrix.page_axis, page.label))
+        try:
+            smiles = assemble_rgroup_product(self._series_core, pieces)
+        except DesignAssemblyError as exc:
+            self._studio_status(str(exc))
+            return
+        caption = detail
+        predicted = item.data(_PREDICTION_ROLE)
+        if isinstance(predicted, tuple) and len(predicted) == 2:
+            caption = f"{detail}. Free-Wilson ≈ {float(predicted[0]):.4g}"
+        opener(smiles, caption=caption)
+
+    def _studio_status(self, message: str) -> None:
+        app = self._app
+        status = getattr(app, "status_label", None) if app is not None else None
+        if status is not None:
+            status.setText(f"Drug Design Studio: {message}")
 
     def _export_current_page(self) -> None:
         matrix = self._matrix

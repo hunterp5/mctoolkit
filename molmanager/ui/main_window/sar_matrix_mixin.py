@@ -21,6 +21,7 @@ from __future__ import annotations
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QMessageBox
 
+from ...analysis.design_studio import series_core_from_labels, suggest_core_column
 from ...analysis.sar_matrix import SarMatrixLimit, SarObservation, build_sar_matrix
 from ...services.activity_records import parse_activity_float
 from ..analysis_job_support import ensure_activity_analysis_ready, show_activity_tool_dialog
@@ -28,9 +29,22 @@ from ..qt_widget_utils import qobject_is_deleted
 from ..strings import TOOL_SAR_MATRIX
 from ..table_dataframe import iter_scoped_table_analysis_rows, scoped_table_column_names
 
+_BLANK_LABEL = frozenset({"", "n/a", "na", "none", "null", "nan"})
+
+
+def _label_kept(row_label: str, col_label: str, page_label: str, page_column: str) -> bool:
+    """True when this row would land on the SAR grid."""
+    if (row_label or "").strip().casefold() in _BLANK_LABEL:
+        return False
+    if (col_label or "").strip().casefold() in _BLANK_LABEL:
+        return False
+    if page_column and (page_label or "").strip().casefold() in _BLANK_LABEL:
+        return False
+    return True
+
 
 class SarMatrixMixin:
-    """Open the SAR matrix dialog and dock the colored grid beside the table."""
+    """Open the SAR matrix dialog, then show the colored grid in its own window."""
 
     def open_sar_matrix_dialog(self) -> None:
         activity_cols = ensure_activity_analysis_ready(
@@ -67,21 +81,29 @@ class SarMatrixMixin:
 
     def _on_sar_matrix_dialog_accepted(self, dialog) -> None:
         params = dialog.params()
+        all_cols, _numeric = scoped_table_column_names(self, visible_only=True)
+        core_column = suggest_core_column(all_cols, params.row_column)
         observations: list[SarObservation] = []
+        cores: list[str] = []
         for row_index, row in iter_scoped_table_analysis_rows(
             self,
             visible_only=True,
             only_selected=params.only_selected,
         ):
+            row_label = row.get(params.row_column, "")
+            col_label = row.get(params.column_column, "")
+            page_label = row.get(params.page_column, "") if params.page_column else ""
             observations.append(
                 SarObservation(
                     oid=int(self._table_model.row_oid(row_index)),
-                    row_label=row.get(params.row_column, ""),
-                    col_label=row.get(params.column_column, ""),
-                    page_label=row.get(params.page_column, "") if params.page_column else "",
+                    row_label=row_label,
+                    col_label=col_label,
+                    page_label=page_label,
                     activity=parse_activity_float(row.get(params.activity_column, "")),
                 )
             )
+            if core_column and _label_kept(row_label, col_label, page_label, params.page_column):
+                cores.append(str(row.get(core_column, "")))
         try:
             matrix = build_sar_matrix(
                 observations,
@@ -99,28 +121,59 @@ class SarMatrixMixin:
             )
             return
         higher = params.higher_is_better
+        core_smiles, core_state = (
+            series_core_from_labels(cores) if core_column else (None, "missing")
+        )
         # The grid used to open inside this slot, which is still inside the
         # settings dialog's click. Showing that window and closing it again
         # fail-fasts in CoreMessaging.dll on Windows 10. Open it on the next turn.
-        QTimer.singleShot(
-            0,
-            lambda matrix=matrix, higher=higher: self._open_built_sar_matrix(
-                matrix, higher_is_better=higher
-            ),
-        )
 
-    def _open_built_sar_matrix(self, matrix, *, higher_is_better: bool) -> None:
+        def _open() -> None:
+            self._open_built_sar_matrix(
+                matrix,
+                higher_is_better=higher,
+                series_core=core_smiles,
+                series_core_state=core_state,
+            )
+
+        QTimer.singleShot(0, _open)
+
+    def _open_built_sar_matrix(
+        self,
+        matrix,
+        *,
+        higher_is_better: bool,
+        series_core: str | None = None,
+        series_core_state: str = "missing",
+    ) -> None:
         try:
-            self._show_sar_matrix(matrix, higher_is_better=higher_is_better)
+            self._show_sar_matrix(
+                matrix,
+                higher_is_better=higher_is_better,
+                series_core=series_core,
+                series_core_state=series_core_state,
+            )
         except (RuntimeError, TypeError, ValueError) as exc:
             QMessageBox.warning(self, TOOL_SAR_MATRIX, str(exc) or "Could not open the SAR matrix.")
 
-    def _show_sar_matrix(self, matrix, *, higher_is_better: bool) -> None:
+    def _show_sar_matrix(
+        self,
+        matrix,
+        *,
+        higher_is_better: bool,
+        series_core: str | None = None,
+        series_core_state: str = "missing",
+    ) -> None:
         from ..sar_matrix_panel import SarMatrixPanel, SarMatrixWindow
 
         for widget in self.iter_docked_plot_widgets():
             if isinstance(widget, SarMatrixPanel):
-                widget.set_matrix(matrix, higher_is_better=higher_is_better)
+                widget.set_matrix(
+                    matrix,
+                    higher_is_better=higher_is_better,
+                    series_core=series_core,
+                    series_core_state=series_core_state,
+                )
                 self.show_docked_plot_panel()
                 widget.raise_()
                 self.status_label.setText("SAR matrix: updated in the workspace pane.")
@@ -129,19 +182,26 @@ class SarMatrixMixin:
         if existing is not None and not qobject_is_deleted(existing):
             panel = getattr(existing, "_panel", None)
             if isinstance(panel, SarMatrixPanel):
-                panel.set_matrix(matrix, higher_is_better=higher_is_better)
+                panel.set_matrix(
+                    matrix,
+                    higher_is_better=higher_is_better,
+                    series_core=series_core,
+                    series_core_state=series_core_state,
+                )
                 existing.show()
                 existing.raise_()
+                existing.activateWindow()
                 return
-        # Dock the panel itself. A floating shell that is shown and then
-        # destroyed in the same turn is what Windows aborts on.
         panel = SarMatrixPanel(self, self)
-        panel.set_matrix(matrix, higher_is_better=higher_is_better)
-        dock = getattr(self, "dock_plot_widget", None)
-        if callable(dock) and dock(panel):
-            self._sar_matrix_dialog = None
-            return
+        panel.set_matrix(
+            matrix,
+            higher_is_better=higher_is_better,
+            series_core=series_core,
+            series_core_state=series_core_state,
+        )
         dialog = SarMatrixWindow(self, panel=panel)
         self._sar_matrix_dialog = dialog
         dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
         self.status_label.setText("SAR matrix: opened.")

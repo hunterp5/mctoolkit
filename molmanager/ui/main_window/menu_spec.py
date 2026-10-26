@@ -311,6 +311,15 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             hotkey="tools.sketcher",
             tooltip="Open the structure sketcher to draw or edit molecules.",
         ),
+        action(
+            "Drug Design Studio…",
+            "open_design_studio",
+            tooltip=(
+                "Open a sketcher with a live descriptor and druglike MPO strip in its own window. "
+                "Dock it beside the table from the window footer. "
+                "An empty SAR Matrix cell builds that analog here."
+            ),
+        ),
         tooltips_visible=True,
     ),
     submenu(

@@ -1,6 +1,6 @@
 # Protonate
 
-Protonate writes the dominant protomer at a chosen pH into an output column using a **Uni-pKa** ionization ensemble (MolGpKa SMARTS enumeration + Uni-Mol free energies). It also writes **% Protomer (pH …)** with the dialog pH in the header, the Boltzmann mole fraction of that form at that pH, and **pKa** (macro pKa list, same column as Predict pKa). Optional **Render 2D** depicts that column the same way as **Structure** (image cells; SMILES stay stored, not shown as text). Right-click a Protonated cell for Open in Sketcher, Browser, Render 2D, **Copy** (SMILES, InChI, InChIKey, Molfile, SMARTS), and Paste.
+Protonate writes the dominant protomer at a chosen pH into an output column using a **Uni-pKa** ionization ensemble (MolGpKa SMARTS enumeration + Uni-Mol free energies). It also writes **% Protomer (pH …)** with the dialog pH in the header, the Boltzmann mole fraction of that form at that pH, and **pKa** (macro pKa list, same column as Predict pKa). Optional **Render 2D** depicts that column the same way as **Structure** (image cells; SMILES stay stored, not shown as text). Right-click a Protonated cell for Open in Sketcher, Open in Design Studio, Browser, Render 2D, **Copy** (SMILES, InChI, InChIKey, Molfile, SMARTS), and Paste.
 
 ## Goal
 

@@ -450,9 +450,14 @@ class TableMenuMixin:
             sketch_mol = mol_for_app_depiction(self, sketch_mol, int(oid), depiction_column)
 
         sketch_act = view_poses_act = view_conformers_act = browser_act = render2d_act = None
+        design_act = None
         structure_menu = False
         if chem_col and mol_ctx is not None:
             sketch_act = menu.addAction("Open in Sketcher…")
+            design_act = menu.addAction("Open in Design Studio")
+            design_act.setToolTip(
+                "Open this structure in the Drug Design Studio. The table row stays unchanged."
+            )
             structure_menu = True
         if packed_confs_b64 is not None and pose_column:
             view_poses_act = menu.addAction("View Poses")
@@ -512,6 +517,10 @@ class TableMenuMixin:
         action = menu.exec_(self.table.viewport().mapToGlobal(pos))
         if action == sketch_act and mol_ctx is not None:
             self.open_sketcher(sketch_mol, source_oid=oid)
+        elif design_act is not None and action == design_act and mol_ctx is not None:
+            opener = getattr(self, "open_design_studio_for_molecule", None)
+            if callable(opener):
+                opener(sketch_mol, caption=f"Row {oid}" if oid is not None else "")
         elif view_poses_act is not None and action == view_poses_act and oid is not None:
             column = self.headers[col] if 0 <= col < len(self.headers) else ""
             self.show_packed_poses_in_viewer(int(oid), column)

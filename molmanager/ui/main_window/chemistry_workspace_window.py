@@ -102,6 +102,7 @@ from .fast_prepare_tools_mixin import FastPrepareToolsMixin
 from .fragment_tools_mixin import FragmentToolsMixin
 from .free_wilson_mixin import FreeWilsonMixin
 from .hansch_mixin import HanschMixin
+from .design_studio_mixin import DesignStudioMixin
 from .sar_matrix_mixin import SarMatrixMixin
 from .interaction_fingerprint_mixin import InteractionFingerprintMixin
 from .ingest_export_mixin import IngestExportMixin
@@ -794,6 +795,9 @@ install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.qsar", (QsarM
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.free_wilson", (FreeWilsonMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.hansch", (HanschMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.sar_matrix", (SarMatrixMixin,))
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.design_studio", (DesignStudioMixin,)
+)
 install_window_forwards(
     ChemistryWorkspaceWindow,
     "workspace_tools.interaction_fingerprint",

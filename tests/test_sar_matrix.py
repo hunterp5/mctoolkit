@@ -199,7 +199,9 @@ def test_panel_leaves_an_unmade_cell_blank(qapp):
         empty = panel._table.item(0, 0)
         assert empty is not None
         assert empty.text() == ""
-        assert empty.toolTip() == "Not made"
+        assert empty.toolTip() == (
+            "Not made. Click to build this analog in the Drug Design Studio."
+        )
         filled = panel._table.item(1, 0)
         assert filled is not None
         assert filled.text() == "6"
@@ -238,7 +240,7 @@ def test_panel_draws_a_prediction_in_italic(qapp):
         panel.close()
 
 
-def test_opening_sar_matrix_docks_without_a_transient_window(qapp):
+def test_opening_sar_matrix_shows_an_undocked_window(qapp):
     from PyQt5.QtWidgets import QDialog
 
     from molmanager.ui.main_window import ChemistryWorkspaceWindow
@@ -270,15 +272,15 @@ def test_opening_sar_matrix_docks_without_a_transient_window(qapp):
             for widget in window.iter_docked_plot_widgets()
             if isinstance(widget, SarMatrixPanel)
         ]
-        assert len(panels) == 1
-        assert "Best unmade" in panels[0]._summary.text()
+        assert panels == []
         floating = [
             dialog
             for dialog in qapp.topLevelWidgets()
             if isinstance(dialog, SarMatrixWindow) and dialog.isVisible()
         ]
-        assert floating == []
-        assert "docked" in window.status_label.text()
+        assert len(floating) == 1
+        assert "Best unmade" in floating[0]._panel._summary.text()
+        assert "opened" in window.status_label.text()
     finally:
         window.close()
 
