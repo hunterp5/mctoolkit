@@ -60,11 +60,20 @@ from ...workflows.macro_recipe import (
     ROW_SCOPE_LABELS,
     STEP_CALCULATOR,
     STEP_DESCRIPTORS,
+    STEP_EXPLICIT_H,
+    STEP_EXTRACT,
+    STEP_FAST_PREPARE,
     STEP_FILTER,
     STEP_KINDS,
     STEP_LABELS,
+    STEP_NEUTRALIZE,
+    STEP_PLOT,
+    STEP_POTENCY,
     STEP_PROTONATE,
+    STEP_RANDOM,
     STEP_REACTION,
+    STEP_REMOVE_H,
+    STEP_RGROUP,
     MacroDocumentError,
     MacroRecipe,
     default_step,
@@ -90,12 +99,80 @@ _PAGE = {
     STEP_FILTER: 3,
     STEP_REACTION: 4,
 }
-_SCOPED = {STEP_DESCRIPTORS, STEP_CALCULATOR, STEP_PROTONATE}
+_SUMMARY = 5
+_SCOPED = {
+    STEP_DESCRIPTORS,
+    STEP_CALCULATOR,
+    STEP_PROTONATE,
+    STEP_RANDOM,
+    STEP_EXTRACT,
+    STEP_POTENCY,
+    STEP_EXPLICIT_H,
+    STEP_REMOVE_H,
+    STEP_NEUTRALIZE,
+    STEP_FAST_PREPARE,
+}
 _CLAUSE_LABEL = {
     FILTER_NUMERIC: "Numeric range",
     FILTER_TEXT: "Text",
     FILTER_SUBSTRUCTURE: "Substructure",
 }
+
+
+def _step_summary_text(kind: str, params: dict[str, Any]) -> str:
+    """Read-only description for a recorded step the form does not edit field by field."""
+    if kind == STEP_RANDOM:
+        column = params.get("column") or "a new column"
+        distribution = params.get("distribution") or "random"
+        return (
+            f"Fill {column} with {distribution} numbers. "
+            "Recorded from Tools → Random → Number. "
+            "Later steps use ${stepId.output}."
+        )
+    if kind == STEP_EXTRACT:
+        source = params.get("source_column") or "the reaction column"
+        mode = params.get("mode") or "components"
+        return (
+            f"Extract {mode} from {source}. "
+            "Recorded from Chemistry → Extract Reaction Info. "
+            "Later steps use ${stepId.col_1}, ${stepId.col_2}, and so on."
+        )
+    if kind == STEP_POTENCY:
+        column = params.get("column") or "the activity column"
+        unit = params.get("desired_unit") or "nM"
+        return (
+            f"Standardize {column} to {unit}. "
+            "Recorded from Tools → Potency Standardization. "
+            "Later steps use ${stepId.activity}, and ${stepId.p}, ${stepId.ki}, or ${stepId.pki} "
+            "when those columns were written."
+        )
+    if kind in (STEP_EXPLICIT_H, STEP_REMOVE_H, STEP_NEUTRALIZE):
+        source = params.get("structure_source") or "Structure"
+        return (
+            f"{STEP_LABELS.get(kind, kind)} on {source}. "
+            "Later steps use ${stepId.output}. Render 2D does not delay the next step."
+        )
+    if kind == STEP_FAST_PREPARE:
+        source = params.get("structure_source") or "Structure"
+        return (
+            f"Fast prepare {source}. "
+            "Later steps use ${stepId.output} and ${stepId.fragments}."
+        )
+    if kind == STEP_RGROUP:
+        core = params.get("core_id") or "the core"
+        return f"Enumerate R-groups on {core} and add the products to the table."
+    if kind == STEP_PLOT:
+        state = params.get("state") if isinstance(params.get("state"), dict) else {}
+        plot_type = state.get("plot_type") or "plot"
+        bits = [
+            f"{label} {state.get(key)}"
+            for label, key in (("x", "x"), ("y", "y"), ("color", "color"))
+            if state.get(key)
+        ]
+        detail = f" ({', '.join(bits)})" if bits else ""
+        return f"Restore the plotter to {plot_type}{detail}. Zoom and pan are not saved."
+    label = STEP_LABELS.get(kind, kind)
+    return f"Recorded {label} step. The saved settings are kept when you edit the step id."
 
 
 def _fill_editable(combo: QComboBox, choices: list[str], current: str) -> None:
@@ -220,6 +297,7 @@ class _StepEditor(QWidget):
         self._stack.addWidget(self._build_protonate())
         self._stack.addWidget(self._build_filter())
         self._stack.addWidget(self._build_reaction())
+        self._stack.addWidget(self._build_summary())
         root.addWidget(self._stack, 1)
 
     def load(
@@ -240,10 +318,15 @@ class _StepEditor(QWidget):
         self._scope.setCurrentIndex(scope_index if scope_index >= 0 else 0)
         self._scope.setVisible(kind in _SCOPED)
         self._scope_label.setVisible(kind in _SCOPED)
-        self._stack.setCurrentIndex(_PAGE.get(kind, 0))
         self._refs = list(refs)
         self._sources = list(structure_sources) or ["Structure"]
         self._columns = list(columns)
+        if kind not in _PAGE:
+            self._stack.setCurrentIndex(_SUMMARY)
+            self._summary.setText(_step_summary_text(kind, params))
+            self._loading = False
+            return
+        self._stack.setCurrentIndex(_PAGE[kind])
         if kind == STEP_DESCRIPTORS:
             self._load_descriptors(params)
         elif kind == STEP_CALCULATOR:
@@ -267,6 +350,9 @@ class _StepEditor(QWidget):
         params = dict(step.get("params") or {})
         if kind in _SCOPED:
             params["row_scope"] = str(self._scope.currentData() or "table")
+        if kind not in _PAGE:
+            step["params"] = params
+            return
         if kind == STEP_DESCRIPTORS:
             params["structure_source"] = self._desc_source.currentText().strip() or "Structure"
             params["descriptors"] = self._checked_descriptors()
@@ -285,6 +371,16 @@ class _StepEditor(QWidget):
         elif kind == STEP_REACTION:
             params.update(self._read_reaction(params))
         step["params"] = params
+
+    def _build_summary(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        self._summary = QLabel()
+        self._summary.setWordWrap(True)
+        self._summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(self._summary)
+        layout.addStretch(1)
+        return page
 
     def _build_descriptors(self) -> QWidget:
         page = QWidget()
@@ -829,7 +925,9 @@ class MacroDialog(QDialog):
         hint = QLabel(
             "A later step can use a column this step writes: ${stepId.key}. "
             "Descriptor keys are the internal names (MolWt, not Mol Weight). "
-            "Calculator writes ${stepId.output}. Protonate writes output, percent, and pka."
+            "Calculator and random number write ${stepId.output}. "
+            "Protonate writes output, percent, and pka. "
+            "Extract reaction writes col_1, col_2, and so on."
         )
         hint.setWordWrap(True)
         right_layout.addWidget(hint)
@@ -842,15 +940,21 @@ class MacroDialog(QDialog):
         root.addWidget(self._status)
         actions = QHBoxLayout()
         self._save_btn = QPushButton("Save")
+        self._record_btn = QPushButton("Record")
+        self._plot_btn = QPushButton("Add plot")
         self._run_btn = QPushButton("Run")
         self._stop_btn = QPushButton("Stop")
         self._close_btn = QPushButton("Close")
         self._stop_btn.setEnabled(False)
         self._save_btn.clicked.connect(self._save_clicked)
+        self._record_btn.clicked.connect(self._toggle_recording)
+        self._plot_btn.clicked.connect(self._add_current_plot)
         self._run_btn.clicked.connect(self._run)
         self._stop_btn.clicked.connect(self._runner.cancel)
         self._close_btn.clicked.connect(self.close)
         actions.addWidget(self._save_btn)
+        actions.addWidget(self._record_btn)
+        actions.addWidget(self._plot_btn)
         actions.addWidget(self._run_btn)
         actions.addWidget(self._stop_btn)
         actions.addStretch(1)
@@ -864,7 +968,9 @@ class MacroDialog(QDialog):
             self._remove_step_btn,
             self._up_btn,
             self._down_btn,
+            self._plot_btn,
         )
+        self._recording_doc_id: str | None = None
 
     def _reload_macro_list(self) -> None:
         self._macro_list.blockSignals(True)
@@ -1079,6 +1185,114 @@ class MacroDialog(QDialog):
             return
         save_macro_library(self.edited_library())
 
+    def _toggle_recording(self) -> None:
+        if self._app is None:
+            self._status.setText("Open a table before recording.")
+            return
+        from ..macro_recorder import ensure_recorder
+
+        recorder = ensure_recorder(self._app)
+        if recorder.recording:
+            recorder.remove_listener(self._sync_recording)
+            recipe = recorder.stop()
+            self._recording_doc_id = None
+            self._record_btn.setText("Record")
+            self._install_recorded_recipe(recipe)
+            self._status.setText("Recording stopped. Review the steps, then Run.")
+            return
+        self.add_macro()
+        if self._macro_index < 0:
+            return
+        self._docs[self._macro_index]["name"] = "Recording"
+        self._name.setText("Recording")
+        item = self._macro_list.item(self._macro_index)
+        if item is not None:
+            item.setText("Recording")
+        self._recording_doc_id = str(self._docs[self._macro_index]["id"])
+        recorder.add_listener(self._sync_recording)
+        recorder.start("Recording")
+        self._record_btn.setText("Stop recording")
+        self._status.setText(
+            "Recording. Accept a tool dialog, or Add plot, to add a step."
+        )
+
+    def _add_current_plot(self) -> None:
+        if self._app is None:
+            self._status.setText("Open a table before adding a plot.")
+            return
+        state = self._app.current_plot_session_state()
+        if not state:
+            self._status.setText("Open a plotter before adding it to the macro.")
+            return
+        from ...workflows.macro_recipe import new_step_id
+        from ...workflows.macro_record import plot_step
+        from ..command_dispatch import dispatch_step
+        from ..macro_recorder import ensure_recorder
+
+        recorder = ensure_recorder(self._app)
+        if recorder.recording:
+            handle = dispatch_step(self._app, plot_step(state), {})
+            outcome = handle.outcome
+            if outcome is not None and not outcome.ok:
+                self._status.setText(outcome.error or "The plot could not be added.")
+                return
+            self._status.setText("Added the current plot settings.")
+            return
+        if self._macro_index < 0:
+            self.add_macro()
+        if self._macro_index < 0:
+            return
+        self._commit_step()
+        doc = self._docs[self._macro_index]
+        existing = {str(step.get("id") or "") for step in doc["steps"]}
+        step = plot_step(state)
+        step.id = new_step_id(STEP_PLOT, existing)
+        doc["steps"].append(step_to_json(step))
+        self._step_index = len(doc["steps"]) - 1
+        self._reload_steps()
+        self._show_step()
+        self._status.setText("Added the current plot settings.")
+
+    def _sync_recording(self) -> None:
+        if not self._recording_doc_id:
+            return
+        from ..macro_recorder import ensure_recorder
+        from ...workflows.macro_recipe import step_to_json
+
+        recorder = ensure_recorder(self._app)
+        index = next(
+            (i for i, doc in enumerate(self._docs) if str(doc.get("id")) == self._recording_doc_id),
+            -1,
+        )
+        if index < 0:
+            return
+        self._docs[index]["steps"] = [step_to_json(step) for step in recorder.steps]
+        if index != self._macro_index:
+            return
+        self._step_index = len(self._docs[index]["steps"]) - 1
+        self._reload_steps()
+        self._show_step()
+
+    def _install_recorded_recipe(self, recipe) -> None:
+        from ...workflows.macro_recipe import recipe_to_json
+
+        if self._recording_doc_id:
+            return
+        payload = recipe_to_json(recipe)
+        index = next(
+            (i for i, doc in enumerate(self._docs) if str(doc.get("name")) == recipe.name),
+            -1,
+        )
+        if index < 0:
+            self._docs.append(payload)
+            self._macro_index = len(self._docs) - 1
+        else:
+            self._docs[index] = payload
+            self._macro_index = index
+        self._step_index = len(payload["steps"]) - 1
+        self._reload_macro_list()
+        self._show_macro()
+
     def _run(self) -> None:
         if self._runner.is_running or self._macro_index < 0:
             return
@@ -1108,6 +1322,7 @@ class MacroDialog(QDialog):
 
     def _set_busy(self, busy: bool) -> None:
         self._run_btn.setEnabled(not busy)
+        self._record_btn.setEnabled(not busy)
         self._save_btn.setEnabled(not busy)
         self._stop_btn.setEnabled(busy)
         self._macro_list.setEnabled(not busy)
