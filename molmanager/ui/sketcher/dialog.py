@@ -830,12 +830,16 @@ class SketcherDialog(QDialog):
         return found
 
     def _sketch_owns_edit_hotkeys(self) -> bool:
-        """Sketch edit keys apply only while this window (or an embedded canvas) is active."""
+        """Sketch edit keys apply while this window, or the window hosting an embed, is active.
+
+        Other application shortcuts stay enabled. Only undo, redo, copy, paste,
+        delete, and keys the sketch itself uses are held off the table.
+        """
         if not self.isVisible():
             return False
         if self._embedded:
-            focus = QApplication.focusWidget()
-            return focus is not None and (focus is self or self.isAncestorOf(focus))
+            window = self.window()
+            return window is not None and bool(window.isActiveWindow())
         return self.isActiveWindow()
 
     def _claim_parent_edit_hotkeys(self) -> None:
@@ -1680,13 +1684,9 @@ class SketcherDialog(QDialog):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         status = getattr(self, "_status_bar", None)
         if status is not None:
-            status.setSizeGripEnabled(False)
-        for action in self.findChildren(QAction):
-            if action.shortcutContext() == Qt.WindowShortcut:
-                action.setShortcutContext(Qt.WidgetWithChildrenShortcut)
-        for shortcut in self.findChildren(QShortcut):
-            if shortcut.context() == Qt.WindowShortcut:
-                shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+            status.hide()
+        # Window shortcuts follow the host window, so undo and the other sketch
+        # keys work anywhere in the Design Studio, not only on the canvas.
         self._sync_parent_edit_hotkeys()
 
     def _escape_asks_close(self) -> None:

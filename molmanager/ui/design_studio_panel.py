@@ -14,9 +14,9 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Sketcher with a live descriptor and druglike MPO strip.
+"""Sketcher with a live descriptor strip and a suggestion rail.
 
-Opens in its own window. The footer can dock it beside the table.
+Opens in its own window. It is not docked into the table workspace.
 """
 
 from __future__ import annotations
@@ -25,35 +25,39 @@ import logging
 import threading
 from typing import Any
 
-from PyQt5.QtCore import QEvent, QObject, QRunnable, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QObject, QRunnable, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QScrollArea,
     QSplitter,
+    QStatusBar,
     QVBoxLayout,
     QWidget,
 )
 from rdkit import Chem
 
-from ..analysis.design_studio import DesignSnapshot, compute_design_snapshot
+from ..analysis.design_studio import (
+    DESIGN_QUEUE_NAME,
+    DesignSnapshot,
+    DesignSuggestion,
+    SeriesRow,
+    compute_design_snapshot,
+    mmp_suggestions,
+    rgroup_swap_suggestions,
+    suggest_core_column,
+)
+from ..analysis.sar_matrix import rgroup_index, suggest_rgroup_axes
+from ..services.activity_records import parse_activity_float
+from .browsers.chrome import BrowserHostDialog, apply_browser_body_layout
+from .dockable_plot import style_plot_footer_text_button
 from .sketcher.dialog import SketcherDialog
 from .sketcher.physical_properties import compute_ionization_properties
-from .browsers.chrome import BrowserHostDialog, apply_browser_body_layout
-from .dockable_plot import (
-    apply_plot_chrome_glyphs,
-    discard_host_dialog_after_dock,
-    make_add_to_main_button,
-    make_close_plot_button,
-    make_send_window_button,
-    request_close_plot_widget,
-    style_plot_footer_text_button,
-    sync_docked_footer_bar,
-    sync_footer_on_parent_change,
-)
 from .strings import TOOL_DESIGN_STUDIO
 from .threadpool_access import start_runnable_on_app_pool
 
@@ -352,10 +356,87 @@ def _term_label(key: str) -> str:
     return key
 
 
-class DesignStudioPanel(QWidget):
-    """Sketcher on the left, live scores on the right."""
+class SuggestionRail(QWidget):
+    """Ranked analogs from MMP transforms and one-point R-group swaps."""
 
-    dockable_in_workspace = True
+    def __init__(self, studio: DesignStudioPanel):
+        super().__init__(studio)
+        self._studio = studio
+        self._suggestions: list[DesignSuggestion] = []
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 4, 8, 8)
+        root.setSpacing(6)
+        title = QLabel("Suggestions")
+        title_font = QFont(title.font())
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setToolTip(
+            "MMP transforms that raise activity on this structure, then one-point "
+            "R-group swaps scored from the series. A cliff note means a small change "
+            "with a large activity shift, so the median is not a smooth trend."
+        )
+        root.addWidget(title)
+        self._list = QListWidget(self)
+        self._list.setSelectionMode(QListWidget.SingleSelection)
+        self._list.itemClicked.connect(self._apply_current)
+        root.addWidget(self._list, 1)
+        buttons = QHBoxLayout()
+        self._update_btn = QPushButton("Update", self)
+        self._update_btn.setToolTip(
+            "Rebuild suggestions from the last MMP run and the table's R-group columns."
+        )
+        style_plot_footer_text_button(self._update_btn)
+        self._update_btn.clicked.connect(self.refresh)
+        self._accept_btn = QPushButton("Accept", self)
+        self._accept_btn.setToolTip(
+            f"Add the sketch to the table and to the {DESIGN_QUEUE_NAME} list."
+        )
+        style_plot_footer_text_button(self._accept_btn)
+        self._accept_btn.clicked.connect(studio.accept_sketch)
+        self._add_btn = QPushButton("Add to table", self)
+        self._add_btn.setToolTip("Append the current sketch as a new table row.")
+        style_plot_footer_text_button(self._add_btn)
+        self._add_btn.clicked.connect(studio._add_sketch_to_table)
+        buttons.addWidget(self._update_btn)
+        buttons.addWidget(self._accept_btn)
+        buttons.addWidget(self._add_btn)
+        root.addLayout(buttons)
+
+    def refresh(self) -> None:
+        studio = self._studio
+        mol = studio.current_mol()
+        pairs = []
+        app = studio.parent_app
+        if app is not None:
+            pairs = list(getattr(app, "_mmp_last_pairs", None) or [])
+        suggestions = mmp_suggestions(mol, pairs)
+        suggestions.extend(rgroup_swap_suggestions(studio.current_smiles(), studio.series_rows()))
+        self._suggestions = suggestions
+        self._list.clear()
+        if not suggestions:
+            item = QListWidgetItem("No suggestions. Run MMP, or decompose a series.")
+            item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+            self._list.addItem(item)
+            studio.show_status("No suggestions for this structure.")
+            return
+        for suggestion in suggestions:
+            item = QListWidgetItem(f"{suggestion.title}\n{suggestion.detail}")
+            item.setToolTip(suggestion.detail)
+            item.setData(Qt.UserRole, suggestion.smiles)
+            self._list.addItem(item)
+        studio.show_status(f"{len(suggestions)} suggestion(s).")
+
+    def _apply_current(self, item: QListWidgetItem) -> None:
+        smiles = item.data(Qt.UserRole)
+        if not smiles:
+            return
+        self._studio.load_smiles(str(smiles), caption=item.text().split("\n", 1)[0])
+
+
+class DesignStudioPanel(QWidget):
+    """Sketcher on the left, scores and suggestions on the right."""
+
+    dockable_in_workspace = False
     supports_floating_title = False
 
     def __init__(self, parent_app: Any = None, parent: QWidget | None = None):
@@ -373,44 +454,44 @@ class DesignStudioPanel(QWidget):
 
         self._strip = DesignPropertyStrip(self._sketcher, self)
         self._strip.setMinimumWidth(240)
-        self._strip.setMaximumWidth(300)
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setWidget(self._strip)
         scroll.setMinimumWidth(250)
-        scroll.setMaximumWidth(310)
+
+        self._rail = SuggestionRail(self)
+        right = QSplitter(Qt.Vertical, self)
+        right.setChildrenCollapsible(False)
+        right.addWidget(scroll)
+        right.addWidget(self._rail)
+        right.setStretchFactor(0, 1)
+        right.setStretchFactor(1, 1)
 
         splitter = QSplitter(Qt.Horizontal, self)
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(self._sketcher)
-        splitter.addWidget(scroll)
+        splitter.addWidget(right)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         self._sketcher.show()
         root.addWidget(splitter, 1)
 
-        self._sketcher.canvas.sketchChanged.connect(self._strip.schedule_refresh)
+        self._status = QStatusBar(self)
+        self._status.setSizeGripEnabled(False)
+        self._status.showMessage("Ready.")
+        root.addWidget(self._status)
 
-        footer = QHBoxLayout()
-        self._add_row_btn = QPushButton("Add to table", self)
-        self._add_row_btn.setToolTip("Append the current sketch as a new table row.")
-        style_plot_footer_text_button(self._add_row_btn)
-        self._add_row_btn.clicked.connect(self._add_sketch_to_table)
-        self._add_to_main_btn = make_add_to_main_button(self, tooltip="Dock beside the table")
-        self._add_to_main_btn.clicked.connect(self._add_to_main_window)
-        self._send_window_btn = make_send_window_button(self, tooltip="Open in a separate window")
-        self._send_window_btn.clicked.connect(self._send_to_new_window)
-        self._close_btn = make_close_plot_button(self, tooltip="Close the Drug Design Studio.")
-        self._close_btn.clicked.connect(self._close_docked)
-        footer.addWidget(self._add_row_btn)
-        footer.addStretch(1)
-        footer.addWidget(self._add_to_main_btn)
-        footer.addWidget(self._send_window_btn)
-        footer.addWidget(self._close_btn)
-        root.addLayout(footer)
-        self._sync_footer_chrome()
+        self._sketcher.canvas.sketchChanged.connect(self._strip.schedule_refresh)
+        self._sketcher.canvas.statusMessage.connect(self.show_status)
+        original_status = self._sketcher.show_sketch_status
+
+        def _forward_status(message: str) -> None:
+            original_status(message)
+            self.show_status(message)
+
+        self._sketcher.show_sketch_status = _forward_status
         self.setMinimumWidth(self.embedded_minimum_width())
 
     def rebind_parent_app(self, parent_app: Any | None) -> None:
@@ -432,82 +513,184 @@ class DesignStudioPanel(QWidget):
             parent_app._design_studio_dialog = dialog
         return dialog
 
-    def load_molecule(self, mol: Chem.Mol, *, caption: str = "") -> bool:
+    def load_molecule(self, mol: Chem.Mol, *, caption: str = "", refresh_suggestions: bool = True) -> bool:
         """Replace the sketch. *caption* is the line above the scores."""
         self._strip.set_caption(caption)
         loaded = self._sketcher.load_structure_from_mol(mol, confirm_if_nonempty=False)
         if loaded:
             self._strip.schedule_refresh()
+            if refresh_suggestions:
+                self._rail.refresh()
         return loaded
+
+    def load_smiles(self, smiles: str, *, caption: str = "") -> bool:
+        mol = Chem.MolFromSmiles((smiles or "").strip())
+        if mol is None:
+            self.show_status("That suggestion could not be read.")
+            return False
+        return self.load_molecule(mol, caption=caption, refresh_suggestions=False)
+
+    def show_status(self, message: str) -> None:
+        """One line at the bottom of the studio, the same role as the sketcher status bar."""
+        self._status.showMessage((message or "").strip() or "Ready.")
+
+    def current_mol(self) -> Chem.Mol | None:
+        try:
+            return self._sketcher._sketch_mol_for_3d()
+        except (RuntimeError, ValueError, TypeError, AttributeError):
+            return None
+
+    def current_smiles(self) -> str:
+        mol = self.current_mol()
+        if mol is None:
+            return ""
+        try:
+            return Chem.MolToSmiles(Chem.Mol(mol), canonical=True) or ""
+        except (RuntimeError, ValueError, TypeError):
+            return ""
+
+    def series_rows(self) -> list[SeriesRow]:
+        """Decomposed table rows the rail can use for one-point swaps."""
+        app = self.parent_app
+        model = getattr(app, "_table_model", None) if app is not None else None
+        headers = list(getattr(app, "headers", []) or [])
+        if app is None or model is None or not headers:
+            return []
+        row_axis, col_axis, page_axis = suggest_rgroup_axes(headers)
+        axes = [name for name in (row_axis, col_axis, page_axis) if name]
+        if len(axes) < 2:
+            axes = [name for name in headers if rgroup_index(name) is not None]
+        if not axes:
+            return []
+        core_column = suggest_core_column(headers, axes[0])
+        if not core_column:
+            return []
+        activity = _activity_column(headers, _numeric_headers(model))
+        rows: list[SeriesRow] = []
+        mols = getattr(app, "mols", {}) or {}
+        for index in range(model.rowCount()):
+            try:
+                oid = int(model.row_oid(index))
+            except (TypeError, ValueError):
+                continue
+            substituents = tuple(
+                (axis, _cell_text(model, index, axis, headers)) for axis in axes
+            )
+            product = ""
+            mol = mols.get(oid)
+            if mol is not None:
+                try:
+                    product = Chem.MolToSmiles(mol, canonical=True) or ""
+                except (RuntimeError, ValueError, TypeError):
+                    product = ""
+            activity_value = None
+            if activity:
+                activity_value = parse_activity_float(_cell_text(model, index, activity, headers))
+            rows.append(
+                SeriesRow(
+                    core_smiles=_cell_text(model, index, core_column, headers),
+                    substituents=substituents,
+                    activity=activity_value,
+                    product_smiles=product,
+                )
+            )
+        return rows
+
+    def accept_sketch(self) -> None:
+        """Add the canvas to the table, if it is new, and to the Design queue list."""
+        app = self.parent_app
+        smiles = self.current_smiles()
+        if app is None or not smiles:
+            self.show_status("Draw a structure before accepting it.")
+            return
+        store_factory = getattr(app, "_row_list_store", None)
+        if not callable(store_factory):
+            self.show_status("This window cannot store a Design queue list.")
+            return
+        existing = _oid_with_smiles(app, smiles)
+        if existing is None:
+            before = int(getattr(app, "next_oid", 0))
+            added = self._sketcher._append_molecules_from_smiles_parts([smiles])
+            if added <= 0:
+                self.show_status("Could not add this structure to the table.")
+                return
+            existing = before
+        store_factory().add(DESIGN_QUEUE_NAME, [int(existing)])
+        rebuild = getattr(app, "_rebuild_lists_menu", None)
+        if callable(rebuild):
+            rebuild()
+        message = f"Added row {existing} to {DESIGN_QUEUE_NAME}."
+        self.show_status(message)
+        status = getattr(app, "status_label", None)
+        if status is not None:
+            status.setText(f"{TOOL_DESIGN_STUDIO}: {message}")
 
     def shutdown(self) -> None:
         self._strip.shutdown()
 
-    def on_docked_plot_closing(self) -> None:
-        self.shutdown()
-
     def _add_sketch_to_table(self) -> None:
         self._sketcher._add_to_table()
-
-    def _add_to_main_window(self) -> None:
-        app = self.parent_app
-        if app is None:
-            return
-        dock = getattr(app, "dock_plot_widget", None)
-        if not callable(dock) or not dock(self):
-            return
-        dlg = self.window()
-        if isinstance(dlg, DesignStudioWindow):
-            discard_host_dialog_after_dock(dlg, app, "_design_studio_dialog")
-
-    def _send_to_new_window(self) -> None:
-        app = self.parent_app
-        if app is None:
-            return
-        undock = getattr(app, "undock_plot_to_window", None)
-        if callable(undock):
-            undock(self)
-
-    def _close_docked(self) -> None:
-        self.shutdown()
-        request_close_plot_widget(
-            self,
-            title="Close Drug Design Studio",
-            message="Close the Drug Design Studio?",
-        )
-
-    def _is_docked(self) -> bool:
-        app = self.parent_app
-        if app is None:
-            return False
-        check = getattr(app, "is_plot_docked", None)
-        return bool(callable(check) and check(self))
-
-    def _sync_footer_chrome(self) -> None:
-        apply_plot_chrome_glyphs(self)
-        floating = isinstance(self.window(), DesignStudioWindow)
-        docked = self._is_docked()
-        self._add_to_main_btn.setVisible(floating or not docked)
-        self._send_window_btn.setVisible(docked)
-        self._close_btn.setVisible(docked)
-        sync_docked_footer_bar(self, docked=docked)
-
-    def changeEvent(self, event) -> None:  # noqa: N802 — Qt API
-        if event.type() == QEvent.ParentChange:
-            sync_footer_on_parent_change(self)
-        super().changeEvent(event)
 
     def closeEvent(self, event) -> None:  # noqa: N802 — Qt API
         self.shutdown()
         super().closeEvent(event)
 
 
+def _numeric_headers(model) -> set[str]:
+    bounds = getattr(model, "numeric_bounds_by_column", None)
+    if not callable(bounds):
+        return set()
+    try:
+        found = bounds()
+    except (RuntimeError, TypeError, ValueError):
+        return set()
+    if isinstance(found, dict):
+        return set(found)
+    return set(found or ())
+
+
+def _activity_column(headers: list[str], numeric: set[str]) -> str | None:
+    preferred = ("pic50", "pki", "pec50", "ic50", "ki", "activity", "potency")
+    names = [name for name in headers if name in numeric and name not in {"ID_HIDDEN"}]
+    for token in preferred:
+        for name in names:
+            if token in name.casefold():
+                return name
+    return names[0] if names else None
+
+
+def _cell_text(model, row: int, header: str, headers: list[str]) -> str:
+    if header not in headers:
+        return ""
+    column = headers.index(header)
+    text = (model.cell_text(row, column) or "").strip()
+    if text:
+        return text
+    backing = getattr(model, "backing_value_for_row_header", None)
+    if not callable(backing):
+        return ""
+    return (backing(row, header) or "").strip()
+
+
+def _oid_with_smiles(app, smiles: str) -> int | None:
+    target = (smiles or "").strip()
+    mols = getattr(app, "mols", None) or {}
+    for oid, mol in mols.items():
+        try:
+            current = Chem.MolToSmiles(mol, canonical=True) or ""
+        except (RuntimeError, ValueError, TypeError):
+            continue
+        if current == target:
+            return int(oid)
+    return None
+
+
 class DesignStudioWindow(BrowserHostDialog):
     """Floating shell for :class:`DesignStudioPanel`."""
 
     default_title = TOOL_DESIGN_STUDIO
-    close_title = "Close Drug Design Studio"
-    close_message = "Close the Drug Design Studio?"
+    close_title = "Close Design Studio"
+    close_message = "Close the Design Studio?"
     panel_cls = DesignStudioPanel
     min_size = (900, 560)
     initial_size = (1180, 760)
