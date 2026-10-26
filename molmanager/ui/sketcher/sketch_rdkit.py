@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from PyQt5.QtCore import QPoint, QTimer
+from PyQt5.QtCore import QPoint, QPointF, QTimer
 from PyQt5.QtWidgets import QMessageBox
 
 from rdkit import Chem
@@ -1101,8 +1101,10 @@ class SketchWidgetRdkitMixin:
             if not self.nodes:
                 return
             self._view_scale = 1.0
+            self._view_pan = QPointF(0.0, 0.0)
             self._refresh_sketch_draw_metrics()
             self.ensure_sketch_fits_viewport(refresh=False)
+            self.remember_opened_render()
             self._after_sketch_edit(notify=True, notify_if_valence_failed=True)
 
         QTimer.singleShot(0, _finish_rdkit_load)
