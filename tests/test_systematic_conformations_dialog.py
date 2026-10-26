@@ -38,10 +38,9 @@ def test_systematic_conformations_dialog_defaults(qapp):  # noqa: ARG001
     assert p.keep_hydrogens is False
     assert dlg.output_panel.add_to_table_cb.text() == "Add as Entries"
     assert p.obabel_path == ""
-    option_boxes = [b for b in dlg.findChildren(QGroupBox) if b.title() == "Options"]
-    assert option_boxes
-    assert dlg.output_panel.add_to_table_cb.parent() is option_boxes[0]
-    assert dlg.original_cb.parent() is option_boxes[0]
+    boxes = {b.title(): b for b in dlg.findChildren(QGroupBox)}
+    assert dlg.output_panel.add_to_table_cb.parent() is boxes["Output"]
+    assert dlg.original_cb.parent() is boxes["Search"]
     assert dlg.output_panel.save_to_file_cb.parent() is dlg.output_panel
     assert dlg.output_panel.save_path_edit.parent() is dlg.output_panel
     dlg.close()
