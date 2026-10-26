@@ -14,36 +14,54 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Sketcher writes a structure back to the table row it was opened from."""
+"""Sketcher Add to Table and Update Table Entry."""
 
 from __future__ import annotations
 
-from PyQt5.QtWidgets import QAction, QMenu, QMessageBox, QWidget
+from PyQt5.QtWidgets import QMenu, QMenuBar, QMessageBox, QWidget
 from rdkit import Chem
 
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
 from molmanager.ui.sketcher import SketcherDialog
 
 
-def test_file_menu_has_no_update_table_entry(qapp):  # noqa: ARG001
-    dlg = SketcherDialog(QWidget())
+def _file_labels(dialog: SketcherDialog) -> list[str]:
+    bar = dialog.findChild(QMenuBar)
+    file_menu = next(action.menu() for action in bar.actions() if action.text() == "File")
+    file_menu.aboutToShow.emit()
+    return [action.text() for action in file_menu.actions() if action.isVisible() and action.text()]
+
+
+def test_file_menu_update_entry_follows_the_source_row(qapp, monkeypatch):  # noqa: ARG001
+    _accept_close(monkeypatch)
+    blank = SketcherDialog(QWidget())
+    opened = SketcherDialog(QWidget(), source_oid=3)
     try:
-        names = [a.text() for a in dlg.findChildren(QAction)]
-        assert "Update Table Entry" not in names
-        assert "Export to Table" in names
+        assert _file_labels(blank) == ["Save Sketch…", "Add to Table"]
+        assert "Update Table Entry" not in _file_labels(blank)
+        assert _file_labels(opened) == ["Save Sketch…", "Add to Table", "Update Table Entry"]
+        opened.set_source_entry(None)
+        assert "Update Table Entry" not in _file_labels(opened)
     finally:
-        dlg.close()
+        blank.close()
+        opened.close()
 
 
-def _answer_close_prompt(monkeypatch, choice: QMessageBox.StandardButton) -> list[int]:
-    asked: list[int] = []
+def _accept_close(monkeypatch) -> None:
+    monkeypatch.setattr(
+        SketcherDialog,
+        "_ask_close",
+        lambda _self: QMessageBox.Yes,
+    )
 
-    def question(*_args, **_kwargs):
-        asked.append(choice)
-        return choice
 
-    monkeypatch.setattr(QMessageBox, "question", question)
-    return asked
+def _accept_table_write(monkeypatch, asked: list[tuple[str, str]] | None = None) -> None:
+    def confirm(_self, title: str, message: str) -> bool:
+        if asked is not None:
+            asked.append((title, message))
+        return True
+
+    monkeypatch.setattr(SketcherDialog, "_confirm_table_write", confirm)
 
 
 def _row_window() -> ChemistryWorkspaceWindow:
@@ -57,76 +75,123 @@ def _row_window() -> ChemistryWorkspaceWindow:
     return w
 
 
-def test_closing_edit_sketcher_updates_the_row_after_yes(qapp, monkeypatch):  # noqa: ARG001
-    asked = _answer_close_prompt(monkeypatch, QMessageBox.Yes)
+def _sketch(window: ChemistryWorkspaceWindow, smiles: str, *, source_oid: int | None = 0):
+    dlg = SketcherDialog(window, source_oid=source_oid)
+    assert dlg.load_structure_from_mol(Chem.MolFromSmiles(smiles), confirm_if_nonempty=False)
+    return dlg
+
+
+def test_update_table_entry_replaces_the_source_row(qapp, monkeypatch):  # noqa: ARG001
+    _accept_close(monkeypatch)
+    asked: list[tuple[str, str]] = []
+    _accept_table_write(monkeypatch, asked)
     w = _row_window()
-    dlg = SketcherDialog(w, source_oid=0, update_on_close=True)
+    dlg = _sketch(w, "OCC")
     try:
-        assert dlg.load_structure_from_mol(Chem.MolFromSmiles("OCC"), confirm_if_nonempty=False)
-        dlg.close()
-        assert asked == [QMessageBox.Yes]
+        dlg._update_table_entry()
+        assert asked == [("Update Table Entry", "Update this table entry with the sketch?")]
         assert Chem.MolToSmiles(w.mols[0]) == "CCO"
         assert w._table_model.value_for_header(0, "SMILES") == "CCO"
+        assert 1 not in w.mols
     finally:
+        dlg.close()
         w.close()
 
 
-def test_closing_edit_sketcher_can_keep_the_row_or_stay_open(qapp, monkeypatch):  # noqa: ARG001
-    choice = {"value": QMessageBox.No}
-    monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_k: choice["value"])
+def test_add_to_table_appends_a_row(qapp, monkeypatch):  # noqa: ARG001
+    _accept_close(monkeypatch)
+    asked: list[tuple[str, str]] = []
+    _accept_table_write(monkeypatch, asked)
     w = _row_window()
-    dlg = SketcherDialog(w, source_oid=0, update_on_close=True)
+    dlg = _sketch(w, "OCC")
     try:
-        assert dlg.load_structure_from_mol(Chem.MolFromSmiles("OCC"), confirm_if_nonempty=False)
-        dlg.close()
+        dlg._add_to_table()
+        assert asked == [("Add to Table", "Add this sketch to the table as new rows?")]
         assert Chem.MolToSmiles(w.mols[0]) == "CCN"
-        choice["value"] = QMessageBox.Cancel
-        dlg = SketcherDialog(w, source_oid=0, update_on_close=True)
-        assert dlg.load_structure_from_mol(Chem.MolFromSmiles("OCC"), confirm_if_nonempty=False)
-        dlg.close()
-        assert dlg._update_on_close
-        assert Chem.MolToSmiles(w.mols[0]) == "CCN"
-        dlg._update_on_close = False
+        assert Chem.MolToSmiles(w.mols[1]) == "CCO"
     finally:
         dlg.close()
         w.close()
 
 
-def test_closing_sketcher_without_edit_flag_leaves_the_row(qapp):  # noqa: ARG001
+def test_closing_sketcher_asks_and_leaves_the_row(qapp, monkeypatch):  # noqa: ARG001
     w = _row_window()
-    dlg = SketcherDialog(w, source_oid=0)
+    dlg = _sketch(w, "c1ccccc1")
+    dlg.show()
+    qapp.processEvents()
+    asked: list[str] = []
+
+    def refuse_close(_self) -> int:
+        asked.append("close")
+        return QMessageBox.No
+
+    monkeypatch.setattr(SketcherDialog, "_ask_close", refuse_close)
     try:
-        assert dlg.load_structure_from_mol(
-            Chem.MolFromSmiles("c1ccccc1"), confirm_if_nonempty=False
-        )
-        dlg.close()
+        assert dlg.close() is False
+        assert dlg.isVisible()
+        assert asked == ["close"]
+        assert Chem.MolToSmiles(w.mols[0]) == "CCN"
+        monkeypatch.setattr(SketcherDialog, "_ask_close", lambda _self: QMessageBox.Yes)
+        assert dlg.close() is True
         assert Chem.MolToSmiles(w.mols[0]) == "CCN"
     finally:
         w.close()
 
 
-def test_closing_an_unchanged_sketch_does_not_record_undo(qapp):  # noqa: ARG001
+def test_declining_table_write_leaves_the_rows(qapp, monkeypatch):  # noqa: ARG001
+    _accept_close(monkeypatch)
+    monkeypatch.setattr(SketcherDialog, "_confirm_table_write", lambda *_args, **_kwargs: False)
+    w = _row_window()
+    dlg = _sketch(w, "OCC")
+    try:
+        dlg._add_to_table()
+        dlg._update_table_entry()
+        assert Chem.MolToSmiles(w.mols[0]) == "CCN"
+        assert 1 not in w.mols
+    finally:
+        dlg.close()
+        w.close()
+
+
+def test_updating_an_unchanged_sketch_does_not_record_undo(qapp, monkeypatch):  # noqa: ARG001
+    _accept_close(monkeypatch)
+    _accept_table_write(monkeypatch)
     w = _row_window()
     w.mols[0] = Chem.MolFromSmiles("CCO")
     w._table_model.set_cell_text(0, "SMILES", "CCO")
-    dlg = SketcherDialog(w, source_oid=0, update_on_close=True)
+    dlg = _sketch(w, "CCO")
     try:
-        assert dlg.load_structure_from_mol(Chem.MolFromSmiles("CCO"), confirm_if_nonempty=False)
         before = w._undo_stack.count()
-        dlg.close()
+        dlg._update_table_entry()
         assert Chem.MolToSmiles(w.mols[0]) == "CCO"
         assert w._undo_stack.count() == before
+        assert w.status_label.text() == "That table row already has this structure."
     finally:
+        dlg.close()
         w.close()
 
 
-def test_structure_menu_edits_in_sketcher_under_paste(qapp, monkeypatch):  # noqa: ARG001
+def test_export_without_a_source_row_adds_a_row(qapp, monkeypatch):  # noqa: ARG001
+    _accept_close(monkeypatch)
+    _accept_table_write(monkeypatch)
+    w = _row_window()
+    dlg = _sketch(w, "OCC", source_oid=None)
+    try:
+        dlg._add_to_table()
+        assert Chem.MolToSmiles(w.mols[0]) == "CCN"
+        assert Chem.MolToSmiles(w.mols[1]) == "CCO"
+    finally:
+        dlg.close()
+        w.close()
+
+
+def test_structure_menu_groups_open_copy_and_browser(qapp, monkeypatch):  # noqa: ARG001
     w = _row_window()
     opened: dict = {}
 
     def fake_exec(menu, *_args, **_kwargs):
         opened["texts"] = [act.text() for act in menu.actions() if act.text()]
-        return next(act for act in menu.actions() if act.text() == "Edit in Sketcher")
+        return next(act for act in menu.actions() if act.text() == "Open in Sketcher")
 
     def capture_open(mol=None, **kwargs):
         opened["mol"] = mol
@@ -141,9 +206,14 @@ def test_structure_menu_edits_in_sketcher_under_paste(qapp, monkeypatch):  # noq
         src = w._table_model.index(0, 1)
         rect = w.table.visualRect(proxy.mapFromSource(src))
         w.show_table_menu(rect.center())
-        texts = opened["texts"]
-        assert texts[texts.index("Paste") + 1] == "Edit in Sketcher"
-        assert opened["kwargs"] == {"source_oid": 0, "update_on_close": True}
+        assert opened["texts"] == [
+            "Open in Sketcher",
+            "Open in Design Studio",
+            "Copy",
+            "Paste",
+            "Browser…",
+        ]
+        assert opened["kwargs"] == {"source_oid": 0}
         assert opened["mol"] is not None
     finally:
         w.close()
