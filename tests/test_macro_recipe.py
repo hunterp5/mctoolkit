@@ -32,17 +32,20 @@ from molmanager.workflows.macro_recipe import (
     MacroDocumentError,
     MacroRecipe,
     MacroReferenceError,
+    MacroStep,
     default_step,
     descriptor_display_by_key,
     format_issues,
     library_from_json,
     library_to_json,
     new_recipe,
+    output_keys,
     recipe_from_json,
     recipe_to_json,
     substitute_column_refs,
     validate_recipe,
 )
+from molmanager.workflows.macro_record import rewrite_recorded_params
 
 _KEYS = {"MolWt", "MolLogP"}
 
@@ -144,6 +147,176 @@ def test_unsupported_library_version_is_rejected():
         library_from_json({"version": 99, "macros": []})
 
 
+def test_random_extract_and_plot_steps_validate():
+    recipe = MacroRecipe(
+        id="abc",
+        name="More",
+        steps=[
+            MacroStep(
+                id="rand1",
+                kind="random_number",
+                params={
+                    "row_scope": "table",
+                    "column": "Random",
+                    "distribution": "uniform",
+                    "low": 0,
+                    "high": 1,
+                },
+            ),
+            MacroStep(
+                id="ext1",
+                kind="reaction_extract",
+                params={
+                    "row_scope": "selection",
+                    "source_column": "Reaction",
+                    "mode": "both",
+                    "published": ["col_1", "col_2"],
+                },
+            ),
+            MacroStep(
+                id="plot1",
+                kind="plot",
+                params={"state": {"plot_type": "scatter", "x": "${ext1.col_1}", "y": "LogP"}},
+            ),
+        ],
+    )
+    issues = validate_recipe(recipe, descriptor_keys=_KEYS)
+    assert issues == (), format_issues(issues)
+    assert output_keys("random_number", recipe.steps[0].params) == ("output",)
+    assert output_keys("reaction_extract", recipe.steps[1].params) == ("col_1", "col_2")
+    assert output_keys("plot", recipe.steps[2].params) == ()
+
+
+def test_plot_axis_names_are_rewritten_and_titles_are_not():
+    updated = rewrite_recorded_params(
+        "plot",
+        {
+            "state": {
+                "plot_type": "scatter",
+                "x": "Mol Weight",
+                "y": "LogP",
+                "color": "Mol Weight",
+                "radar_spokes": ["Mol Weight", "TPSA"],
+                "hover_columns": ["Mol Weight"],
+                "plot_title": "Mol Weight",
+            }
+        },
+        {"desc1": {"MolWt": "Mol Weight", "TPSA": "TPSA"}},
+    )
+    state = updated["state"]
+    assert state["x"] == "${desc1.MolWt}"
+    assert state["color"] == "${desc1.MolWt}"
+    assert state["radar_spokes"] == ["${desc1.MolWt}", "${desc1.TPSA}"]
+    assert state["hover_columns"] == ["${desc1.MolWt}"]
+    assert state["y"] == "LogP"
+    assert state["plot_title"] == "Mol Weight"
+    assert substitute_column_refs(state["x"], {"desc1": {"MolWt": "Mol Weight (1)"}}) == (
+        "Mol Weight (1)"
+    )
+
+
+def test_potency_structure_and_rgroup_steps_validate():
+    recipe = MacroRecipe(
+        id="abc",
+        name="Prep",
+        steps=[
+            MacroStep(
+                id="pot1",
+                kind="potency",
+                params={
+                    "row_scope": "table",
+                    "column": "IC50",
+                    "unit_column": "Unit",
+                    "measure": "IC50",
+                    "desired_unit": "nM",
+                    "write_p": True,
+                    "write_ki": True,
+                    "mw_column": None,
+                    "assay_concentrations": [
+                        {
+                            "conc_constant": 10.0,
+                            "conc_column": None,
+                            "conc_unit": "uM",
+                            "ref_constant": None,
+                            "ref_column": "Km",
+                            "ref_unit": "uM",
+                        }
+                    ],
+                },
+            ),
+            MacroStep(
+                id="neut1",
+                kind="neutralize",
+                params={
+                    "row_scope": "table",
+                    "structure_source": "${pot1.activity}",
+                    "no_render_2d": True,
+                },
+            ),
+            MacroStep(
+                id="prep1",
+                kind="fast_prepare",
+                params={
+                    "row_scope": "selection",
+                    "structure_source": "Structure",
+                    "update_target": False,
+                    "largest_column": "Largest",
+                    "fragments_column": "Fragments",
+                    "neutralize": True,
+                },
+            ),
+            MacroStep(
+                id="rgrp1",
+                kind="rgroup",
+                params={
+                    "core_smiles": "[*:1]c1ccccc1",
+                    "core_id": "core",
+                    "pools": [
+                        {"label": 1, "mode": "smiles", "file_path": "", "smiles_text": "CCN*"}
+                    ],
+                    "max_products": 5,
+                    "add_to_table": True,
+                    "save_to_file": False,
+                },
+            ),
+        ],
+    )
+    issues = validate_recipe(recipe, descriptor_keys=_KEYS)
+    assert issues == (), format_issues(issues)
+    assert output_keys("potency", recipe.steps[0].params) == ("activity", "p", "ki", "pki")
+    assert output_keys("neutralize", recipe.steps[1].params) == ("output",)
+    assert output_keys("fast_prepare", recipe.steps[2].params) == ("output", "fragments")
+    assert output_keys("rgroup", recipe.steps[3].params) == ()
+
+
+def test_potency_columns_are_rewritten_and_new_fragment_names_are_not():
+    potency = rewrite_recorded_params(
+        "potency",
+        {
+            "column": "IC50",
+            "unit_column": "Unit",
+            "mw_column": "Mol Weight",
+            "assay_concentrations": [{"conc_column": "Mol Weight", "ref_column": "Km"}],
+        },
+        {"desc1": {"MolWt": "Mol Weight"}},
+    )
+    assert potency["mw_column"] == "${desc1.MolWt}"
+    assert potency["assay_concentrations"][0]["conc_column"] == "${desc1.MolWt}"
+    assert potency["column"] == "IC50"
+    prepared = rewrite_recorded_params(
+        "fast_prepare",
+        {
+            "structure_source": "Mol Weight",
+            "fragments_column": "Fragments",
+            "largest_column": "Largest",
+        },
+        {"desc1": {"MolWt": "Mol Weight"}},
+    )
+    assert prepared["structure_source"] == "${desc1.MolWt}"
+    assert prepared["fragments_column"] == "Fragments"
+    assert prepared["largest_column"] == "Largest"
+
+
 def test_catalog_uses_internal_keys():
     assert descriptor_display_by_key()["MolWt"] == "Mol Weight"
 
@@ -157,7 +330,7 @@ def test_command_catalog_lists_the_recipe_steps_without_qt():
 
     if not qt_already_loaded:
         assert "PyQt5.QtWidgets" not in sys.modules
-    assert len(COMMANDS) == 5
+    assert len(COMMANDS) == 14
     descriptors = command_for_step_kind("descriptors")
     assert descriptors is not None
     assert descriptors.command_id == "chemistry.descriptors"
