@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QLineEdit,
     QMessageBox,
     QSpinBox,
@@ -69,11 +70,32 @@ class BinningDialog(QDialog):
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
 
-        self._form = QFormLayout()
+        source = QGroupBox("Column")
+        source_form = QFormLayout(source)
+        source_form.setContentsMargins(8, 6, 8, 6)
+        source_form.setSpacing(4)
+        source_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.col_combo = QComboBox()
         self.col_combo.addItems(columns)
         self.col_combo.setToolTip("Numeric column to bin. Non-numeric cells are left blank.")
-        self._form.addRow("Column:", self.col_combo)
+        source_form.addRow("Column:", self.col_combo)
+
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(
+                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
+            )
+        else:
+            self.only_selected_cb.setEnabled(False)
+        source_form.addRow("", self.only_selected_cb)
+        root.addWidget(source)
+
+        bins = QGroupBox("Bins")
+        self._form = QFormLayout(bins)
+        self._form.setContentsMargins(8, 6, 8, 6)
+        self._form.setSpacing(4)
+        self._form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.method_combo = QComboBox()
         for label, method in BIN_METHODS:
@@ -126,6 +148,13 @@ class BinningDialog(QDialog):
             "Add a bin below the first edge and a bin at or above the last edge."
         )
         self._form.addRow(self.open_ends_cb)
+        root.addWidget(bins)
+
+        output = QGroupBox("Output")
+        out_form = QFormLayout(output)
+        out_form.setContentsMargins(8, 6, 8, 6)
+        out_form.setSpacing(4)
+        out_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self.range_input = QLineEdit()
         self.range_input.setPlaceholderText("Range column")
@@ -133,7 +162,7 @@ class BinningDialog(QDialog):
             "Column for the bin range, such as [0, 1). "
             "Defaults to the source name plus _bin. Existing names get a (1) suffix."
         )
-        self._form.addRow("Range column:", self.range_input)
+        out_form.addRow("Range column:", self.range_input)
 
         self.class_input = QLineEdit()
         self.class_input.setPlaceholderText("Class column")
@@ -143,18 +172,8 @@ class BinningDialog(QDialog):
             "four are Low, Medium, High, and Very high; otherwise Class 1, Class 2, …. "
             "Defaults to the source name plus _class. Existing names get a (1) suffix."
         )
-        self._form.addRow("Class column:", self.class_input)
-        root.addLayout(self._form)
-
-        self.only_selected_cb = QCheckBox("Selected Rows Only")
-        self._only_selected_scope_prefix = "Selected Rows Only"
-        if self._have_selection:
-            self.only_selected_cb.setText(
-                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
-            )
-        else:
-            self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
+        out_form.addRow("Class column:", self.class_input)
+        root.addWidget(output)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)
