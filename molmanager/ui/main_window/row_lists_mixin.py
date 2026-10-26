@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Lists menu: save a selection, add it to an existing list, rename, and delete lists."""
+"""Lists menu: save a selection, add or remove it, rename, and delete lists."""
 
 from __future__ import annotations
 
@@ -122,6 +122,53 @@ class RowListsMixin:
                 label.setText(f'Created list "{key}" with {n_new} row(s).')
             else:
                 label.setText(f'Added {n_new} row(s) to list "{key}".')
+        return True
+
+    def remove_selected_from_list(self) -> None:
+        """Prompt for an existing list and drop the current row selection from it."""
+        oids = self._selected_oids_set()
+        if not oids:
+            QMessageBox.information(
+                self,
+                "Remove Selected from List",
+                "No rows are selected. Select one or more rows in the table first.",
+            )
+            return
+        names = self._row_list_store().names()
+        if not names:
+            QMessageBox.information(
+                self,
+                "Remove Selected from List",
+                "There are no lists. Add selected rows to a list first.",
+            )
+            return
+        from ..dialogs.row_lists import RemoveSelectedFromListDialog
+
+        dlg = RemoveSelectedFromListDialog(self, existing_names=names)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        self.remove_from_named_row_list(dlg.list_name(), oids)
+
+    def remove_from_named_row_list(
+        self, name: str, oids: set[int] | frozenset[int] | list[int]
+    ) -> bool:
+        """Drop *oids* from *name*. Return True when the list lost rows."""
+        key = normalize_list_name(name)
+        store = self._row_list_store()
+        if not key or key not in store.names() or not oids:
+            return False
+        n_removed = store.remove(key, oids)
+        label = getattr(self, "status_label", None)
+        if n_removed == 0:
+            if label is not None:
+                label.setText(f'Selected rows are not in list "{key}".')
+            return False
+        self._rebuild_lists_menu()
+        mark = getattr(self, "_mark_session_dirty", None)
+        if callable(mark):
+            mark()
+        if label is not None:
+            label.setText(f'Removed {n_removed} row(s) from list "{key}".')
         return True
 
     def apply_row_list(self, name: str) -> int:
