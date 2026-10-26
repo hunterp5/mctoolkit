@@ -14,31 +14,34 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Numbered R-group atoms for the sketcher (R1, R2).
+"""Numbered R-group atoms for the sketcher.
 
-An R-group atom is a dummy with an atom-map number. R-group enumeration reads
-that as ``[*:1]`` or ``[*:2]`` on the core.
+An R-group atom is a dummy with an atom-map number. Enumeration reads ``R1`` as
+``[*:1]``, and the same for any ``Rn`` up to :data:`RGROUP_MAX`.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+# Toolbar shortcuts. Any Rn in 1..RGROUP_MAX is a valid node symbol.
 RGROUP_LABELS: tuple[int, ...] = (1, 2)
+RGROUP_MAX = 32
 
 
 def rgroup_element(label: int) -> str:
-    """Toolbar and node symbol for one attachment number."""
+    """Node symbol for one attachment number."""
     return f"R{int(label)}"
 
 
 def rgroup_label_from_element(element: str | None) -> int | None:
-    """Return 1 or 2 when *element* is ``R1`` or ``R2``."""
+    """Return ``n`` when *element* is ``Rn`` with ``1 <= n <= RGROUP_MAX``."""
     text = (element or "").strip().upper()
-    if len(text) == 2 and text[0] == "R" and text[1].isdigit():
-        label = int(text[1])
-        if label in RGROUP_LABELS:
-            return label
+    if len(text) < 2 or text[0] != "R" or not text[1:].isdigit():
+        return None
+    label = int(text[1:])
+    if 1 <= label <= RGROUP_MAX:
+        return label
     return None
 
 

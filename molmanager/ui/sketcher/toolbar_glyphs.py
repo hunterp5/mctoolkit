@@ -423,6 +423,31 @@ def mode_draw_icon(size: int = _ICON_SIZE) -> QIcon:
     return _paint_icon(paint, size)
 
 
+def mode_chain_icon(size: int = _ICON_SIZE) -> QIcon:
+    def paint(p: QPainter, s: float) -> None:
+        pen = _ink_pen(1.7)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        points = [
+            QPointF(s * 0.16, s * 0.62),
+            QPointF(s * 0.38, s * 0.34),
+            QPointF(s * 0.60, s * 0.62),
+            QPointF(s * 0.82, s * 0.34),
+        ]
+        path = QPainterPath(points[0])
+        for point in points[1:]:
+            path.lineTo(point)
+        p.drawPath(path)
+        p.setBrush(QBrush(_INK))
+        p.setPen(Qt.NoPen)
+        for point in points:
+            p.drawEllipse(point, s * 0.045, s * 0.045)
+
+    return _paint_icon(paint, size)
+
+
 def mode_erase_icon(size: int = _ICON_SIZE) -> QIcon:
     def paint(p: QPainter, s: float) -> None:
         # Classic angled eraser, centered in the button (no floor line).

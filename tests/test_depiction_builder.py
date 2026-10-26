@@ -280,9 +280,14 @@ def test_fallback_reasons(smiles, reason):
     assert build_scene(mol) == (None, reason)
 
 
-def test_dative_bond_falls_back():
+def test_dative_bond_is_dashed():
+    from molmanager.chem.depiction_scene import StrokeStyle
+
     mol = Chem.MolFromSmiles("N->[Pt]")
-    assert scene_fallback_reason(mol) == "bond_dative"
+    assert scene_fallback_reason(mol) is None
+    scene, reason = build_scene(mol)
+    assert scene is not None, reason
+    assert any(stroke.style == StrokeStyle.DASHED for stroke in scene.strokes)
 
 
 def test_molfile_r_atom_is_drawn_as_its_label():

@@ -36,6 +36,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QShortcut,
+    QStatusBar,
     QSizePolicy,
     QSplitter,
     QVBoxLayout,
@@ -46,23 +47,23 @@ from rdkit import Chem
 
 from ...table.structure_depiction_layout import reaction_depict_size
 from ...chem.molecule_conversion import mol_to_canonical_smiles
-from ...chem.reaction_file_io import RXN_SMARTS_HEADER
+from ...chem.reaction_file_io import RXN_ANNOTATION_HEADER, RXN_SMARTS_HEADER
 from ...chem.structure_2d_depiction import ReactionDrawSpec
 from ...workers import ExportWorker
 
 from ..mol_viewer_3d import Molecule3DEmbedView
 from ..qt_widget_utils import make_window_resizable
 from .chem import _parse_periodic_element_symbol
-from .constants import WILDCARD_ELEMENT
+from .constants import SKETCH_RAIL_ELEMENTS, SKETCH_RING_TEMPLATES, WILDCARD_ELEMENT
+from .contracted_labels import TABLE_CONTRACTED_LABELS
+from .fused_templates import FUSED_TEMPLATE_SMILES, fused_template
 from .rgroups import is_rgroup_element, rgroup_element
 from .customize_elements import (
     CustomizeElementsDialog,
-    element_groups_for_symbols,
     load_toolbar_element_symbols,
     save_toolbar_element_symbols,
 )
 from .toolbar_glyphs import (
-    TOOLBAR_RING_TEMPLATES,
     bond_dative_icon,
     bond_double_icon,
     bond_hash_icon,
@@ -73,6 +74,7 @@ from .toolbar_glyphs import (
     charge_minus_icon,
     charge_plus_icon,
     clear_sketch_icon,
+    mode_chain_icon,
     mode_draw_icon,
     mode_erase_icon,
     mode_lasso_icon,
@@ -263,6 +265,15 @@ class SketcherDialog(QDialog):
         )
         self.tb_text.toggled.connect(self._toggle_text)
 
+        self.tb_groups = _glyph_tool_button(
+            mode_text_icon(),
+            "Contract a terminal group the Structure column also contracts "
+            "(CF3, CN, N3, CO2H, SO3H, PO3H2, OMe, Boc). "
+            "Click an atom, or click empty canvas to place the label.",
+            checkable=False,
+        )
+        self.tb_groups.clicked.connect(self._show_group_menu)
+
         self._act_mode_draw = QAction("Draw", self)
         self._act_mode_draw.setCheckable(True)
         self._act_mode_draw.setChecked(True)
@@ -398,6 +409,14 @@ class SketcherDialog(QDialog):
         copy_smarts_act = QAction("Copy SMARTS", self)
         copy_smarts_act.triggered.connect(self._copy_smarts)
         tools.addAction(copy_smarts_act)
+        copy_mol_act = QAction("Copy Molfile", self)
+        copy_mol_act.setToolTip("Copy a molfile of the selection, or of the whole sketch.")
+        copy_mol_act.triggered.connect(self._copy_molfile)
+        tools.addAction(copy_mol_act)
+        copy_png_act = QAction("Copy Image", self)
+        copy_png_act.setToolTip("Copy a PNG of the structure, without selection marks.")
+        copy_png_act.triggered.connect(self._copy_image)
+        tools.addAction(copy_png_act)
 
         settings_menu = menubar.addMenu("Settings")
         customize_el_act = QAction("Customize Elements", self)
@@ -420,6 +439,7 @@ class SketcherDialog(QDialog):
         top_bar.addWidget(self.select_btn)
         top_bar.addWidget(self.lasso_btn)
         top_bar.addWidget(self.tb_text)
+        top_bar.addWidget(self.tb_groups)
         self.tb_clear = _glyph_tool_button(
             clear_sketch_icon(),
             "Clear the sketch (also in the right-click empty-canvas menu).",
@@ -427,11 +447,22 @@ class SketcherDialog(QDialog):
         )
         self.tb_clear.clicked.connect(self._clear_sketch)
         top_bar.addWidget(self.tb_clear)
+        self.tb_chain = _glyph_tool_button(
+            mode_chain_icon(),
+            "Chain: drag a zigzag carbon chain on the 30° grid. A short click places one atom.",
+        )
+        self.tb_chain.toggled.connect(self._toggle_chain)
+        top_bar.addWidget(self.tb_chain)
         top_bar.addWidget(_toolbar_vsep())
 
         self._bond_tool_group = QButtonGroup(self)
         self._bond_tool_group.setExclusive(True)
         self._bond_tool_buttons: list[tuple[QPushButton, int, int]] = []
+        self._bond_palette = QFrame(self, Qt.Popup)
+        self._bond_palette.setFrameShape(QFrame.StyledPanel)
+        bond_row = QHBoxLayout(self._bond_palette)
+        bond_row.setContentsMargins(6, 6, 6, 6)
+        bond_row.setSpacing(4)
 
         def _add_bond_tool(
             icon, tip: str, order: int, stereo: int, *, checked: bool = False
@@ -441,14 +472,18 @@ class SketcherDialog(QDialog):
             btn.clicked.connect(lambda _=False, o=order, s=stereo: self._on_bond_tool(o, s))
             self._bond_tool_group.addButton(btn)
             self._bond_tool_buttons.append((btn, order, stereo))
-            top_bar.addWidget(btn)
+            bond_row.addWidget(btn)
             return btn
 
         self.bond_plain = _add_bond_tool(
-            bond_plain_icon(), "Single bond (plain).", 1, BOND_STEREO_PLAIN, checked=True
+            bond_plain_icon(), "Single bond (plain). Key 1.", 1, BOND_STEREO_PLAIN, checked=True
         )
-        self.bond_double = _add_bond_tool(bond_double_icon(), "Double bond.", 2, BOND_STEREO_PLAIN)
-        self.bond_triple = _add_bond_tool(bond_triple_icon(), "Triple bond.", 3, BOND_STEREO_PLAIN)
+        self.bond_double = _add_bond_tool(
+            bond_double_icon(), "Double bond. Key 2.", 2, BOND_STEREO_PLAIN
+        )
+        self.bond_triple = _add_bond_tool(
+            bond_triple_icon(), "Triple bond. Key 3.", 3, BOND_STEREO_PLAIN
+        )
         self.bond_wedge = _add_bond_tool(
             bond_wedge_icon(), "Wedge bond (solid stereo).", 1, BOND_STEREO_WEDGE
         )
@@ -463,21 +498,60 @@ class SketcherDialog(QDialog):
         )
         self.bond_dative = _add_bond_tool(
             bond_dative_icon(),
-            "Dative / coordinate bond (arrow from donor to acceptor).",
+            "Dative bond, drawn dashed from donor to acceptor.",
             1,
             BOND_STEREO_DATIVE,
         )
+        self.tb_bond = _glyph_tool_button(
+            bond_plain_icon(),
+            "Bond style. Click to choose single, double, triple, wedge, hash, wavy, or dative. "
+            "Keys 1, 2, and 3 set the order.",
+            checkable=False,
+        )
+        self.tb_bond.clicked.connect(self._show_bond_palette)
+        top_bar.addWidget(self.tb_bond)
         top_bar.addWidget(_toolbar_vsep())
 
         self._ring_button_group = QButtonGroup(self)
         self._ring_button_group.setExclusive(False)
         self._ring_btn_by_key: dict[str, QPushButton] = {}
-        for key, n_atoms, aromatic, tip in TOOLBAR_RING_TEMPLATES:
-            rb = _glyph_tool_button(ring_icon(n_atoms, aromatic=aromatic), tip)
-            rb.clicked.connect(lambda checked=False, k=key: self._on_ring_tool_clicked(k, checked))
-            self._ring_button_group.addButton(rb)
-            self._ring_btn_by_key[key] = rb
-            top_bar.addWidget(rb)
+        self._ring_palette = QFrame(self, Qt.Popup)
+        self._ring_palette.setFrameShape(QFrame.StyledPanel)
+        ring_grid = QGridLayout(self._ring_palette)
+        ring_grid.setContentsMargins(8, 8, 8, 8)
+        ring_grid.setHorizontalSpacing(4)
+        ring_grid.setVerticalSpacing(4)
+        ring_columns = 6
+        ring_row = 0
+        for title, names in self._ring_palette_groups():
+            header = QLabel(title)
+            header.setStyleSheet("font-weight: 600;")
+            ring_grid.addWidget(header, ring_row, 0, 1, ring_columns)
+            ring_row += 1
+            for index, key in enumerate(names):
+                if key in SKETCH_RING_TEMPLATES:
+                    n_atoms, _elements, orders = SKETCH_RING_TEMPLATES[key]
+                    aromatic = any(order == 2 for order in orders)
+                else:
+                    graph = fused_template(key)
+                    n_atoms = len(graph.elements) if graph is not None else 6
+                    aromatic = True
+                tip = f"{key} ({n_atoms} atoms)"
+                rb = _glyph_tool_button(ring_icon(n_atoms, aromatic=aromatic), tip)
+                rb.clicked.connect(
+                    lambda checked=False, k=key: self._on_ring_tool_clicked(k, checked)
+                )
+                self._ring_button_group.addButton(rb)
+                self._ring_btn_by_key[key] = rb
+                ring_grid.addWidget(rb, ring_row + index // ring_columns, index % ring_columns)
+            ring_row += (len(names) + ring_columns - 1) // ring_columns
+        self.tb_rings = _glyph_tool_button(
+            ring_icon(6, aromatic=True),
+            "Ring templates, including fused systems such as naphthalene and indole.",
+            checkable=False,
+        )
+        self.tb_rings.clicked.connect(self._show_ring_palette)
+        top_bar.addWidget(self.tb_rings)
         top_bar.addWidget(_toolbar_vsep())
 
         self.charge_plus = _glyph_tool_button(
@@ -524,7 +598,16 @@ class SketcherDialog(QDialog):
         top_toolbar = QWidget()
         top_toolbar.setObjectName("SketcherTopToolbar")
         top_toolbar.setStyleSheet(
-            "#SketcherTopToolbar { background-color: palette(window); border: none; }"
+            "#SketcherTopToolbar {"
+            " background-color: palette(window);"
+            " border: none;"
+            " border-bottom: 1px solid palette(mid);"
+            "}"
+            "QPushButton:checked {"
+            " background-color: #d6e6f8;"
+            " border: 1px solid #6f93c4;"
+            " border-radius: 3px;"
+            "}"
         )
         top_toolbar.setLayout(top_bar)
         top_toolbar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -546,7 +629,7 @@ class SketcherDialog(QDialog):
         self._element_btn_by_symbol: dict[str, QPushButton] = {}
         self._element_button_group = QButtonGroup(self)
         self._element_button_group.setExclusive(True)
-        self._el_btn_font = QFont("Sans", 8, QFont.Bold)
+        self._el_btn_font = QFont("Sans", 9)
         self._el_btn_font.setStyleHint(QFont.SansSerif)
         self._el_ncols = 4
         self._el_grid = QGridLayout()
@@ -569,20 +652,29 @@ class SketcherDialog(QDialog):
         toolbar_widget = QWidget()
         toolbar_widget.setObjectName("SketcherToolbarPanel")
         toolbar_widget.setStyleSheet(
-            "#SketcherToolbarPanel { background-color: palette(window); border: none; }"
+            "#SketcherToolbarPanel {"
+            " background-color: palette(window);"
+            " border: none;"
+            " border-right: 1px solid palette(mid);"
+            "}"
+            "QPushButton:checked {"
+            " background-color: #d6e6f8;"
+            " border: 1px solid #6f93c4;"
+            " border-radius: 3px;"
+            "}"
         )
-        # Wide enough for "Alkaline Earth Metals" header + margins (4×28px buttons).
-        toolbar_widget.setFixedWidth(172)
-        toolbar_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Maximum)
+        toolbar_widget.setFixedWidth(148)
+        toolbar_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         toolbar_widget.setLayout(toolbar_outer)
         self._toolbar_panel = toolbar_widget
-        main_h.addWidget(toolbar_widget, 0, Qt.AlignTop)
+        main_h.addWidget(toolbar_widget, 0)
 
         self.canvas = SketchWidget(self)
         self.canvas.select_mode = False
         self.canvas.setToolTip(
             "Right-click empty canvas for templates, modes, cleanup, and zoom-related commands in the menu bar."
         )
+        self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.canvas.setFocus()
 
         self.view_3d = Molecule3DEmbedView(self)
@@ -595,8 +687,33 @@ class SketcherDialog(QDialog):
         self._canvas_splitter.addWidget(self.view_3d)
         self._canvas_splitter.setStretchFactor(0, 1)
         self._canvas_splitter.setStretchFactor(1, 1)
+        self._canvas_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         main_h.addWidget(self._canvas_splitter, 1)
-        l.addLayout(main_h)
+        l.addLayout(main_h, 1)
+
+        self._status_bar = QStatusBar(self)
+        self._status_bar.setObjectName("SketcherStatusBar")
+        self._status_bar.setSizeGripEnabled(True)
+        self._status_bar.setStyleSheet(
+            "#SketcherStatusBar {"
+            " background-color: palette(window);"
+            " border-top: 1px solid palette(mid);"
+            "}"
+            "#SketcherStatusBar::item { border: none; }"
+            "QLabel#SketcherStatusTool { font-weight: 600; padding-left: 8px; padding-right: 10px; }"
+            "QLabel#SketcherStatusCounts { color: palette(shadow); padding-right: 12px; }"
+            "QLabel#SketcherStatusFormula { padding-left: 8px; padding-right: 4px; }"
+        )
+        self._status_tool = QLabel("Draw")
+        self._status_tool.setObjectName("SketcherStatusTool")
+        self._status_counts = QLabel("0 atoms   0 bonds")
+        self._status_counts.setObjectName("SketcherStatusCounts")
+        self._status_formula = QLabel("")
+        self._status_formula.setObjectName("SketcherStatusFormula")
+        self._status_bar.addWidget(self._status_tool)
+        self._status_bar.addWidget(self._status_counts, 1)
+        self._status_bar.addPermanentWidget(self._status_formula)
+        l.addWidget(self._status_bar)
 
         self._3d_refresh_timer = QTimer(self)
         self._3d_refresh_timer.setSingleShot(True)
@@ -604,15 +721,20 @@ class SketcherDialog(QDialog):
         self._3d_refresh_timer.timeout.connect(self._refresh_3d_view_now)
 
         self.canvas.sketchChanged.connect(self._update_sketch_status)
+        self.canvas.sketchChanged.connect(self._update_status_bar)
         self.canvas.sketchChanged.connect(self._schedule_3d_refresh)
         self.tb_erase.blockSignals(True)
         self.tb_erase.setChecked(False)
         self.tb_erase.blockSignals(False)
-        self.select_btn.blockSignals(True)
-        self.select_btn.setChecked(True)
-        self.select_btn.blockSignals(False)
-        self._toggle_select(True)
+        if self._initial_mol is not None:
+            self.select_btn.blockSignals(True)
+            self.select_btn.setChecked(True)
+            self.select_btn.blockSignals(False)
+            self._toggle_select(True)
+        else:
+            self._enter_draw_mode()
         self._update_sketch_status()
+        self._update_status_bar()
 
         if self._initial_mol is not None:
             QTimer.singleShot(0, self._apply_initial_mol)
@@ -696,12 +818,14 @@ class SketcherDialog(QDialog):
         rxn_on = bool(
             getattr(self, "tb_rxn_arrow", None) is not None and self.tb_rxn_arrow.isChecked()
         )
+        chain_on = bool(getattr(self, "tb_chain", None) is not None and self.tb_chain.isChecked())
         draw_on = (
             not self.tb_erase.isChecked()
             and not self.select_btn.isChecked()
             and not self.lasso_btn.isChecked()
             and not self.tb_text.isChecked()
             and not rxn_on
+            and not chain_on
         )
         self._act_mode_draw.blockSignals(True)
         self._act_mode_draw.setChecked(draw_on)
@@ -724,6 +848,7 @@ class SketcherDialog(QDialog):
             self._act_mode_text.blockSignals(True)
             self._act_mode_text.setChecked(self.tb_text.isChecked())
             self._act_mode_text.blockSignals(False)
+        self._update_status_bar()
 
     def show_sketch_canvas_menu(self, global_pos: QPoint) -> None:
         """Templates, modes, and cleanup (formerly the Draw menu). Right-click empty canvas."""
@@ -847,6 +972,93 @@ class SketcherDialog(QDialog):
         self.tb_wildcard.blockSignals(False)
         self._on_wildcard_tool_toggled(True)
 
+    def _ring_palette_groups(self) -> list[tuple[str, list[str]]]:
+        """Ring template names grouped the way the palette shows them."""
+        buckets: dict[str, list[str]] = {
+            "Carbocycles": [],
+            "Nitrogen": [],
+            "Oxygen": [],
+            "Sulfur": [],
+        }
+        for name, (_count, elements, _orders) in SKETCH_RING_TEMPLATES.items():
+            present = set(elements)
+            if present <= {"C"}:
+                buckets["Carbocycles"].append(name)
+            elif "S" in present:
+                buckets["Sulfur"].append(name)
+            elif "O" in present and "N" not in present:
+                buckets["Oxygen"].append(name)
+            else:
+                buckets["Nitrogen"].append(name)
+        groups = [(title, names) for title, names in buckets.items() if names]
+        groups.append(("Fused", list(FUSED_TEMPLATE_SMILES)))
+        return groups
+
+    def _popup_under(self, palette: QFrame, button: QPushButton) -> None:
+        palette.adjustSize()
+        palette.move(button.mapToGlobal(QPoint(0, button.height())))
+        palette.show()
+
+    def _show_bond_palette(self) -> None:
+        self._popup_under(self._bond_palette, self.tb_bond)
+
+    def _show_ring_palette(self) -> None:
+        self._popup_under(self._ring_palette, self.tb_rings)
+
+    def _show_more_elements(self) -> None:
+        menu = QMenu(self)
+        for element in getattr(self, "_more_element_symbols", []):
+            action = menu.addAction(element)
+            action.triggered.connect(
+                lambda _checked=False, el=element: self._on_element_tool_clicked(el, True)
+            )
+        button = getattr(self, "_more_elements_btn", None)
+        if button is None:
+            menu.exec_(QCursor.pos())
+            return
+        menu.exec_(button.mapToGlobal(QPoint(0, button.height())))
+
+    def _toggle_chain(self, checked: bool) -> None:
+        if checked:
+            self._leave_special_modes_for_drawing(keep_chain=True)
+            self.canvas.chain_mode = True
+            self.canvas.active_template = None
+            self._uncheck_ring_buttons()
+            self.canvas.place_element = "C"
+            button = self._element_btn_by_symbol.get("C")
+            if button is not None:
+                button.setChecked(True)
+            self.canvas.setCursor(Qt.CrossCursor)
+            self.canvas.setFocus()
+        else:
+            self.canvas.chain_mode = False
+            self.canvas._chain_preview = []
+            self.canvas._chain_press = None
+            if (
+                not self.tb_erase.isChecked()
+                and not self._any_select_tool_on()
+                and not self.tb_text.isChecked()
+            ):
+                self._enter_draw_mode()
+                return
+        self.canvas.update()
+        self._sync_mode_menu_checks()
+
+    def _update_status_bar(self) -> None:
+        """Refresh the tool, counts, and formula shown in the status bar."""
+        bar = getattr(self, "_status_bar", None)
+        canvas = getattr(self, "canvas", None)
+        if bar is None or canvas is None:
+            return
+        atoms = len(canvas.nodes)
+        bonds = len(canvas.bonds)
+        atom_word = "atom" if atoms == 1 else "atoms"
+        bond_word = "bond" if bonds == 1 else "bonds"
+        self._status_tool.setText(canvas.active_tool_name())
+        self._status_counts.setText(f"{atoms} {atom_word}    {bonds} {bond_word}")
+        formula = canvas.sketch_formula()
+        self._status_formula.setText(formula or "")
+
     def _enter_draw_mode(self) -> None:
         """Leave erase/select/template, choose carbon, and focus the canvas for drawing."""
         self._leave_special_modes_for_drawing()
@@ -955,7 +1167,9 @@ class SketcherDialog(QDialog):
             ],
         )
 
-    def _leave_special_modes_for_drawing(self, *, reset_bond: bool = True) -> None:
+    def _leave_special_modes_for_drawing(
+        self, *, reset_bond: bool = True, keep_chain: bool = False
+    ) -> None:
         """Exit Select, Erase, Text, and Reaction arrow so drawing tools (element/template) apply."""
         if self.tb_erase.isChecked():
             self.tb_erase.blockSignals(True)
@@ -972,6 +1186,14 @@ class SketcherDialog(QDialog):
         self.canvas.select_tool = "box"
         self.canvas.text_mode = False
         self.canvas.reaction_arrow_mode = False
+        if not keep_chain:
+            self.canvas.chain_mode = False
+            self.canvas._chain_preview = []
+            self.canvas._chain_press = None
+            if getattr(self, "tb_chain", None) is not None and self.tb_chain.isChecked():
+                self.tb_chain.blockSignals(True)
+                self.tb_chain.setChecked(False)
+                self.tb_chain.blockSignals(False)
         self.canvas.setCursor(Qt.ArrowCursor)
         self._clear_canvas_selection_ui()
         if reset_bond:
@@ -1033,6 +1255,13 @@ class SketcherDialog(QDialog):
                 self.tb_text.setChecked(False)
                 self.tb_text.blockSignals(False)
                 self.canvas.text_mode = False
+            if getattr(self, "tb_chain", None) is not None and self.tb_chain.isChecked():
+                self.tb_chain.blockSignals(True)
+                self.tb_chain.setChecked(False)
+                self.tb_chain.blockSignals(False)
+            self.canvas.chain_mode = False
+            self.canvas._chain_preview = []
+            self.canvas._chain_press = None
             self.canvas.reaction_arrow_mode = True
             self.canvas.place_element = None
             self.canvas.active_template = None
@@ -1062,10 +1291,18 @@ class SketcherDialog(QDialog):
     def _set_bond_tool(self, order: int, stereo: int) -> None:
         self.canvas.active_bond_order = int(order)
         self.canvas.active_bond_stereo = int(stereo) if int(order) == 1 else BOND_STEREO_PLAIN
+        active_icon = None
         for btn, o, s in getattr(self, "_bond_tool_buttons", []):
+            checked = o == order and s == (stereo if order == 1 else BOND_STEREO_PLAIN)
             btn.blockSignals(True)
-            btn.setChecked(o == order and s == (stereo if order == 1 else BOND_STEREO_PLAIN))
+            btn.setChecked(checked)
             btn.blockSignals(False)
+            if checked:
+                active_icon = btn.icon()
+        if active_icon is not None and getattr(self, "tb_bond", None) is not None:
+            self.tb_bond.setIcon(active_icon)
+        if getattr(self, "_bond_palette", None) is not None:
+            self._bond_palette.hide()
 
     def _on_bond_tool(self, order: int, stereo: int) -> None:
         """Select a bond type and switch the canvas to draw mode."""
@@ -1111,44 +1348,47 @@ class SketcherDialog(QDialog):
         self._element_btn_by_symbol.clear()
 
     def _populate_element_toolbar(self, symbols: list[str]) -> None:
-        """Build left-panel element buttons for ``symbols`` (plus Custom * / ? / R1 / R2)."""
+        """Short element rail, plus Custom * / ? / R1 / R2. Other saved symbols sit under More."""
         self._visible_element_symbols = list(symbols)
         self._clear_element_grid_widgets()
         el_ncols = self._el_ncols
         btn_font = self._el_btn_font
         grid_row = 0
-        groups = element_groups_for_symbols(symbols)
-        for gi, (group_title, group_symbols) in enumerate(groups):
-            if gi > 0:
-                self._el_grid.addWidget(_toolbar_hsep(), grid_row, 0, 1, el_ncols)
-                grid_row += 1
-            self._el_grid.addWidget(_toolbar_header(group_title), grid_row, 0, 1, el_ncols)
+        self._el_grid.addWidget(_toolbar_header("Elements"), grid_row, 0, 1, el_ncols)
+        grid_row += 1
+        rail = list(SKETCH_RAIL_ELEMENTS)
+        for i, el in enumerate(rail):
+            b = QPushButton(el)
+            b.setCheckable(True)
+            b.setProperty("sketch_element", el)
+            b.setFont(btn_font)
+            b.setFixedSize(28, 26)
+            b.setStyleSheet("padding: 0px;")
+            row, col = i // el_ncols, i % el_ncols
+            if el == "C":
+                b.setToolTip(
+                    "Carbon: click empty space to place C; drag to draw a bond; "
+                    "click any other atom to replace it with carbon."
+                )
+            else:
+                b.setToolTip(f"Place {el}.")
+            b.clicked.connect(lambda checked, e=el: self._on_element_tool_clicked(e, checked))
+            self._element_button_group.addButton(b)
+            self._el_grid.addWidget(b, grid_row + row, col)
+            self.element_buttons.append(b)
+            self._element_btn_by_symbol[el] = b
+        grid_row += (len(rail) + el_ncols - 1) // el_ncols
+        rail_set = set(rail)
+        self._more_element_symbols = [s for s in symbols if s not in rail_set]
+        if self._more_element_symbols:
+            self._more_elements_btn = QPushButton("More…")
+            self._more_elements_btn.setFont(btn_font)
+            self._more_elements_btn.setToolTip(
+                "Other elements from Customize Elements, including isotopes."
+            )
+            self._more_elements_btn.clicked.connect(self._show_more_elements)
+            self._el_grid.addWidget(self._more_elements_btn, grid_row, 0, 1, el_ncols)
             grid_row += 1
-            for i, el in enumerate(group_symbols):
-                b = QPushButton(el)
-                b.setCheckable(True)
-                b.setProperty("sketch_element", el)
-                b.setFont(btn_font)
-                b.setFixedSize(28, 26)
-                b.setStyleSheet("padding: 0px;")
-                row, col = i // el_ncols, i % el_ncols
-                if el == "C":
-                    b.setToolTip(
-                        "Carbon: click empty space to place C; click another C to extend a chain; "
-                        "click any other atom to replace it with carbon."
-                    )
-                elif el == "D":
-                    b.setToolTip("Deuterium (hydrogen isotope).")
-                elif el == "T":
-                    b.setToolTip("Tritium (hydrogen isotope).")
-                else:
-                    b.setToolTip(f"Place {el} ({group_title}).")
-                b.clicked.connect(lambda checked, e=el: self._on_element_tool_clicked(e, checked))
-                self._element_button_group.addButton(b)
-                self._el_grid.addWidget(b, grid_row + row, col)
-                self.element_buttons.append(b)
-                self._element_btn_by_symbol[el] = b
-            grid_row += (len(group_symbols) + el_ncols - 1) // el_ncols
 
         self._el_grid.addWidget(_toolbar_hsep(), grid_row, 0, 1, el_ncols)
         grid_row += 1
@@ -1202,6 +1442,13 @@ class SketcherDialog(QDialog):
         self._el_grid.addWidget(self.tb_any_element, grid_row, 1)
         self._el_grid.addWidget(self.tb_r1, grid_row, 2)
         self._el_grid.addWidget(self.tb_r2, grid_row, 3)
+        self.tb_rn = QPushButton("Rn")
+        self.tb_rn.setFont(r_font)
+        self.tb_rn.setFixedSize(32, 26)
+        self.tb_rn.setStyleSheet("padding: 0px;")
+        self.tb_rn.setToolTip("Choose Rn (R3, R4, …). Exports as [*:n].")
+        self.tb_rn.clicked.connect(self._on_rn_clicked)
+        self._el_grid.addWidget(self.tb_rn, grid_row + 1, 0)
 
         # Drop place-tool if the selected element was removed from the panel.
         place = getattr(self.canvas, "place_element", None) if hasattr(self, "canvas") else None
@@ -1283,6 +1530,8 @@ class SketcherDialog(QDialog):
         self.canvas.place_element = None
 
     def _select_template_from_menu(self, name: str) -> None:
+        if getattr(self, "_ring_palette", None) is not None:
+            self._ring_palette.hide()
         self._leave_special_modes_for_drawing()
         self._uncheck_element_buttons_clear_place()
         self.canvas.active_template = name
@@ -1401,9 +1650,51 @@ class SketcherDialog(QDialog):
             self.canvas.active_template = None
             self._uncheck_ring_buttons()
             self.canvas.place_element = element
+            if getattr(self, "tb_rn", None) is not None:
+                self.tb_rn.setText("Rn")
             return
         if self.canvas.place_element == element:
             self._select_default_element_tool()
+
+    def _on_rn_clicked(self) -> None:
+        number, ok = QInputDialog.getInt(self, "R-group", "R-group number:", 3, 1, 32)
+        if not ok:
+            return
+        from .rgroups import rgroup_element
+
+        self._uncheck_rgroup_buttons()
+        self._uncheck_element_buttons_clear_place()
+        self._leave_special_modes_for_drawing()
+        self.canvas.active_template = None
+        self._uncheck_ring_buttons()
+        self.canvas.place_element = rgroup_element(number)
+        self.tb_rn.setText(f"R{number}")
+        self.canvas.setFocus()
+        self._sync_mode_menu_checks()
+
+    def _show_group_menu(self) -> None:
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        for name in TABLE_CONTRACTED_LABELS:
+            action = menu.addAction(name)
+            action.triggered.connect(lambda _checked=False, label=name: self._arm_group(label))
+        menu.exec_(self.tb_groups.mapToGlobal(QPoint(0, self.tb_groups.height())))
+
+    def _arm_group(self, label: str) -> None:
+        self._leave_special_modes_for_drawing()
+        self.canvas.arm_contracted_label(label)
+        if self.canvas.armed_abbrev:
+            self.canvas.setCursor(Qt.CrossCursor)
+        self.canvas.setFocus()
+        self._update_status_bar()
+
+    def _copy_molfile(self) -> None:
+        if not self.canvas.copy_molblock_to_clipboard():
+            QMessageBox.information(self, "Copy Molfile", "Nothing on the canvas to copy.")
+
+    def _copy_image(self) -> None:
+        if not self.canvas.copy_depiction_png_to_clipboard():
+            QMessageBox.information(self, "Copy Image", "The sketch could not be drawn.")
 
     def _on_any_element_tool_clicked(self, checked: bool) -> None:
         if not checked:
@@ -1515,10 +1806,16 @@ class SketcherDialog(QDialog):
         smarts = (self.canvas.to_reaction_smarts() or "").strip()
         if not smarts:
             return 0
-        self._ensure_table_columns(app, (RXN_SMARTS_HEADER,))
+        headers = [RXN_SMARTS_HEADER]
+        annotation = self.canvas.reaction_annotation()
+        cells = {RXN_SMARTS_HEADER: smarts}
+        if annotation:
+            headers.append(RXN_ANNOTATION_HEADER)
+            cells[RXN_ANNOTATION_HEADER] = annotation
+        self._ensure_table_columns(app, tuple(headers))
         oid = app.next_oid
         app.next_oid += 1
-        app._table_model.append_row(oid, {RXN_SMARTS_HEADER: smarts})
+        app._table_model.append_row(oid, cells)
         self._queue_reaction_structure_render(app, oid, smarts)
         app.status_label.setText("Added 1 reaction from sketcher")
         if hasattr(app, "calculate_global_bounds"):

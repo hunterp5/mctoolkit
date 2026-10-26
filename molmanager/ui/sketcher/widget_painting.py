@@ -14,7 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""ACS Document 1996–style 2D rendering for :class:`~molmanager.ui.sketcher.widget.SketchWidget`."""
+"""Canvas rendering for :class:`~molmanager.ui.sketcher.widget.SketchWidget`.
+
+Structure ink is the same depiction scene the Structure column paints. Selection,
+the reaction arrow, and in-progress drags stay on this canvas.
+"""
 
 from __future__ import annotations
 
@@ -25,7 +29,7 @@ from PyQt5.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterP
 
 from .chem import sketch_lone_pair_count, sketch_oxidation_state
 from .sketch_rdkit_paint import render_sketch_mol_to_pixmap, sketch_rdkit_paint_cache_key
-from .constants import SKETCH_MEDIAN_BOND_PX, WILDCARD_ELEMENT
+from .constants import SKETCH_COORD_SCALE, SKETCH_MEDIAN_BOND_PX, WILDCARD_ELEMENT
 from .bonds import (
     BOND_STEREO_DATIVE,
     BOND_STEREO_HASH,
@@ -1689,13 +1693,55 @@ class SketchWidgetPaintMixin:
                         p, pos, ch, symbol=label, font_pt=style.label_font_pt, node=n
                     )
 
+    def _scene_line_width_px(self) -> float:
+        """Stroke matching the table painter's 1px line relative to a normal cell bond."""
+        from molmanager.table.depiction_painter import TABLE_STROKE_PER_BOND
+
+        med = float(getattr(self, "_median_bond_length_px", None) or SKETCH_MEDIAN_BOND_PX)
+        return max(0.8, med * TABLE_STROKE_PER_BOND)
+
+    def _paint_depiction_scene(self, p: QPainter, scene) -> None:
+        from molmanager.table.depiction_painter import SceneFit, light_palette, paint_scene_fit
+
+        fit = SceneFit(scale=float(SKETCH_COORD_SCALE), dx=0.0, dy=0.0)
+        paint_scene_fit(
+            p,
+            scene,
+            fit,
+            light_palette(),
+            line_width_px=self._scene_line_width_px(),
+        )
+
+    def _paint_chain_preview(self, p: QPainter, style) -> None:
+        points = list(getattr(self, "_chain_preview", None) or [])
+        if not points:
+            return
+        pen = QPen(QColor(60, 120, 200))
+        pen.setStyle(Qt.DashLine)
+        pen.setWidthF(max(1.0, style.bond_width_px * 0.75))
+        pen.setCapStyle(Qt.RoundCap)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        anchor_id = getattr(self, "_chain_anchor", None)
+        anchor = None
+        if anchor_id is not None:
+            anchor = next((n for n in self.nodes if int(n["id"]) == int(anchor_id)), None)
+        previous = anchor["pos"] if anchor is not None else None
+        for point in points:
+            if previous is not None:
+                p.drawLine(previous, point)
+            p.drawEllipse(QPointF(point), 3.0, 3.0)
+            previous = point
+
     def _paint_sketch_structure(self, p: QPainter, style) -> None:
-        if self._try_paint_rdkit_sketch_structure(p):
+        scene = self.depiction_scene_for_canvas()
+        if scene is not None:
+            self._last_structure_paint = "scene"
             self._paint_sketch_bond_highlights(p, style)
-            # RDKit pixmap is drawn with noAtomLabels; paint crisp ACS heteroatom labels here.
-            self._paint_sketch_element_labels(p, style)
+            self._paint_depiction_scene(p, scene)
             self._paint_sketch_atom_overlays(p, style)
             return
+        self._last_structure_paint = "acs"
         self._paint_sketch_structure_acs(p, style)
 
     def _paint_reaction_arrow(
@@ -1733,6 +1779,40 @@ class SketchWidgetPaintMixin:
             )
         )
         p.setBrush(Qt.NoBrush)
+        if not preview:
+            self._paint_reaction_labels(p, start, end, style)
+
+    def _paint_reaction_labels(self, p: QPainter, start: QPoint, end: QPoint, style) -> None:
+        above = str(getattr(self, "reaction_above", "") or "").strip()
+        below = str(getattr(self, "reaction_below", "") or "").strip()
+        if not above and not below:
+            return
+        x1, y1 = float(start.x()), float(start.y())
+        x2, y2 = float(end.x()), float(end.y())
+        dx, dy = x2 - x1, y2 - y1
+        length = max(math.hypot(dx, dy), 1.0)
+        ux, uy = dx / length, dy / length
+        px, py = -uy, ux
+        gap = max(16.0, float(style.label_font_pt) * 1.4)
+        font = iupac_structure_font(max(8.0, float(style.label_font_pt) * 0.9))
+        metrics = QFontMetrics(font)
+        p.setFont(font)
+        p.setPen(QColor(20, 20, 20))
+        mid_x = (x1 + x2) / 2.0
+        mid_y = (y1 + y2) / 2.0
+
+        def _draw(text: str, ox: float, oy: float) -> None:
+            width = (
+                metrics.horizontalAdvance(text)
+                if hasattr(metrics, "horizontalAdvance")
+                else metrics.width(text)
+            )
+            p.drawText(QPointF(ox - width / 2.0, oy + metrics.ascent() / 2.0), text)
+
+        if above:
+            _draw(above, mid_x + px * gap, mid_y + py * gap)
+        if below:
+            _draw(below, mid_x - px * gap, mid_y - py * gap)
 
     def _paint_reaction_pluses(self, p: QPainter, style) -> None:
         pts = self._reaction_plus_positions()
@@ -1764,6 +1844,7 @@ class SketchWidgetPaintMixin:
         if getattr(self, "_arrow_dragging", False) and self._arrow_drag_start is not None:
             end = self._arrow_drag_pos or self._arrow_drag_start
             self._paint_reaction_arrow(p, self._arrow_drag_start, end, style, preview=True)
+        self._paint_chain_preview(p, style)
         if self._is_dragging and self._drag_start is not None and self._drag_pos is not None:
             start = next((n for n in self.nodes if n["id"] == self._drag_start), None)
             if start:
@@ -1802,3 +1883,17 @@ class SketchWidgetPaintMixin:
             sel_pen.setWidth(1)
             p.setPen(sel_pen)
             p.drawPath(path)
+        framed = self.selection_frame_widget()
+        if framed is not None:
+            rect, handle = framed
+            frame_pen = QPen(QColor(40, 90, 180))
+            frame_pen.setStyle(Qt.DashLine)
+            frame_pen.setWidth(1)
+            p.setPen(frame_pen)
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(rect)
+            if handle is not None:
+                p.setBrush(QBrush(QColor(40, 90, 180)))
+                p.setPen(Qt.NoPen)
+                p.drawEllipse(QPointF(handle), 5.0, 5.0)
+                p.setBrush(Qt.NoBrush)

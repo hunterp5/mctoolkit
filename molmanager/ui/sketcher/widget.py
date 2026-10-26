@@ -36,6 +36,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QInputDialog,
+    QLineEdit,
     QMenu,
     QMessageBox,
     QVBoxLayout,
@@ -65,8 +66,8 @@ from .iupac_rings import (
     rotate_offsets_to_inward_heteroatoms,
     spiro_second_ring_offsets_y_up,
 )
-from .iupac_style import snap_extension_angle
 from .iupac_validate import format_iupac_issues, validate_iupac_sketch
+from .sketch_grid import chain_points, snap_to_hex_grid
 from .sketch_graph import connected_components_from_graph, topology_fingerprint
 from .sketch_rdkit import SketchWidgetRdkitMixin
 from .constants import (
@@ -140,9 +141,13 @@ class SketchWidget(
         self.select_mode = False
         self.select_tool = "box"  # "box" | "lasso" while select_mode is on
         self.text_mode = False
+        self.chain_mode = False
         self.reaction_arrow_mode = False
         self.reaction_arrow: tuple[QPoint, QPoint] | None = None
+        self.reaction_above: str = ""
+        self.reaction_below: str = ""
         self.selected_reaction_arrow = False
+        self.armed_abbrev: str | None = None
         self._arrow_dragging = False
         self._arrow_drag_start: QPoint | None = None
         self._arrow_drag_pos: QPoint | None = None
@@ -175,6 +180,16 @@ class SketchWidget(
         self._mouse_down_pos: QPoint | None = None
         self._maybe_move = False
         self._suppress_click = False
+        self._chain_anchor: int | None = None
+        self._chain_press: QPoint | None = None
+        self._chain_preview: list[QPoint] = []
+        self._rotating = False
+        self._rotate_orig: dict[int, QPoint] = {}
+        self._rotate_cen: tuple[float, float] | None = None
+        self._rotate_start = 0.0
+        self._panning = False
+        self._pan_last: QPoint | None = None
+        self._space_pan = False
 
         self._angle_signs: dict[int, int] = {}
         self._undo: list[tuple[str, Any]] = []
@@ -183,6 +198,8 @@ class SketchWidget(
         self.radius = 14
         self._median_bond_length_px = float(SKETCH_MEDIAN_BOND_PX)
         self._view_scale = 1.0
+        self._view_pan = QPointF(0.0, 0.0)
+        self._last_structure_paint = ""
         self._rdkit_sketch_paint_cache_key = None
         self._rdkit_sketch_paint_cache = None
         self._valence_violations: set[int] = set()
@@ -603,11 +620,22 @@ class SketchWidget(
         """Map widget pixels to sketch model coordinates (inverse of paint-time view scale)."""
         c = self._view_center()
         s = float(self._view_scale)
+        pan = self._view_pan
         if abs(s) < 1e-9:
             return QPoint(pt)
         return QPoint(
-            int(round((pt.x() - c.x()) / s + c.x())),
-            int(round((pt.y() - c.y()) / s + c.y())),
+            int(round((pt.x() - c.x() - pan.x()) / s + c.x())),
+            int(round((pt.y() - c.y() - pan.y()) / s + c.y())),
+        )
+
+    def _model_point_to_widget(self, pt: QPoint) -> QPoint:
+        """Map sketch model coordinates to widget pixels."""
+        c = self._view_center()
+        s = float(self._view_scale)
+        pan = self._view_pan
+        return QPoint(
+            int(round(c.x() + pan.x() + (float(pt.x()) - c.x()) * s)),
+            int(round(c.y() + pan.y() + (float(pt.y()) - c.y()) * s)),
         )
 
     def _widget_rect_to_model(self, rect: QRect) -> QRect:
@@ -637,9 +665,10 @@ class SketchWidget(
 
     def _apply_view_transform(self, p: QPainter) -> None:
         c = self._view_center()
-        p.translate(c)
+        pan = self._view_pan
+        p.translate(c.x() + pan.x(), c.y() + pan.y())
         p.scale(self._view_scale, self._view_scale)
-        p.translate(-c)
+        p.translate(-c.x(), -c.y())
 
     def _refresh_sketch_draw_metrics(self) -> None:
         """Sync line weights / hit radius to the current model-space median bond length."""
@@ -745,6 +774,44 @@ class SketchWidget(
             self.update()
             return
         self._set_reaction_arrow((QPoint(start), head))
+
+    def set_reaction_text(self, above: str, below: str) -> None:
+        """Store the labels drawn above and below the reaction arrow."""
+        new = ((above or "").strip(), (below or "").strip())
+        old = (self.reaction_above, self.reaction_below)
+        if old == new:
+            return
+        self.reaction_above, self.reaction_below = new
+        self._push_undo("set_reaction_text", (old, new))
+        self._after_sketch_edit()
+
+    def reaction_annotation(self) -> str:
+        """Table cell for the arrow labels. Above and below are separated by `` | ``."""
+        above = (self.reaction_above or "").strip()
+        below = (self.reaction_below or "").strip()
+        if above and below:
+            return f"{above} | {below}"
+        return above or below
+
+    def _open_reaction_text_dialog(self) -> None:
+        if self.reaction_arrow is None:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Reaction text")
+        form = QFormLayout(dialog)
+        above = QLineEdit(self.reaction_above)
+        below = QLineEdit(self.reaction_below)
+        above.setPlaceholderText("Reagents, above the arrow")
+        below.setPlaceholderText("Conditions, below the arrow")
+        form.addRow("Above", above)
+        form.addRow("Below", below)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        self.set_reaction_text(above.text(), below.text())
 
     def _fragment_centroid(self, comp: set[int]) -> tuple[float, float] | None:
         xs: list[float] = []
@@ -1213,6 +1280,8 @@ class SketchWidget(
                 (int(self.reaction_arrow[0].x()), int(self.reaction_arrow[0].y())),
                 (int(self.reaction_arrow[1].x()), int(self.reaction_arrow[1].y())),
             ),
+            "reaction_above": self.reaction_above,
+            "reaction_below": self.reaction_below,
         }
 
     def _restore_sketch_state(self, payload: dict[str, Any]) -> None:
@@ -1260,6 +1329,8 @@ class SketchWidget(
                     QPoint(int(b[0]), int(b[1])),
                 )
         self.selected_reaction_arrow = False
+        self.reaction_above = str(payload.get("reaction_above") or "")
+        self.reaction_below = str(payload.get("reaction_below") or "")
         self._ensure_bonds_sanitized()
 
     def _swap_clear_sketch_undo(self, other: dict[str, Any], *, to_redo: bool) -> None:
@@ -1392,6 +1463,12 @@ class SketchWidget(
             if self.reaction_arrow is None:
                 self.selected_reaction_arrow = False
             self._redo.append(("set_arrow", data))
+            self._after_sketch_edit()
+            return
+        if op == "set_reaction_text":
+            old, _new = data
+            self.reaction_above, self.reaction_below = old
+            self._redo.append(("set_reaction_text", data))
             self._after_sketch_edit()
             return
         if op == "add_node":
@@ -1540,6 +1617,19 @@ class SketchWidget(
             self._redo.append(("del_hs_redo", payload))
             self._after_sketch_edit()
             return
+        elif op == "add_chain":
+            payload = data
+            nids = set(payload["new_ids"])
+            self.nodes = [n for n in self.nodes if n["id"] not in nids]
+            self.bonds = [
+                b
+                for b in self.bonds
+                if _bond_unpack(b)[0] not in nids and _bond_unpack(b)[1] not in nids
+            ]
+            self.selected_nodes = [i for i in self.selected_nodes if i not in nids]
+            self._redo.append(("add_chain_redo", payload))
+            self._after_sketch_edit()
+            return
         elif op == "paste_group":
             payload = data
             for nid in payload["new_ids"]:
@@ -1569,6 +1659,12 @@ class SketchWidget(
             if self.reaction_arrow is None:
                 self.selected_reaction_arrow = False
             self._undo.append(("set_arrow", data))
+            self._after_sketch_edit()
+            return
+        if op == "set_reaction_text":
+            _old, new = data
+            self.reaction_above, self.reaction_below = new
+            self._undo.append(("set_reaction_text", data))
             self._after_sketch_edit()
             return
         if op == "del_node":
@@ -1640,6 +1736,16 @@ class SketchWidget(
                     bt = _bond_make(*_bond_unpack(bb))
                     self.bonds = [b for b in self.bonds if b != bt]
             self._undo.append(("del_hs_local", payload))
+            self._after_sketch_edit()
+            return
+        if op == "add_chain_redo":
+            payload = data
+            self.nodes.extend(payload["nodes"])
+            for bond in payload["bonds"]:
+                self.bonds.append(_bond_make(*_bond_unpack(bond)))
+            if payload["nodes"]:
+                self.next_id = max(self.next_id, max(int(n["id"]) for n in payload["nodes"]) + 1)
+            self._undo.append(("add_chain", payload))
             self._after_sketch_edit()
             return
         if op == "paste_redo":
@@ -2024,12 +2130,127 @@ class SketchWidget(
         self._after_sketch_edit(notify=True, notify_if_valence_failed=True)
 
     def paste_from_clipboard(self, anchor: QPoint | None = None) -> bool:
-        frag = self._clipboard_sketch_fragment()
-        if not frag:
-            return False
         pt = anchor if anchor is not None else self.rect().center()
-        self._paste_fragment_payload(frag, pt)
+        frag = self._clipboard_sketch_fragment()
+        if frag:
+            self._paste_fragment_payload(frag, pt)
+            return True
+        text = QApplication.clipboard().text() or ""
+        mol = self._mol_from_clipboard_text(text)
+        if mol is None:
+            return False
+        return self.append_mol_at(mol, pt)
+
+    def clipboard_has_pastable_structure(self) -> bool:
+        """True when the clipboard holds a sketch fragment, a molfile, or SMILES."""
+        if self.clipboard_has_sketch_fragment():
+            return True
+        text = QApplication.clipboard().text() or ""
+        return self._mol_from_clipboard_text(text) is not None
+
+    @staticmethod
+    def _mol_from_clipboard_text(text: str):
+        from molmanager.chem.molecule_conversion import looks_like_mol_block
+
+        raw = (text or "").strip()
+        if not raw or raw.startswith("MOLMANAGER_SKETCHCLIP:"):
+            return None
+        if looks_like_mol_block(raw):
+            mol = Chem.MolFromMolBlock(raw)
+            if mol is not None and mol.GetNumAtoms() > 0:
+                return mol
+        first = raw.splitlines()[0].strip()
+        if not first or len(first) > 4000 or " " in first:
+            return None
+        mol = Chem.MolFromSmiles(first)
+        if mol is not None and mol.GetNumAtoms() > 0:
+            return mol
+        return None
+
+    def copy_molblock_to_clipboard(self) -> bool:
+        """Copy a molfile of the selection, or of the whole sketch when nothing is selected."""
+        ids = self._selection_fragment_ids() or {int(n["id"]) for n in self.nodes}
+        if not ids:
+            return False
+        mol = self._mol_from_node_ids(ids)
+        if mol is None or mol.GetNumAtoms() == 0:
+            return False
+        try:
+            block = Chem.MolToMolBlock(mol)
+        except Exception:
+            return False
+        if not block:
+            return False
+        QApplication.clipboard().setText(block)
         return True
+
+    def copy_depiction_png_to_clipboard(self) -> bool:
+        """Copy a PNG of the depiction scene, without selection chrome."""
+        from PyQt5.QtCore import QRectF
+        from PyQt5.QtGui import QImage
+
+        from molmanager.table.depiction_painter import light_palette, paint_scene
+
+        scene = self.depiction_scene_for_canvas()
+        if scene is None:
+            return False
+        image = QImage(640, 480, QImage.Format_ARGB32)
+        image.fill(Qt.white)
+        painter = QPainter(image)
+        try:
+            paint_scene(painter, scene, QRectF(0, 0, 640, 480), light_palette(), line_width_px=1.6)
+        finally:
+            painter.end()
+        QApplication.clipboard().setImage(image)
+        return True
+
+    def arm_contracted_label(self, raw: str) -> bool:
+        """Contract *raw* onto the hovered or sole selected atom, or arm the next click."""
+        from .contracted_labels import lookup_contracted_label
+
+        label = lookup_contracted_label(raw)
+        if label is None:
+            return False
+        target = self._abbrev_target_node()
+        if target is not None:
+            self._mutate_atom_element(target, label.element, None, abbrev=label.display)
+            self.armed_abbrev = None
+            return True
+        self.armed_abbrev = label.display
+        return True
+
+    def _abbrev_target_node(self) -> dict[str, Any] | None:
+        if isinstance(self.hover, int):
+            found = next((n for n in self.nodes if int(n["id"]) == int(self.hover)), None)
+            if found is not None:
+                return found
+        if len(self.selected_nodes) == 1:
+            nid = int(self.selected_nodes[0])
+            return next((n for n in self.nodes if int(n["id"]) == nid), None)
+        return None
+
+    def _apply_armed_abbrev(self, pt: QPoint) -> None:
+        from .contracted_labels import lookup_contracted_label
+
+        label = lookup_contracted_label(self.armed_abbrev or "")
+        self.armed_abbrev = None
+        if label is None:
+            return
+        hit = self._hit_node(pt)
+        if hit is not None:
+            self._mutate_atom_element(hit, label.element, None, abbrev=label.display)
+            return
+        nid = self.next_id
+        self.next_id += 1
+        node = {
+            "id": nid,
+            "pos": QPoint(pt.x(), pt.y()),
+            "element": label.element,
+            "abbrev": label.display,
+        }
+        self.nodes.append(node)
+        self._push_undo("add_node", node)
+        self._after_sketch_edit()
 
     def _add_copy_paste_menu_actions(self, menu: QMenu, *, paste_anchor: QPoint) -> None:
         """Copy / Paste for the current selection, then a divider (context menus)."""
@@ -2041,8 +2262,8 @@ class SketchWidget(
         act_copy.triggered.connect(self.copy_selection_to_clipboard)
         menu.addAction(act_copy)
         act_paste = QAction("Paste", self)
-        act_paste.setToolTip("Paste a copied sketch fragment at the click location.")
-        act_paste.setEnabled(self.clipboard_has_sketch_fragment())
+        act_paste.setToolTip("Paste a sketch fragment, molfile, or SMILES at the click location.")
+        act_paste.setEnabled(self.clipboard_has_pastable_structure())
         anchor = QPoint(paste_anchor)
         act_paste.triggered.connect(lambda _=False, pt=anchor: self.paste_from_clipboard(pt))
         menu.addAction(act_paste)
@@ -2161,6 +2382,7 @@ class SketchWidget(
         if not changed and abs(scale - 1.0) < 1e-9:
             return False
         self._view_scale = 1.0
+        self._view_pan = QPointF(0.0, 0.0)
         self._refresh_sketch_draw_metrics()
         if refresh:
             self._after_sketch_edit(notify=True, notify_if_valence_failed=True)
@@ -2236,19 +2458,95 @@ class SketchWidget(
         self._after_sketch_edit(notify=True, notify_if_valence_failed=True)
 
     def zoom_about_viewport_center(self, factor: float, push_undo: bool = False) -> None:
-        """
-        Zoom the canvas view about the widget center (bonds, labels, and line weights scale together).
-
-        Does not move atoms in model space or record undo (use Fit Structure to resize the sketch).
-        """
+        """Zoom about the widget center. Atoms stay in model space."""
         del push_undo
-        if not self.nodes or abs(factor - 1.0) < 1e-6:
+        self.zoom_about_widget_point(factor, self.rect().center())
+
+    def zoom_about_widget_point(self, factor: float, widget_pt: QPoint) -> None:
+        """
+        Zoom the view about a widget pixel so the model point under it stays put.
+
+        Does not move atoms or record undo.
+        """
+        if abs(factor - 1.0) < 1e-6:
             return
         factor = float(factor)
         if factor <= 0:
             return
-        self._view_scale = max(0.08, min(12.0, self._view_scale * factor))
+        old = float(self._view_scale)
+        new = max(0.08, min(12.0, old * factor))
+        actual = new / old if old else 1.0
+        center = self._view_center()
+        pan = self._view_pan
+        wx = float(widget_pt.x()) - center.x()
+        wy = float(widget_pt.y()) - center.y()
+        self._view_pan = QPointF(
+            wx * (1.0 - actual) + pan.x() * actual, wy * (1.0 - actual) + pan.y() * actual
+        )
+        self._view_scale = new
         self.update()
+
+    def pan_by_widget_delta(self, dx: float, dy: float) -> None:
+        """Shift the view by widget pixels. Atoms stay in model space."""
+        pan = self._view_pan
+        self._view_pan = QPointF(pan.x() + float(dx), pan.y() + float(dy))
+        self.update()
+
+    def active_tool_name(self) -> str:
+        """Short name of the armed tool, for the footer."""
+        if self.armed_abbrev:
+            return self.armed_abbrev
+        if self.chain_mode:
+            return "Chain"
+        if self.erase_mode:
+            return "Erase"
+        if self.text_mode:
+            return "Text"
+        if self.reaction_arrow_mode:
+            return "Reaction arrow"
+        if self.select_mode:
+            return "Lasso" if self.select_tool == "lasso" else "Select"
+        if self.active_template:
+            return str(self.active_template)
+        element = self.place_element or "C"
+        return f"Draw {element}"
+
+    def sketch_formula(self) -> str | None:
+        """Molecular formula when the sketch is one fragment RDKit can describe."""
+        if not self.nodes:
+            return None
+        components = self.connected_components()
+        if len(components) != 1:
+            return None
+        mol = self._mol_from_node_ids(set(components[0]))
+        if mol is None or mol.GetNumAtoms() == 0:
+            return None
+        try:
+            from rdkit.Chem.rdMolDescriptors import CalcMolFormula
+
+            mol.UpdatePropertyCache(strict=False)
+            return str(CalcMolFormula(mol))
+        except Exception:
+            return None
+
+    def nudge_selection(self, dx: int, dy: int) -> bool:
+        """Move the selection by model pixels. One undo step."""
+        ids = self._atoms_for_selection_move()
+        if not ids or (dx == 0 and dy == 0):
+            return False
+        moves: list[tuple[int, QPoint, QPoint]] = []
+        for node in self.nodes:
+            if int(node["id"]) not in ids:
+                continue
+            old = QPoint(node["pos"].x(), node["pos"].y())
+            new = QPoint(old.x() + int(dx), old.y() + int(dy))
+            node["pos"] = new
+            moves.append((int(node["id"]), old, new))
+        if not moves:
+            return False
+        self._push_undo("move_nodes", moves)
+        self._after_sketch_edit()
+        return True
 
     def _can_group_selection(self) -> bool:
         sel = self._selected_node_set()
@@ -2273,9 +2571,7 @@ class SketchWidget(
             return
         menu.addSeparator()
         act = QAction("Clean Up Selected", self)
-        act.setToolTip(
-            "Re-layout only the selected atoms (same IUPAC Clean Up as the full sketch)."
-        )
+        act.setToolTip("Re-layout only the selected atoms with the same layout as Clean Up.")
         act.triggered.connect(self._menu_cleanup_selected)
         menu.addAction(act)
 
@@ -2371,6 +2667,149 @@ class SketchWidget(
         self._push_undo("move_nodes", moves)
         self._after_sketch_edit()
         return True
+
+    def _commit_carbon_chain(self, anchor_id: int | None, points: list[QPoint]) -> bool:
+        """Add zigzag carbons. *anchor_id* is the existing atom the first bond leaves, if any."""
+        if not points:
+            return False
+        stored_nodes: list[dict[str, Any]] = []
+        stored_bonds: list[tuple[int, int, int, int]] = []
+        prev = anchor_id
+        for point in points:
+            nid = self.next_id
+            self.next_id += 1
+            node = {"id": nid, "pos": QPoint(point.x(), point.y()), "element": "C"}
+            self.nodes.append(node)
+            stored_nodes.append({"id": nid, "pos": QPoint(point.x(), point.y()), "element": "C"})
+            if prev is not None:
+                bond = _bond_make(int(prev), nid, 1, BOND_STEREO_PLAIN)
+                self.bonds.append(bond)
+                stored_bonds.append(bond)
+            prev = nid
+        self._push_undo(
+            "add_chain",
+            {
+                "nodes": stored_nodes,
+                "bonds": stored_bonds,
+                "new_ids": [int(n["id"]) for n in stored_nodes],
+            },
+        )
+        self._after_sketch_edit()
+        return True
+
+    def preview_carbon_chain(
+        self, anchor_id: int | None, press: QPoint, target: QPoint
+    ) -> list[QPoint]:
+        """Ghost carbons for a chain drag. Includes a carbon at *press* when there is no anchor."""
+        med = float(getattr(self, "_median_bond_length_px", None) or SKETCH_MEDIAN_BOND_PX)
+        if anchor_id is None:
+            origin = (float(press.x()), float(press.y()))
+            extra = chain_points(origin, (float(target.x()), float(target.y())), med)
+            points = [QPoint(press.x(), press.y())]
+            points.extend(QPoint(int(round(x)), int(round(y))) for x, y in extra)
+            return points
+        anchor = next((n for n in self.nodes if int(n["id"]) == int(anchor_id)), None)
+        if anchor is None:
+            return []
+        origin = (float(anchor["pos"].x()), float(anchor["pos"].y()))
+        extra = chain_points(origin, (float(target.x()), float(target.y())), med)
+        if extra:
+            return [QPoint(int(round(x)), int(round(y))) for x, y in extra]
+        ux, uy = self._compute_extension_vector(int(anchor_id), snap=True, new_bond_order=1)
+        return [
+            QPoint(
+                int(round(origin[0] + ux * med)),
+                int(round(origin[1] + uy * med)),
+            )
+        ]
+
+    def finish_carbon_chain(self, anchor_id: int | None, press: QPoint, target: QPoint) -> bool:
+        """Commit the chain preview as one undo step."""
+        return self._commit_carbon_chain(
+            anchor_id, self.preview_carbon_chain(anchor_id, press, target)
+        )
+
+    def selection_frame_widget(self) -> tuple[QRect, QPoint | None] | None:
+        """Widget-space selection frame and rotate handle, or ``None`` when nothing is selected."""
+        ids = {int(i) for i in self.selected_nodes}
+        nodes = [n for n in self.nodes if int(n["id"]) in ids]
+        if not nodes or self._selecting:
+            return None
+        mapped = [self._model_point_to_widget(n["pos"]) for n in nodes]
+        pad = 16
+        left = min(p.x() for p in mapped) - pad
+        right = max(p.x() for p in mapped) + pad
+        top = min(p.y() for p in mapped) - pad
+        bottom = max(p.y() for p in mapped) + pad
+        rect = QRect(QPoint(left, top), QPoint(right, bottom))
+        handle = None
+        if len(nodes) >= 2:
+            handle = QPoint(int(round((left + right) / 2.0)), top - 12)
+        return rect, handle
+
+    def hit_rotate_handle(self, widget_pt: QPoint) -> bool:
+        """True when *widget_pt* is on the selection rotate handle."""
+        if not self.select_mode or self._selecting:
+            return False
+        framed = self.selection_frame_widget()
+        if framed is None or framed[1] is None:
+            return False
+        handle = framed[1]
+        dx = widget_pt.x() - handle.x()
+        dy = widget_pt.y() - handle.y()
+        return dx * dx + dy * dy <= 14 * 14
+
+    def begin_selection_rotate(self, model_pt: QPoint) -> None:
+        ids = self._selection_transform_atom_ids()
+        cen = self._selection_centroid(ids)
+        if cen is None or len(ids) < 2:
+            return
+        self._rotating = True
+        self._rotate_orig = {
+            int(n["id"]): QPoint(n["pos"].x(), n["pos"].y())
+            for n in self.nodes
+            if int(n["id"]) in ids
+        }
+        self._rotate_cen = cen
+        self._rotate_start = math.atan2(float(model_pt.y()) - cen[1], float(model_pt.x()) - cen[0])
+
+    def update_selection_rotate(self, model_pt: QPoint) -> None:
+        if not self._rotating or self._rotate_cen is None:
+            return
+        cx, cy = self._rotate_cen
+        delta = math.atan2(float(model_pt.y()) - cy, float(model_pt.x()) - cx) - self._rotate_start
+        ca, sa = math.cos(delta), math.sin(delta)
+        for nid, old in self._rotate_orig.items():
+            node = next((n for n in self.nodes if int(n["id"]) == nid), None)
+            if node is None:
+                continue
+            dx = float(old.x()) - cx
+            dy = float(old.y()) - cy
+            node["pos"] = QPoint(
+                int(round(cx + dx * ca + dy * sa)),
+                int(round(cy - dx * sa + dy * ca)),
+            )
+        self.update()
+
+    def end_selection_rotate(self) -> None:
+        if not self._rotating:
+            return
+        moves: list[tuple[int, QPoint, QPoint]] = []
+        for nid, old in self._rotate_orig.items():
+            node = next((n for n in self.nodes if int(n["id"]) == nid), None)
+            if node is None:
+                continue
+            new = QPoint(node["pos"].x(), node["pos"].y())
+            if old.x() != new.x() or old.y() != new.y():
+                moves.append((nid, old, new))
+        self._rotating = False
+        self._rotate_orig = {}
+        self._rotate_cen = None
+        if moves:
+            self._push_undo("move_nodes", moves)
+            self._after_sketch_edit()
+        else:
+            self.update()
 
     def rotate_selection(self, degrees: float) -> bool:
         """Rotate the current selection about its centroid (degrees, counterclockwise on screen)."""
@@ -2589,6 +3028,9 @@ class SketchWidget(
         ):
             vec = exterior_ring_substituent_direction(angles)
             if vec is not None:
+                if do_snap:
+                    ang = snap_to_hex_grid(math.atan2(vec[1], vec[0]))
+                    return (math.cos(ang), math.sin(ang))
                 return vec
 
         if len(angles) == 1:
@@ -2602,12 +3044,7 @@ class SketchWidget(
                 ang_new = neigh_ang + math.pi - sign * dev
                 self._angle_signs[atom_id] = -sign
             if do_snap:
-                ang_new = snap_extension_angle(
-                    ang_new,
-                    angles,
-                    prefer_linear=prefer_linear,
-                    prefer_trigonal=prefer_trigonal,
-                )
+                ang_new = snap_to_hex_grid(ang_new)
             return (math.cos(ang_new), math.sin(ang_new))
         angles_s = sorted(angles)
         max_gap = -1.0
@@ -2638,12 +3075,7 @@ class SketchWidget(
             best_mid += sign * math.radians(25)
             self._angle_signs[atom_id] = -sign
         if do_snap:
-            best_mid = snap_extension_angle(
-                best_mid,
-                angles_s,
-                prefer_linear=prefer_linear,
-                prefer_trigonal=prefer_trigonal,
-            )
+            best_mid = snap_to_hex_grid(best_mid)
         return (math.cos(best_mid), math.sin(best_mid))
 
     def _activate_select_mode_from_parent(self) -> None:
@@ -2659,6 +3091,106 @@ class SketchWidget(
             self.erase_mode = False
             self.text_mode = False
 
+    def _place_fused_template(
+        self,
+        name: str,
+        center: QPoint | None,
+        attach_to: int | None,
+        fuse_bond: int | None,
+        bond_length: float,
+    ) -> None:
+        from .fused_templates import (
+            fused_template,
+            screen_points_centered,
+            screen_points_on_bond,
+        )
+
+        template = fused_template(name)
+        if template is None:
+            return
+        before = self._snapshot_sketch_state()
+        prefer_side = 1.0
+        points: list[tuple[float, float]] | None = None
+        shared: dict[int, int] = {}
+        if fuse_bond is not None and 0 <= int(fuse_bond) < len(self.bonds):
+            a_id, b_id, _o, _s = _bond_unpack(self.bonds[int(fuse_bond)])
+            na = next((x for x in self.nodes if x["id"] == a_id), None)
+            nb = next((x for x in self.nodes if x["id"] == b_id), None)
+            if na is not None and nb is not None:
+                ax, ay = float(na["pos"].x()), float(na["pos"].y())
+                bx, by = float(nb["pos"].x()), float(nb["pos"].y())
+                ring = self._ring_atom_ids() if hasattr(self, "_ring_atom_ids") else set()
+                if a_id in ring and b_id in ring and hasattr(self, "_smallest_cycle_through_bond"):
+                    face = self._smallest_cycle_through_bond(a_id, b_id)
+                    if face:
+                        cx = sum(float(x["pos"].x()) for x in self.nodes if x["id"] in face) / len(
+                            face
+                        )
+                        cy = sum(float(x["pos"].y()) for x in self.nodes if x["id"] in face) / len(
+                            face
+                        )
+                        mx, my = (ax + bx) * 0.5, (ay + by) * 0.5
+                        dx, dy = bx - ax, by - ay
+                        px, py = -dy, dx
+                        if px * (cx - mx) + py * (cy - my) > 0:
+                            prefer_side = -1.0
+                points = screen_points_on_bond(template, ax, ay, bx, by, prefer_side=prefer_side)
+                shared = {template.fusion[0]: a_id, template.fusion[1]: b_id}
+        if points is None:
+            if attach_to is not None:
+                base = next((n for n in self.nodes if n["id"] == attach_to), None)
+                if base is None:
+                    return
+                ux, uy = self._compute_extension_vector(attach_to)
+                span = bond_length * 2.2
+                cpt = (
+                    float(base["pos"].x()) + ux * span,
+                    float(base["pos"].y()) + uy * span,
+                )
+            else:
+                cpt_q = center if center is not None else self.rect().center()
+                cpt = (float(cpt_q.x()), float(cpt_q.y()))
+            points = screen_points_centered(template, cpt[0], cpt[1], bond_length)
+        id_of: dict[int, int] = dict(shared)
+        for index, (x, y) in enumerate(points):
+            if index in id_of:
+                continue
+            nid = self.next_id
+            self.next_id += 1
+            self.nodes.append(
+                {
+                    "id": nid,
+                    "pos": QPoint(int(round(x)), int(round(y))),
+                    "element": template.elements[index],
+                }
+            )
+            id_of[index] = nid
+        existing = {frozenset((_bond_unpack(b)[0], _bond_unpack(b)[1])) for b in self.bonds}
+        for i, j, order in template.bonds:
+            ia, ib = id_of[i], id_of[j]
+            if frozenset((ia, ib)) in existing:
+                continue
+            self.bonds.append(_bond_make(ia, ib, order, 0))
+            existing.add(frozenset((ia, ib)))
+        if attach_to is not None and not shared:
+            nearest = min(
+                id_of.values(),
+                key=lambda nid: self._node_distance_sq(attach_to, nid),
+            )
+            pair = frozenset((attach_to, nearest))
+            if pair not in existing and nearest != attach_to:
+                self.bonds.append(_bond_make(attach_to, nearest, 1, 0))
+        self._commit_template_placement(before)
+
+    def _node_distance_sq(self, a_id: int, b_id: int) -> float:
+        a = next((n for n in self.nodes if n["id"] == a_id), None)
+        b = next((n for n in self.nodes if n["id"] == b_id), None)
+        if a is None or b is None:
+            return 1e18
+        dx = float(a["pos"].x() - b["pos"].x())
+        dy = float(a["pos"].y() - b["pos"].y())
+        return dx * dx + dy * dy
+
     def place_template(
         self,
         name: str,
@@ -2669,6 +3201,16 @@ class SketchWidget(
         *,
         fuse_bond: int | None = None,
     ):
+        from .fused_templates import FUSED_TEMPLATE_SMILES
+
+        if name in FUSED_TEMPLATE_SMILES:
+            bl = float(
+                bond_length
+                if bond_length is not None and bond_length > 0
+                else getattr(self, "_median_bond_length_px", None) or SKETCH_MEDIAN_BOND_PX
+            )
+            self._place_fused_template(name, center, attach_to, fuse_bond, bl)
+            return
         tpl = SKETCH_RING_TEMPLATES.get(name)
         if tpl is None:
             return

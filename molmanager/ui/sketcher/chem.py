@@ -23,7 +23,7 @@ from typing import Any
 from rdkit import Chem
 
 from .constants import DEFAULT_WILDCARD_ELEMENTS, ELEMENT_UPPER_MAP, WILDCARD_ELEMENT
-from .rgroups import rgroup_element, rgroup_label_from_element
+from .rgroups import RGROUP_MAX, rgroup_element, rgroup_label_from_element
 from .wildcards import (
     _is_wildcard_node,
     _normalize_wildcard_elements,
@@ -99,7 +99,7 @@ def _sketch_element_from_rdkit_atom(atom: Chem.Atom) -> str:
     """Map an RDKit atom back to a sketcher element symbol (D/T for hydrogen isotopes)."""
     if atom.GetAtomicNum() == 0:
         label = int(atom.GetAtomMapNum() or 0) or int(atom.GetIsotope() or 0)
-        mapped = rgroup_element(label) if label in (1, 2) else None
+        mapped = rgroup_element(label) if 1 <= label <= RGROUP_MAX else None
         if mapped:
             return mapped
         return atom.GetSymbol() or "*"

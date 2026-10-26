@@ -30,6 +30,8 @@ from .molecule_conversion import looks_like_mol_block, mol_to_canonical_smiles
 logger = logging.getLogger(__name__)
 
 RXN_SMARTS_HEADER = "Reaction SMARTS"
+# Text drawn above and below a sketcher arrow. Not part of the reaction SMARTS.
+RXN_ANNOTATION_HEADER = "Reaction Annotation"
 RXN_REACTANTS_HEADER = "Reactants"
 RXN_PRODUCTS_HEADER = "Products"
 RXN_NAME_HEADER = "Reaction Name"

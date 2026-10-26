@@ -165,6 +165,20 @@ _reg("THP", "C", "C1CCCCO1", "THP")
 _reg("Tr", "C", "C(c1ccccc1)(c1ccccc1)c1ccccc1", "TR", "TRITYL", "CPh3")
 
 
+# The terminal groups the Structure column contracts. The sketcher offers the same
+# names, and only contracts an atom when the user picks one.
+TABLE_CONTRACTED_LABELS: tuple[str, ...] = (
+    "CF3",
+    "CN",
+    "N3",
+    "CO2H",
+    "SO3H",
+    "PO3H2",
+    "OMe",
+    "Boc",
+)
+
+
 def lookup_contracted_label(raw: str) -> ContractedLabel | None:
     """Return a contracted label definition, or None if not recognized."""
     key = (raw or "").strip().upper().replace(" ", "").replace("≡", "#")

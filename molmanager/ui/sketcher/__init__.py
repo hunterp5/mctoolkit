@@ -24,8 +24,8 @@ Public imports match the former ``MolManager.ui.sketcher`` module path.
 Alkene **E/Z** is inferred from 2D geometry in ``alkene_stereo``. Tautomers, atropisomers, and arbitrary
 diastereomer sets are not auto-enumerated; see ``docs/STEREO_AND_ISOMERISM.md``.
 
-**IUPAC drawing:** hashed wedges, ring double-bond sidedness, condensed heteroatom labels, Clean Up
-orientation, and interactive angle/length snap — see ``docs/IUPAC_DRAWING.md``.
+**Depiction:** the canvas paints the same scene as the Structure column. Clean Up uses that
+column's generated layout (no cell-fit rotation). Bond drags and the chain tool snap to a 30° grid.
 
 **Bonds & valence:** internal bond ``order`` is 1–3 (single/double/triple); valence warnings sum incident
 orders vs element/charge caps. Aromatic rings are Kekulized on load so doubles are preserved; see ``docs/VALENCE_BONDS_AND_AROMATICITY.md``.

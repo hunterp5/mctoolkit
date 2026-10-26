@@ -47,6 +47,10 @@ _WAVE_AMPLITUDE = 0.05
 _DASH_PATTERN = [3.0, 2.0]
 # Width of a highlighted bond's band, as a fraction of the mean bond length.
 _HIGHLIGHT_BAND_WIDTH = 0.3
+# Default structure cell (210px) with the painter's 5% padding, about six bonds
+# across. The table stroke is 1px, so this is that stroke divided by a normal bond.
+TABLE_REFERENCE_BOND_PX = (210.0 * 0.9) / 6.0
+TABLE_STROKE_PER_BOND = 1.0 / TABLE_REFERENCE_BOND_PX
 
 # RDKit's default element colours, so the first vector pictures compare like for like.
 _LIGHT_ELEMENT_RGB: dict[int, tuple[int, int, int]] = {
@@ -175,18 +179,16 @@ def _paint_highlight(
     painter.setBrush(Qt.NoBrush)
 
 
-def paint_scene(
+def paint_scene_fit(
     painter: QPainter,
     scene: DepictionScene,
-    rect: QRectF,
+    fit: SceneFit,
     palette: ScenePalette,
     *,
     line_width_px: float = 1.0,
-    max_bond_px: float | None = None,
     highlight: SceneHighlight | None = None,
-) -> SceneFit:
-    """Draw *scene* centred in *rect*, over *highlight* if given. Returns the fit used."""
-    fit = fit_scene(scene, rect, max_bond_px=max_bond_px)
+) -> None:
+    """Draw *scene* through an explicit *fit*. The table centres a cell; the sketcher locks atoms."""
     bond_px = scene.mean_bond_length * fit.scale
     painter.save()
     try:
@@ -234,4 +236,26 @@ def paint_scene(
                 painter.restore()
     finally:
         painter.restore()
+
+
+def paint_scene(
+    painter: QPainter,
+    scene: DepictionScene,
+    rect: QRectF,
+    palette: ScenePalette,
+    *,
+    line_width_px: float = 1.0,
+    max_bond_px: float | None = None,
+    highlight: SceneHighlight | None = None,
+) -> SceneFit:
+    """Draw *scene* centred in *rect*, over *highlight* if given. Returns the fit used."""
+    fit = fit_scene(scene, rect, max_bond_px=max_bond_px)
+    paint_scene_fit(
+        painter,
+        scene,
+        fit,
+        palette,
+        line_width_px=line_width_px,
+        highlight=highlight,
+    )
     return fit

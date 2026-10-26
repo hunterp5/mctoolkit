@@ -16,11 +16,18 @@ Starts from a blank canvas or an existing molecule when launched in an edit cont
 
 ## Options
 
-- **Canvas** - interactive drawing surface with bond/atom tools and a reaction arrow.
-- **Element** and **bond order** controls. In Custom, **R1** and **R2** attach a numbered point to the atom you click (exported as `[*:1]` and `[*:2]` for R-group enumeration).
-- **Reaction arrow** - drag to split the sketch into reactants (tail) and products (head). **Export to Table** then adds **Reaction SMARTS** and renders the 2D scheme in Structure.
-- **Edit** - Undo/Redo, **Copy** / **Paste** of a selected fragment (Ctrl+C / Ctrl+V), and **Delete Selection** (Del, same as **Edit → Delete Selection** on the table). Right-click the canvas for the same Copy / Paste at the top of the menu.
-- **Edit tools** - select, erase, and ring templates as provided.
+- **Canvas** - interactive drawing surface. The structure is drawn with the same depiction as the Structure column. The mouse wheel zooms toward the cursor. Drag with the middle button, or hold Space and drag, to pan. Arrow keys nudge a selection.
+- **Draw** - a blank sketch opens here. A sketch opened from a table row opens in Select.
+- **Chain** - drag to grow a zigzag carbon chain on the 30° grid. A short click places one carbon. The whole chain is one undo step.
+- **Bond** - one button opens single, double, triple, wedge, hash, wavy, and dative. Keys 1, 2, and 3 set the bond order. Dative bonds are dashed.
+- **Rings** - one button opens carbocycles, heterocycles, and fused systems (naphthalene, indole, quinoline, isoquinoline, benzimidazole, purine). Drop a template on a bond to fuse it, or on empty canvas to place it.
+- **Groups** - contract CF3, CN, N3, CO2H, SO3H, PO3H2, OMe, or Boc onto an atom. The same groups are the ones the Structure column can contract. The canvas keeps every atom you placed until you contract one yourself.
+- **Elements** - the left rail is the common set (C, N, O, S, F, Cl, Br, I, P, H) plus `*`, `?`, R1, R2, and Rn. **More…** lists the rest of the saved element set. Rn asks for a number and exports as `[*:n]`.
+- **Clipboard** - paste a molfile or SMILES onto the canvas, and copy a molfile or a PNG of the structure. The PNG is the depiction, without the selection frame.
+- **Reaction arrow** - drag to split the sketch into reactants (tail) and products (head). Double-click the arrow, or right-click it, to write text above and below it. **Export to Table** adds **Reaction SMARTS** (the structures only) and, when you wrote text, **Reaction Annotation**. The 2D scheme is rendered in Structure.
+- **Edit** - Undo/Redo, **Copy** / **Paste** of a selected fragment (Ctrl+C / Ctrl+V), and **Delete Selection** (Del, same as **Edit → Delete Selection** on the table). Right-click the canvas for the same Copy / Paste at the top of the menu. A selected fragment shows a frame; drag the handle above it to rotate.
+- **Clean Up** - lays the sketch out the same way a structure without saved coordinates is laid out for the table.
+- **Status bar** - the active tool, atom and bond counts, and a formula when the sketch is one molecule.
 - **Apply / accept** - push the drawn molecule or reaction back to the caller or table.
 
 ## Workflow

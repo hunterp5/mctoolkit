@@ -124,9 +124,12 @@ def test_physical_properties_view_action(qapp) -> None:  # noqa: ARG001
 
 
 def test_populate_element_toolbar_subset(qapp) -> None:  # noqa: ARG001
+    from molmanager.ui.sketcher.constants import SKETCH_RAIL_ELEMENTS
+
     dlg = SketcherDialog(QWidget())
     dlg._populate_element_toolbar(["C", "N", "O", "Au"])
-    assert set(dlg._element_btn_by_symbol) == {"C", "N", "O", "Au"}
+    assert list(dlg._element_btn_by_symbol) == list(SKETCH_RAIL_ELEMENTS)
+    assert dlg._more_element_symbols == ["Au"]
     assert dlg.tb_wildcard is not None
     assert dlg.tb_any_element is not None
     groups = dict(element_groups_for_symbols(["C", "N", "O", "Au"]))

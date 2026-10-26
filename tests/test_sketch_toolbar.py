@@ -21,7 +21,12 @@ from __future__ import annotations
 from PyQt5.QtWidgets import QWidget
 
 from molmanager.ui.sketcher.bonds import BOND_STEREO_PLAIN, BOND_STEREO_WEDGE
-from molmanager.ui.sketcher.constants import SKETCH_RING_TEMPLATES, TOOLBAR_ELEMENT_GROUPS
+from molmanager.ui.sketcher.constants import (
+    SKETCH_RAIL_ELEMENTS,
+    SKETCH_RING_TEMPLATES,
+    TOOLBAR_ELEMENT_GROUPS,
+)
+from molmanager.ui.sketcher.fused_templates import FUSED_TEMPLATE_SMILES
 from molmanager.ui.sketcher.customize_elements import default_toolbar_element_symbols
 from molmanager.ui.sketcher.dialog import SketcherDialog
 from molmanager.ui.sketcher.toolbar_glyphs import (
@@ -36,6 +41,7 @@ from molmanager.ui.sketcher.toolbar_glyphs import (
     charge_minus_icon,
     charge_plus_icon,
     clear_sketch_icon,
+    mode_chain_icon,
     mode_draw_icon,
     mode_erase_icon,
     mode_lasso_icon,
@@ -60,6 +66,7 @@ def test_toolbar_glyphs_are_non_null(qapp) -> None:  # noqa: ARG001
         mode_lasso_icon(),
         mode_text_icon(),
         mode_draw_icon(),
+        mode_chain_icon(),
         mode_erase_icon(),
         clear_sketch_icon(),
         charge_plus_icon(),
@@ -78,6 +85,11 @@ def test_sketcher_top_toolbar_controls(qapp) -> None:  # noqa: ARG001
     dlg = SketcherDialog(QWidget(), element_symbols=default_toolbar_element_symbols())
     assert dlg.tb_3d.isCheckable()
     assert not dlg.tb_3d.isChecked()
+    assert dlg.tb_chain.isCheckable()
+    assert dlg.tb_draw.isChecked()
+    assert not dlg.select_btn.isChecked()
+    assert dlg.canvas.place_element == "C"
+    assert not dlg.canvas.select_mode
     assert dlg.tb_draw.isCheckable()
     assert dlg.tb_erase.isCheckable()
     assert dlg.select_btn.isCheckable()
@@ -106,17 +118,12 @@ def test_sketcher_top_toolbar_controls(qapp) -> None:  # noqa: ARG001
     # Canvas sits under a splitter; dialog lookup must walk ancestors (right-click menu).
     assert dlg.canvas.parent() is dlg._canvas_splitter
     assert dlg.canvas._sketcher_dialog_if() is dlg
-    assert "Ni" in dlg._element_btn_by_symbol
-    assert "Pd" in dlg._element_btn_by_symbol
-    assert "Pt" in dlg._element_btn_by_symbol
-    assert "Li" in dlg._element_btn_by_symbol
-    assert "Se" in dlg._element_btn_by_symbol
-    assert "Cs" in dlg._element_btn_by_symbol
-    assert "Al" in dlg._element_btn_by_symbol
-    # Informal PT headings: Hydrogen Isotopes first (H, D, T).
-    assert list(dlg._element_btn_by_symbol)[0:3] == ["H", "D", "T"]
-    assert "D" in dlg._element_btn_by_symbol
-    assert "T" in dlg._element_btn_by_symbol
+    assert list(dlg._element_btn_by_symbol) == list(SKETCH_RAIL_ELEMENTS)
+    assert "Ni" in dlg._more_element_symbols
+    assert "Pd" in dlg._more_element_symbols
+    assert "D" in dlg._more_element_symbols
+    assert "T" in dlg._more_element_symbols
+    assert "Li" in dlg._more_element_symbols
     titles = [t for t, _ in TOOLBAR_ELEMENT_GROUPS]
     assert "Hydrogen Isotopes" in titles
     assert "Halogens" in titles
@@ -139,7 +146,7 @@ def test_sketcher_top_toolbar_controls(qapp) -> None:  # noqa: ARG001
     dlg.tb_r2.setChecked(True)
     assert dlg.canvas.place_element == "R2"
     assert not dlg.tb_r1.isChecked()
-    assert set(dlg._ring_btn_by_key) == {k for k, *_ in TOOLBAR_RING_TEMPLATES}
+    assert set(dlg._ring_btn_by_key) == set(SKETCH_RING_TEMPLATES) | set(FUSED_TEMPLATE_SMILES)
 
     dlg._on_ring_tool_clicked("Benzene", True)
     assert dlg.canvas.active_template == "Benzene"

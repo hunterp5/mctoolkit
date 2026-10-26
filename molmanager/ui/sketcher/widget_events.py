@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import QAction, QMenu, QMessageBox, QWidget
 
 from .bonds import BOND_STEREO_PLAIN, _bond_make, _bond_unpack
 from .constants import DEFAULT_WILDCARD_ELEMENTS, SKETCH_MEDIAN_BOND_PX, WILDCARD_ELEMENT
+from .sketch_grid import snap_to_hex_grid
 from .rgroups import rgroup_label_from_element
 from .sketch_reactions import snap_arrow_end
 from .wildcards import _is_wildcard_node
@@ -41,6 +42,22 @@ class SketchWidgetEventsMixin:
     def mousePressEvent(self, ev):
         wpt = ev.pos()
         pt = self._widget_point_to_model(wpt)
+        if ev.button() == Qt.MiddleButton or (ev.button() == Qt.LeftButton and self._space_pan):
+            self._panning = True
+            self._pan_last = QPoint(wpt)
+            self.setCursor(Qt.ClosedHandCursor)
+            return
+        if ev.button() == Qt.LeftButton and self.chain_mode:
+            hit = self._hit_node(pt)
+            self._chain_anchor = int(hit["id"]) if hit is not None else None
+            self._chain_press = QPoint(pt)
+            self._chain_preview = self.preview_carbon_chain(
+                self._chain_anchor, self._chain_press, pt
+            )
+            self._mouse_down_pos = QPoint(wpt)
+            self.setCursor(Qt.CrossCursor)
+            self.update()
+            return
         if ev.button() == Qt.LeftButton:
             hit = self._hit_node(pt)
             self._mouse_down_pos = QPoint(wpt)
@@ -62,6 +79,11 @@ class SketchWidgetEventsMixin:
                 return
 
             if self.select_mode:
+                if self.hit_rotate_handle(wpt):
+                    self.begin_selection_rotate(pt)
+                    self.setCursor(Qt.CrossCursor)
+                    self.update()
+                    return
                 shift = bool(ev.modifiers() & Qt.ShiftModifier)
                 if hit is not None:
                     if shift:
@@ -201,6 +223,14 @@ class SketchWidgetEventsMixin:
                 return
 
         elif ev.button() == Qt.RightButton:
+            if self._hit_reaction_arrow(pt) and self._hit_node(pt) is None:
+                menu = QMenu(self)
+                act_text = QAction("Edit reaction text…", self)
+                act_text.triggered.connect(self._open_reaction_text_dialog)
+                menu.addAction(act_text)
+                menu.exec_(self.mapToGlobal(wpt))
+                self.update()
+                return
             hit = self._hit_node(pt)
             if hit:
                 menu = QMenu(self)
@@ -314,7 +344,7 @@ class SketchWidgetEventsMixin:
                         ("Wedge (narrow at first atom)", 1),
                         ("Hash / dashed wedge", 2),
                         ("Wavy (unspecified stereo)", 3),
-                        ("Dative / coordinate (arrow)", 4),
+                        ("Dative (dashed)", 4),
                     ]:
                         sa = QAction(label, self)
 
@@ -346,6 +376,10 @@ class SketchWidgetEventsMixin:
         if ev.button() != Qt.LeftButton:
             return super().mouseDoubleClickEvent(ev)
         pt = self._widget_point_to_model(ev.pos())
+        if self._hit_reaction_arrow(pt) and self._hit_node(pt) is None:
+            self._open_reaction_text_dialog()
+            ev.accept()
+            return
         hit = self._hit_node(pt)
         bi, _bd = self._hit_bond(pt)
         if hit is None and bi is None:
@@ -384,6 +418,25 @@ class SketchWidgetEventsMixin:
     def mouseMoveEvent(self, ev):
         wpt = ev.pos()
         pt = self._widget_point_to_model(wpt)
+
+        if self._panning and self._pan_last is not None:
+            self.pan_by_widget_delta(wpt.x() - self._pan_last.x(), wpt.y() - self._pan_last.y())
+            self._pan_last = QPoint(wpt)
+            self.setCursor(Qt.ClosedHandCursor)
+            return
+
+        if self.chain_mode and self._chain_press is not None:
+            self._chain_preview = self.preview_carbon_chain(
+                self._chain_anchor, self._chain_press, pt
+            )
+            self.setCursor(Qt.CrossCursor)
+            self.update()
+            return
+
+        if self._rotating:
+            self.update_selection_rotate(pt)
+            self.setCursor(Qt.CrossCursor)
+            return
 
         if self._arrow_dragging and self._arrow_drag_start is not None:
             snap = bool(ev.modifiers() & Qt.ShiftModifier)
@@ -540,6 +593,7 @@ class SketchWidgetEventsMixin:
                 if (
                     self.erase_mode
                     or self.reaction_arrow_mode
+                    or self.chain_mode
                     or self._carbon_chain_cursor_active()
                 ):
                     self.setCursor(Qt.CrossCursor)
@@ -548,6 +602,32 @@ class SketchWidgetEventsMixin:
         self.update()
 
     def mouseReleaseEvent(self, ev):
+        if self._panning and ev.button() in (Qt.MiddleButton, Qt.LeftButton):
+            self._panning = False
+            self._pan_last = None
+            return
+        if self._rotating and ev.button() == Qt.LeftButton:
+            self.end_selection_rotate()
+            return
+        if getattr(self, "armed_abbrev", None) and ev.button() == Qt.LeftButton:
+            self._apply_armed_abbrev(self._widget_point_to_model(ev.pos()))
+            self._mouse_down_pos = None
+            self._drag_candidate = None
+            self._is_dragging = False
+            self._drag_start = None
+            self.update()
+            return
+        if self.chain_mode and ev.button() == Qt.LeftButton and self._chain_press is not None:
+            end_pt = self._widget_point_to_model(ev.pos())
+            anchor = self._chain_anchor
+            press = self._chain_press
+            self._chain_anchor = None
+            self._chain_press = None
+            self._chain_preview = []
+            self._mouse_down_pos = None
+            self.finish_carbon_chain(anchor, press, end_pt)
+            self.update()
+            return
         if ev.button() != Qt.LeftButton:
             return
 
@@ -703,23 +783,13 @@ class SketchWidgetEventsMixin:
                                     math.atan2(on["pos"].y() - by, on["pos"].x() - bx)
                                 )
                                 neigh_orders.append(int(o0))
-                        from .iupac_style import snap_extension_angle
-
                         max_exist = max(neigh_orders) if neigh_orders else 1
                         prefer_linear = (
                             max_exist >= 3 or order >= 3 or (max_exist == 2 and order == 2)
                         )
-                        prefer_trigonal = (not prefer_linear) and (max_exist == 2 or order == 2)
-                        ang = (
-                            snap_extension_angle(
-                                ang,
-                                neigh_angs,
-                                prefer_linear=prefer_linear,
-                                prefer_trigonal=prefer_trigonal,
-                            )
-                            if neigh_angs
-                            else ang
-                        )
+                        if prefer_linear and len(neigh_angs) == 1:
+                            ang = neigh_angs[0] + math.pi
+                        ang = snap_to_hex_grid(ang)
                         ex = int(round(bx + math.cos(ang) * med))
                         ey = int(round(by + math.sin(ang) * med))
                     else:
@@ -840,6 +910,36 @@ class SketchWidgetEventsMixin:
         self._mouse_down_pos = None
 
     def keyPressEvent(self, ev):
+        if ev.key() == Qt.Key_Space and not ev.isAutoRepeat():
+            self._space_pan = True
+            ev.accept()
+            return
+        if ev.key() in (Qt.Key_1, Qt.Key_2, Qt.Key_3) and not (
+            ev.modifiers() & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+        ):
+            order = int(ev.key() - Qt.Key_0)
+            dialog = self._sketcher_dialog_if()
+            if dialog is not None and hasattr(dialog, "_on_bond_tool"):
+                dialog._on_bond_tool(order, BOND_STEREO_PLAIN)
+            else:
+                self.active_bond_order = order
+                self.active_bond_stereo = BOND_STEREO_PLAIN
+            ev.accept()
+            return
+        arrows = {
+            Qt.Key_Left: (-4, 0),
+            Qt.Key_Right: (4, 0),
+            Qt.Key_Up: (0, -4),
+            Qt.Key_Down: (0, 4),
+        }
+        if ev.key() in arrows and not (
+            ev.modifiers() & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+        ):
+            step = 16 if ev.modifiers() & Qt.ShiftModifier else 4
+            dx, dy = arrows[ev.key()]
+            if self.nudge_selection(dx // 4 * step, dy // 4 * step):
+                ev.accept()
+                return
         if ev.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             if self._sketcher_dialog_if() is None:
                 if self._handle_delete_key():
@@ -875,3 +975,22 @@ class SketchWidgetEventsMixin:
             pass
 
         super().keyPressEvent(ev)
+
+    def keyReleaseEvent(self, ev):
+        if ev.key() == Qt.Key_Space and not ev.isAutoRepeat():
+            self._space_pan = False
+            ev.accept()
+            return
+        super().keyReleaseEvent(ev)
+
+    def wheelEvent(self, ev):
+        delta = ev.angleDelta().y()
+        if delta == 0:
+            return
+        factor = 1.15 if delta > 0 else 1.0 / 1.15
+        self.zoom_about_widget_point(factor, ev.pos())
+        ev.accept()
+
+    def focusOutEvent(self, ev):
+        self._space_pan = False
+        super().focusOutEvent(ev)

@@ -150,6 +150,20 @@ TOOLBAR_ELEMENT_SYMBOLS: tuple[str, ...] = tuple(
     el for _title, els in TOOLBAR_ELEMENT_GROUPS for el in els
 )
 
+# Short element rail on the sketcher. Everything else from the saved set is under More.
+SKETCH_RAIL_ELEMENTS: tuple[str, ...] = (
+    "C",
+    "N",
+    "O",
+    "S",
+    "F",
+    "Cl",
+    "Br",
+    "I",
+    "P",
+    "H",
+)
+
 # Pixel → model distance scale for 2D stereo perception (bond dirs + coordinates).
 SKETCH_COORD_SCALE = 40.0
 

@@ -103,7 +103,11 @@ _DRAWABLE_BOND_TYPES = {
     Chem.BondType.DOUBLE,
     Chem.BondType.TRIPLE,
     Chem.BondType.AROMATIC,
+    Chem.BondType.DATIVE,
 }
+# Full atom label supplied by the sketcher (abbreviation or explicit carbon). Not RDKit's
+# ``_displayLabel``, which means the scene cannot represent the molecule.
+DISPLAY_LABEL_PROP = "molManagerLabel"
 # Lone atoms whose hydrogens are written first: H2O, H2S, HF, HCl, ...
 _HYDROGEN_FIRST = {8, 9, 16, 17, 34, 35, 52, 53, 85}
 _MINUS = "\u2212"
@@ -118,6 +122,13 @@ Box = tuple[float, float, float, float]
 def _is_placeholder(atom) -> bool:
     """A molfile ``R`` / ``*`` atom: a dummy whose query matches any atom."""
     return atom.GetAtomicNum() == 0 and atom.DescribeQuery().startswith("AtomNull")
+
+
+def _display_label(atom) -> str:
+    """Sketcher-supplied label, or empty when the atom uses its element symbol."""
+    if not atom.HasProp(DISPLAY_LABEL_PROP):
+        return ""
+    return str(atom.GetProp(DISPLAY_LABEL_PROP) or "").strip()
 
 
 def scene_fallback_reason(mol) -> str | None:
@@ -156,11 +167,17 @@ def scene_revision(layout: LayoutOptions | None = None) -> int:
 
 
 def build_scene(
-    mol, layout: LayoutOptions | None = None
+    mol,
+    layout: LayoutOptions | None = None,
+    *,
+    abbreviations: bool | None = None,
+    separate_fragments: bool = True,
 ) -> tuple[DepictionScene | None, str | None]:
     """``(scene, None)`` for a drawable molecule, else ``(None, reason)``.
 
     *layout* defaults to :func:`current_layout_options`; pass it when building many scenes.
+    *abbreviations* defaults to the table setting. *separate_fragments* slides salts apart
+    so their labels clear; the sketcher turns that off so painted atoms stay on the cursor.
     """
     reason = scene_fallback_reason(mol)
     if reason is not None:
@@ -173,7 +190,14 @@ def build_scene(
         return None, "prepare_failed"
     if any(b.GetBondType() == Chem.BondType.AROMATIC for b in prepared.GetBonds()):
         return None, "not_kekulized"
-    return _SceneBuilder(prepared).build(), None
+    use_abbreviations = abbreviations_enabled() if abbreviations is None else bool(abbreviations)
+    return (
+        _SceneBuilder(prepared).build(
+            abbreviations=use_abbreviations,
+            separate_fragments=separate_fragments,
+        ),
+        None,
+    )
 
 
 def _sub(p: Point, q: Point) -> Point:
@@ -273,15 +297,17 @@ class _SceneBuilder:
         self.fills: list[Fill] = []
         self.labels: list[Label] = []
 
-    def build(self) -> DepictionScene:
-        if abbreviations_enabled():
+    def build(
+        self, *, abbreviations: bool = True, separate_fragments: bool = True
+    ) -> DepictionScene:
+        if abbreviations:
             self._abbreviations = find_abbreviations(self.mol)
             self._hidden = {
                 index for group in self._abbreviations.values() for index in group.hidden
             }
             self._collapse_abbreviations()
         labels = self._labels()
-        if self._separate_fragments(labels):
+        if separate_fragments and self._separate_fragments(labels):
             labels = self._labels()
         pad = LABEL_PADDING * self.mbl
         for index, label in labels.items():
@@ -372,6 +398,8 @@ class _SceneBuilder:
         return labels
 
     def _needs_label(self, atom) -> bool:
+        if _display_label(atom):
+            return True
         if atom.GetAtomicNum() != 6:
             return True
         return bool(
@@ -423,6 +451,9 @@ class _SceneBuilder:
 
     @staticmethod
     def _symbol(atom) -> str:
+        label = _display_label(atom)
+        if label:
+            return label
         if atom.GetAtomicNum() == 0:
             if atom.HasProp("dummyLabel") and atom.GetProp("dummyLabel").strip():
                 return atom.GetProp("dummyLabel").strip()
@@ -470,17 +501,26 @@ class _SceneBuilder:
         if not self._needs_label(atom):
             return None
         orientation = self._orientation(atom)
-        isotope = [(str(atom.GetIsotope()), PieceKind.SUPERSCRIPT)] if atom.GetIsotope() else []
+        custom = bool(_display_label(atom))
+        isotope = (
+            []
+            if custom or not atom.GetIsotope()
+            else [(str(atom.GetIsotope()), PieceKind.SUPERSCRIPT)]
+        )
         element = (self._symbol(atom), PieceKind.NORMAL)
         hydrogens = []
-        count = self._hydrogen_count(atom)
+        count = 0 if custom else self._hydrogen_count(atom)
         if count:
             hydrogens.append(("H", PieceKind.NORMAL))
             if count > 1:
                 hydrogens.append((str(count), PieceKind.SUBSCRIPT))
         charge_text = self._charge_text(atom.GetFormalCharge())
         charge = [(charge_text, PieceKind.SUPERSCRIPT)] if charge_text else []
-        mapping = [(f":{atom.GetAtomMapNum()}", PieceKind.NORMAL)] if atom.GetAtomMapNum() else []
+        mapping = (
+            []
+            if custom or not atom.GetAtomMapNum()
+            else [(f":{atom.GetAtomMapNum()}", PieceKind.NORMAL)]
+        )
 
         stacked = orientation in (LabelOrientation.NORTH, LabelOrientation.SOUTH)
         if stacked and not hydrogens:
@@ -569,6 +609,8 @@ class _SceneBuilder:
             self._double(bond)
         elif kind == Chem.BondType.TRIPLE:
             self._triple(bond)
+        elif kind == Chem.BondType.DATIVE:
+            self._line(bond, *self._ends(bond), style=StrokeStyle.DASHED)
         else:
             direction = bond.GetBondDir()
             if direction == Chem.BondDir.BEGINWEDGE:

@@ -61,7 +61,8 @@ from .iupac_rings import (
     large_ring_offsets_y_up,
     rotate_offsets_to_inward_heteroatoms,
 )
-from .wildcards import _is_wildcard_node
+from .rgroups import is_rgroup_node, rgroup_label_from_element
+from .wildcards import _is_wildcard_node, _normalize_wildcard_elements
 
 
 class SketchWidgetRdkitMixin:
@@ -573,8 +574,58 @@ class SketchWidgetRdkitMixin:
             for uid, pt in exo_pos.items():
                 by_id[uid]["pos"] = pt
 
+    def _depiction_atom(self, node: dict, formal_charge: int) -> Chem.Atom:
+        """Atom for the shared depiction scene: labels the table painter already draws.
+
+        Export still uses :func:`_rdkit_atom_from_sketch_node`. This copy keeps
+        abbreviations and explicit carbons as text, and turns queries into dummies
+        the scene can label.
+        """
+        from molmanager.chem.depiction_builder import DISPLAY_LABEL_PROP
+
+        fc = int(formal_charge)
+        abbrev = node.get("abbrev")
+        if abbrev:
+            el = str(node.get("element") or "C")
+            try:
+                atom = Chem.Atom(el)
+            except Exception:
+                atom = Chem.Atom("C")
+            atom.SetProp(DISPLAY_LABEL_PROP, str(abbrev))
+            atom.SetNoImplicit(True)
+            if fc:
+                atom.SetFormalCharge(fc)
+            return atom
+        if node.get("explicit_carbon") and str(node.get("element") or "") == "C":
+            atom = Chem.Atom("C")
+            atom.SetProp(DISPLAY_LABEL_PROP, self._explicit_carbon_display_label(node))
+            atom.SetNoImplicit(True)
+            if fc:
+                atom.SetFormalCharge(fc)
+            return atom
+        if _is_wildcard_node(node):
+            atom = Chem.Atom(0)
+            elements = _normalize_wildcard_elements(node)
+            atom.SetProp("dummyLabel", ",".join(elements) if elements else "*")
+            atom.SetNoImplicit(True)
+            if fc:
+                atom.SetFormalCharge(fc)
+            return atom
+        if is_rgroup_node(node):
+            atom = Chem.Atom(0)
+            label = str(node.get("element") or "R")
+            atom.SetProp("dummyLabel", label)
+            number = rgroup_label_from_element(label)
+            if number is not None:
+                atom.SetUnsignedProp("_MolFileRLabel", int(number))
+            atom.SetNoImplicit(True)
+            if fc:
+                atom.SetFormalCharge(fc)
+            return atom
+        return _rdkit_atom_from_sketch_node(node, formal_charge=fc)
+
     def _mol_from_node_ids(
-        self, ids: set[int], return_idmap: bool = False
+        self, ids: set[int], return_idmap: bool = False, *, for_depiction: bool = False
     ) -> Chem.Mol | tuple[Chem.Mol, dict[int, int]] | None:
         if not ids:
             return None
@@ -584,7 +635,10 @@ class SketchWidgetRdkitMixin:
             if n["id"] not in ids:
                 continue
             fc = self._formal_charge(n)
-            a = _rdkit_atom_from_sketch_node(n, formal_charge=fc)
+            if for_depiction:
+                a = self._depiction_atom(n, fc)
+            else:
+                a = _rdkit_atom_from_sketch_node(n, formal_charge=fc)
             idx = rw.AddAtom(a)
             idmap[n["id"]] = idx
         for bond in self.bonds:
@@ -615,21 +669,72 @@ class SketchWidgetRdkitMixin:
                     else:
                         bobj.SetBondDir(BondDir.UNKNOWN)
         # Expand contracted labels (CF3, Ph, …) after skeleton bonds exist.
-        for n in self.nodes:
-            if n["id"] not in ids:
-                continue
-            ab = n.get("abbrev")
-            if not ab:
-                continue
-            ai = idmap.get(n["id"])
-            if ai is None:
-                continue
-            expand_contracted_label_on_atom(rw, ai, str(ab))
+        # The depiction scene draws the abbreviation as a label instead.
+        if not for_depiction:
+            for n in self.nodes:
+                if n["id"] not in ids:
+                    continue
+                ab = n.get("abbrev")
+                if not ab:
+                    continue
+                ai = idmap.get(n["id"])
+                if ai is None:
+                    continue
+                expand_contracted_label_on_atom(rw, ai, str(ab))
         mol = rw.GetMol()
         self._apply_sketch_coords_and_stereo(mol, idmap)
         if return_idmap:
             return mol, idmap
         return mol
+
+    def depiction_scene_for_canvas(self):
+        """Depiction scene of the current sketch, or ``None`` when it cannot be built.
+
+        Abbreviations stay expanded as atoms the user placed, and fragments are not
+        slid. Coordinates are the sketch coordinates, so the painter can lock the
+        picture to the cursor.
+        """
+        from molmanager.chem.depiction_builder import build_scene
+        from molmanager.chem.depiction_layout import LayoutOptions
+
+        key = self._depiction_scene_cache_key()
+        if key == getattr(self, "_depiction_scene_key", None):
+            return getattr(self, "_depiction_scene_cache", None)
+        self._depiction_scene_key = key
+        self._depiction_scene_cache = None
+        self._depiction_scene_reason = None
+        ids = {int(n["id"]) for n in self.nodes}
+        if not ids:
+            return None
+        mol = self._mol_from_node_ids(ids, for_depiction=True)
+        if mol is None:
+            self._depiction_scene_reason = "empty"
+            return None
+        options = LayoutOptions(
+            macrocycle_coordgen=False,
+            flip_inward_substituents=False,
+            rotate_to_cell=False,
+        )
+        scene, reason = build_scene(mol, options, abbreviations=False, separate_fragments=False)
+        self._depiction_scene_cache = scene
+        self._depiction_scene_reason = reason
+        return scene
+
+    def _depiction_scene_cache_key(self) -> tuple:
+        nodes = tuple(
+            (
+                int(n["id"]),
+                int(n["pos"].x()),
+                int(n["pos"].y()),
+                str(n.get("element") or ""),
+                int(n.get("charge", 0) or 0),
+                str(n.get("abbrev") or ""),
+                tuple(n.get("wildcard_els") or ()),
+                bool(n.get("explicit_carbon")),
+            )
+            for n in self.nodes
+        )
+        return (nodes, tuple(self.bonds))
 
     @staticmethod
     def _atom_in_macrocycle(mol: Chem.Mol, idx: int, *, min_size: int = 9) -> bool:
@@ -986,7 +1091,7 @@ class SketchWidgetRdkitMixin:
             a, b = rd2sk[a_rd], rd2sk[b_rd]
             self.bonds.append(_bond_make(a, b, order, stereo))
         self._ensure_bonds_sanitized()
-        # Keep RDKit/table orientation; do not apply IUPAC hex or GR-3 flips on load.
+        # Keep RDKit/table orientation; do not apply a second layout pass on load.
         try:
             self._rewedge_sketch_from_mol(m, rd2sk, stereo_tags)
         except Exception:
@@ -1001,6 +1106,79 @@ class SketchWidgetRdkitMixin:
             self._after_sketch_edit(notify=True, notify_if_valence_failed=True)
 
         QTimer.singleShot(0, _finish_rdkit_load)
+        return True
+
+    def append_mol_at(self, mol: Chem.Mol, center: QPoint) -> bool:
+        """Add *mol* at *center* without clearing the sketch. One undo step."""
+        if mol is None or mol.GetNumAtoms() == 0:
+            return False
+        try:
+            prepared = Chem.Mol(mol)
+        except Exception:
+            return False
+        if prepared.GetNumConformers() == 0 or not self._structure_has_usable_2d(prepared):
+            try:
+                prepared.RemoveAllConformers()
+                rdDepictor.Compute2DCoords(prepared)
+            except Exception:
+                return False
+        if prepared.GetNumConformers() == 0:
+            return False
+        try:
+            Chem.Kekulize(prepared, clearAromaticFlags=True)
+        except Exception:
+            pass
+        conformer = prepared.GetConformer()
+        lengths = []
+        for bond in prepared.GetBonds():
+            a = conformer.GetAtomPosition(bond.GetBeginAtomIdx())
+            b = conformer.GetAtomPosition(bond.GetEndAtomIdx())
+            lengths.append(math.hypot(a.x - b.x, a.y - b.y))
+        med = sorted(lengths)[len(lengths) // 2] if lengths else 1.5
+        scale = float(SKETCH_MEDIAN_BOND_PX) / max(med, 0.01)
+        count = prepared.GetNumAtoms()
+        xs = [conformer.GetAtomPosition(i).x for i in range(count)]
+        ys = [conformer.GetAtomPosition(i).y for i in range(count)]
+        mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+        before = self._snapshot_sketch_state()
+        rd2sk: dict[int, int] = {}
+        new_ids: list[int] = []
+        for index in range(count):
+            atom = prepared.GetAtomWithIdx(index)
+            if atom.GetAtomicNum() == 1 and atom.GetDegree() == 0:
+                continue
+            pos = conformer.GetAtomPosition(index)
+            nid = self.next_id
+            self.next_id += 1
+            node: dict[str, Any] = {
+                "id": nid,
+                "pos": QPoint(
+                    int(round(center.x() + (pos.x - mx) * scale)),
+                    int(round(center.y() - (pos.y - my) * scale)),
+                ),
+                "element": _sketch_element_from_rdkit_atom(atom),
+            }
+            charge = int(atom.GetFormalCharge() or 0)
+            if charge:
+                node["charge"] = charge
+            self.nodes.append(node)
+            rd2sk[index] = nid
+            new_ids.append(nid)
+        if not new_ids:
+            self._restore_sketch_state(before)
+            return False
+        for bond in prepared.GetBonds():
+            ia = rd2sk.get(bond.GetBeginAtomIdx())
+            ib = rd2sk.get(bond.GetEndAtomIdx())
+            if ia is None or ib is None:
+                continue
+            kind = bond.GetBondType()
+            order = 2 if kind == Chem.BondType.DOUBLE else 3 if kind == Chem.BondType.TRIPLE else 1
+            stereo = BOND_STEREO_DATIVE if kind == Chem.BondType.DATIVE else 0
+            self.bonds.append(_bond_make(ia, ib, order, stereo))
+        self._push_undo("clear_sketch", before)
+        self.selected_nodes = list(new_ids)
+        self._after_sketch_edit()
         return True
 
     def _depict_add_hs_mol_fixed_heavy(
@@ -1977,12 +2155,46 @@ class SketchWidgetRdkitMixin:
             )
         return out
 
+    def _layout_sketch_mol(self, mol: Chem.Mol) -> bool:
+        """Replace *mol*'s conformer with the structure column's generated layout.
+
+        CoordGen is used for rings of 12 or more when E/Z still reads, and inward
+        macrocycle substituents are flipped out. The turn that fills a table cell
+        stays off.
+        """
+        from molmanager.chem.depiction_layout import LayoutOptions, layout_for_drawing
+
+        try:
+            mol.RemoveAllConformers()
+        except Exception:
+            pass
+        options = LayoutOptions(
+            macrocycle_coordgen=True,
+            flip_inward_substituents=True,
+            rotate_to_cell=False,
+        )
+        laid = layout_for_drawing(mol, options)
+        if laid is None or laid.GetNumConformers() == 0:
+            return False
+        if laid.GetNumAtoms() != mol.GetNumAtoms():
+            return False
+        source = laid.GetConformer()
+        dest = Conformer(mol.GetNumAtoms())
+        for index in range(mol.GetNumAtoms()):
+            dest.SetAtomPosition(index, source.GetAtomPosition(index))
+        try:
+            mol.RemoveAllConformers()
+        except Exception:
+            pass
+        mol.AddConformer(dest, assignId=True)
+        return mol.GetNumConformers() > 0
+
     def cleanup_layout_2d_selected(self) -> bool:
-        """IUPAC Clean Up for the current selection only; unselected atoms stay put."""
+        """Clean Up for the current selection only; unselected atoms stay put."""
         return self.cleanup_layout_2d(atom_ids=self._atoms_for_selection_move())
 
     def cleanup_layout_2d(self, atom_ids: set[int] | None = None) -> bool:
-        """Reposition atoms using RDKit 2D coords with IUPAC-oriented post-pass.
+        """Reposition atoms with the structure column's 2D layout.
 
         When *atom_ids* is given, only those atoms move; the cleaned fragment is
         rigid-aligned to its original place so unselected atoms stay put.
@@ -2012,7 +2224,7 @@ class SketchWidgetRdkitMixin:
                 except Exception:
                     mol.UpdatePropertyCache(strict=False)
             stereo_tags = self._capture_tetrahedral_chiral_tags(mol)
-            if not self._depict_mol_2d_iupac(mol, clear_conformers=True):
+            if not self._layout_sketch_mol(mol):
                 return False
             conf = mol.GetConformer(0)
             self._restore_tetrahedral_chiral_tags(mol, stereo_tags)
@@ -2065,15 +2277,6 @@ class SketchWidgetRdkitMixin:
                     if node:
                         node["pos"] = newp
                 self._push_undo("move_nodes", moves)
-            if not selected_only:
-                try:
-                    self._apply_hex_macrocycles_to_sketch()
-                except Exception:
-                    pass
-                try:
-                    self._reorient_sketch_iupac()
-                except Exception:
-                    pass
             # Sync wedge/hash from re-wedged mol after layout.
             try:
                 self._rewedge_sketch_from_mol(mol, {v: k for k, v in sk2rd.items()}, stereo_tags)
