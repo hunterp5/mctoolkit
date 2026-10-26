@@ -25,9 +25,9 @@ Starts from a blank canvas or an existing molecule when launched in an edit cont
 - **Elements** - the left rail is the common set (C, N, O, S, F, Cl, Br, I, P, H) plus `*`, `?`, R1, R2, and Rn. **More…** lists the rest of the saved element set. Rn asks for a number and exports as `[*:n]`.
 - **Clipboard** - paste a molfile or SMILES onto the canvas, and copy a molfile or a PNG of the structure. The PNG is the depiction, without the selection frame.
 - **Reaction arrow** - drag to split the sketch into reactants (tail) and products (head). Double-click the arrow, or right-click it, to write text above and below it. **Export to Table** adds **Reaction SMARTS** (the structures only) and, when you wrote text, **Reaction Annotation**. The 2D scheme is rendered in Structure.
-- **Edit** - Undo/Redo, **Copy** / **Paste** of a selected fragment (Ctrl+C / Ctrl+V), and **Delete Selection** (Del, same as **Edit → Delete Selection** on the table). Right-click the canvas for the same Copy / Paste at the top of the menu. A selected fragment shows a frame; drag the handle above it to rotate.
+- **Edit** - While the sketcher window is active, Ctrl+Z undoes the sketch, Ctrl+Y or Ctrl+Shift+Z redoes it, Ctrl+C / Ctrl+V copy and paste a selected fragment, and Del deletes the atom or bond under the cursor or the current selection. The same keys edit the table when this window is not active. Right-click the canvas for Copy / Paste. A selected fragment shows a frame; drag the handle above it to rotate.
 - **Clean Up** - lays the sketch out the same way a structure without saved coordinates is laid out for the table.
-- **Status bar** - the active tool, atom and bond counts, and a formula when the sketch is one molecule.
+- **Status bar** - reports the last edit: atoms selected, deleted, copied, pasted, undone, and similar actions.
 - **Apply / accept** - push the drawn molecule or reaction back to the caller or table.
 
 ## Workflow

@@ -152,6 +152,49 @@ def _sketcher_preferred_dialog_size() -> tuple[int, int]:
     return (w, h)
 
 
+def _standard_key_shortcuts(standard_key) -> list[QKeySequence]:
+    """Every binding Qt uses for a standard key on this platform."""
+    bindings = list(QKeySequence.keyBindings(standard_key))
+    if bindings:
+        return bindings
+    return [QKeySequence(standard_key)]
+
+
+def _shortcut_texts(action: QAction) -> set[str]:
+    texts: set[str] = set()
+    for sequence in action.shortcuts():
+        text = sequence.toString(QKeySequence.PortableText).strip()
+        if text:
+            texts.add(text)
+    return texts
+
+
+# Table commands the sketcher replaces while its window is active.
+_SKETCH_EDIT_PARENT_ACTION_IDS = frozenset(
+    {
+        "edit.undo",
+        "edit.redo",
+        "edit.copy",
+        "edit.paste",
+        "edit.delete_selection",
+    }
+)
+
+
+class _ParentHotkeyClaim:
+    """How many open sketchers are holding one table shortcut off."""
+
+    __slots__ = ("count", "was_enabled")
+
+    def __init__(self, was_enabled: bool) -> None:
+        self.count = 1
+        self.was_enabled = was_enabled
+
+
+# id(QAction) -> claim. Shared so two sketchers do not re-enable each other's keys.
+_PARENT_HOTKEY_CLAIMS: dict[int, _ParentHotkeyClaim] = {}
+
+
 class SketcherDialog(QDialog):
     def __init__(
         self,
@@ -161,9 +204,11 @@ class SketcherDialog(QDialog):
         element_symbols: list[str] | None = None,
         source_oid: int | None = None,
         update_on_close: bool = False,
+        app=None,
     ):
         super().__init__(parent)
-        self.parent_app = parent
+        self.parent_app = app if app is not None else parent
+        self._embedded = False
         if initial_mol is not None and not isinstance(initial_mol, Chem.Mol):
             initial_mol = None
         self._initial_mol = initial_mol
@@ -194,17 +239,19 @@ class SketcherDialog(QDialog):
 
         edit_menu = menubar.addMenu("Edit")
         undo_act = QAction("Undo", self)
-        undo_act.setShortcut(QKeySequence.Undo)
+        undo_act.setShortcuts(_standard_key_shortcuts(QKeySequence.Undo))
         undo_act.setShortcutContext(Qt.WindowShortcut)
         undo_act.setToolTip("Undo the last sketch change (Ctrl+Z).")
         undo_act.triggered.connect(self._undo_sketch)
         edit_menu.addAction(undo_act)
         redo_act = QAction("Redo", self)
-        redo_act.setShortcut(QKeySequence.Redo)
+        redo_act.setShortcuts(_standard_key_shortcuts(QKeySequence.Redo))
         redo_act.setShortcutContext(Qt.WindowShortcut)
         redo_act.setToolTip("Redo the last undone sketch change (Ctrl+Y / Ctrl+Shift+Z).")
         redo_act.triggered.connect(self._redo_sketch)
         edit_menu.addAction(redo_act)
+        self._act_edit_undo = undo_act
+        self._act_edit_redo = redo_act
         edit_menu.addSeparator()
         copy_act = QAction("&Copy", self)
         copy_act.setShortcut(QKeySequence.Copy)
@@ -699,20 +746,9 @@ class SketcherDialog(QDialog):
             " background-color: palette(window);"
             " border-top: 1px solid palette(mid);"
             "}"
-            "#SketcherStatusBar::item { border: none; }"
-            "QLabel#SketcherStatusTool { font-weight: 600; padding-left: 8px; padding-right: 10px; }"
-            "QLabel#SketcherStatusCounts { color: palette(shadow); padding-right: 12px; }"
-            "QLabel#SketcherStatusFormula { padding-left: 8px; padding-right: 4px; }"
+            "#SketcherStatusBar QLabel { padding-left: 8px; background: transparent; }"
         )
-        self._status_tool = QLabel("Draw")
-        self._status_tool.setObjectName("SketcherStatusTool")
-        self._status_counts = QLabel("0 atoms   0 bonds")
-        self._status_counts.setObjectName("SketcherStatusCounts")
-        self._status_formula = QLabel("")
-        self._status_formula.setObjectName("SketcherStatusFormula")
-        self._status_bar.addWidget(self._status_tool)
-        self._status_bar.addWidget(self._status_counts, 1)
-        self._status_bar.addPermanentWidget(self._status_formula)
+        self._status_bar.showMessage("Ready.")
         l.addWidget(self._status_bar)
 
         self._3d_refresh_timer = QTimer(self)
@@ -721,7 +757,7 @@ class SketcherDialog(QDialog):
         self._3d_refresh_timer.timeout.connect(self._refresh_3d_view_now)
 
         self.canvas.sketchChanged.connect(self._update_sketch_status)
-        self.canvas.sketchChanged.connect(self._update_status_bar)
+        self.canvas.statusMessage.connect(self.show_sketch_status)
         self.canvas.sketchChanged.connect(self._schedule_3d_refresh)
         self.tb_erase.blockSignals(True)
         self.tb_erase.setChecked(False)
@@ -734,7 +770,6 @@ class SketcherDialog(QDialog):
         else:
             self._enter_draw_mode()
         self._update_sketch_status()
-        self._update_status_bar()
 
         if self._initial_mol is not None:
             QTimer.singleShot(0, self._apply_initial_mol)
@@ -745,8 +780,8 @@ class SketcherDialog(QDialog):
         esc.setContext(Qt.WidgetWithChildrenShortcut)
         esc.activated.connect(self._escape_asks_close)
 
-        self._parent_delete_action = None
-        self._parent_delete_was_enabled = False
+        self._parent_hotkeys_blocked = False
+        self._claimed_parent_actions: list[QAction] = []
         self._sketch_key_filters_installed = False
         make_window_resizable(self)
 
@@ -757,25 +792,88 @@ class SketcherDialog(QDialog):
         mods = event.modifiers()
         return not (mods & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
 
-    def _resolve_parent_delete_action(self):
-        if self._parent_delete_action is not None:
-            return self._parent_delete_action
-        parent = self.parent()
-        if parent is not None and hasattr(parent, "_hotkey_actions"):
-            self._parent_delete_action = parent._hotkey_actions.get("edit.delete_selection")
-        return self._parent_delete_action
+    def _host_hotkey_actions(self) -> dict:
+        """Table hotkey map on the nearest ancestor, or on the hosting application."""
+        hosts: list[QWidget] = []
+        seen: set[int] = set()
+        widget = self.parent()
+        while widget is not None and id(widget) not in seen:
+            seen.add(id(widget))
+            hosts.append(widget)
+            widget = widget.parent()
+        app = getattr(self, "parent_app", None)
+        if isinstance(app, QWidget) and id(app) not in seen:
+            hosts.append(app)
+        for host in hosts:
+            actions = getattr(host, "_hotkey_actions", None)
+            if isinstance(actions, dict) and actions:
+                return actions
+        return {}
 
-    def _set_parent_delete_action_blocked(self, blocked: bool) -> None:
-        act = self._resolve_parent_delete_action()
-        if act is None:
+    def _conflicting_parent_actions(self) -> list[QAction]:
+        """Table shortcuts that would steal undo, redo, or another sketch edit key."""
+        host_actions = self._host_hotkey_actions()
+        if not host_actions:
+            return []
+        sketch_keys: set[str] = set()
+        for action in self.findChildren(QAction):
+            sketch_keys.update(_shortcut_texts(action))
+        found: list[QAction] = []
+        seen: set[int] = set()
+        for action_id, action in host_actions.items():
+            if not isinstance(action, QAction) or id(action) in seen:
+                continue
+            overlaps = bool(_shortcut_texts(action) & sketch_keys)
+            if action_id in _SKETCH_EDIT_PARENT_ACTION_IDS or overlaps:
+                seen.add(id(action))
+                found.append(action)
+        return found
+
+    def _sketch_owns_edit_hotkeys(self) -> bool:
+        """Sketch edit keys apply only while this window (or an embedded canvas) is active."""
+        if not self.isVisible():
+            return False
+        if self._embedded:
+            focus = QApplication.focusWidget()
+            return focus is not None and (focus is self or self.isAncestorOf(focus))
+        return self.isActiveWindow()
+
+    def _claim_parent_edit_hotkeys(self) -> None:
+        if self._parent_hotkeys_blocked:
             return
-        if blocked:
-            if act.isEnabled():
-                self._parent_delete_was_enabled = True
-                act.setEnabled(False)
-        elif self._parent_delete_was_enabled:
-            act.setEnabled(True)
-            self._parent_delete_was_enabled = False
+        claimed: list[QAction] = []
+        for action in self._conflicting_parent_actions():
+            key = id(action)
+            claim = _PARENT_HOTKEY_CLAIMS.get(key)
+            if claim is None:
+                _PARENT_HOTKEY_CLAIMS[key] = _ParentHotkeyClaim(bool(action.isEnabled()))
+                action.setEnabled(False)
+            else:
+                claim.count += 1
+            claimed.append(action)
+        self._claimed_parent_actions = claimed
+        self._parent_hotkeys_blocked = True
+
+    def _release_parent_edit_hotkeys(self) -> None:
+        if not self._parent_hotkeys_blocked:
+            return
+        for action in self._claimed_parent_actions:
+            claim = _PARENT_HOTKEY_CLAIMS.get(id(action))
+            if claim is None:
+                continue
+            claim.count -= 1
+            if claim.count <= 0:
+                _PARENT_HOTKEY_CLAIMS.pop(id(action), None)
+                if claim.was_enabled:
+                    action.setEnabled(True)
+        self._claimed_parent_actions = []
+        self._parent_hotkeys_blocked = False
+
+    def _sync_parent_edit_hotkeys(self) -> None:
+        if self._sketch_owns_edit_hotkeys():
+            self._claim_parent_edit_hotkeys()
+        else:
+            self._release_parent_edit_hotkeys()
 
     def _install_sketch_key_filters(self) -> None:
         if self._sketch_key_filters_installed:
@@ -792,6 +890,8 @@ class SketcherDialog(QDialog):
         self._sketch_key_filters_installed = False
 
     def eventFilter(self, obj, event) -> bool:  # noqa: ARG002
+        if self._embedded and event.type() in (QEvent.FocusIn, QEvent.FocusOut):
+            QTimer.singleShot(0, self._sync_parent_edit_hotkeys)
         if not self.isVisible():
             return False
         if event.type() == QEvent.ShortcutOverride and self._is_sketch_delete_key(event):
@@ -802,13 +902,18 @@ class SketcherDialog(QDialog):
             return True
         return False
 
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.ActivationChange:
+            self._sync_parent_edit_hotkeys()
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        self._set_parent_delete_action_blocked(True)
+        self._sync_parent_edit_hotkeys()
         self._install_sketch_key_filters()
 
     def hideEvent(self, event) -> None:
-        self._set_parent_delete_action_blocked(False)
+        self._release_parent_edit_hotkeys()
         self._remove_sketch_key_filters()
         super().hideEvent(event)
 
@@ -848,7 +953,6 @@ class SketcherDialog(QDialog):
             self._act_mode_text.blockSignals(True)
             self._act_mode_text.setChecked(self.tb_text.isChecked())
             self._act_mode_text.blockSignals(False)
-        self._update_status_bar()
 
     def show_sketch_canvas_menu(self, global_pos: QPoint) -> None:
         """Templates, modes, and cleanup (formerly the Draw menu). Right-click empty canvas."""
@@ -1044,20 +1148,13 @@ class SketcherDialog(QDialog):
         self.canvas.update()
         self._sync_mode_menu_checks()
 
-    def _update_status_bar(self) -> None:
-        """Refresh the tool, counts, and formula shown in the status bar."""
+    def show_sketch_status(self, message: str) -> None:
+        """Show one line in the sketcher status bar, like the main window status line."""
         bar = getattr(self, "_status_bar", None)
-        canvas = getattr(self, "canvas", None)
-        if bar is None or canvas is None:
+        if bar is None:
             return
-        atoms = len(canvas.nodes)
-        bonds = len(canvas.bonds)
-        atom_word = "atom" if atoms == 1 else "atoms"
-        bond_word = "bond" if bonds == 1 else "bonds"
-        self._status_tool.setText(canvas.active_tool_name())
-        self._status_counts.setText(f"{atoms} {atom_word}    {bonds} {bond_word}")
-        formula = canvas.sketch_formula()
-        self._status_formula.setText(formula or "")
+        text = (message or "").strip() or "Ready."
+        bar.showMessage(text)
 
     def _enter_draw_mode(self) -> None:
         """Leave erase/select/template, choose carbon, and focus the canvas for drawing."""
@@ -1079,26 +1176,18 @@ class SketcherDialog(QDialog):
             return
         self._edit_delete_busy = True
         try:
-            self.canvas._handle_delete_key()
+            deleted = self.canvas._handle_delete_key()
         finally:
             self._edit_delete_busy = False
+        if not deleted:
+            self.show_sketch_status("Nothing to delete.")
 
     def _shortcut_copy_selection(self) -> None:
-        if not self.canvas.copy_selection_to_clipboard():
-            QMessageBox.information(
-                self,
-                "Copy",
-                "Turn on Select, pick atoms/bonds, then Ctrl+C to copy.",
-            )
+        self.canvas.copy_selection_to_clipboard()
 
     def _shortcut_paste_selection(self) -> None:
         anchor = self.canvas.mapFromGlobal(QCursor.pos())
-        if not self.canvas.paste_from_clipboard(anchor):
-            QMessageBox.information(
-                self,
-                "Paste",
-                "Clipboard has no sketch selection (use Ctrl+C in Select mode first).",
-            )
+        self.canvas.paste_from_clipboard(anchor)
 
     def _populate_templates_menu(self, tpl_menu: QMenu) -> None:
         def add_section(title: str, pairs: list[tuple[str, str]]) -> None:
@@ -1577,7 +1666,32 @@ class SketcherDialog(QDialog):
             ),
         )
 
+    def set_embedded(self, embedded: bool) -> None:
+        """Host this dialog inside another widget. Escape no longer closes it.
+
+        Shortcuts stay inside the sketcher so they do not undo table edits while
+        the canvas has focus.
+        """
+        self._embedded = bool(embedded)
+        if not self._embedded:
+            return
+        self.setAttribute(Qt.WA_DeleteOnClose, False)
+        self.setWindowFlags(Qt.Widget)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        status = getattr(self, "_status_bar", None)
+        if status is not None:
+            status.setSizeGripEnabled(False)
+        for action in self.findChildren(QAction):
+            if action.shortcutContext() == Qt.WindowShortcut:
+                action.setShortcutContext(Qt.WidgetWithChildrenShortcut)
+        for shortcut in self.findChildren(QShortcut):
+            if shortcut.context() == Qt.WindowShortcut:
+                shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+        self._sync_parent_edit_hotkeys()
+
     def _escape_asks_close(self) -> None:
+        if self._embedded:
+            return
         self.close()
 
     def _uncheck_any_element_button(self) -> None:
@@ -1686,15 +1800,13 @@ class SketcherDialog(QDialog):
         if self.canvas.armed_abbrev:
             self.canvas.setCursor(Qt.CrossCursor)
         self.canvas.setFocus()
-        self._update_status_bar()
+        self._sync_mode_menu_checks()
 
     def _copy_molfile(self) -> None:
-        if not self.canvas.copy_molblock_to_clipboard():
-            QMessageBox.information(self, "Copy Molfile", "Nothing on the canvas to copy.")
+        self.canvas.copy_molblock_to_clipboard()
 
     def _copy_image(self) -> None:
-        if not self.canvas.copy_depiction_png_to_clipboard():
-            QMessageBox.information(self, "Copy Image", "The sketch could not be drawn.")
+        self.canvas.copy_depiction_png_to_clipboard()
 
     def _on_any_element_tool_clicked(self, checked: bool) -> None:
         if not checked:
@@ -2212,6 +2324,9 @@ class SketcherDialog(QDialog):
         self.select_btn.blockSignals(False)
         self._toggle_select(True)
         self._update_sketch_status()
+        atoms = len(self.canvas.nodes)
+        noun = "atom" if atoms == 1 else "atoms"
+        self.show_sketch_status(f"Loaded {atoms} {noun}.")
         return True
 
     def _on_cleanup_layout(self) -> None:
@@ -2223,6 +2338,7 @@ class SketcherDialog(QDialog):
                 "Could not re-layout the structure. Try fixing valence or connectivity issues first.",
             )
             return
+        self.show_sketch_status("Cleaned up the structure.")
         issues = self.canvas.refresh_iupac_validation()
         if issues:
             from molmanager.ui.sketcher.iupac_validate import format_iupac_issues
@@ -2251,6 +2367,7 @@ class SketcherDialog(QDialog):
                 "Could not re-layout the selection. Try fixing valence or connectivity issues first.",
             )
             return
+        self.show_sketch_status("Cleaned up the selection.")
         issues = self.canvas.refresh_iupac_validation()
         if issues:
             from molmanager.ui.sketcher.iupac_validate import format_iupac_issues
@@ -2269,7 +2386,9 @@ class SketcherDialog(QDialog):
         smi = rxn or self.canvas.to_smiles()
         if smi:
             QApplication.clipboard().setText(smi)
+            self.show_sketch_status("Copied SMILES.")
         else:
+            self.show_sketch_status("Could not copy SMILES.")
             QMessageBox.warning(
                 self,
                 "Copy",
@@ -2278,14 +2397,11 @@ class SketcherDialog(QDialog):
 
     def _copy_selected_smiles(self) -> None:
         if not self.canvas._atoms_for_selection_move():
-            QMessageBox.information(
-                self,
-                "Copy Selected as SMILES",
-                "Select one or more atoms (or bonds) first.",
-            )
+            self.show_sketch_status("Select atoms to copy as SMILES.")
             return
         if self.canvas.copy_selected_as_smiles_to_clipboard():
             return
+        self.show_sketch_status("Could not copy the selection as SMILES.")
         QMessageBox.warning(
             self,
             "Copy Selected as SMILES",
@@ -2296,7 +2412,9 @@ class SketcherDialog(QDialog):
         smt = (self.canvas.to_reaction_smarts() or self.canvas.to_smarts() or "").strip()
         if smt:
             QApplication.clipboard().setText(smt)
+            self.show_sketch_status("Copied SMARTS.")
         else:
+            self.show_sketch_status("Could not copy SMARTS.")
             QMessageBox.warning(
                 self,
                 "Copy SMARTS",
@@ -2394,10 +2512,13 @@ class SketcherDialog(QDialog):
         return True
 
     def closeEvent(self, event):
+        if self._embedded:
+            event.ignore()
+            return
         if self._update_on_close and not self._confirm_close_updates_row():
             event.ignore()
             return
         self._update_on_close = False
-        self._set_parent_delete_action_blocked(False)
+        self._release_parent_edit_hotkeys()
         self._remove_sketch_key_filters()
         event.accept()

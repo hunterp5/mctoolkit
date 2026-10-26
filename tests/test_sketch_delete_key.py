@@ -151,3 +151,27 @@ def test_sketcher_edit_delete_action_removes_selection(qapp) -> None:  # noqa: A
     assert len(w.nodes) == 1
     assert w.nodes[0]["id"] == 2
     dlg.close()
+
+
+def test_status_bar_reports_select_delete_copy_and_undo(qapp) -> None:
+    dlg = SketcherDialog(QWidget())
+    messages: list[str] = []
+    dlg.canvas.statusMessage.connect(messages.append)
+    w = dlg.canvas
+    _add_two_atom_sketch(w)
+    w.select_mode = True
+    w.selected_nodes = [1, 2]
+    w._sync_selected_bonds_from_nodes()
+    w._announce_selection()
+    assert messages[-1] == "Selected 2 atoms and 1 bond."
+    w.hover = 1
+    w._refresh_hover_from_cursor = lambda: None
+    assert w._handle_delete_key()
+    assert messages[-1] == "Deleted 1 atom."
+    w.selected_nodes = [2]
+    assert w.copy_selection_to_clipboard()
+    assert messages[-1] == "Copied 1 atom."
+    w.undo()
+    assert messages[-1] == "Undone."
+    assert any(node["id"] == 1 for node in w.nodes)
+    dlg.close()

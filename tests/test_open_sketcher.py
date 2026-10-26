@@ -28,9 +28,7 @@ from molmanager.ui.sketcher import SketcherDialog
 
 def _click(widget, pos: QPoint) -> None:
     """Press and release the left button at *pos* in *widget* coordinates."""
-    press = QMouseEvent(
-        QEvent.MouseButtonPress, pos, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier
-    )
+    press = QMouseEvent(QEvent.MouseButtonPress, pos, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
     release = QMouseEvent(
         QEvent.MouseButtonRelease, pos, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier
     )
@@ -51,7 +49,7 @@ def test_package_import_opens_a_blank_sketcher(qapp) -> None:  # noqa: ARG001
     assert dialog.canvas.nodes == []
     dialog.canvas.repaint()
     qapp.processEvents()
-    assert dialog._status_tool.text().startswith("Draw")
+    assert dialog._status_bar.currentMessage() == "Ready."
     assert dialog.canvas.height() > dialog.height() * 0.7
     assert dialog._status_bar.height() < 48
 
@@ -78,6 +76,7 @@ def test_open_sketcher_loads_a_structure(qapp) -> None:  # noqa: ARG001
     dialog.canvas.repaint()
     qapp.processEvents()
     assert dialog.canvas._last_structure_paint == "scene"
+    assert dialog._status_bar.currentMessage().startswith("Loaded ")
     dialog.canvas.cleanup_layout_2d()
     assert len(dialog.canvas.nodes) >= 7
     dialog.close()

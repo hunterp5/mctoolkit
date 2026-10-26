@@ -667,6 +667,9 @@ class SketchWidgetEventsMixin:
                             moves.append((nid, old_pos, new_pos))
                 if moves:
                     self._push_undo("move_nodes", moves)
+                    moved = len(moves)
+                    noun = "atom" if moved == 1 else "atoms"
+                    self._report_status(f"Moved {moved} {noun}.")
                 if self._arrow_move_orig is not None and self.reaction_arrow is not None:
                     old = self._arrow_move_orig
                     new = self._arrow_copy(self.reaction_arrow)
@@ -682,6 +685,7 @@ class SketchWidgetEventsMixin:
                     self.setCursor(Qt.ArrowCursor)
                 self.update()
                 return
+            self._announce_selection()
             if self._selecting:
                 self._selecting = False
                 self._select_start = None

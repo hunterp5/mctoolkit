@@ -186,7 +186,7 @@ def test_loaded_sketch_starts_in_select(qapp) -> None:  # noqa: ARG001
     dialog = SketcherDialog(QWidget(), initial_mol=Chem.MolFromSmiles("CCO"))
     assert dialog.select_btn.isChecked()
     assert dialog.canvas.select_mode
-    assert dialog._status_tool.text() == "Select"
+    assert dialog._status_bar.currentMessage() == "Ready."
     dialog.close()
 
 

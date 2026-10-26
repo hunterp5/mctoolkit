@@ -95,6 +95,12 @@ from .widget_painting import SketchWidgetPaintMixin
 from .widget_events import SketchWidgetEventsMixin
 
 
+def _count_label(count: int, singular: str) -> str:
+    """``1 atom`` or ``2 atoms``."""
+    noun = singular if count == 1 else f"{singular}s"
+    return f"{count} {noun}"
+
+
 class SketchWidget(
     SketchWidgetEventsMixin, SketchWidgetPaintMixin, SketchWidgetRdkitMixin, QWidget
 ):
@@ -111,6 +117,7 @@ class SketchWidget(
     """
 
     sketchChanged = pyqtSignal()
+    statusMessage = pyqtSignal(str)
 
     def _sketcher_dialog_if(self):
         """Nearest ``SketcherDialog`` ancestor (canvas may sit under a splitter)."""
@@ -162,6 +169,7 @@ class SketchWidget(
         self.hover: int | tuple[str, int] | None = None  # node id, or ('bond', bond_index)
         self.selected_nodes: list[int] = []
         self.selected_bond_indices: set[int] = set()
+        self._last_selection_status: tuple[tuple[int, ...], tuple[int, ...], bool] = ((), (), False)
         self._selecting = False
         self._select_start: QPoint | None = None
         self._selection_rect: QRect | None = None
@@ -243,6 +251,66 @@ class SketchWidget(
 
     def _notify_sketch_changed(self) -> None:
         self.sketchChanged.emit()
+
+    def _report_status(self, message: str) -> None:
+        """Send one line to the sketcher status bar."""
+        text = (message or "").strip()
+        if text:
+            self.statusMessage.emit(text)
+
+    def _selection_fingerprint(self) -> tuple[tuple[int, ...], tuple[int, ...], bool]:
+        return (
+            tuple(int(i) for i in self.selected_nodes),
+            tuple(sorted(int(i) for i in self.selected_bond_indices)),
+            bool(self.selected_reaction_arrow),
+        )
+
+    def _remember_selection(self) -> None:
+        self._last_selection_status = self._selection_fingerprint()
+
+    def _announce_selection(self) -> None:
+        """Report a selection change once, after a click or marquee finishes."""
+        key = self._selection_fingerprint()
+        if key == self._last_selection_status:
+            return
+        self._last_selection_status = key
+        atoms, bonds, arrow = key
+        parts: list[str] = []
+        if atoms:
+            parts.append(_count_label(len(atoms), "atom"))
+        if bonds:
+            parts.append(_count_label(len(bonds), "bond"))
+        if arrow:
+            parts.append("the reaction arrow")
+        if not parts:
+            self._report_status("Selection cleared.")
+            return
+        if len(parts) == 1:
+            detail = parts[0]
+        elif len(parts) == 2:
+            detail = f"{parts[0]} and {parts[1]}"
+        else:
+            detail = f"{parts[0]}, {parts[1]}, and {parts[2]}"
+        self._report_status(f"Selected {detail}.")
+
+    @staticmethod
+    def _deleted_status(atoms: int, bonds: int, arrow: bool) -> str:
+        parts: list[str] = []
+        if atoms:
+            parts.append(_count_label(atoms, "atom"))
+        if bonds:
+            parts.append(_count_label(bonds, "bond"))
+        if arrow:
+            parts.append("the reaction arrow")
+        if not parts:
+            return "Nothing to delete."
+        if len(parts) == 1:
+            detail = parts[0]
+        elif len(parts) == 2:
+            detail = f"{parts[0]} and {parts[1]}"
+        else:
+            detail = f"{parts[0]}, {parts[1]}, and {parts[2]}"
+        return f"Deleted {detail}."
 
     def _clear_salt_bundle(self) -> None:
         self._salt_bundle_smiles = None
@@ -478,6 +546,9 @@ class SketchWidget(
             and not self.selected_reaction_arrow
         ):
             return
+        removed_atoms = len(self.selected_nodes)
+        removed_bonds = len(self.selected_bond_indices)
+        removed_arrow = bool(self.selected_reaction_arrow)
         for bi in sorted(self.selected_bond_indices, reverse=True):
             if 0 <= bi < len(self.bonds):
                 b = self.bonds.pop(bi)
@@ -496,6 +567,8 @@ class SketchWidget(
             self.selected_reaction_arrow = False
         self.hover = None
         self._after_sketch_edit(notify=True, notify_if_valence_failed=True)
+        self._report_status(self._deleted_status(removed_atoms, removed_bonds, removed_arrow))
+        self._remember_selection()
 
     def _try_delete_hover_target(self, *, refresh_hover: bool = True) -> bool:
         """Delete the atom or bond under the cursor, if any."""
@@ -515,6 +588,8 @@ class SketchWidget(
             self._push_undo("del_node", (node, conn))
             self._delete_node(nid)
             self.hover = None
+            self._report_status("Deleted 1 atom.")
+            self._remember_selection()
             return True
         if isinstance(self.hover, tuple) and self.hover[0] == "bond":
             try:
@@ -526,11 +601,15 @@ class SketchWidget(
                 self._push_undo("del_bond", b)
                 self.hover = None
                 self._after_sketch_edit(notify=True, notify_if_valence_failed=True)
+                self._report_status("Deleted 1 bond.")
+                self._remember_selection()
                 return True
         if isinstance(self.hover, tuple) and self.hover[0] == "arrow":
             if self.reaction_arrow is not None:
                 self._set_reaction_arrow(None)
                 self.hover = None
+                self._report_status("Deleted the reaction arrow.")
+                self._remember_selection()
                 return True
         return False
 
@@ -549,6 +628,8 @@ class SketchWidget(
                 conn = [b for b in self.bonds if b[0] == self.sel or b[1] == self.sel]
                 self._push_undo("del_node", (node, conn))
             self._delete_node(self.sel)
+            self._report_status("Deleted 1 atom.")
+            self._remember_selection()
             return True
         return False
 
@@ -1448,7 +1529,15 @@ class SketchWidget(
             return "ok", ["Empty sketch."]
         return "ok", ["No valence or stereochemistry issues flagged."]
 
-    def undo(self):
+    def undo(self) -> None:
+        """Undo one sketch edit and report it on the status bar."""
+        if not self._undo:
+            self._report_status("Nothing to undo.")
+            return
+        self._perform_undo()
+        self._report_status("Undone.")
+
+    def _perform_undo(self) -> None:
         if not self._undo:
             return
         self._ensure_bonds_sanitized()
@@ -1644,7 +1733,15 @@ class SketchWidget(
             self._redo.append(("paste_redo", payload))
         self._after_sketch_edit()
 
-    def redo(self):
+    def redo(self) -> None:
+        """Redo one sketch edit and report it on the status bar."""
+        if not self._redo:
+            self._report_status("Nothing to redo.")
+            return
+        self._perform_redo()
+        self._report_status("Redone.")
+
+    def _perform_redo(self) -> None:
         if not self._redo:
             return
         self._ensure_bonds_sanitized()
@@ -2045,12 +2142,15 @@ class SketchWidget(
 
     def copy_selection_to_clipboard(self) -> bool:
         if not self.select_mode:
+            self._report_status("Turn on Select, then pick atoms to copy.")
             return False
         frag = self._serialize_selection_fragment()
         if not frag or not frag.get("nodes"):
+            self._report_status("Nothing selected to copy.")
             return False
         blob = CLIPBOARD_PREFIX + json.dumps(frag, separators=(",", ":"))
         QApplication.clipboard().setText(blob)
+        self._report_status(f"Copied {_count_label(len(frag['nodes']), 'atom')}.")
         return True
 
     def _clipboard_sketch_fragment(self) -> dict[str, Any] | None:
@@ -2073,8 +2173,10 @@ class SketchWidget(
         """Copy SMILES/SMARTS of the current selection to the system clipboard."""
         smi = self.to_smiles_selected()
         if not smi:
+            self._report_status("Could not copy the selection as SMILES.")
             return False
         QApplication.clipboard().setText(smi)
+        self._report_status("Copied selected SMILES.")
         return True
 
     def _paste_fragment_payload(self, frag: dict[str, Any], anchor: QPoint) -> None:
@@ -2131,15 +2233,23 @@ class SketchWidget(
 
     def paste_from_clipboard(self, anchor: QPoint | None = None) -> bool:
         pt = anchor if anchor is not None else self.rect().center()
+        before = len(self.nodes)
         frag = self._clipboard_sketch_fragment()
         if frag:
             self._paste_fragment_payload(frag, pt)
-            return True
-        text = QApplication.clipboard().text() or ""
-        mol = self._mol_from_clipboard_text(text)
-        if mol is None:
+        else:
+            text = QApplication.clipboard().text() or ""
+            mol = self._mol_from_clipboard_text(text)
+            if mol is None or not self.append_mol_at(mol, pt):
+                self._report_status("Clipboard has no structure to paste.")
+                return False
+        added = len(self.nodes) - before
+        if added <= 0:
+            self._report_status("Clipboard has no structure to paste.")
             return False
-        return self.append_mol_at(mol, pt)
+        self._report_status(f"Pasted {_count_label(added, 'atom')}.")
+        self._remember_selection()
+        return True
 
     def clipboard_has_pastable_structure(self) -> bool:
         """True when the clipboard holds a sketch fragment, a molfile, or SMILES."""
@@ -2171,17 +2281,22 @@ class SketchWidget(
         """Copy a molfile of the selection, or of the whole sketch when nothing is selected."""
         ids = self._selection_fragment_ids() or {int(n["id"]) for n in self.nodes}
         if not ids:
+            self._report_status("Nothing to copy as a molfile.")
             return False
         mol = self._mol_from_node_ids(ids)
         if mol is None or mol.GetNumAtoms() == 0:
+            self._report_status("Nothing to copy as a molfile.")
             return False
         try:
             block = Chem.MolToMolBlock(mol)
         except Exception:
+            self._report_status("Could not copy the molfile.")
             return False
         if not block:
+            self._report_status("Could not copy the molfile.")
             return False
         QApplication.clipboard().setText(block)
+        self._report_status(f"Copied molfile ({_count_label(mol.GetNumAtoms(), 'atom')}).")
         return True
 
     def copy_depiction_png_to_clipboard(self) -> bool:
@@ -2193,6 +2308,7 @@ class SketchWidget(
 
         scene = self.depiction_scene_for_canvas()
         if scene is None:
+            self._report_status("Could not copy the image.")
             return False
         image = QImage(640, 480, QImage.Format_ARGB32)
         image.fill(Qt.white)
@@ -2202,6 +2318,7 @@ class SketchWidget(
         finally:
             painter.end()
         QApplication.clipboard().setImage(image)
+        self._report_status("Copied image.")
         return True
 
     def arm_contracted_label(self, raw: str) -> bool:
@@ -2215,8 +2332,10 @@ class SketchWidget(
         if target is not None:
             self._mutate_atom_element(target, label.element, None, abbrev=label.display)
             self.armed_abbrev = None
+            self._report_status(f"Contracted {label.display}.")
             return True
         self.armed_abbrev = label.display
+        self._report_status(f"{label.display} armed. Click an atom or empty canvas.")
         return True
 
     def _abbrev_target_node(self) -> dict[str, Any] | None:
@@ -2239,6 +2358,7 @@ class SketchWidget(
         hit = self._hit_node(pt)
         if hit is not None:
             self._mutate_atom_element(hit, label.element, None, abbrev=label.display)
+            self._report_status(f"Contracted {label.display}.")
             return
         nid = self.next_id
         self.next_id += 1
@@ -2251,6 +2371,7 @@ class SketchWidget(
         self.nodes.append(node)
         self._push_undo("add_node", node)
         self._after_sketch_edit()
+        self._report_status(f"Placed {label.display}.")
 
     def _add_copy_paste_menu_actions(self, menu: QMenu, *, paste_anchor: QPoint) -> None:
         """Copy / Paste for the current selection, then a divider (context menus)."""
@@ -2270,7 +2391,8 @@ class SketchWidget(
         menu.addSeparator()
 
     def clear(self, *, push_undo: bool = True):
-        if push_undo and (self.nodes or self.bonds or self.reaction_arrow is not None):
+        had_sketch = bool(self.nodes or self.bonds or self.reaction_arrow is not None)
+        if push_undo and had_sketch:
             self._push_undo("clear_sketch", self._snapshot_sketch_state())
         self.nodes = []
         self.bonds = []
@@ -2294,7 +2416,10 @@ class SketchWidget(
         self._alkene_ez_by_bond_index = {}
         self._stereo_label_node_ids.clear()
         self._clear_salt_bundle()
+        self._last_selection_status = ((), (), False)
         self._after_sketch_edit(notify=True, notify_if_valence_failed=True)
+        if push_undo and had_sketch:
+            self._report_status("Sketch cleared.")
 
     def _median_bond_length_sketch_px(self) -> float | None:
         """Median Euclidean bond length in current sketch pixel coordinates."""
@@ -2695,6 +2820,7 @@ class SketchWidget(
             },
         )
         self._after_sketch_edit()
+        self._report_status(f"Added {_count_label(len(stored_nodes), 'atom')}.")
         return True
 
     def preview_carbon_chain(
