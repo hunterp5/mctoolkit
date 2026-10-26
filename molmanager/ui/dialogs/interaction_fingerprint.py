@@ -27,7 +27,6 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
     QHBoxLayout,
     QLineEdit,
     QPushButton,
@@ -35,7 +34,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ..protein_viewer_models import STRUCTURE_FILE_FILTER
-from ..qt_widget_utils import make_window_minimizable
+from ..qt_widget_utils import boxed_form, make_window_minimizable
 from ..strings import TOOL_INTERACTION_FINGERPRINT
 from .scope import selection_scope_checked
 
@@ -70,7 +69,7 @@ class InteractionFingerprintDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 8)
         root.setSpacing(8)
-        form = QFormLayout()
+        poses, form = boxed_form("Poses")
 
         path_row = QHBoxLayout()
         self.path_edit = QLineEdit((receptor_path or "").strip())
@@ -97,13 +96,6 @@ class InteractionFingerprintDialog(QDialog):
         )
         form.addRow("Pose column:", self.pose_combo)
 
-        self.prefix_edit = QLineEdit("IFP")
-        self.prefix_edit.setToolTip(
-            "Writes this column and a second column named “prefix Residues”."
-        )
-        form.addRow("Column prefix:", self.prefix_edit)
-        root.addLayout(form)
-
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
         if self._have_selection:
@@ -112,7 +104,16 @@ class InteractionFingerprintDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
-        root.addWidget(self.only_selected_cb)
+        form.addRow("", self.only_selected_cb)
+        root.addWidget(poses)
+
+        output, out_form = boxed_form("Output")
+        self.prefix_edit = QLineEdit("IFP")
+        self.prefix_edit.setToolTip(
+            "Writes this column and a second column named “prefix Residues”."
+        )
+        out_form.addRow("Column prefix:", self.prefix_edit)
+        root.addWidget(output)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)
