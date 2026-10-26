@@ -116,12 +116,19 @@ class StructureWritebackMixin:
         src: str,
         no_render_2d: bool,
         done_label: str = "Done.",
+        on_written=None,
     ) -> None:
-        """Write ``(oid, blob, smiles)`` tool results into *src*, then optionally render 2D."""
+        """Write ``(oid, blob, smiles)`` tool results into *src*, then optionally render 2D.
+
+        *on_written* runs after the structures are stored. Render 2D continues in the
+        background and does not delay it.
+        """
         rows = [(int(oid), bytes(blob), smiles) for oid, blob, smiles in results if blob]
         oids = self._write_tool_structures(src, rows)
         self.schedule_calculate_global_bounds()
         self._clear_tool_progress()
+        if callable(on_written):
+            on_written(src)
         if not no_render_2d and self._tool_target_renders_2d(src):
             if self._render_tool_structures(src, oids):
                 return
