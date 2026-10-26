@@ -479,6 +479,9 @@ class SessionRestoreMixin:
         restore_search = getattr(self, "restore_table_search_session", None)
         if callable(restore_search):
             restore_search(doc.get("table_search"))
+        restore_replace = getattr(self, "restore_find_replace_session", None)
+        if callable(restore_replace):
+            restore_replace(doc.get("table_find_replace"))
         restore_lists = getattr(self, "restore_row_lists_session", None)
         if callable(restore_lists):
             restore_lists(doc.get("row_lists"))
@@ -554,7 +557,7 @@ class SessionRestoreMixin:
                 pass
 
     def _show_session_workspace_when_ready(self) -> None:
-        """Show restored floating plot windows and Search with the rest of the workspace."""
+        """Show restored floating plots, Search, and Find and Replace with the workspace."""
         self._session_hold_workspace_surfaces = False
         for dlg in self._iter_floating_plot_hosts():
             try:
@@ -571,6 +574,17 @@ class SessionRestoreMixin:
             except RuntimeError:
                 pass
         self._session_search_want_visible = False
+        replace_panel = getattr(self, "_find_replace_panel", None)
+        want_replace = bool(getattr(self, "_session_find_replace_want_visible", False))
+        if replace_panel is not None and want_replace:
+            try:
+                replace_panel.setVisible(True)
+                populate_replace = getattr(self, "_populate_find_replace_columns", None)
+                if callable(populate_replace):
+                    populate_replace()
+            except RuntimeError:
+                pass
+        self._session_find_replace_want_visible = False
 
     def _session_plot_host_waiting_for_web(self, host) -> bool:
         """True when a restored plot has a WebEngine view that has not finished loading."""
