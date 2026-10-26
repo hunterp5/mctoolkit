@@ -89,19 +89,18 @@ def test_generate_conformations_dialog_options_includes_etkdg_flags(qapp):  # no
     assert not any(cb.text() == "Advanced" for cb in dlg.findChildren(QCheckBox))
     assert dlg.output_panel.add_to_table_cb.text() == "Add as Entries"
     assert dlg.windowTitle() == "Generate Conformations — Stochastic"
-    option_boxes = [b for b in dlg.findChildren(QGroupBox) if b.title() == "Options"]
-    assert option_boxes
-    box = option_boxes[0]
-    assert dlg.enforce_chirality_cb.parent() is box
-    assert dlg.random_coords_cb.parent() is box
-    assert dlg.exp_torsions_cb.parent() is box
-    assert dlg.small_ring_cb.parent() is box
-    assert dlg.macrocycle_cb.parent() is box
-    assert dlg.basic_knowledge_cb.parent() is box
-    assert dlg.heavy_rms_cb.parent() is box
-    assert dlg.keep_hs_cb.parent() is box
-    assert dlg.only_selected_cb.parent() is box
-    assert dlg.output_panel.add_to_table_cb.parent() is box
+    boxes = {b.title(): b for b in dlg.findChildren(QGroupBox)}
+    embed = boxes["Embed"]
+    assert dlg.enforce_chirality_cb.parent() is embed
+    assert dlg.random_coords_cb.parent() is embed
+    assert dlg.exp_torsions_cb.parent() is embed
+    assert dlg.small_ring_cb.parent() is embed
+    assert dlg.macrocycle_cb.parent() is embed
+    assert dlg.basic_knowledge_cb.parent() is embed
+    assert dlg.heavy_rms_cb.parent() is boxes["Minimize"]
+    assert dlg.keep_hs_cb.parent() is boxes["Output"]
+    assert dlg.only_selected_cb.parent() is boxes["Output"]
+    assert dlg.output_panel.add_to_table_cb.parent() is boxes["Output"]
     assert dlg.output_panel.save_to_file_cb.parent() is dlg.output_panel
     assert dlg.output_panel.save_path_edit.parent() is dlg.output_panel
     dlg.close()
