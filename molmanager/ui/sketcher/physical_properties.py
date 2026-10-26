@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -216,22 +217,29 @@ class _IonizationWorker(QRunnable):
         self._signals = signals
         self._cancel_event = cancel_event
 
+    def _emit(self, name: str, *payload) -> None:
+        """Deliver a result unless the properties window has already been destroyed."""
+        try:
+            getattr(self._signals, name).emit(*payload)
+        except RuntimeError:
+            logger.debug("physical properties window closed before ionization reported")
+
     def run(self) -> None:
         try:
             if self._cancel_event.is_set():
-                self._signals.failed.emit(self._generation, "cancelled")
+                self._emit("failed", self._generation, "cancelled")
                 return
             result = compute_ionization_properties(self._mol, cancel_event=self._cancel_event)
         except Exception as exc:
             msg = str(exc) or _PKA_CALC_FAILED
             if msg != "cancelled":
                 logger.debug("sketcher ionization failed: %s", msg)
-            self._signals.failed.emit(self._generation, msg)
+            self._emit("failed", self._generation, msg)
             return
         if self._cancel_event.is_set():
-            self._signals.failed.emit(self._generation, "cancelled")
+            self._emit("failed", self._generation, "cancelled")
             return
-        self._signals.finished.emit(self._generation, result)
+        self._emit("finished", self._generation, result)
 
 
 class SketchPhysicalPropertiesDialog(QDialog):
@@ -248,6 +256,7 @@ class SketchPhysicalPropertiesDialog(QDialog):
 
         self._generation = 0
         self._active_generation = 0
+        self._shutting_down = False
         self._ion_busy = False
         self._pending_mol: Chem.Mol | None = None
         self._pending_generation = 0
@@ -309,10 +318,30 @@ class SketchPhysicalPropertiesDialog(QDialog):
         self._timer.start()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        self._shutting_down = True
         self._timer.stop()
         self._cancel_event.set()
         self._pending_mol = None
+        for signal in (self._ion_signals.finished, self._ion_signals.failed):
+            with suppress(TypeError):
+                signal.disconnect()
+        canvas = getattr(self._sketcher, "canvas", None)
+        if canvas is not None:
+            with suppress(TypeError):
+                canvas.sketchChanged.disconnect(self.schedule_refresh)
         super().closeEvent(event)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not self._shutting_down:
+            return
+        self._shutting_down = False
+        self._cancel_event = threading.Event()
+        self._ion_signals.finished.connect(self._on_ionization_finished)
+        self._ion_signals.failed.connect(self._on_ionization_failed)
+        canvas = getattr(self._sketcher, "canvas", None)
+        if canvas is not None:
+            canvas.sketchChanged.connect(self.schedule_refresh)
 
     def _clear_all(self) -> None:
         self._val_mw.setText("—")
@@ -345,6 +374,8 @@ class SketchPhysicalPropertiesDialog(QDialog):
             lab.setToolTip(tip)
 
     def _refresh_now(self) -> None:
+        if self._shutting_down:
+            return
         self._generation += 1
         gen = self._generation
         # Cancel any in-flight process-pool job; coalesced pending work uses the new gen.
@@ -405,6 +436,8 @@ class SketchPhysicalPropertiesDialog(QDialog):
             self._ion_busy = False
 
     def _on_ionization_finished(self, generation: int, result: object) -> None:
+        if self._shutting_down:
+            return
         self._release_ionization_busy(generation)
         try:
             if generation != self._generation:
@@ -433,6 +466,8 @@ class SketchPhysicalPropertiesDialog(QDialog):
             self._drain_pending_ionization()
 
     def _on_ionization_failed(self, generation: int, msg: str) -> None:
+        if self._shutting_down:
+            return
         self._release_ionization_busy(generation)
         if generation != self._generation:
             self._drain_pending_ionization()
