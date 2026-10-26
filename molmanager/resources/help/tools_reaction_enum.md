@@ -8,7 +8,7 @@ Generate product libraries in silico from defined chemistry instead of drawing e
 
 ## When to use
 
-Use **Chemistry → Reaction → Reaction Based Enumeration** for combinatorial expansions, reagent scans, or validating a reaction SMARTS on small reactant lists.
+Use **Chemistry → Structure Enumeration → Reaction Based Enumeration** for combinatorial expansions, reagent scans, or validating a reaction SMARTS on small reactant lists.
 
 ## Inputs / scope
 

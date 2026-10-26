@@ -389,8 +389,8 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
             ),
             _e(
                 "tools_reaction_extract",
-                "Extract Info",
-                "Extract Info",
+                "Extract Reaction Info",
+                "Extract Reaction Info",
                 "Split reaction SMARTS into reactant and product columns.",
             ),
             _e(

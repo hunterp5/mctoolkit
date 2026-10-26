@@ -138,17 +138,14 @@ def test_substructure_menu_sits_between_conformations_and_predict():
 def test_reaction_menu_outline():
     tools = find_submenu(MAIN_WINDOW_MENUS, "Chemistry")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(tools.items)]
+    assert "Reaction" not in labels
+    assert "Extract Info…" not in labels
     assert "Reaction Based Enumeration…" not in labels
     assert labels.index("Structure Decomposition") == labels.index("Predict") + 1
     assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
     assert labels.index("REINVENT Sampling…") == labels.index("Structure Enumeration") + 1
-    assert labels.index("Reaction") == labels.index("REINVENT Sampling…") + 1
-    assert labels.index("Retrosynthesis") == labels.index("Reaction") + 1
-    reaction = find_submenu(tools.items, "Reaction")
-    assert menu_outline(reaction.items) == [
-        "Extract Info…",
-        "Reaction Based Enumeration…",
-    ]
+    assert labels.index("Extract Reaction Info…") == labels.index("REINVENT Sampling…") + 1
+    assert labels.index("Retrosynthesis") == labels.index("Extract Reaction Info…") + 1
     retrosynthesis = find_submenu(tools.items, "Retrosynthesis")
     assert menu_outline(retrosynthesis.items) == ["Search…"]
     decomp = find_submenu(tools.items, "Structure Decomposition")
@@ -162,6 +159,7 @@ def test_reaction_menu_outline():
         "R-Group Enumeration…",
         "BRICS Recomposition…",
         "RECAP Recomposition…",
+        "Reaction Based Enumeration…",
     ]
 
 

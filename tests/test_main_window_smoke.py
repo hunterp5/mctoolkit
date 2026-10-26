@@ -1464,14 +1464,15 @@ def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
     mb = w.menuBar()
     tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Chemistry")
     labels = [a.text().replace("&", "") for a in tools.actions()]
+    assert "Reaction" not in labels
+    assert "Extract Info…" not in labels
     assert "Reaction Based Enumeration…" not in labels
     assert labels.index("Structure Decomposition") == labels.index("Predict") + 1
     assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
     assert labels.index("REINVENT Sampling…") == labels.index("Structure Enumeration") + 1
-    assert labels.index("Reaction") == labels.index("REINVENT Sampling…") + 1
-    reaction = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "Reaction")
-    rxn_labels = [a.text().replace("&", "") for a in reaction.actions() if not a.isSeparator()]
-    assert rxn_labels == ["Extract Info…", "Reaction Based Enumeration…"]
+    assert labels.index("Extract Reaction Info…") == labels.index("REINVENT Sampling…") + 1
+    extract = next(a for a in tools.actions() if a.text().replace("&", "") == "Extract Reaction Info…")
+    assert extract.menu() is None
     decomp = next(
         a.menu() for a in tools.actions() if a.text().replace("&", "") == "Structure Decomposition"
     )
@@ -1489,6 +1490,7 @@ def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
         "R-Group Enumeration…",
         "BRICS Recomposition…",
         "RECAP Recomposition…",
+        "Reaction Based Enumeration…",
     ]
     w.close()
 

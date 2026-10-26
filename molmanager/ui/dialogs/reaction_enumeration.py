@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Dialog for Chemistry → Reaction → Reaction Based Enumeration."""
+"""Dialog for Chemistry → Structure Enumeration → Reaction Based Enumeration."""
 
 from __future__ import annotations
 

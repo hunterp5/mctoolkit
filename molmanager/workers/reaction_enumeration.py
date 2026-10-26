@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Reaction-based enumeration worker (Tools menu)."""
+"""Reaction-based enumeration worker (Chemistry → Structure Enumeration)."""
 
 from __future__ import annotations
 

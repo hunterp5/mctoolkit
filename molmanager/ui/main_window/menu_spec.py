@@ -550,26 +550,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "open_recap_recomposition",
                 tooltip="Combine RECAP fragment columns into new product structures (new rows).",
             ),
-            tooltips_visible=True,
-        ),
-        action(
-            "REINVENT Sampling…",
-            "open_reinvent_sampling",
-            tooltip=(
-                "Sample molecules with a local REINVENT 4 install "
-                "(de novo, R-groups, linkers, or similar molecules) and append them."
-            ),
-        ),
-        submenu(
-            "&Reaction",
-            action(
-                "Extract Info…",
-                "open_reaction_extract",
-                tooltip=(
-                    "Split a reaction SMARTS / SMIRKS column into individual reactant and/or "
-                    "product columns."
-                ),
-            ),
             action(
                 "Reaction Based Enumeration…",
                 "open_reaction_enumeration",
@@ -580,6 +560,22 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 ),
             ),
             tooltips_visible=True,
+        ),
+        action(
+            "REINVENT Sampling…",
+            "open_reinvent_sampling",
+            tooltip=(
+                "Sample molecules with a local REINVENT 4 install "
+                "(de novo, R-groups, linkers, or similar molecules) and append them."
+            ),
+        ),
+        action(
+            "Extract Reaction Info…",
+            "open_reaction_extract",
+            tooltip=(
+                "Split a reaction SMARTS / SMIRKS column into individual reactant and/or "
+                "product columns."
+            ),
         ),
         submenu(
             "&Retrosynthesis",
