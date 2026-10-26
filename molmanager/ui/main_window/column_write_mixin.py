@@ -210,6 +210,9 @@ class ColumnWriteMixin:
         refresh_search = getattr(self, "_refresh_table_search_column_combos", None)
         if callable(refresh_search):
             refresh_search()
+        refresh_replace = getattr(self, "_populate_find_replace_columns", None)
+        if callable(refresh_replace):
+            refresh_replace()
 
     def _calc_writeback_async_min_rows(self) -> int:
         from ...platform_support.config import load_config
