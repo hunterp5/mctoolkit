@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Assign numeric table cells to bins and label them (Data → Binning)."""
+"""Assign numeric table cells to bins and label them (Data → Similarity → Binning)."""
 
 from __future__ import annotations
 
