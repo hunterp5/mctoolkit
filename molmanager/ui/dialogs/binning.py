@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Bin a numeric column and write range and class columns (Data → Binning)."""
+"""Bin a numeric column and write range and class columns (Data → Similarity → Binning)."""
 
 from __future__ import annotations
 
