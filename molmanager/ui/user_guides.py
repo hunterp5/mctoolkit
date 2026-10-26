@@ -138,7 +138,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
     GuideSection(
         "3 — Edit and table",
         (
-            _e("edit_menu", "Edit", "Edit", "Undo/redo, clipboard, find and replace, and selection."),
+            _e(
+                "edit_menu",
+                "Edit",
+                "Edit",
+                "Undo/redo, clipboard, find and replace, and selection.",
+            ),
             _e("table", "Table", "Table", "Columns, sorting, context menus, and precision."),
             _e(
                 "tools_filter",
@@ -348,15 +353,21 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         (
             _e(
                 "tools_rgroup",
-                "R-Group Decomposition",
-                "R-Group Decomposition",
+                "Structure Decomposition",
+                "Structure Decomposition",
                 "Match a core and extract R-group columns.",
             ),
             _e(
                 "tools_rgroup_enum",
-                "R-Group Enumeration",
-                "R-Group Enumeration",
+                "Structure Enumeration",
+                "Structure Enumeration",
                 "Attach building-block lists to a numbered core and append the products.",
+            ),
+            _e(
+                "tools_reinvent",
+                "REINVENT Sampling",
+                "REINVENT Sampling",
+                "Sample molecules with a local REINVENT 4 install and append them.",
             ),
             _e(
                 "tools_activity_cliff",
@@ -372,8 +383,8 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
             ),
             _e(
                 "tools_reaction_extract",
-                "Extract",
-                "Reaction Extract",
+                "Extract Info",
+                "Extract Info",
                 "Split reaction SMARTS into reactant and product columns.",
             ),
             _e(
@@ -381,6 +392,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Reaction Enumeration",
                 "Reaction Enumeration",
                 "Enumerate products from reaction SMARTS.",
+            ),
+            _e(
+                "tools_aizynthfinder",
+                "Retrosynthesis",
+                "Retrosynthesis",
+                "Local AiZynthFinder route search (Chemistry → Retrosynthesis → Search).",
             ),
             _e(
                 "tools_predict_metabolites",

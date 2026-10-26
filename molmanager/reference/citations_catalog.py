@@ -254,6 +254,61 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
         ),
     ),
     CitationSection(
+        "Retrosynthesis",
+        (
+            _t(
+                "aizynthfinder",
+                "AiZynthFinder",
+                "Chemistry → Retrosynthesis → Search. Local Monte Carlo tree search "
+                "in a separate Python environment.",
+                (
+                    (
+                        "Genheden, S.; Thakkar, A.; Chadimová, V.; Reymond, J.-L.; Engkvist, O.; "
+                        "Bjerrum, E. AiZynthFinder: a fast, robust and flexible open-source "
+                        "software for retrosynthetic planning. J. Cheminform. 2020, 12, 70.",
+                        "https://doi.org/10.1186/s13321-020-00472-1",
+                    ),
+                ),
+                LIC_MIT,
+                homepage="https://github.com/MolecularAI/aizynthfinder",
+                notes=(
+                    "MIT license. Not installed into the MolManager environment: version 4.4.1 "
+                    "requires RDKit 2023.x. Point Settings → Configure → AiZynthFinder at that "
+                    "environment's Python and a local config.yml from download_public_data. "
+                    "The public USPTO models and ZINC stock are read from disk. Configs that "
+                    "set use_remote_models or a non-local MongoDB stock are refused."
+                ),
+            ),
+        ),
+    ),
+    CitationSection(
+        "Generative design",
+        (
+            _t(
+                "reinvent4",
+                "REINVENT 4",
+                "Chemistry → REINVENT Sampling. De novo, LibInvent, LinkInvent, and Mol2Mol sampling.",
+                (
+                    (
+                        "Loeffler, H. H.; He, J.; Tibo, A.; Janet, J. P.; Voronov, A.; "
+                        "Mervin, L. H.; Engkvist, O. Reinvent 4: Modern AI-driven generative "
+                        "molecule design. J. Cheminformatics 2024, 16, 20.",
+                        "https://doi.org/10.1186/s13321-024-00812-5",
+                    ),
+                ),
+                LIC_APACHE2,
+                homepage="https://github.com/MolecularAI/REINVENT4",
+                notes=(
+                    "Apache-2.0. Not installed into the MolManager environment: REINVENT 4 "
+                    "pins NumPy 2, pandas 3, and its own PyTorch build. Settings → Configure → "
+                    "REINVENT points at that environment's reinvent command. This wrapper samples "
+                    "only. Public priors are files in that install's priors folder "
+                    "(Zenodo 10.5281/zenodo.15641296)."
+                ),
+            ),
+        ),
+    ),
+    CitationSection(
         "Ionization, pKa, and ADME models",
         (
             _t(

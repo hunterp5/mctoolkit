@@ -29,7 +29,7 @@ At least two valid molecules in the chosen **Target Column**. **Selected Rows On
 ## Use cases
 
 - Propose the core for a Free-Wilson analysis.
-- Copy the core SMARTS into **Chemistry → R-Group Decomposition → Core-Based Decomposition**.
+- Copy the core SMARTS into **Chemistry → Structure Decomposition → Core-Based Decomposition**.
 
 ## Tips and limits
 

@@ -1,6 +1,6 @@
-# Reaction Extract
+# Extract Info
 
-Reaction Extract splits a reaction SMARTS / SMIRKS column into one new column per reactant and/or product.
+Extract Info splits a reaction SMARTS / SMIRKS column into one new column per reactant and/or product.
 
 ## Goal
 
@@ -8,7 +8,7 @@ Turn packed reaction cells into individual structure columns for filtering, enum
 
 ## When to use
 
-Use **Chemistry → Reaction → Extract** after loading an RXN file, sketching a reaction into the table, or importing SMIRKS when you need the components as separate fields.
+Use **Chemistry → Reaction → Extract Info** after loading an RXN file, sketching a reaction into the table, or importing SMIRKS when you need the components as separate fields.
 
 ## Inputs / scope
 

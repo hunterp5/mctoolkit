@@ -503,7 +503,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             about_to_show="_sync_predict_viewer_actions",
         ),
         submenu(
-            "&R-Group Decomposition",
+            "Structure &Decomposition",
             action(
                 "Core-Based Decomposition…",
                 "open_core_based_decomposition",
@@ -515,14 +515,26 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 tooltip="Split structures into BRICS retrosynthetic fragments (new SMILES columns).",
             ),
             action(
-                "BRICS Recomposition…",
-                "open_brics_recomposition",
-                tooltip="Combine BRICS fragment columns into new product structures (new rows).",
-            ),
-            action(
                 "RECAP Decomposition…",
                 "open_recap_decomposition",
                 tooltip="Split structures into RECAP retrosynthetic fragments (new SMILES columns).",
+            ),
+            tooltips_visible=True,
+        ),
+        submenu(
+            "Structure &Enumeration",
+            action(
+                "R-Group Enumeration…",
+                "open_rgroup_enumeration",
+                tooltip=(
+                    "Attach building-block lists to a core with numbered * points and append the "
+                    "products. The same property limits used for fragment recomposition can cap the set."
+                ),
+            ),
+            action(
+                "BRICS Recomposition…",
+                "open_brics_recomposition",
+                tooltip="Combine BRICS fragment columns into new product structures (new rows).",
             ),
             action(
                 "RECAP Recomposition…",
@@ -532,17 +544,17 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltips_visible=True,
         ),
         action(
-            "R-Group Enumeration…",
-            "open_rgroup_enumeration",
+            "REINVENT Sampling…",
+            "open_reinvent_sampling",
             tooltip=(
-                "Attach building-block lists to a core with numbered * points and append the "
-                "products. The same property limits used for fragment recomposition can cap the set."
+                "Sample molecules with a local REINVENT 4 install "
+                "(de novo, R-groups, linkers, or similar molecules) and append them."
             ),
         ),
         submenu(
             "&Reaction",
             action(
-                "Extract…",
+                "Extract Info…",
                 "open_reaction_extract",
                 tooltip=(
                     "Split a reaction SMARTS / SMIRKS column into individual reactant and/or "
@@ -556,6 +568,18 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                     "Run a named reaction (Suzuki, Buchwald, amide coupling, etc.) across two reactant "
                     "pools from structure files or pasted SMILES, then append products to the table "
                     "and/or an SDF file."
+                ),
+            ),
+            tooltips_visible=True,
+        ),
+        submenu(
+            "&Retrosynthesis",
+            action(
+                "Search…",
+                "open_aizynthfinder",
+                tooltip=(
+                    "Plan routes with a local AiZynthFinder install "
+                    "(Settings → Configure → AiZynthFinder)."
                 ),
             ),
             tooltips_visible=True,
@@ -814,6 +838,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             action("Self-Organizing Map…", "open_som_dialog"),
             tooltips_visible=True,
         ),
+        SEPARATOR,
         action(
             "&Plotter…",
             "open_plot",

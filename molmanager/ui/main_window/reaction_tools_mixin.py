@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Chemistry → Reaction (extract components, reaction enumeration) and R-group enumeration."""
+"""Chemistry → Reaction (extract components, reaction enumeration) and structure enumeration."""
 
 from __future__ import annotations
 

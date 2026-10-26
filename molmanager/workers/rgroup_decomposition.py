@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Core-based decomposition (Chemistry → R-Group Decomposition)."""
+"""Core-based decomposition (Chemistry → Structure Decomposition → Core-Based Decomposition)."""
 
 from __future__ import annotations
 

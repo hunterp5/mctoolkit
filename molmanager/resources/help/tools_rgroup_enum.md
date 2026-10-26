@@ -24,7 +24,7 @@ One core SMILES, with attachment points written as `[*:1]`, `[*:2]`, and so on. 
 
 ## Workflow
 
-1. Open **Chemistry → R-Group Enumeration**.
+1. Open **Chemistry → Structure Enumeration → R-Group Enumeration**.
 2. Sketch or paste the core. One file row appears for each attachment point.
 3. Set the attachment point and browse to that point's building-block file. Cap a point you are not varying with a file that contains `*`.
 4. Optionally set property limits and a maximum number of products.

@@ -139,20 +139,28 @@ def test_reaction_menu_outline():
     tools = find_submenu(MAIN_WINDOW_MENUS, "Chemistry")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(tools.items)]
     assert "Reaction Based Enumeration…" not in labels
-    assert labels.index("R-Group Decomposition") == labels.index("Predict") + 1
-    assert labels.index("R-Group Enumeration…") == labels.index("R-Group Decomposition") + 1
-    assert labels.index("Reaction") == labels.index("R-Group Enumeration…") + 1
+    assert labels.index("Structure Decomposition") == labels.index("Predict") + 1
+    assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
+    assert labels.index("REINVENT Sampling…") == labels.index("Structure Enumeration") + 1
+    assert labels.index("Reaction") == labels.index("REINVENT Sampling…") + 1
+    assert labels.index("Retrosynthesis") == labels.index("Reaction") + 1
     reaction = find_submenu(tools.items, "Reaction")
     assert menu_outline(reaction.items) == [
-        "Extract…",
+        "Extract Info…",
         "Reaction Based Enumeration…",
     ]
-    decomp = find_submenu(tools.items, "R-Group Decomposition")
+    retrosynthesis = find_submenu(tools.items, "Retrosynthesis")
+    assert menu_outline(retrosynthesis.items) == ["Search…"]
+    decomp = find_submenu(tools.items, "Structure Decomposition")
     assert menu_outline(decomp.items) == [
         "Core-Based Decomposition…",
         "BRICS Decomposition…",
-        "BRICS Recomposition…",
         "RECAP Decomposition…",
+    ]
+    enum = find_submenu(tools.items, "Structure Enumeration")
+    assert menu_outline(enum.items) == [
+        "R-Group Enumeration…",
+        "BRICS Recomposition…",
         "RECAP Recomposition…",
     ]
 
@@ -302,7 +310,8 @@ def test_data_menu_plot_submenu_titles():
     assert "Dimensionality Reduction" in labels
     assert "Plotter…" in labels
     assert labels.index("Dimensionality Reduction") == labels.index("MedChem Plots") + 1
-    assert labels.index("Plotter…") == labels.index("Dimensionality Reduction") + 1
+    assert labels.index("Plotter…") == labels.index("Dimensionality Reduction") + 2
+    assert labels[labels.index("Dimensionality Reduction") + 1] == ""
     medchem = find_submenu(data.items, "MedChem Plots")
     assert menu_outline(medchem.items) == [
         "BOILED-Egg…",

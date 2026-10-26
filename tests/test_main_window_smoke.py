@@ -1465,17 +1465,31 @@ def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
     tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Chemistry")
     labels = [a.text().replace("&", "") for a in tools.actions()]
     assert "Reaction Based Enumeration…" not in labels
-    assert labels.index("R-Group Decomposition") == labels.index("Predict") + 1
-    assert labels.index("R-Group Enumeration…") == labels.index("R-Group Decomposition") + 1
-    assert labels.index("Reaction") == labels.index("R-Group Enumeration…") + 1
+    assert labels.index("Structure Decomposition") == labels.index("Predict") + 1
+    assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
+    assert labels.index("REINVENT Sampling…") == labels.index("Structure Enumeration") + 1
+    assert labels.index("Reaction") == labels.index("REINVENT Sampling…") + 1
     reaction = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "Reaction")
     rxn_labels = [a.text().replace("&", "") for a in reaction.actions() if not a.isSeparator()]
-    assert rxn_labels == ["Extract…", "Reaction Based Enumeration…"]
+    assert rxn_labels == ["Extract Info…", "Reaction Based Enumeration…"]
     decomp = next(
-        a.menu() for a in tools.actions() if a.text().replace("&", "") == "R-Group Decomposition"
+        a.menu() for a in tools.actions() if a.text().replace("&", "") == "Structure Decomposition"
     )
     decomp_labels = [a.text().replace("&", "") for a in decomp.actions()]
-    assert "Core-Based Decomposition…" in decomp_labels
+    assert decomp_labels == [
+        "Core-Based Decomposition…",
+        "BRICS Decomposition…",
+        "RECAP Decomposition…",
+    ]
+    enum = next(
+        a.menu() for a in tools.actions() if a.text().replace("&", "") == "Structure Enumeration"
+    )
+    enum_labels = [a.text().replace("&", "") for a in enum.actions()]
+    assert enum_labels == [
+        "R-Group Enumeration…",
+        "BRICS Recomposition…",
+        "RECAP Recomposition…",
+    ]
     w.close()
 
 
