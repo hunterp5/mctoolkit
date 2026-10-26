@@ -30,6 +30,7 @@ from __future__ import annotations
 from typing import Any
 
 from .app_kernel import AppKernel, bind_mixin_methods
+from .macro_tools import MacroTools
 
 
 class _LazyMixinHost:
@@ -97,6 +98,7 @@ class WorkspaceTools:
             app, lambda: _load("molmanager.ui.main_window.mpo_mixin", "MpoMixin")
         )
         self.structure_prep = _LazyMixinHost(app, _load_structure_prep)
+        self.macros = MacroTools(app)
 
 
 def _load(module: str, name: str):
