@@ -42,27 +42,19 @@ class TableCalcMixin:
 
         if not isinstance(dlg, CalculatorDialog):
             return
-        column = dlg.name_input.text().strip()
-        expression = dlg.expr_input.text().strip()
-        only_selected = dlg.only_selected_rows()
+        from ...workflows.macro_recipe import ROW_SCOPE_SELECTION
+
+        request = dlg.request()
+        only_selected = request.row_scope == ROW_SCOPE_SELECTION
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, TOOL_CALCULATOR):
             return
-        self.start_calculator_job(
-            column=column,
-            expression=expression,
-            allowed=None if not only_selected else set(allowed or ()),
-            on_done=None,
-        )
+        from ...workflows.macro_record import calculator_step
+        from ..command_dispatch import dispatch_step
 
-    def start_calculator_job(
-        self,
-        *,
-        column: str,
-        expression: str,
-        allowed: set[int] | None,
-        on_done,
-    ) -> None:
+        dispatch_step(self, calculator_step(request), {})
+
+    def start_calculator_job(self, request, *, allowed: set[int] | None, on_done) -> None:
         """Evaluate *expression* into *column*. ``on_done(error, {"output": header})``.
 
         *allowed* ``None`` uses every row. The dialog passes ``on_done=None`` and
@@ -78,6 +70,8 @@ class TableCalcMixin:
             else:
                 QMessageBox.information(self, TOOL_CALCULATOR, message)
             return
+        column = request.column
+        expression = request.expression
         name = (column or "").strip()
         if not name:
             message = "Enter a name for the new column."
@@ -118,12 +112,24 @@ class TableCalcMixin:
             else:
                 QMessageBox.information(self, TOOL_CALCULATOR, message)
             return
-        self._calculator_on_done = on_done
+        column_name = self.new_c
+        from PyQt5.QtCore import Qt
+
+        from ..job_signals import CalculatorJobSignals, release_job_signals, retain_job_signals
+
+        bridge = CalculatorJobSignals(self)
+        retain_job_signals(self, bridge)
+
+        def _slot(res, done=on_done, col=column_name, held=bridge) -> None:
+            release_job_signals(self, held)
+            self._apply_custom_calc(res, done, col)
+
+        bridge.custom_calc.connect(_slot, Qt.QueuedConnection)
         enqueue_process_queue_job(
             self,
             "Calculator…",
             len(row_data),
-            lambda ev, ps, rd=row_data, ex=expr, sigs=self.signals: workers.CustomCalcWorker(
+            lambda ev, ps, rd=row_data, ex=expr, sigs=bridge: workers.CustomCalcWorker(
                 rd, ex, sigs, cancel_event=ev, progress_state=ps
             ),
             queue_label=f"Calculator ({len(row_data)} rows)",
@@ -154,37 +160,90 @@ class TableCalcMixin:
         d.show()
 
     def _on_random_number_dialog_accepted(self, d) -> None:
-        from ...table.random_number_columns import generate_random_values
+        from ...workflows.macro_record import random_number_step
+        from ...workflows.tool_requests import row_scope_from_only_selected
+        from ..command_dispatch import dispatch_step
 
-        p = d.params()
-        col = p.column_name
-        if not col:
-            QMessageBox.warning(self, TOOL_RANDOM_NUMBER, "Enter a name for the output column.")
-            return
         only_selected = d.only_selected_rows()
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, TOOL_RANDOM_NUMBER):
             return
+        dispatch_step(
+            self,
+            random_number_step(d.params(), row_scope_from_only_selected(only_selected)),
+            {},
+        )
+
+    def start_random_number_job(self, params: dict, *, allowed: set[int] | None, on_done) -> None:
+        """Fill a column with random numbers. ``on_done(error, {"output": header})``.
+
+        The handle finishes from ``on_calc_finished`` after the cells exist.
+        """
+        from typing import cast
+
+        from ...table.random_number_columns import (
+            DistributionName,
+            RandomNumberParams,
+            generate_random_values,
+        )
+        from ..macro_recorder import report_unless_replaying
+
+        column = str(params.get("column") or "").strip()
+        if not column:
+            self._fail_random_number("Enter a name for the output column.", on_done)
+            return
         oids = self._all_oids_in_table_order()
         if allowed is not None:
-            oids = [o for o in oids if o in allowed]
+            oids = [oid for oid in oids if oid in allowed]
         if not oids:
-            QMessageBox.information(self, TOOL_RANDOM_NUMBER, "No rows to process for this scope.")
             self.status_label.setText("Ready.")
+            message = "No rows to process for this scope."
+            on_done(message, {})
+            report_unless_replaying(self, TOOL_RANDOM_NUMBER, message, warning=False)
             return
-        try:
-            values = generate_random_values(len(oids), p.params)
-        except ValueError as exc:
-            QMessageBox.warning(
-                self, TOOL_RANDOM_NUMBER, str(exc) or "Invalid random-number settings."
+        distribution = str(params.get("distribution") or "uniform")
+        if distribution not in ("uniform", "integer", "normal"):
+            self._fail_random_number(
+                "Choose a uniform, integer, or normal distribution.", on_done
             )
             return
-        rows = [(int(oid), {col: text}) for oid, text in zip(oids, values)]
-        written = self.on_calc_finished(rows, [col], progress_label=TOOL_RANDOM_NUMBER)
-        final_col = written[0] if written else col
-        self.status_label.setText(
-            f'{TOOL_RANDOM_NUMBER}: column "{final_col}" updated ({len(rows)} row(s)).'
+        try:
+            settings = RandomNumberParams(
+                distribution=cast(DistributionName, distribution),
+                low=float(params.get("low", 0.0)),
+                high=float(params.get("high", 1.0)),
+                mean=float(params.get("mean", 0.0)),
+                std=float(params.get("std", 1.0)),
+                seed=_optional_seed(params.get("seed")),
+                decimals=int(params.get("decimals", 4)),
+                clip_normal=bool(params.get("clip_normal", False)),
+            )
+            values = generate_random_values(len(oids), settings)
+        except (TypeError, ValueError) as exc:
+            self._fail_random_number(str(exc) or "Invalid random-number settings.", on_done)
+            return
+        rows = [(int(oid), {column: text}) for oid, text in zip(oids, values, strict=True)]
+
+        def _after(written: list[str]) -> None:
+            final_col = written[0] if written else column
+            self.status_label.setText(
+                f'{TOOL_RANDOM_NUMBER}: column "{final_col}" updated ({len(rows)} row(s)).'
+            )
+            if not written:
+                on_done("Random number produced no column.", {})
+            else:
+                on_done(None, {"output": str(written[0])})
+
+        self.on_calc_finished(
+            rows, [column], progress_label=TOOL_RANDOM_NUMBER, on_complete=_after
         )
+
+    def _fail_random_number(self, message: str, on_done) -> None:
+        from ..macro_recorder import report_unless_replaying
+
+        self.status_label.setText("Ready.")
+        on_done(message, {})
+        report_unless_replaying(self, TOOL_RANDOM_NUMBER, message)
 
     def open_calculator(self):
         if not self.headers:
@@ -242,11 +301,9 @@ class TableCalcMixin:
         )
 
     def _run_potency_from_dialog(self, dlg) -> None:
-        from ...chem.potency import (
-            needs_molecular_weight,
-            output_headers,
-            standardize_activity,
-        )
+        from ...workflows.macro_record import potency_step
+        from ...workflows.tool_requests import row_scope_from_only_selected
+        from ..command_dispatch import dispatch_step
         from ..dialogs import PotencyStandardizationDialog
 
         if not isinstance(dlg, PotencyStandardizationDialog):
@@ -265,11 +322,37 @@ class TableCalcMixin:
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, TOOL_POTENCY):
             return
+        dispatch_step(
+            self,
+            potency_step(request, row_scope_from_only_selected(only_selected)),
+            {},
+        )
+
+    def start_potency_job(self, params: dict, *, allowed: set[int] | None, on_done) -> None:
+        """Standardize activity. ``on_done(error, outputs)`` maps activity, p, ki, and pki."""
+        from ...chem.potency import (
+            needs_molecular_weight,
+            output_headers,
+            standardize_activity,
+        )
+        from ...workflows.macro_recipe import potency_output_keys
+        from ..macro_recorder import report_unless_replaying
+
+        request = _potency_request(params)
+        if request.column not in self.headers or request.unit_column not in self.headers:
+            message = "Choose a data column and a unit column from the table."
+            self.status_label.setText("Ready.")
+            on_done(message, {})
+            report_unless_replaying(self, TOOL_POTENCY, message)
+            return
         oids = self._all_oids_in_table_order()
         if allowed is not None:
             oids = [oid for oid in oids if oid in allowed]
         if not oids:
-            QMessageBox.information(self, TOOL_POTENCY, "No rows to process for this scope.")
+            message = "No rows to process for this scope."
+            self.status_label.setText("Ready.")
+            on_done(message, {})
+            report_unless_replaying(self, TOOL_POTENCY, message, warning=False)
             return
         activity_col = self.headers.index(request.column)
         unit_col = self.headers.index(request.unit_column)
@@ -292,7 +375,7 @@ class TableCalcMixin:
             structure_mw = _structure_molecular_weights(
                 self,
                 [oid for oid, _activity, _unit in prepared],
-                only_selected=only_selected,
+                only_selected=allowed is not None,
             )
         rows: list[tuple[int, dict[str, str]]] = []
         for oid, activity, unit_text in prepared:
@@ -321,10 +404,15 @@ class TableCalcMixin:
                     ),
                 )
             )
-        written = self.on_calc_finished(rows, headers, progress_label=TOOL_POTENCY)
-        self.status_label.setText(
-            f"{TOOL_POTENCY}: wrote {len(written)} column(s) for {len(rows)} row(s)."
-        )
+        keys = potency_output_keys(params)
+
+        def _after(written: list[str]) -> None:
+            self.status_label.setText(
+                f"{TOOL_POTENCY}: wrote {len(written)} column(s) for {len(rows)} row(s)."
+            )
+            on_done(None, {key: header for key, header in zip(keys, written, strict=False)})
+
+        self.on_calc_finished(rows, headers, progress_label=TOOL_POTENCY, on_complete=_after)
 
     def _ensure_blank_table_headers(self) -> None:
         """Create ID and Structure columns so Add Row/Column work before a file is loaded."""
@@ -786,8 +874,11 @@ class TableCalcMixin:
             self.status_label.setText(f"Diverse subset failed: {msg or 'Computation failed.'}")
 
     def on_custom_calc_finished(self, res):
-        # If the expression failed for every row, don't add an all-error column.
-        done = getattr(self, "_calculator_on_done", None)
+        """Shared-signal path. Macro and dialog jobs use a per-job signal instead."""
+        self._apply_custom_calc(res, on_done=None, column_name=getattr(self, "new_c", ""))
+
+    def _apply_custom_calc(self, res, on_done, column_name: str) -> None:
+        """Write calculator *res* into *column_name*. *on_done* belongs to this job."""
         ok_any = False
         for _idx, val in res:
             t = (val or "").strip()
@@ -795,14 +886,13 @@ class TableCalcMixin:
                 ok_any = True
                 break
         if not ok_any:
-            self._calculator_on_done = None
             self.status_label.setText(f"{TOOL_CALCULATOR}: no numeric results.")
             self._clear_tool_progress()
             message = (
                 "The expression produced no numeric results (all rows failed). No column was added."
             )
-            if done is not None:
-                done(message, {})
+            if on_done is not None:
+                on_done(message, {})
             else:
                 QMessageBox.warning(self, TOOL_CALCULATOR, message)
             return
@@ -810,30 +900,71 @@ class TableCalcMixin:
         self._finish_tool_progress("Calculator…")
 
         def _after(written: list[str]) -> None:
-            callback = getattr(self, "_calculator_on_done", None)
-            self._calculator_on_done = None
-            column = written[0] if written else str(getattr(self, "new_c", ""))
+            column = written[0] if written else column_name
             self.status_label.setText(
                 self._consume_partial_results_notice()
                 or f'{TOOL_CALCULATOR}: column "{column}" updated.'
             )
-            if callback is not None:
-                if not written:
-                    callback("Calculator produced no column.", {})
-                else:
-                    callback(None, {"output": str(written[0])})
+            if on_done is None:
+                return
+            if not written:
+                on_done("Calculator produced no column.", {})
+            else:
+                on_done(None, {"output": str(written[0])})
 
         self.on_calc_finished(
-            [(int(oid), {self.new_c: str(val)}) for oid, val in res],
-            [self.new_c],
+            [(int(oid), {column_name: str(val)}) for oid, val in res],
+            [column_name],
             finish_progress=False,
-            on_complete=_after if done is not None else None,
+            on_complete=_after,
         )
-        if done is None:
-            self.status_label.setText(
-                self._consume_partial_results_notice()
-                or f'{TOOL_CALCULATOR}: column "{self.new_c}" updated.'
+
+
+def _potency_request(params: dict):
+    from ..dialogs.potency import AssayConcentration, PotencyRequest
+
+    assays = []
+    for item in params.get("assay_concentrations") or []:
+        if not isinstance(item, dict):
+            continue
+        assays.append(
+            AssayConcentration(
+                conc_constant=_optional_float(item.get("conc_constant")),
+                conc_column=_optional_text(item.get("conc_column")),
+                conc_unit=str(item.get("conc_unit") or "uM"),
+                ref_constant=_optional_float(item.get("ref_constant")),
+                ref_column=_optional_text(item.get("ref_column")),
+                ref_unit=str(item.get("ref_unit") or "uM"),
             )
+        )
+    mw = params.get("mw_column")
+    return PotencyRequest(
+        column=str(params.get("column") or "").strip(),
+        unit_column=str(params.get("unit_column") or "").strip(),
+        measure=str(params.get("measure") or "IC50"),
+        desired_unit=str(params.get("desired_unit") or "nM"),
+        write_p=bool(params.get("write_p")),
+        write_ki=bool(params.get("write_ki")),
+        assay_concentrations=tuple(assays),
+        mw_column=_optional_text(mw),
+    )
+
+
+def _optional_float(value):
+    if value is None or value == "":
+        return None
+    return float(value)
+
+
+def _optional_text(value) -> str | None:
+    text = "" if value is None else str(value).strip()
+    return text or None
+
+
+def _optional_seed(value) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(value)
 
 
 def _structure_molecular_weights(app, oids: list[int], *, only_selected: bool) -> dict[int, float]:
