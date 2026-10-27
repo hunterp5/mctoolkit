@@ -21,7 +21,8 @@ sessions live under its directory and are removed when the process exits.
 ``MOLMANAGER_OFFLINE=1`` refuses network lookups. ``MOLMANAGER_SQL_WRITES=0``
 refuses SQL that modifies a database. ``MOLMANAGER_TOOL_ALLOWLIST`` limits which
 external programs may start, and ``MOLMANAGER_TOOL_DIGESTS`` pins their SHA-256.
-All four default to today's behavior.
+A machine policy file can set the same names and wins over the process environment.
+With no policy file and the variables unset, behavior matches a normal desktop launch.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tempfile
 import threading
 from contextlib import suppress
@@ -159,13 +161,13 @@ def install_runtime() -> SessionRuntime:
 
 
 def network_allowed() -> bool:
-    """False when ``MOLMANAGER_OFFLINE`` is set. Read on each call."""
-    return not _env_truthy("MOLMANAGER_OFFLINE")
+    """False when offline mode is set. The machine policy wins over the environment."""
+    return not _truthy(_configured("MOLMANAGER_OFFLINE"))
 
 
 def sql_writes_allowed() -> bool:
-    """False when ``MOLMANAGER_SQL_WRITES`` is ``0``. Default is allowed."""
-    return _env_bool("MOLMANAGER_SQL_WRITES", True)
+    """False when SQL writes are disabled. The machine policy wins over the environment."""
+    return _flag(_configured("MOLMANAGER_SQL_WRITES"), True)
 
 
 def require_tool(executable: str, purpose: str) -> None:
@@ -218,17 +220,67 @@ def _close_current() -> None:
         _current.close()
 
 
-def _env_truthy(name: str) -> bool:
-    return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
+def machine_policy_path() -> Path:
+    """File IT can deploy. A key in this file wins over the process environment."""
+    if sys.platform == "win32":
+        base = os.environ.get("PROGRAMDATA") or r"C:\ProgramData"
+        return Path(base) / "MolManager" / "policy.txt"
+    if sys.platform == "darwin":
+        return Path("/Library/Application Support/MolManager/policy.txt")
+    return Path("/etc/molmanager/policy.txt")
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    raw = (os.environ.get(name) or "").strip().lower()
-    if not raw:
+def _policy_values() -> dict[str, str]:
+    path = machine_policy_path()
+    if not path.is_file():
+        return {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    values: dict[str, str] = {}
+    for line in lines:
+        body = line.split("#", 1)[0].strip()
+        if not body or "=" not in body:
+            continue
+        key, _, value = body.partition("=")
+        key = key.strip()
+        if key.startswith("MOLMANAGER_"):
+            values[key] = value.strip()
+    return values
+
+
+def _configured(name: str) -> str:
+    """Policy value when the key is present, otherwise the environment."""
+    forced = policy_value(name)
+    if forced is not None:
+        return forced
+    return (os.environ.get(name) or "").strip()
+
+
+def policy_value(name: str) -> str | None:
+    """Value from the machine policy file, or ``None`` when *name* is absent.
+
+    An empty string means the key is present and explicitly blank. Callers that
+    fall back to QSettings must treat ``None`` and ``""`` differently.
+    """
+    values = _policy_values()
+    if name not in values:
+        return None
+    return values[name]
+
+
+def _truthy(raw: str) -> bool:
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _flag(raw: str, default: bool) -> bool:
+    text = raw.strip().lower()
+    if not text:
         return default
-    if raw in ("0", "false", "no", "off"):
+    if text in ("0", "false", "no", "off"):
         return False
-    if raw in ("1", "true", "yes", "on"):
+    if text in ("1", "true", "yes", "on"):
         return True
     return default
 
@@ -239,7 +291,7 @@ def _name_key(text: str) -> str:
 
 def _allowlist_tokens() -> list[str] | None:
     """``None`` when no allowlist is configured. An empty list denies every tool."""
-    raw = (os.environ.get("MOLMANAGER_TOOL_ALLOWLIST") or "").strip()
+    raw = _configured("MOLMANAGER_TOOL_ALLOWLIST")
     if not raw:
         return None
     path = Path(raw)
@@ -268,7 +320,7 @@ def _allowlist_permits(executable: str) -> bool:
 
 
 def _digest_problem(executable: str) -> str | None:
-    raw = (os.environ.get("MOLMANAGER_TOOL_DIGESTS") or "").strip()
+    raw = _configured("MOLMANAGER_TOOL_DIGESTS")
     if not raw:
         return None
     pin_path = Path(raw)

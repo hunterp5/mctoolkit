@@ -35,6 +35,7 @@ from ...platform_support.wsl_launcher import (
     resolve_wsl_executable,
     run_wsl,
     save_wsl_executable,
+    wsl_path_locked,
 )
 from ..qt_widget_utils import make_window_minimizable
 
@@ -71,6 +72,11 @@ class WslSettingsDialog(QDialog):
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color: palette(mid);")
         root.addWidget(self.status)
+        self._policy_locked = wsl_path_locked()
+        if self._policy_locked:
+            self.path_edit.setReadOnly(True)
+            browse.setEnabled(False)
+            self.status.setText("This path is set by the machine policy and cannot be changed here.")
         make_window_minimizable(self)
 
     def selected_path(self) -> str:
@@ -118,5 +124,6 @@ class WslSettingsDialog(QDialog):
         self.status.setText(f"Failed: {detail}")
 
     def accept(self) -> None:
-        save_wsl_executable(self.selected_path())
+        if not self._policy_locked:
+            save_wsl_executable(self.selected_path())
         super().accept()

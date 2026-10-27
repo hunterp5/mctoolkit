@@ -35,6 +35,7 @@ from ...platform_support.tool_paths import (
     TOOL_AIZYNTH_CONFIG,
     TOOL_AIZYNTH_PYTHON,
     configured_executable,
+    policy_tool_path,
     save_tool_path,
 )
 from ...predictions.aizynthfinder_run import probe_install
@@ -63,6 +64,8 @@ class AizynthFinderSettingsDialog(QDialog):
             "python.exe from the environment where aizynthfinder is installed. "
             "Do not use MolManager's own Python."
         )
+        if policy_tool_path(TOOL_AIZYNTH_PYTHON) is not None:
+            self.python_edit.setReadOnly(True)
         root.addLayout(self._path_row(self.python_edit, "Browse Python…", self._browse_python))
 
         self.config_edit = QLineEdit(configured_executable(TOOL_AIZYNTH_CONFIG))
@@ -70,6 +73,8 @@ class AizynthFinderSettingsDialog(QDialog):
         self.config_edit.setToolTip(
             "config.yml written by download_public_data, next to the model files."
         )
+        if policy_tool_path(TOOL_AIZYNTH_CONFIG) is not None:
+            self.config_edit.setReadOnly(True)
         root.addLayout(self._path_row(self.config_edit, "Browse config…", self._browse_config))
 
         buttons = QHBoxLayout()
@@ -90,6 +95,13 @@ class AizynthFinderSettingsDialog(QDialog):
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color: palette(mid);")
         root.addWidget(self.status)
+        if (
+            policy_tool_path(TOOL_AIZYNTH_PYTHON) is not None
+            or policy_tool_path(TOOL_AIZYNTH_CONFIG) is not None
+        ):
+            self.status.setText(
+                "A path set by the machine policy is read-only and cannot be changed here."
+            )
         make_window_minimizable(self)
 
     def selected_python(self) -> str:
@@ -107,6 +119,7 @@ class AizynthFinderSettingsDialog(QDialog):
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(edit, 1)
         browse = QPushButton(browse_label)
+        browse.setEnabled(not edit.isReadOnly())
         browse.clicked.connect(slot)
         row.addWidget(browse)
         return row
@@ -146,6 +159,8 @@ class AizynthFinderSettingsDialog(QDialog):
         QMessageBox.warning(self, self.windowTitle(), message)
 
     def accept(self) -> None:
-        save_tool_path(TOOL_AIZYNTH_PYTHON, self.selected_python())
-        save_tool_path(TOOL_AIZYNTH_CONFIG, self.selected_config())
+        if policy_tool_path(TOOL_AIZYNTH_PYTHON) is None:
+            save_tool_path(TOOL_AIZYNTH_PYTHON, self.selected_python())
+        if policy_tool_path(TOOL_AIZYNTH_CONFIG) is None:
+            save_tool_path(TOOL_AIZYNTH_CONFIG, self.selected_config())
         super().accept()

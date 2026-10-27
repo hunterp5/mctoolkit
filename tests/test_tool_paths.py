@@ -37,6 +37,16 @@ def test_save_tool_path_roundtrip_and_clear() -> None:
     assert configured_executable(TOOL_GNINA) == ""
 
 
+def test_machine_policy_overrides_the_configure_dialog(tmp_path, monkeypatch) -> None:
+    from molmanager.platform_support import session_runtime
+
+    policy = tmp_path / "policy.txt"
+    policy.write_text("MOLMANAGER_TOOL_GNINA=/opt/policy/gnina\n", encoding="utf-8")
+    monkeypatch.setattr(session_runtime, "machine_policy_path", lambda: policy)
+    save_tool_path(TOOL_GNINA, "/usr/local/bin/gnina")
+    assert configured_executable(TOOL_GNINA) == "/opt/policy/gnina"
+
+
 def test_amber_program_directory_and_sibling() -> None:
     assert amber_program("antechamber", "antechamber") == "antechamber"
     assert amber_program("parmchk2", "antechamber") == "parmchk2"

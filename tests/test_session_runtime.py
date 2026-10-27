@@ -96,6 +96,37 @@ def test_foreign_scratch_session_is_copied(tmp_path: Path) -> None:
     assert runtime.retain_foreign_session(copied) == copied
 
 
+def test_machine_policy_overrides_the_environment(tmp_path: Path, monkeypatch) -> None:
+    policy = tmp_path / "policy.txt"
+    policy.write_text(
+        "\n".join(
+            [
+                "# deployed by IT",
+                "MOLMANAGER_OFFLINE=1",
+                "MOLMANAGER_SQL_WRITES=0",
+                "NOT_A_MOLMANAGER_KEY=1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "molmanager.platform_support.session_runtime.machine_policy_path", lambda: policy
+    )
+    monkeypatch.setenv("MOLMANAGER_OFFLINE", "0")
+    monkeypatch.setenv("MOLMANAGER_SQL_WRITES", "1")
+    assert network_allowed() is False
+    assert sql_writes_allowed() is False
+
+
+def test_missing_policy_file_leaves_the_environment_in_effect(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "molmanager.platform_support.session_runtime.machine_policy_path",
+        lambda: tmp_path / "missing.txt",
+    )
+    monkeypatch.delenv("MOLMANAGER_OFFLINE", raising=False)
+    assert network_allowed() is True
+
+
 def test_allowlist_limits_which_program_can_start(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("MOLMANAGER_TOOL_DIGESTS", raising=False)
     program = tmp_path / "gnina.exe"

@@ -512,6 +512,8 @@ Optional settings for power users and IT deployments:
 | `MOLMANAGER_BUNDLE_DIR` | Folder containing optional `gnina` / `vina` binaries |
 | `MOLMANAGER_BIOTRANSFORMER_JAR` | Path to the BioTransformer JAR (`btkb/` or `database/`, and `supportfiles/`, must be siblings of the JAR) |
 
+`MOLMANAGER_OFFLINE`, `MOLMANAGER_SQL_WRITES`, `MOLMANAGER_TOOL_ALLOWLIST`, and `MOLMANAGER_TOOL_DIGESTS` can also be written in a machine policy file, one `KEY=value` per line. On Windows that file is `%ProgramData%\MolManager\policy.txt`. On macOS it is `/Library/Application Support/MolManager/policy.txt`. On Linux it is `/etc/molmanager/policy.txt`. A key in that file wins over the process environment and over Settings → Configure. Tool paths use `MOLMANAGER_TOOL_GNINA`, `MOLMANAGER_TOOL_OBABEL`, `MOLMANAGER_TOOL_JAVA`, `MOLMANAGER_TOOL_MAFFT`, `MOLMANAGER_TOOL_XTB`, `MOLMANAGER_TOOL_CONFGEN`, `MOLMANAGER_TOOL_REINVENT`, `MOLMANAGER_TOOL_AMBER`, `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG`, and `MOLMANAGER_TOOL_WSL`. Lines starting with `#` are comments. If the file is absent, only the environment and Configure dialog are used.
+
 **Custom calculator:** expressions always use a restricted AST interpreter (`calculator_expressions`). Treat them as trusted input only. `MOLMANAGER_CUSTOM_CALC_LEGACY_EVAL` is retired and ignored if set.
 
 **Legacy env aliases:** `CHEMMANAGER_*` variables are still mapped to `MOLMANAGER_*` when the new name is unset, with a deprecation warning. Prefer `MOLMANAGER_*` only.

@@ -45,6 +45,7 @@ from ...platform_support.tool_paths import (
     TOOL_REINVENT,
     TOOL_XTB,
     configured_executable,
+    policy_tool_path,
     save_tool_path,
 )
 from ..qt_widget_utils import make_window_minimizable
@@ -341,6 +342,7 @@ class ToolPathDialog(QDialog):
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse_file)
         row.addWidget(browse)
+        folder = None
         if spec.browse_directory:
             folder = QPushButton("Folder…")
             folder.clicked.connect(self._browse_dir)
@@ -359,6 +361,15 @@ class ToolPathDialog(QDialog):
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color: palette(mid);")
         root.addWidget(self.status)
+        self._policy_locked = policy_tool_path(spec.key) is not None
+        if self._policy_locked:
+            self.path_edit.setReadOnly(True)
+            browse.setEnabled(False)
+            if folder is not None:
+                folder.setEnabled(False)
+            self.status.setText(
+                "This path is set by the machine policy and cannot be changed here."
+            )
         make_window_minimizable(self)
 
     def selected_path(self) -> str:
@@ -400,5 +411,6 @@ class ToolPathDialog(QDialog):
         self.status.setText(first)
 
     def accept(self) -> None:
-        save_tool_path(self._spec.key, self.selected_path())
+        if not self._policy_locked:
+            save_tool_path(self._spec.key, self.selected_path())
         super().accept()

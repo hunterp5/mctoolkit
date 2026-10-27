@@ -68,11 +68,23 @@ def default_wsl_executable() -> str:
 
 
 def load_wsl_executable() -> str:
-    """Saved WSL executable, or :func:`default_wsl_executable` when unset."""
+    """Policy path, saved path, or :func:`default_wsl_executable` when unset."""
+    from .session_runtime import policy_value
+
+    forced = policy_value("MOLMANAGER_TOOL_WSL")
+    if forced is not None:
+        return forced or default_wsl_executable()
     saved = _settings_value()
     if saved:
         return saved
     return default_wsl_executable()
+
+
+def wsl_path_locked() -> bool:
+    """True when the machine policy sets ``MOLMANAGER_TOOL_WSL``."""
+    from .session_runtime import policy_value
+
+    return policy_value("MOLMANAGER_TOOL_WSL") is not None
 
 
 def save_wsl_executable(path: str) -> str:
@@ -83,10 +95,16 @@ def save_wsl_executable(path: str) -> str:
 
 
 def resolve_wsl_executable(user_path: str = "") -> str | None:
-    """Return an existing WSL executable path, else ``None``."""
+    """Return an existing WSL executable path, else ``None``.
+
+    A machine policy path is used even when *user_path* is set.
+    """
     from .bundled_paths import resolve_user_executable
 
-    text = (user_path or "").strip() or load_wsl_executable()
+    if wsl_path_locked():
+        text = load_wsl_executable()
+    else:
+        text = (user_path or "").strip() or load_wsl_executable()
     return resolve_user_executable(text)
 
 

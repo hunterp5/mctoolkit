@@ -45,6 +45,20 @@ _SETTINGS_KEYS = {
     TOOL_XTB: "tools/xtb_executable",
 }
 
+# Machine policy keys. A present key wins over Settings → Configure.
+_POLICY_KEYS = {
+    TOOL_AIZYNTH_CONFIG: "MOLMANAGER_TOOL_AIZYNTH_CONFIG",
+    TOOL_AIZYNTH_PYTHON: "MOLMANAGER_TOOL_AIZYNTH_PYTHON",
+    TOOL_AMBER: "MOLMANAGER_TOOL_AMBER",
+    TOOL_CONFGEN: "MOLMANAGER_TOOL_CONFGEN",
+    TOOL_GNINA: "MOLMANAGER_TOOL_GNINA",
+    TOOL_JAVA: "MOLMANAGER_TOOL_JAVA",
+    TOOL_MAFFT: "MOLMANAGER_TOOL_MAFFT",
+    TOOL_OBABEL: "MOLMANAGER_TOOL_OBABEL",
+    TOOL_REINVENT: "MOLMANAGER_TOOL_REINVENT",
+    TOOL_XTB: "MOLMANAGER_TOOL_XTB",
+}
+
 
 def _qsettings():
     """Process QSettings store. Tests replace this with an isolated ini file."""
@@ -60,8 +74,21 @@ def _key(tool: str) -> str:
         raise KeyError(f"Unknown tool path setting: {tool}") from exc
 
 
+def policy_tool_path(tool: str) -> str | None:
+    """Path forced by the machine policy, or ``None`` when *tool* is not pinned."""
+    name = _POLICY_KEYS.get(tool)
+    if name is None:
+        return None
+    from .session_runtime import policy_value
+
+    return policy_value(name)
+
+
 def configured_executable(tool: str) -> str:
-    """Saved path for *tool*, or ``""`` when unset or Qt settings are unavailable."""
+    """Policy path, otherwise the saved Configure path. ``""`` when neither is set."""
+    forced = policy_tool_path(tool)
+    if forced is not None:
+        return forced
     try:
         settings = _qsettings()
     except ImportError:
@@ -83,7 +110,10 @@ def save_tool_path(tool: str, path: str) -> str:
 
 
 def effective_tool_path(tool: str, user_path: str = "") -> str:
-    """*user_path* when set, otherwise the saved Configure path (may be empty)."""
+    """Policy path when pinned, otherwise *user_path* or the saved Configure path."""
+    forced = policy_tool_path(tool)
+    if forced is not None:
+        return forced
     text = (user_path or "").strip()
     if text:
         return text
