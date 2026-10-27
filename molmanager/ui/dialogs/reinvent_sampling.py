@@ -37,6 +37,7 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from ...generative.reinvent_results import open_results_table, results_status, skipped_suffix
@@ -127,7 +128,13 @@ class ReinventSamplingDialog(QDialog):
             "Prior ids such as .reinvent are files in that install's priors folder."
         )
         intro.setWordWrap(True)
-        root.addWidget(intro)
+        outer.addWidget(intro)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        root = QVBoxLayout(body)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
 
         sampling, form = boxed_form("Sampling")
         self.generator_combo = QComboBox()
@@ -201,6 +208,24 @@ class ReinventSamplingDialog(QDialog):
         form.addRow("", self.unique_check)
         form.addRow("", self.randomize_check)
 
+        self.seed_spin = QSpinBox()
+        self.seed_spin.setRange(0, 2_147_483_647)
+        self.seed_spin.setSpecialValueText("auto")
+        self.seed_spin.setValue(0)
+        self.seed_spin.setToolTip("Fixes REINVENT's random seed. Auto leaves it unset.")
+        form.addRow("Random seed", self.seed_spin)
+
+        self.isomeric_check = QCheckBox("Keep stereochemistry in SMILES")
+        self.isomeric_check.setToolTip(
+            "Write isomeric SMILES. Off uses non-isomeric SMILES, which is REINVENT's default."
+        )
+        form.addRow("", self.isomeric_check)
+
+        self.extra_flags_edit = QLineEdit()
+        self.extra_flags_edit.setPlaceholderText(EXTRA_FLAGS_PLACEHOLDER)
+        self.extra_flags_edit.setToolTip(EXTRA_FLAGS_TOOLTIP)
+        form.addRow("Extra flags", self.extra_flags_edit)
+
         scaffold_row = QHBoxLayout()
         self.scaffold_edit = QLineEdit()
         self.scaffold_edit.setPlaceholderText("Optional SMARTS, such as c1ccc(*)cc1")
@@ -246,20 +271,25 @@ class ReinventSamplingDialog(QDialog):
         self.stop_button = QPushButton("Stop")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self._on_stop)
+        self.add_button = QPushButton("Add to this table")
+        self.add_button.setEnabled(False)
+        self.add_button.setToolTip("Append the molecules from the last run to this table.")
+        self.add_button.clicked.connect(self._add_pending)
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.close)
         buttons.addWidget(self.sample_button)
         buttons.addWidget(self.stop_button)
+        buttons.addWidget(self.add_button)
         buttons.addStretch(1)
         buttons.addWidget(close_button)
-        root.addLayout(buttons)
+        outer.addLayout(buttons)
 
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
         self.log_edit.setMinimumHeight(140)
         self.log_edit.setPlaceholderText("REINVENT output")
         apply_monospace_to_text_edit(self.log_edit)
-        root.addWidget(self.log_edit, 1)
+        outer.addWidget(self.log_edit, 1)
 
         self._on_generator_changed()
         make_window_minimizable(self)
@@ -279,6 +309,9 @@ class ReinventSamplingDialog(QDialog):
             temperature=float(self.temperature_spin.value()),
             seeds=seeds,
             scaffold_smarts=self.scaffold_edit.text().strip(),
+            seed=int(self.seed_spin.value()),
+            isomeric_smiles=self.isomeric_check.isChecked(),
+            extra_flags=self.extra_flags_edit.text().strip(),
         )
 
     def closeEvent(self, event) -> None:  # noqa: N802 — Qt API name
@@ -380,6 +413,8 @@ class ReinventSamplingDialog(QDialog):
             QMessageBox.warning(self, TOOL_REINVENT_SAMPLING, MISSING_REINVENT_MSG)
             return
         self.log_edit.clear()
+        self._pending_records = ()
+        self.add_button.setEnabled(False)
         self._set_running(True)
         worker = _SamplingWorker(executable, request, self._signals)
         self._worker = worker
@@ -432,10 +467,15 @@ class ReinventSamplingDialog(QDialog):
         self.temperature_spin.setEnabled(not running)
         self.unique_check.setEnabled(not running)
         self.randomize_check.setEnabled(not running)
+        self.seed_spin.setEnabled(not running)
+        self.isomeric_check.setEnabled(not running)
+        self.extra_flags_edit.setEnabled(not running)
         self.seed_source.setEnabled(not running)
         self.seed_text.setEnabled(not running)
         self.scaffold_edit.setEnabled(not running)
         self.scaffold_sketch.setEnabled(not running)
+        if running:
+            self.add_button.setEnabled(False)
 
     def _append_log(self, line: str) -> None:
         self.log_edit.append(line)
@@ -443,35 +483,52 @@ class ReinventSamplingDialog(QDialog):
     def _on_finished(self, outcome: SamplingOutcome) -> None:
         self._worker = None
         self._set_running(False)
-        added = 0
-        app = self.parent_app
-        if (
-            outcome.records
-            and app is not None
-            and hasattr(app, "add_rows_from_external_records_batch")
-        ):
-            added = int(
-                app.add_rows_from_external_records_batch(
-                    list(outcome.records),
-                    render_structures=True,
-                )
-            )
-        skipped = ""
-        if outcome.skipped_invalid:
-            skipped = f" Skipped {outcome.skipped_invalid} invalid SMILES."
-        if outcome.skipped_scaffold:
-            skipped += f" Skipped {outcome.skipped_scaffold} that missed the scaffold."
-        if outcome.cancelled:
-            message = f"Stopped. Added {added} row(s).{skipped}"
-        elif added:
-            message = f"Added {added} row(s).{skipped}"
-        else:
-            message = f"REINVENT finished without any valid molecules.{skipped}"
+        self._pending_records = tuple(outcome.records)
+        self.add_button.setEnabled(bool(self._pending_records))
+        skipped = skipped_suffix(
+            invalid=outcome.skipped_invalid,
+            scaffold=outcome.skipped_scaffold,
+        )
+        open_error = ""
+        if outcome.records:
+            try:
+                path = open_results_table(outcome.records, stem="REINVENT sampling")
+                self._append_log(str(path))
+            except OSError as exc:
+                open_error = str(exc)
+        message = results_status(
+            count=len(outcome.records),
+            cancelled=outcome.cancelled,
+            skipped=skipped,
+            open_error=open_error,
+        )
         self._append_log(message)
+        app = self.parent_app
         if app is not None and hasattr(app, "status_label"):
             app.status_label.setText(f"{TOOL_REINVENT_SAMPLING}: {message}")
-        if not outcome.cancelled and added == 0:
+        if open_error:
+            QMessageBox.warning(self, TOOL_REINVENT_SAMPLING, message)
+        elif not outcome.cancelled and not outcome.records:
             QMessageBox.information(self, TOOL_REINVENT_SAMPLING, message)
+
+    def _add_pending(self) -> None:
+        records = self._pending_records
+        app = self.parent_app
+        if not records or app is None or not hasattr(app, "add_rows_from_external_records_batch"):
+            QMessageBox.information(
+                self,
+                TOOL_REINVENT_SAMPLING,
+                "There are no molecules from the last run to add.",
+            )
+            return
+        added = int(
+            app.add_rows_from_external_records_batch(list(records), render_structures=True)
+        )
+        self.add_button.setEnabled(False)
+        message = f"Added {added} row(s) to this table."
+        self._append_log(message)
+        if hasattr(app, "status_label"):
+            app.status_label.setText(f"{TOOL_REINVENT_SAMPLING}: {message}")
 
     def _on_failed(self, message: str) -> None:
         self._worker = None
