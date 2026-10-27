@@ -79,7 +79,7 @@ def _env_float(name: str, default: float, *, lo: float) -> float:
 
 
 def clamp_substructure_async_rows(raw: str | None) -> int:
-    """Match ``FilterPanelMixin`` / worker threshold semantics."""
+    """Match the filter-worker row threshold."""
     default = 400
     try:
         thresh = int((raw or "").strip() or str(default))

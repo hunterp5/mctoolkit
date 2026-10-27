@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Filter panel mixin and filter card widgets."""
+"""Filter card widgets."""
 
 from .cards import (
     CategoryFilterCard,
@@ -25,13 +25,11 @@ from .cards import (
     filter_card_drop_index,
     next_default_filter_title,
 )
-from .panel_mixin import FilterPanelMixin
 
 __all__ = [
     "CategoryFilterCard",
     "FilterCard",
     "FilterCardsHost",
-    "FilterPanelMixin",
     "SubstructureFilterCard",
     "TextFilterCard",
     "filter_card_drop_index",

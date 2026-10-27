@@ -32,7 +32,6 @@ from molmanager.ui.filters.filter_apply_mixin import FilterApplyMixin
 from molmanager.ui.filters.filter_bounds_mixin import FilterBoundsMixin
 from molmanager.ui.filters.filter_cards_mixin import FilterCardsMixin
 from molmanager.ui.filters.filter_substructure_mixin import FilterSubstructureMixin
-from molmanager.ui.filters.panel_mixin import FilterPanelMixin
 from molmanager.ui.gui_settings_mixin import GuiSettingsMixin
 from molmanager.ui.main_window.activity_cliff_mixin import ActivityCliffMixin
 from molmanager.ui.main_window.app_lifecycle_mixin import AppLifecycleMixin
@@ -272,7 +271,6 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
         FilterSubstructureMixin,
         FilterApplyMixin,
         FilterBoundsMixin,
-        FilterPanelMixin,
         TableUIMixin,
         AppLifecycleMixin,
     )
