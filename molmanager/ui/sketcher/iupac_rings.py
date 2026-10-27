@@ -502,53 +502,138 @@ def exterior_ring_substituent_direction(
     return (math.cos(mid), math.sin(mid))
 
 
+def _largest_gap_bisector(angles: Sequence[float]) -> float:
+    """Mid-angle of the largest gap in a set of directions, in ``[0, 2π)``."""
+    angs = sorted(float(a) for a in angles)
+    if not angs:
+        return 0.0
+    if len(angs) == 1:
+        return (angs[0] + math.pi) % (2.0 * math.pi)
+    max_gap = -1.0
+    best_mid = 0.0
+    for i, a1 in enumerate(angs):
+        a2 = angs[(i + 1) % len(angs)] if i + 1 < len(angs) else angs[0] + 2.0 * math.pi
+        gap = a2 - a1 if a2 >= a1 else (a2 + 2.0 * math.pi - a1)
+        if gap > max_gap:
+            max_gap = gap
+            best_mid = a1 + gap / 2.0
+    return best_mid % (2.0 * math.pi)
+
+
+def _angle_between(a: float, b: float) -> float:
+    """Smallest absolute difference between two radians, in ``[0, π]``."""
+    d = abs(float(a) - float(b)) % (2.0 * math.pi)
+    return min(d, 2.0 * math.pi - d)
+
+
+def _rotate_offsets(
+    offsets: Sequence[tuple[float, float]], rot: float
+) -> list[tuple[float, float]]:
+    cos_r, sin_r = math.cos(rot), math.sin(rot)
+    return [(x * cos_r - y * sin_r, x * sin_r + y * cos_r) for x, y in offsets]
+
+
+def _spiro_pose_at_vertex(
+    offsets: Sequence[tuple[float, float]],
+    vertex: int,
+    *,
+    target: float,
+    mirror: bool,
+) -> list[tuple[float, float]] | None:
+    """
+    Ring offsets with *vertex* at the origin and the local bond bisector on *target*.
+
+    The bisector is the smaller angle between the two bonds that leave that vertex,
+    so one edge is not laid down the gap center (which would fuse it to a neighbor).
+    """
+    n = len(offsets)
+    if n < 3:
+        return None
+    seq = [offsets[(vertex + i) % n] for i in range(n)]
+    ox, oy = seq[0]
+    seq = [(x - ox, y - oy) for x, y in seq]
+    if mirror:
+        seq = [(x, -y) for x, y in seq]
+    if math.hypot(*seq[1]) < 1e-6 or math.hypot(*seq[-1]) < 1e-6:
+        return None
+    b1 = math.atan2(seq[1][1], seq[1][0])
+    b2 = math.atan2(seq[-1][1], seq[-1][0])
+    sweep = (b2 - b1) % (2.0 * math.pi)
+    if sweep <= math.pi:
+        bisector = b1 + sweep / 2.0
+    else:
+        bisector = b1 - (2.0 * math.pi - sweep) / 2.0
+    return _rotate_offsets(seq, target - bisector)
+
+
 def spiro_second_ring_offsets_y_up(
     n_atoms: int,
     *,
     bond_length: float,
     existing_ring_neighbor_dirs: Sequence[tuple[float, float]],
+    obstacle_points: Sequence[tuple[float, float]] | None = None,
 ) -> list[tuple[float, float]]:
     """
-    Offsets for a new ring sharing the origin (spiro atom) without overlapping the old ring.
+    Offsets for a new ring sharing the origin (spiro atom) without overlapping nearby bonds.
 
-    The shared atom is vertex 0. The ring body is aimed into the largest gap between
-    existing neighbor directions, so the bisector of the two new bonds — not either
-    bond itself — follows that gap (GR-4.2.4 / GR-3.3). A single neighbor grows the
-    ring directly opposite that bond. The new bonds stay clear of nearby bonds.
+    Vertex 0 is the shared atom. The ring is turned so the bisector of the two new
+    bonds — not either bond — points into the largest gap between existing neighbor
+    directions, and the ring body sits in that gap (GR-4.2.4 / GR-3.3). A single
+    neighbor grows the ring directly opposite that bond. Among attachment vertices
+    (needed for reentrant rings), the pose that stays farthest from *obstacle_points*
+    wins. Neighbor endpoints are obstacles when that sequence is omitted.
     """
     n = max(3, int(n_atoms))
     offsets = ring_vertex_offsets_y_up(n, bond_length=bond_length)
-    angs = sorted(
-        math.atan2(dy, dx) for dx, dy in existing_ring_neighbor_dirs if math.hypot(dx, dy) > 1e-6
-    )
-    if not angs:
-        target = 0.0
-    elif len(angs) == 1:
-        target = (angs[0] + math.pi) % (2.0 * math.pi)
-    else:
-        max_gap = -1.0
-        best_mid = 0.0
-        for i in range(len(angs)):
-            a1 = angs[i]
-            a2 = angs[(i + 1) % len(angs)] if i + 1 < len(angs) else angs[0] + 2.0 * math.pi
-            gap = a2 - a1 if a2 >= a1 else (a2 + 2.0 * math.pi - a1)
-            if gap > max_gap:
-                max_gap = gap
-                best_mid = a1 + gap / 2.0
-        target = best_mid % (2.0 * math.pi)
-    if len(offsets) < 2:
-        return offsets
-    ox0, oy0 = offsets[0]
-    translated = [(x - ox0, y - oy0) for x, y in offsets]
-    # Centroid from the shared atom is the bisector into the ring, not one edge.
-    cx = sum(x for x, _y in translated) / n
-    cy = sum(y for _x, y in translated) / n
-    if math.hypot(cx, cy) < 1e-6:
-        cx, cy = translated[1]
-    cur = math.atan2(cy, cx)
-    rot = target - cur
-    cos_r, sin_r = math.cos(rot), math.sin(rot)
-    return [(x * cos_r - y * sin_r, x * sin_r + y * cos_r) for x, y in translated]
+    neighbors = [
+        (float(dx), float(dy))
+        for dx, dy in existing_ring_neighbor_dirs
+        if math.hypot(dx, dy) > 1e-6
+    ]
+    target = _largest_gap_bisector([math.atan2(dy, dx) for dx, dy in neighbors])
+    obstacles = [tuple(p) for p in (obstacle_points if obstacle_points is not None else neighbors)]
+    if len(offsets) < 3:
+        return list(offsets)
+
+    def _score(pose: list[tuple[float, float]]) -> tuple[float, float, float]:
+        bond_angs = (
+            math.atan2(pose[1][1], pose[1][0]),
+            math.atan2(pose[-1][1], pose[-1][0]),
+        )
+        if neighbors:
+            clearance = min(
+                _angle_between(bond, math.atan2(dy, dx))
+                for bond in bond_angs
+                for dx, dy in neighbors
+            )
+        else:
+            clearance = math.pi
+        nearest = min((math.hypot(x, y) for x, y in pose[1:]), default=0.0)
+        for x, y in pose[1:]:
+            for ox, oy in obstacles:
+                nearest = min(nearest, math.hypot(x - ox, y - oy))
+        cx = sum(x for x, _y in pose) / n
+        cy = sum(y for _x, y in pose) / n
+        align = 0.0
+        if math.hypot(cx, cy) > 1e-6:
+            align = math.cos(math.atan2(cy, cx) - target)
+        # Angular clearance dominates so a bond is not drawn on top of a neighbor.
+        return (clearance, nearest, align)
+
+    best: list[tuple[float, float]] | None = None
+    best_score: tuple[float, float, float] | None = None
+    for vertex in range(len(offsets)):
+        for mirror in (False, True):
+            pose = _spiro_pose_at_vertex(offsets, vertex, target=target, mirror=mirror)
+            if pose is None:
+                continue
+            score = _score(pose)
+            if best_score is None or score > best_score:
+                best_score = score
+                best = pose
+    if best is None:
+        return list(offsets)
+    return best
 
 
 def fusion_ring_offsets_for_bond(

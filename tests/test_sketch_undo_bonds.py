@@ -102,7 +102,8 @@ def test_undo_attached_template_is_atomic(qapp) -> None:  # noqa: ARG001
     w.nodes = [{"id": 1, "pos": QPoint(40, 40), "element": "C"}]
     w.next_id = 2
     w.place_template("Cyclopropane", attach_to=1)
-    assert len(w.nodes) == 4
+    assert len(w.nodes) == 3
+    assert len(w.bonds) == 3
     assert len(w._undo) == 1
     w.undo()
     assert len(w.nodes) == 1

@@ -17,8 +17,9 @@
 """Fused-ring sketch templates: naphthalene, indole, and a few common heterocycles.
 
 Each template is a Kekulé graph with one peripheral bond marked for fusion.
-Dropping the template on a bond shares that edge. Dropping it on empty canvas
-or on an atom places the whole fragment.
+Dropping the template on a bond shares that edge. Dropping it on an atom shares
+one atom of the fragment and grows the rest into the open side of that atom.
+Dropping it on empty canvas places the whole fragment.
 """
 
 from __future__ import annotations
@@ -26,9 +27,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Sequence
 
 from rdkit import Chem
 from rdkit.Chem import rdDepictor
+
+from .iupac_rings import _largest_gap_bisector
 
 FUSED_TEMPLATE_SMILES: dict[str, str] = {
     "Naphthalene": "c1ccc2ccccc2c1",
@@ -136,6 +140,93 @@ def screen_points_centered(
     mx = sum(x for x, _y in local) / len(local)
     my = sum(y for _x, y in local) / len(local)
     return [((x - mx) * scale + cx, (y - my) * scale + cy) for x, y in local]
+
+
+def _scale_about_origin(
+    points: Sequence[tuple[float, float]],
+    bond_px: float,
+    bonds: Sequence[tuple[int, int, int]],
+) -> list[tuple[float, float]]:
+    lengths = [
+        math.hypot(points[j][0] - points[i][0], points[j][1] - points[i][1])
+        for i, j, _order in bonds
+    ]
+    scale = float(bond_px) / max(_median(lengths), 1e-6)
+    return [(x * scale, y * scale) for x, y in points]
+
+
+def _reflect_across(
+    points: Sequence[tuple[float, float]], ux: float, uy: float
+) -> list[tuple[float, float]]:
+    reflected: list[tuple[float, float]] = []
+    for x, y in points:
+        along = x * ux + y * uy
+        px, py = x - along * ux, y - along * uy
+        reflected.append((along * ux - px, along * uy - py))
+    return reflected
+
+
+def screen_points_on_atom(
+    template: FusedTemplate,
+    ax: float,
+    ay: float,
+    neighbor_dirs: Sequence[tuple[float, float]],
+    bond_px: float,
+    obstacle_points: Sequence[tuple[float, float]] | None = None,
+) -> list[tuple[float, float]]:
+    """Place the template's first fusion atom on ``(ax, ay)`` in screen space.
+
+    The fragment grows into the largest gap between *neighbor_dirs* (also screen
+    space, relative to the atom). The bonds that leave the shared atom are kept
+    off those neighbors. *obstacle_points* are other atoms in the same frame;
+    the mirror that stays farther from them is used.
+    """
+    local = _scale_about_origin(_screen_local(template), bond_px, template.bonds)
+    anchor = template.fusion[0]
+    neighbors = []
+    for i, j, _order in template.bonds:
+        if i == anchor:
+            neighbors.append(local[j])
+        elif j == anchor:
+            neighbors.append(local[i])
+    if not neighbors:
+        return [(ax + x, ay + y) for x, y in local]
+    gap = _largest_gap_bisector(
+        [math.atan2(dy, dx) for dx, dy in neighbor_dirs if math.hypot(dx, dy) > 1e-6]
+    )
+    # Bisector of the template bonds that faces the rest of the fragment.
+    angs = [math.atan2(y, x) for x, y in neighbors if math.hypot(x, y) > 1e-6]
+    cx = sum(x for x, _y in local) / len(local)
+    cy = sum(y for _x, y in local) / len(local)
+    if len(angs) >= 2:
+        # Largest gap at the anchor points out of a convex ring; flip toward the fragment.
+        bisector = _largest_gap_bisector(angs)
+        if math.hypot(cx, cy) > 1e-6 and math.cos(math.atan2(cy, cx) - bisector) < 0:
+            bisector = (bisector + math.pi) % (2.0 * math.pi)
+    elif math.hypot(cx, cy) > 1e-6:
+        bisector = math.atan2(cy, cx)
+    else:
+        bisector = angs[0] if angs else 0.0
+    cos_r, sin_r = math.cos(gap - bisector), math.sin(gap - bisector)
+    rotated = [(x * cos_r - y * sin_r, x * sin_r + y * cos_r) for x, y in local]
+    ux, uy = math.cos(gap), math.sin(gap)
+    mirrored = _reflect_across(rotated, ux, uy)
+    obstacles = list(obstacle_points or ())
+
+    def _clearance(pts: list[tuple[float, float]]) -> float:
+        nearest = min(
+            (math.hypot(x, y) for i, (x, y) in enumerate(pts) if i != anchor),
+            default=0.0,
+        )
+        for i, (x, y) in enumerate(pts):
+            if i == anchor:
+                continue
+            for ox, oy in obstacles:
+                nearest = min(nearest, math.hypot(x - ox, y - oy))
+        return nearest
+
+    chosen = rotated if _clearance(rotated) >= _clearance(mirrored) else mirrored
+    return [(ax + x, ay + y) for x, y in chosen]
 
 
 def screen_points_on_bond(

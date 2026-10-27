@@ -3288,6 +3288,71 @@ class SketchWidget(
             self.erase_mode = False
             self.text_mode = False
 
+    def _roll_ring_template(self, elements: list, orders: list, element: str) -> tuple[list, list]:
+        """Rotate a ring template so *element* is the shared atom and heteroatoms stay drawn.
+
+        The clicked atom keeps its element. When the template's first atom is a
+        heteroatom and the clicked atom is carbon, a carbon vertex is shared instead
+        so the heteroatom is placed on the far side of the ring.
+        """
+        n = len(elements)
+        if n < 3:
+            return list(elements), list(orders)
+        matches = [i for i, el in enumerate(elements) if el == element]
+        carbons = [i for i, el in enumerate(elements) if el == "C"]
+        candidates = matches or carbons or list(range(n))
+
+        def _spread(start: int) -> int:
+            total = 0
+            for index, el in enumerate(elements):
+                if index == start or el == "C":
+                    continue
+                total += min((index - start) % n, (start - index) % n)
+            return total
+
+        start = max(candidates, key=_spread)
+        rolled_elements = [elements[(i + start) % n] for i in range(n)]
+        if len(orders) == n:
+            rolled_orders = [orders[(i + start) % n] for i in range(n)]
+        else:
+            rolled_orders = list(orders)
+        return rolled_elements, rolled_orders
+
+    def _attachment_gap_and_obstacles(
+        self, atom_id: int
+    ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+        """Y-up bond vectors for the free gap, and Y-up offsets of every other atom.
+
+        A ring atom uses its ring bonds, so the new ring takes that ring's exterior
+        and is not drawn along a nearby ring bond. Other atoms use every incident bond.
+        """
+        base = next((node for node in self.nodes if node["id"] == atom_id), None)
+        if base is None:
+            return [], []
+        bx, by = float(base["pos"].x()), float(base["pos"].y())
+        ring_atoms = self._ring_atom_ids() if hasattr(self, "_ring_atom_ids") else set()
+        neighbor_dirs: list[tuple[float, float]] = []
+        ring_dirs: list[tuple[float, float]] = []
+        obstacles: list[tuple[float, float]] = []
+        for bond in self.bonds:
+            a, b, _o, _s = _bond_unpack(bond)
+            if a != atom_id and b != atom_id:
+                continue
+            other_id = b if a == atom_id else a
+            other = next((node for node in self.nodes if node["id"] == other_id), None)
+            if other is None:
+                continue
+            vec = (float(other["pos"].x() - bx), float(-(other["pos"].y() - by)))
+            neighbor_dirs.append(vec)
+            if atom_id in ring_atoms and other_id in ring_atoms:
+                ring_dirs.append(vec)
+        for other in self.nodes:
+            if other["id"] == atom_id:
+                continue
+            obstacles.append((float(other["pos"].x() - bx), float(-(other["pos"].y() - by))))
+        gap = ring_dirs if len(ring_dirs) >= 2 else neighbor_dirs
+        return gap, obstacles
+
     def _place_fused_template(
         self,
         name: str,
@@ -3299,6 +3364,7 @@ class SketchWidget(
         from .fused_templates import (
             fused_template,
             screen_points_centered,
+            screen_points_on_atom,
             screen_points_on_bond,
         )
 
@@ -3333,21 +3399,25 @@ class SketchWidget(
                             prefer_side = -1.0
                 points = screen_points_on_bond(template, ax, ay, bx, by, prefer_side=prefer_side)
                 shared = {template.fusion[0]: a_id, template.fusion[1]: b_id}
+        if points is None and attach_to is not None:
+            base = next((n for n in self.nodes if n["id"] == attach_to), None)
+            if base is None:
+                return
+            gap, obstacles = self._attachment_gap_and_obstacles(attach_to)
+            points = screen_points_on_atom(
+                template,
+                float(base["pos"].x()),
+                float(base["pos"].y()),
+                [(dx, -dy) for dx, dy in gap],
+                bond_length,
+                [(dx, -dy) for dx, dy in obstacles],
+            )
+            shared = {template.fusion[0]: attach_to}
         if points is None:
-            if attach_to is not None:
-                base = next((n for n in self.nodes if n["id"] == attach_to), None)
-                if base is None:
-                    return
-                ux, uy = self._compute_extension_vector(attach_to)
-                span = bond_length * 2.2
-                cpt = (
-                    float(base["pos"].x()) + ux * span,
-                    float(base["pos"].y()) + uy * span,
-                )
-            else:
-                cpt_q = center if center is not None else self.rect().center()
-                cpt = (float(cpt_q.x()), float(cpt_q.y()))
-            points = screen_points_centered(template, cpt[0], cpt[1], bond_length)
+            cpt_q = center if center is not None else self.rect().center()
+            points = screen_points_centered(
+                template, float(cpt_q.x()), float(cpt_q.y()), bond_length
+            )
         id_of: dict[int, int] = dict(shared)
         for index, (x, y) in enumerate(points):
             if index in id_of:
@@ -3369,24 +3439,7 @@ class SketchWidget(
                 continue
             self.bonds.append(_bond_make(ia, ib, order, 0))
             existing.add(frozenset((ia, ib)))
-        if attach_to is not None and not shared:
-            nearest = min(
-                id_of.values(),
-                key=lambda nid: self._node_distance_sq(attach_to, nid),
-            )
-            pair = frozenset((attach_to, nearest))
-            if pair not in existing and nearest != attach_to:
-                self.bonds.append(_bond_make(attach_to, nearest, 1, 0))
         self._commit_template_placement(before)
-
-    def _node_distance_sq(self, a_id: int, b_id: int) -> float:
-        a = next((n for n in self.nodes if n["id"] == a_id), None)
-        b = next((n for n in self.nodes if n["id"] == b_id), None)
-        if a is None or b is None:
-            return 1e18
-        dx = float(a["pos"].x() - b["pos"].x())
-        dy = float(a["pos"].y() - b["pos"].y())
-        return dx * dx + dy * dy
 
     def place_template(
         self,
@@ -3482,73 +3535,34 @@ class SketchWidget(
             base = next((node for node in self.nodes if node["id"] == attach_to), None)
             if base is None:
                 return
+            elems, orders = self._roll_ring_template(
+                list(elems), list(orders), str(base.get("element") or "C")
+            )
             bx, by = base["pos"].x(), base["pos"].y()
-            ring_atoms = self._ring_atom_ids() if hasattr(self, "_ring_atom_ids") else set()
-            ring_neigh_dirs: list[tuple[float, float]] = []
-            if attach_to in ring_atoms:
-                for bond in self.bonds:
-                    a, b, _o, _s = _bond_unpack(bond)
-                    if a != attach_to and b != attach_to:
-                        continue
-                    oid = b if a == attach_to else a
-                    if oid not in ring_atoms:
-                        continue
-                    on = next((x for x in self.nodes if x["id"] == oid), None)
-                    if on is None:
-                        continue
-                    ring_neigh_dirs.append(
-                        (float(on["pos"].x() - bx), float(-(on["pos"].y() - by)))
-                    )
-            if len(ring_neigh_dirs) >= 2:
-                offsets = spiro_second_ring_offsets_y_up(
-                    n, bond_length=bl, existing_ring_neighbor_dirs=ring_neigh_dirs
+            gap, obstacles = self._attachment_gap_and_obstacles(attach_to)
+            offsets = spiro_second_ring_offsets_y_up(
+                n,
+                bond_length=bl,
+                existing_ring_neighbor_dirs=gap,
+                obstacle_points=obstacles,
+            )
+            id_map = {0: attach_to}
+            for i in range(1, n):
+                dx, dy = offsets[i]
+                nid = self.next_id
+                self.next_id += 1
+                self.nodes.append(
+                    {
+                        "id": nid,
+                        "pos": QPoint(int(round(bx + dx)), int(round(by - dy))),
+                        "element": elems[i] if i < len(elems) else "C",
+                    }
                 )
-                id_map = {0: attach_to}
-                new_ids = []
-                for i in range(1, n):
-                    dx, dy = offsets[i]
-                    nid = self.next_id
-                    self.next_id += 1
-                    self.nodes.append(
-                        {
-                            "id": nid,
-                            "pos": QPoint(int(round(bx + dx)), int(round(by - dy))),
-                            "element": elems[i] if i < len(elems) else "C",
-                        }
-                    )
-                    id_map[i] = nid
-                    new_ids.append(nid)
-                for i in range(n):
-                    ia, ib = id_map[i], id_map[(i + 1) % n]
-                    o = orders[i] if i < len(orders) else 1
-                    bond = _bond_make(ia, ib, o, 0)
-                    self.bonds.append(bond)
-                self._commit_template_placement(before)
-                return
-
-            ux, uy = self._compute_extension_vector(attach_to)
-            c_r = ring_circumradius_for_bond_length(n, bl) if n < 9 else bl * 1.6
-            cpt = QPoint(int(bx + ux * (bl + c_r)), int(by + uy * (bl + c_r)))
-            pre_nodes = [nid["id"] for nid in self.nodes]
-            self.add_ring(n, center=cpt, elements=elems, bond_orders=orders, bond_length=bl)
-            new_ids = [nid["id"] for nid in self.nodes if nid["id"] not in pre_nodes]
-            if not new_ids:
-                self._commit_template_placement(before)
-                return
-            best = None
-            best_d = None
-            for nid in new_ids:
-                nn = next((no for no in self.nodes if no["id"] == nid), None)
-                if nn:
-                    d = (nn["pos"].x() - bx) ** 2 + (nn["pos"].y() - by) ** 2
-                    if best_d is None or d < best_d:
-                        best_d = d
-                        best = nn
-            if best is None:
-                self._commit_template_placement(before)
-                return
-            bond = _bond_make(attach_to, best["id"], 1, 0)
-            self.bonds.append(bond)
+                id_map[i] = nid
+            for i in range(n):
+                ia, ib = id_map[i], id_map[(i + 1) % n]
+                o = orders[i] if i < len(orders) else 1
+                self.bonds.append(_bond_make(ia, ib, o, 0))
             self._commit_template_placement(before)
             return
 

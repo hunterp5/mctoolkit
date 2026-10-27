@@ -24,6 +24,7 @@ from PyQt5.QtCore import QPoint
 from PyQt5.QtWidgets import QWidget
 
 from molmanager.ui.sketcher.bonds import _bond_make, _bond_unpack
+from molmanager.ui.sketcher.constants import SKETCH_RING_TEMPLATES
 from molmanager.ui.sketcher.dialog import SketcherDialog
 from molmanager.ui.sketcher.iupac_rings import (
     exterior_ring_substituent_direction,
@@ -456,3 +457,100 @@ def test_spiro_and_fusion_placement(qapp) -> None:  # noqa: ARG001
     c.place_template("Cyclopropane", attach_to=ring_atom)
     assert len(c.nodes) == before + 2  # share 1, add 2
     dlg.close()
+
+
+def _angle_gap_deg(a: float, b: float) -> float:
+    delta = abs(math.degrees(a - b)) % 360.0
+    return min(delta, 360.0 - delta)
+
+
+def _attachment_bond_clearance_deg(
+    widget: SketchWidget, attach_id: int, old_ids: set[int]
+) -> float:
+    """Smallest angle at *attach_id* between a new bond and a bond that was already there."""
+    pos = {node["id"]: (float(node["pos"].x()), float(node["pos"].y())) for node in widget.nodes}
+    ax, ay = pos[attach_id]
+    old_angles: list[float] = []
+    new_angles: list[float] = []
+    for bond in widget.bonds:
+        a_id, b_id, _order, _stereo = _bond_unpack(bond)
+        if a_id != attach_id and b_id != attach_id:
+            continue
+        other = b_id if a_id == attach_id else a_id
+        angle = math.atan2(pos[other][1] - ay, pos[other][0] - ax)
+        (old_angles if other in old_ids else new_angles).append(angle)
+    if not old_angles or not new_angles:
+        return 180.0
+    return min(_angle_gap_deg(new, old) for new in new_angles for old in old_angles)
+
+
+def test_ring_on_atom_is_direct_and_not_fused(qapp) -> None:  # noqa: ARG001
+    """Clicking an atom builds the ring on that atom, clear of the bonds already there."""
+    templates = (
+        "Cyclopropane",
+        "Cyclobutane",
+        "Cyclopentyl",
+        "Benzene",
+        "Cyclohexyl",
+        "Cycloheptane",
+        "Cyclooctane",
+        "Cyclononane",
+        "Cyclodecane",
+        "Cyclododecane",
+        "Pyridine",
+    )
+    for template in templates:
+        widget = SketchWidget()
+        widget.resize(900, 700)
+        widget._median_bond_length_px = 60.0
+        widget.place_template("Cyclohexyl", center=QPoint(450, 350))
+        old_ids = {node["id"] for node in widget.nodes}
+        attach_id = widget.nodes[0]["id"]
+        before = len(widget.nodes)
+        n_atoms = SKETCH_RING_TEMPLATES[template][0]
+        widget.place_template(template, attach_to=attach_id)
+        assert len(widget.nodes) == before + n_atoms - 1
+        for node in widget.nodes:
+            if node["id"] in old_ids:
+                continue
+            for old in widget.nodes:
+                if old["id"] not in old_ids:
+                    continue
+                distance = math.hypot(
+                    node["pos"].x() - old["pos"].x(), node["pos"].y() - old["pos"].y()
+                )
+                assert distance > 15.0, template
+        assert _attachment_bond_clearance_deg(widget, attach_id, old_ids) > 25.0, template
+
+    widget = SketchWidget()
+    widget.resize(800, 600)
+    widget._median_bond_length_px = 60.0
+    widget.nodes = [
+        {"id": 0, "pos": QPoint(200, 200), "element": "C"},
+        {"id": 1, "pos": QPoint(260, 200), "element": "C"},
+    ]
+    widget.bonds = [_bond_make(0, 1, 1, 0)]
+    widget.next_id = 2
+    widget.place_template("Benzene", attach_to=0)
+    assert len(widget.nodes) == 7
+    assert _attachment_bond_clearance_deg(widget, 0, {0, 1}) > 25.0
+
+    widget = SketchWidget()
+    widget.resize(800, 600)
+    widget._median_bond_length_px = 60.0
+    widget.nodes = [{"id": 1, "pos": QPoint(80, 80), "element": "C"}]
+    widget.next_id = 2
+    widget.place_template("Pyridine", attach_to=1)
+    assert len(widget.nodes) == 6
+    assert any(node["element"] == "N" for node in widget.nodes)
+    assert widget.nodes[0]["element"] == "C"
+
+    widget = SketchWidget()
+    widget.resize(900, 700)
+    widget._median_bond_length_px = 60.0
+    widget.place_template("Cyclohexyl", center=QPoint(450, 350))
+    old_ids = {node["id"] for node in widget.nodes}
+    attach_id = widget.nodes[0]["id"]
+    widget.place_template("Naphthalene", attach_to=attach_id)
+    assert len(widget.nodes) == len(old_ids) + 9
+    assert _attachment_bond_clearance_deg(widget, attach_id, old_ids) > 25.0
