@@ -253,7 +253,9 @@ class _RouteCanvas(QGraphicsView):
         self._proxy: _SharpProxy | None = None
         self._zoom = 1.0
         self._pending: QPoint | None = None
+        self._press_blank = False
         self._pan: tuple[QPoint, int, int] | None = None
+        self.on_blank_click = None
         self._app_filter = False
         self._pan_cursor = False
         self.on_transform = None
@@ -286,7 +288,7 @@ class _RouteCanvas(QGraphicsView):
         return _backing_ratio(width, height, _device_ratio() * self._zoom)
 
     def place_content(self) -> None:
-        """Park the drawing with its right side in view. It may extend past every edge."""
+        """Center the drawing and scale it so the whole tree stays in view."""
         content = self._content
         proxy = self._proxy
         view = self.viewport().size()
@@ -295,8 +297,17 @@ class _RouteCanvas(QGraphicsView):
         self.resetTransform()
         self._zoom = 1.0
         bounds = proxy.sceneBoundingRect()
-        margin = 12
-        self.centerOn(bounds.right() - view.width() / 2 + margin, bounds.center().y())
+        if bounds.width() < 1 or bounds.height() < 1:
+            self._notify_transform()
+            return
+        margin = 24
+        avail_w = max(view.width() - 2 * margin, 1)
+        avail_h = max(view.height() - 2 * margin, 1)
+        zoom = min(avail_w / bounds.width(), avail_h / bounds.height())
+        zoom = min(_ZOOM_MAX, max(_ZOOM_MIN, zoom))
+        self._zoom = zoom
+        self.scale(zoom, zoom)
+        self.centerOn(bounds.center())
         self._notify_transform()
 
     def _apply_background(self) -> None:
@@ -335,6 +346,7 @@ class _RouteCanvas(QGraphicsView):
     def end_pan(self) -> None:
         self._pan = None
         self._pending = None
+        self._press_blank = False
         if QWidget.mouseGrabber() is self.viewport():
             self.viewport().releaseMouse()
         if self._app_filter:
@@ -359,6 +371,7 @@ class _RouteCanvas(QGraphicsView):
         if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
             if self._on_canvas(obj):
                 self._pending = self._pointer(event)
+                self._press_blank = self._is_blank(obj)
                 self._install_app_filter()
             return False
         if kind == QEvent.MouseMove and (self._pending is not None or self._pan is not None):
@@ -368,8 +381,13 @@ class _RouteCanvas(QGraphicsView):
             return False
         if kind == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
             panning = self._pan is not None
+            blank = self._press_blank and not panning
             if panning or self._pending is not None:
                 self.end_pan()
+            if blank:
+                callback = self.on_blank_click
+                if callback is not None:
+                    callback()
             return panning
         return super().eventFilter(obj, event)
 
@@ -489,6 +507,20 @@ class _RouteCanvas(QGraphicsView):
             return True
         return isinstance(obj, QWidget) and content.isAncestorOf(obj)
 
+    def _is_blank(self, obj) -> bool:
+        """True when *obj* is canvas padding, not a step button or molecule card."""
+        if obj is self or obj is self.viewport() or obj is self._content:
+            return True
+        widget = obj
+        content = self._content
+        while isinstance(widget, QWidget) and widget is not content and widget is not self:
+            if isinstance(widget, QAbstractButton):
+                return False
+            if isinstance(widget, QFrame) and widget.objectName() == _CARD_NAME:
+                return False
+            widget = widget.parentWidget()
+        return True
+
 
 def _route_log_view() -> QPlainTextEdit:
     log = QPlainTextEdit()
@@ -535,6 +567,7 @@ class RouteBrowserDialog(QDialog):
         root.addWidget(self.target_combo)
 
         splitter = QSplitter(Qt.Horizontal)
+        self._splitter = splitter
         self.route_table = _route_table()
         self.route_table.currentCellChanged.connect(self._on_route_cell_changed)
         splitter.addWidget(self.route_table)
@@ -547,6 +580,7 @@ class RouteBrowserDialog(QDialog):
         self._steps_layout.setSpacing(12)
         self._route_scroll = _RouteCanvas()
         self._route_scroll.on_transform = self._sync_depictions
+        self._route_scroll.on_blank_click = self._hide_step_details
         self._route_scroll.set_content(self._steps_host)
 
         canvas_column = QWidget()
@@ -558,10 +592,12 @@ class RouteBrowserDialog(QDialog):
         canvas_layout.addWidget(self.summary_log)
 
         self.step_table = _step_table()
+        self._step_table_width = 280
         splitter.addWidget(canvas_column)
         splitter.addWidget(self.step_table)
         splitter.setStretchFactor(1, 1)
         splitter.setChildrenCollapsible(False)
+        self._hide_step_table()
         root.addWidget(splitter, 1)
 
         self._empty = QLabel("Run Retrosynthesis → Search to collect routes.")
@@ -574,6 +610,7 @@ class RouteBrowserDialog(QDialog):
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
         self._route_scroll._apply_background()
+        QTimer.singleShot(0, self._place_tree)
         self._sync_depictions()
 
     def hideEvent(self, event) -> None:  # noqa: N802
@@ -723,9 +760,35 @@ class RouteBrowserDialog(QDialog):
             table.setItem(index, 1, value_item)
         table.resizeColumnsToContents()
         table.resizeRowsToContents()
+        self._show_step_table()
 
     def _clear_step_table(self) -> None:
         self.step_table.setRowCount(0)
+        self._hide_step_table()
+
+    def _show_step_table(self) -> None:
+        table = self.step_table
+        splitter = self._splitter
+        table.show()
+        sizes = splitter.sizes()
+        if len(sizes) != 3 or sizes[2] >= 80:
+            return
+        width = max(self._step_table_width, 220)
+        sizes[1] = max(sizes[1] + sizes[2] - width, 80)
+        sizes[2] = width
+        splitter.setSizes(sizes)
+
+    def _hide_step_table(self) -> None:
+        splitter = self._splitter
+        sizes = splitter.sizes()
+        if len(sizes) == 3 and sizes[2] >= 80:
+            self._step_table_width = sizes[2]
+        self.step_table.hide()
+
+    def _hide_step_details(self) -> None:
+        for button in self._steps_host.findChildren(QPushButton, "route-step"):
+            button.setChecked(False)
+        self._clear_step_table()
 
     def _place_tree(self) -> None:
         host = self._steps_host

@@ -356,7 +356,7 @@ def test_route_browser_lists_one_step(qapp, monkeypatch) -> None:  # noqa: ARG00
     green = next(card for card in cards if "#2e7d32" in card.styleSheet())
     assert "zinc" in green.toolTip()
     _assert_card_copy_menu(cards, monkeypatch)
-    _assert_tree_overflows(dialog)
+    _assert_tree_fits(dialog)
     _assert_sharp_depictions(dialog)
     dialog.route_table.selectRow(1)
     assert dialog.molecule_cards() == []
@@ -387,6 +387,7 @@ def _assert_step_details_toggle(dialog) -> None:
     assert max(card.width() for card in cards) <= 200
     assert buttons[0].parentWidget().width() > max(card.width() for card in cards)
     assert buttons[0].reaction_smiles == "CC.O>>CCO"
+    assert dialog.step_table.isHidden()
     buttons[0].click()
     QApplication.processEvents()
     buttons[0].setChecked(False)
@@ -416,9 +417,47 @@ def _assert_step_details_toggle(dialog) -> None:
         dialog.step_table.mapToGlobal(QPoint(0, 0)).x()
         > dialog._route_scroll.mapToGlobal(QPoint(dialog._route_scroll.width() - 1, 0)).x()
     )
+    _click_canvas(dialog._route_scroll.viewport(), QPoint(4, 4))
+    assert dialog.step_table.isHidden()
+    assert buttons[0].isChecked() is False
 
 
-def _assert_tree_overflows(dialog) -> None:
+def _click_canvas(widget, local) -> None:
+    from PyQt5.QtCore import QEvent, Qt
+    from PyQt5.QtGui import QMouseEvent
+    from PyQt5.QtWidgets import QApplication
+
+    class _Spontaneous(QMouseEvent):
+        def spontaneous(self) -> bool:  # noqa: N802
+            return True
+
+    global_pos = widget.mapToGlobal(local)
+    QApplication.sendEvent(
+        widget,
+        _Spontaneous(
+            QEvent.MouseButtonPress,
+            local,
+            global_pos,
+            Qt.LeftButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        ),
+    )
+    QApplication.sendEvent(
+        widget,
+        _Spontaneous(
+            QEvent.MouseButtonRelease,
+            local,
+            global_pos,
+            Qt.LeftButton,
+            Qt.NoButton,
+            Qt.NoModifier,
+        ),
+    )
+    QApplication.processEvents()
+
+
+def _assert_tree_fits(dialog) -> None:
     from PyQt5.QtWidgets import QApplication
 
     dialog.show()
@@ -429,12 +468,16 @@ def _assert_tree_overflows(dialog) -> None:
     host = dialog._steps_host
     canvas = dialog._route_scroll
     bounds = canvas._proxy.sceneBoundingRect()
-    left = canvas.mapFromScene(bounds.topLeft()).x()
-    right = canvas.mapFromScene(bounds.topRight()).x()
-    view_width = canvas.viewport().width()
-    assert host.width() > view_width
-    assert left < 0
-    assert 0 < right <= view_width
+    top_left = canvas.mapFromScene(bounds.topLeft())
+    bottom_right = canvas.mapFromScene(bounds.bottomRight())
+    view = canvas.viewport().rect()
+    assert host.width() > view.width()
+    assert top_left.x() >= -2
+    assert top_left.y() >= -2
+    assert bottom_right.x() <= view.width() + 2
+    assert bottom_right.y() <= view.height() + 2
+    assert abs((top_left.x() + bottom_right.x()) / 2 - view.width() / 2) <= 4
+    assert abs((top_left.y() + bottom_right.y()) / 2 - view.height() / 2) <= 4
 
 
 def _assert_canvas_pans(dialog) -> None:
@@ -594,8 +637,9 @@ def _assert_canvas_zooms(canvas, viewport, origin) -> None:
         Qt.NoScrollPhase,
         False,
     )
+    before = canvas._zoom
     QApplication.sendEvent(viewport, wheel)
-    assert abs(canvas._zoom - 1.1) < 1e-6
+    assert abs(canvas._zoom - min(4.0, before * 1.1)) < 1e-6
     back = canvas.mapFromScene(watched)
     assert abs(back.x() - anchor.x()) <= 2
     assert abs(back.y() - anchor.y()) <= 2
@@ -645,6 +689,8 @@ def _assert_sharp_depictions(dialog) -> None:
 
     canvas = dialog._route_scroll
     _assert_canvas_zooms(canvas, canvas.viewport(), canvas.mapToGlobal(dialog.rect().topLeft()))
+    canvas._zoom_at(24, canvas.viewport().rect().center())
+    canvas.centerOn(canvas._proxy.sceneBoundingRect().center())
     ratio = canvas.depict_ratio()
     assert ratio > 1.05
     card = dialog.molecule_cards()[0]
