@@ -18,11 +18,14 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import QEvent, QPoint, QRectF, Qt, QTimer
+from urllib.parse import urlencode
+
+from PyQt5.QtCore import QEvent, QPoint, QRectF, Qt, QTimer, QUrl
 from PyQt5.QtGui import (
     QBrush,
     QColor,
     QCursor,
+    QDesktopServices,
     QFont,
     QImage,
     QKeySequence,
@@ -86,6 +89,62 @@ _ZOOM_MIN = 0.25
 _ZOOM_MAX = 4.0
 _ZOOM_STEP = 1.1
 _CHEMICAL_FIELDS = frozenset({"reaction", "template", "smiles", "smarts", "inchi", "inchikey"})
+_ORD_SEARCH_URL = "https://open-reaction-database.org/search"
+
+
+def ord_conditions_url(reaction_smiles: str) -> str:
+    """Public Open Reaction Database search for conditions of *reaction_smiles*."""
+    query = _ord_reaction_query(reaction_smiles)
+    if not query:
+        return ""
+    return f"{_ORD_SEARCH_URL}?{urlencode({'reaction_smarts': query, 'limit': '100'})}"
+
+
+def open_ord_conditions(reaction_smiles: str) -> bool:
+    """Open the Open Reaction Database search for *reaction_smiles* in the browser."""
+    url = ord_conditions_url(reaction_smiles)
+    if not url:
+        return False
+    return bool(QDesktopServices.openUrl(QUrl(url)))
+
+
+def _ord_reaction_query(reaction_smiles: str) -> str:
+    """Reaction SMARTS for a condition search, without atom-map numbers."""
+    text = reaction_smiles.strip()
+    if ">>" not in text:
+        return ""
+    reaction = _parsed_reaction(text)
+    if reaction is None:
+        return text
+    reactants = _unmapped_side(reaction.GetReactants())
+    products = _unmapped_side(reaction.GetProducts())
+    if not reactants or not products:
+        return text
+    return f"{reactants}>>{products}"
+
+
+def _parsed_reaction(text: str):
+    parser = Chem.rdChemReactions.ReactionFromSmarts
+    for use_smiles in (True, False):
+        try:
+            reaction = parser(text, useSmiles=use_smiles)
+        except (ValueError, RuntimeError):
+            reaction = None
+        if reaction is not None and reaction.GetNumProductTemplates():
+            return reaction
+    return None
+
+
+def _unmapped_side(mols) -> str:
+    pieces: list[str] = []
+    for mol in mols:
+        copy = Chem.Mol(mol)
+        for atom in copy.GetAtoms():
+            atom.SetAtomMapNum(0)
+        smiles = Chem.MolToSmiles(copy)
+        if smiles:
+            pieces.append(smiles)
+    return ".".join(pieces)
 
 
 def _is_chemical_field(field: str, value: str) -> bool:
@@ -828,10 +887,26 @@ class _StepBranch(QWidget):
         self._button.setStyleSheet(_STEP_BUTTON_QSS)
         self._button.step_number = number
         self._button.step_rows = _step_rows(reaction)
+        self._button.reaction_smiles = str(reaction.get("smiles") or "").strip()
         self._button.clicked.connect(self._select)
+        self._button.installEventFilter(self)
         row.addWidget(self._button, 0, Qt.AlignVCenter)
         row.addWidget(_HStem(_BRANCH_LEN), 0, Qt.AlignVCenter)
         root.addLayout(row)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj is self._button and event.type() == QEvent.ContextMenu:
+            self._open_reaction_menu(event.globalPos())
+            return True
+        return super().eventFilter(obj, event)
+
+    def _open_reaction_menu(self, global_pos) -> None:
+        menu = QMenu(self._button)
+        search = menu.addAction("Search Open Reaction Database")
+        smiles = str(getattr(self._button, "reaction_smiles", "") or "")
+        search.setEnabled(bool(ord_conditions_url(smiles)))
+        if menu.exec_(global_pos) is search:
+            open_ord_conditions(smiles)
 
     def _select(self) -> None:
         parent = self.parentWidget()

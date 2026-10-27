@@ -379,7 +379,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_reinvent_learning",
                 "REINVENT Learning",
                 "REINVENT Learning",
-                "Train a REINVENT 4 agent for one stage and open the best molecules in a new table.",
+                "Train a REINVENT 4 agent for one stage. Results open in a new table.",
             ),
             _e(
                 "tools_activity_cliff",

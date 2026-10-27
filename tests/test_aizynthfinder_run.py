@@ -385,6 +385,7 @@ def _assert_step_details_toggle(dialog) -> None:
     assert cards
     assert max(card.width() for card in cards) <= 200
     assert buttons[0].parentWidget().width() > max(card.width() for card in cards)
+    assert buttons[0].reaction_smiles == "CC.O>>CCO"
     buttons[0].click()
     QApplication.processEvents()
     fields = [dialog.step_table.item(row, 0).text() for row in range(dialog.step_table.rowCount())]
@@ -651,6 +652,85 @@ def test_branch_lines_reach_reagent_cards(qapp) -> None:  # noqa: ARG001
         key=lambda button: button.mapToGlobal(QPoint(0, 0)).x(),
     )
     assert [button.text() for button in buttons] == ["Step 1", "Step 2", "Step 3"]
+    dialog.close()
+
+
+def test_step_button_searches_open_reaction_database(qapp, monkeypatch) -> None:  # noqa: ARG001
+    from urllib.parse import unquote
+
+    from PyQt5.QtCore import QPoint
+    from PyQt5.QtGui import QContextMenuEvent
+    from PyQt5.QtWidgets import QApplication, QMenu, QPushButton
+
+    import molmanager.ui.browsers.route_browser as route_browser
+
+    url = route_browser.ord_conditions_url("[CH3:1][OH:2]>>[CH3:1][O:2][CH3]")
+    decoded = unquote(url)
+    assert decoded.startswith("https://open-reaction-database.org/search?")
+    assert "reaction_smarts=CO>>COC" in decoded
+    assert ":1" not in decoded
+    assert route_browser.ord_conditions_url("not a reaction") == ""
+
+    opened: list[str] = []
+
+    def _open(target) -> bool:
+        opened.append(target.toString())
+        return True
+
+    monkeypatch.setattr(route_browser.QDesktopServices, "openUrl", _open)
+
+    class _ImmediateMenu(QMenu):
+        def exec_(self, *_args, **_kwargs):  # noqa: N802
+            return self.actions()[0]
+
+    monkeypatch.setattr(route_browser, "QMenu", _ImmediateMenu)
+    dialog = route_browser.RouteBrowserDialog()
+    dialog.set_targets(
+        [
+            {
+                "smiles": "CCO",
+                "routes": [
+                    {
+                        "score": "0.5",
+                        "solved": True,
+                        "steps": [],
+                        "tree": {
+                            "smiles": "CCO",
+                            "in_stock": False,
+                            "reactions": [
+                                {
+                                    "smiles": "CC.O>>CCO",
+                                    "metadata": {},
+                                    "reactants": [
+                                        {"smiles": "CC", "in_stock": True, "reactions": []},
+                                        {"smiles": "O", "in_stock": False, "reactions": []},
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    dialog.show()
+    QApplication.processEvents()
+    button = next(
+        button
+        for button in dialog._steps_host.findChildren(QPushButton)
+        if button.objectName() == "route-step"
+    )
+    QApplication.sendEvent(
+        button,
+        QContextMenuEvent(
+            QContextMenuEvent.Mouse,
+            QPoint(4, 4),
+            button.mapToGlobal(QPoint(4, 4)),
+        ),
+    )
+    assert len(opened) == 1
+    assert unquote(opened[0]).startswith("https://open-reaction-database.org/search?")
+    assert "CC.O>>CCO" in unquote(opened[0])
     dialog.close()
 
 

@@ -567,7 +567,8 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "open_reinvent_sampling",
                 tooltip=(
                     "Sample molecules with a local REINVENT 4 install "
-                    "(de novo, R-groups, linkers, or similar molecules) and open them in a new table."
+                    "(de novo, R-groups, linkers, or similar molecules) "
+                    "and open them in a new table."
                 ),
             ),
             action(
