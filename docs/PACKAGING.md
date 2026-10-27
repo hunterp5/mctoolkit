@@ -72,7 +72,15 @@ pip install pyinstaller
 pyinstaller packaging/molmanager.spec
 ```
 
-Output under `dist/molmanager/`. UPX is off in the spec. `codesign_identity` stays unset until a signing certificate is available, and CI does not build this artifact yet. You still need to ship:
+Output under `dist/MolManager/`. The spec also copies help pages and reaction presets next to the package, which is where `resources_dir()` looks. UPX is off. `codesign_identity` stays unset until a signing certificate is available.
+
+Actions workflow `Package` builds that unsigned core bundle on Ubuntu, and on Windows it wraps the same folder with Inno Setup. Run it by hand or push a `v*` tag. It does not run on every push. The Windows artifact is `MolManager-<version>-setup.exe`. A quiet install that does not launch the app is:
+
+```text
+MolManager-0.1.0-setup.exe /VERYSILENT /NORESTART
+```
+
+The setup is not signed. You still need to ship:
 
 - Qt platform plugins (PyInstaller usually collects these)
 - Optional `resources/bin/` for Gnina

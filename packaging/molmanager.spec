@@ -7,7 +7,8 @@
 import sys
 from pathlib import Path
 
-ROOT = Path(SPECPATH).resolve().parent.parent
+# SPECPATH is packaging/. The repo root is its parent.
+ROOT = Path(SPECPATH).resolve().parent
 
 block_cipher = None
 
@@ -19,6 +20,8 @@ a = Analysis(
         (str(ROOT / "molmanager" / "ui" / "static"), "molmanager/ui/static"),
         (str(ROOT / "molmanager" / "resources" / "README.md"), "molmanager/resources"),
         (str(ROOT / "molmanager" / "resources" / "fonts"), "molmanager/resources/fonts"),
+        (str(ROOT / "molmanager" / "resources" / "help"), "molmanager/resources/help"),
+        (str(ROOT / "molmanager" / "resources" / "reactions"), "molmanager/resources/reactions"),
     ],
     hiddenimports=[
         "rdkit",
