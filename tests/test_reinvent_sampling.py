@@ -304,12 +304,15 @@ def test_scaffold_keeps_matches_and_can_seed_libinvent(tmp_path: Path) -> None:
         )
     )
     assert seeded is None
-    _config, _csv = write_sampling_inputs(tmp_path / "job", _request(
-        generator="libinvent",
-        model_file=".libinvent",
-        sample_strategy="multinomial",
-        scaffold_smarts="*c1ccccc1",
-    ))
+    _config, _csv = write_sampling_inputs(
+        tmp_path / "job",
+        _request(
+            generator="libinvent",
+            model_file=".libinvent",
+            sample_strategy="multinomial",
+            scaffold_smarts="*c1ccccc1",
+        ),
+    )
     assert "*c1ccccc1" in (tmp_path / "job" / "seeds.smi").read_text(encoding="utf-8")
 
 

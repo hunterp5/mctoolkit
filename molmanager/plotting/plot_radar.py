@@ -214,8 +214,7 @@ def build_radar_figure(
         r_closed = list(rvals) + [rvals[0]]
         color = _TRACE_PALETTE[i % len(_TRACE_PALETTE)]
         hover_lines = [
-            f"{col}: {_fmt(raw)} (norm {nv:.3f})"
-            for col, raw, nv in zip(columns, rows[i], rvals)
+            f"{col}: {_fmt(raw)} (norm {nv:.3f})" for col, raw, nv in zip(columns, rows[i], rvals)
         ]
         fig.add_trace(
             go.Scatterpolar(

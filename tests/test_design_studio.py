@@ -350,9 +350,7 @@ def test_design_studio_has_chemistry_between_view_and_settings(qapp):
         assert names.index("Chemistry") == names.index("View") + 1
         assert names.index("Settings") == names.index("Chemistry") + 1
         chemistry = bar.actions()[names.index("Chemistry")].menu()
-        assert [action.text() for action in chemistry.actions()] == [
-            "Bioisosteric Replacement…"
-        ]
+        assert [action.text() for action in chemistry.actions()] == ["Bioisosteric Replacement…"]
     finally:
         panel.shutdown()
         panel.close()
@@ -504,8 +502,8 @@ def test_design_list_collects_suggestions_and_bioisosteres(qapp):
     )
     panel = DesignStudioPanel(app)
     panel._strip._start_or_coalesce_ionization = lambda *_args, **_kwargs: None
-    panel._sketcher._append_molecules_from_smiles_parts = (
-        lambda parts: sent.extend(parts) or len(parts)
+    panel._sketcher._append_molecules_from_smiles_parts = lambda parts: (
+        sent.extend(parts) or len(parts)
     )
     try:
         assert panel._design_list._add_btn.text() == "Add suggestions"

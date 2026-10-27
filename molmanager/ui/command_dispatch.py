@@ -173,7 +173,9 @@ def _protonate(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], d
 
 def _filters(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], done) -> None:
     try:
-        request = filter_request_from_params(step.params, resolve=lambda text: _resolve(text, bindings))
+        request = filter_request_from_params(
+            step.params, resolve=lambda text: _resolve(text, bindings)
+        )
     except (KeyError, TypeError, ValueError) as exc:
         done(str(exc) or "The filter step could not be read.")
         return

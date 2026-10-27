@@ -104,9 +104,7 @@ def add_reinvent_records_to_table(
         batch.append((text, dict(fields)))
     added = 0
     if batch:
-        added = int(
-            app.add_rows_from_external_records_batch(batch, render_structures=True) or 0
-        )
+        added = int(app.add_rows_from_external_records_batch(batch, render_structures=True) or 0)
     return added, skipped
 
 

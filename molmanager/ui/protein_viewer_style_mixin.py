@@ -1220,9 +1220,7 @@ class ProteinViewerStyleMixin:
     def clear_selection(self) -> None:
         """Deselect Manager rows and drop the 3D atom/residue highlight."""
         for slot in self._slots:
-            slot.rows = [
-                replace(row, selected=False) if row.selected else row for row in slot.rows
-            ]
+            slot.rows = [replace(row, selected=False) if row.selected else row for row in slot.rows]
         self._syncing_from_atom = True
         try:
             self.manager.apply_row_states(self._rows)

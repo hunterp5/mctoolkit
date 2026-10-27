@@ -136,9 +136,7 @@ class ReactionToolsMixin:
             if not written:
                 on_done("Reaction extract produced no columns.", {})
                 return
-            outputs = {
-                f"col_{index}": header for index, header in enumerate(written, start=1)
-            }
+            outputs = {f"col_{index}": header for index, header in enumerate(written, start=1)}
             on_done(None, outputs)
 
         self.on_calc_finished(

@@ -1474,12 +1474,12 @@ def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
     assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
     assert labels.index("REINVENT") == labels.index("Structure Enumeration") + 1
     assert labels.index("Extract Reaction Info…") == labels.index("REINVENT") + 1
-    reinvent = next(
-        a.menu() for a in tools.actions() if a.text().replace("&", "") == "REINVENT"
-    )
+    reinvent = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "REINVENT")
     reinvent_labels = [a.text().replace("&", "") for a in reinvent.actions()]
     assert reinvent_labels == ["Sampling…", "Learning…"]
-    extract = next(a for a in tools.actions() if a.text().replace("&", "") == "Extract Reaction Info…")
+    extract = next(
+        a for a in tools.actions() if a.text().replace("&", "") == "Extract Reaction Info…"
+    )
     assert extract.menu() is None
     decomp = next(
         a.menu() for a in tools.actions() if a.text().replace("&", "") == "Structure Decomposition"
@@ -1516,7 +1516,9 @@ def test_data_menu_nests_analyze_and_split_under_table(qapp):  # noqa: ARG001
     assert "Cluster…" not in labels
     assert "Binning…" not in labels
     similarity = next(a.menu() for a in data.actions() if a.text().replace("&", "") == "Similarity")
-    similarity_labels = [a.text().replace("&", "") for a in similarity.actions() if not a.isSeparator()]
+    similarity_labels = [
+        a.text().replace("&", "") for a in similarity.actions() if not a.isSeparator()
+    ]
     assert similarity_labels == [
         "Fingerprint Similarity...",
         "Diverse Subset…",

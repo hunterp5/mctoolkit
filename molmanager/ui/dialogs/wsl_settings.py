@@ -76,7 +76,9 @@ class WslSettingsDialog(QDialog):
         if self._policy_locked:
             self.path_edit.setReadOnly(True)
             browse.setEnabled(False)
-            self.status.setText("This path is set by the machine policy and cannot be changed here.")
+            self.status.setText(
+                "This path is set by the machine policy and cannot be changed here."
+            )
         make_window_minimizable(self)
 
     def selected_path(self) -> str:

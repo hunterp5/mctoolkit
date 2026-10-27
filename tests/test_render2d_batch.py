@@ -414,8 +414,8 @@ def _column_app(rows_in_table: set[int], goal: int):
     app._widen_render2d_column_for_first_structure = lambda: (
         Render2DResultsMixin._widen_render2d_column_for_first_structure(app)
     )
-    app._apply_render2d_column_width = (
-        lambda target, hint: Render2DResultsMixin._apply_render2d_column_width(app, target, hint)
+    app._apply_render2d_column_width = lambda target, hint: (
+        Render2DResultsMixin._apply_render2d_column_width(app, target, hint)
     )
     return app
 

@@ -861,7 +861,9 @@ def _prepare_morgan_combo(
 ) -> _PreparedSet | None:
     numeric = [item for item in prepared if item.fp_choice is None]
     numeric_names = {item.name for item in numeric}
-    ranked = sorted((trial for trial in trials if trial.feature_set in numeric_names), key=_trial_key)
+    ranked = sorted(
+        (trial for trial in trials if trial.feature_set in numeric_names), key=_trial_key
+    )
     if not ranked:
         return None
     best = next(item for item in numeric if item.name == ranked[0].feature_set)
@@ -925,7 +927,9 @@ def _prepare_feature_set(
     matrix = built.X
     if columns:
         names = list(built.feature_names[: built.n_numeric_features])
-        numeric_frame = pd.DataFrame(np.asarray(built.X)[:, : built.n_numeric_features], columns=names)
+        numeric_frame = pd.DataFrame(
+            np.asarray(built.X)[:, : built.n_numeric_features], columns=names
+        )
         filtered = filter_training_features(numeric_frame, y, train_idx)
         if not filtered:
             return None, "all columns removed by the training-set filter"

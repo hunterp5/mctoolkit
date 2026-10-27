@@ -657,7 +657,6 @@ def test_take_plot_widgets_restores_adopted_header_buttons(qapp):
     assert not sip.isdeleted(opts)
 
 
-
 def test_plot_pane_refresh_theme_reapplies_selection_outline(qapp):
     del qapp
     pane = PlotPane("pane_test")

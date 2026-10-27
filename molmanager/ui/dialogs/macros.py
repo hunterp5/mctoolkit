@@ -155,8 +155,7 @@ def _step_summary_text(kind: str, params: dict[str, Any]) -> str:
     if kind == STEP_FAST_PREPARE:
         source = params.get("structure_source") or "Structure"
         return (
-            f"Fast prepare {source}. "
-            "Later steps use ${stepId.output} and ${stepId.fragments}."
+            f"Fast prepare {source}. Later steps use ${{stepId.output}} and ${{stepId.fragments}}."
         )
     if kind == STEP_RGROUP:
         core = params.get("core_id") or "the core"
@@ -1212,9 +1211,7 @@ class MacroDialog(QDialog):
         recorder.add_listener(self._sync_recording)
         recorder.start("Recording")
         self._record_btn.setText("Stop recording")
-        self._status.setText(
-            "Recording. Accept a tool dialog, or Add plot, to add a step."
-        )
+        self._status.setText("Recording. Accept a tool dialog, or Add plot, to add a step.")
 
     def _add_current_plot(self) -> None:
         if self._app is None:

@@ -79,9 +79,7 @@ DIVERSITY_FILTERS: tuple[tuple[str, str], ...] = (
     ("PenalizeSameSmiles", "Same SMILES"),
 )
 _DIVERSITY_TYPES = frozenset(key for key, _label in DIVERSITY_FILTERS)
-_SKIP_FIELDS = frozenset(
-    {"smiles", "smiles_state", "agent", "prior", "target", "score", "step"}
-)
+_SKIP_FIELDS = frozenset({"smiles", "smiles_state", "agent", "prior", "target", "score", "step"})
 _SEED_FIELDS = ("input_smiles", "input_scaffold", "warheads")
 
 
@@ -714,4 +712,3 @@ def _canonical_smiles(smiles: str) -> str:
         return Chem.MolToSmiles(mol, canonical=True)
     finally:
         del blocker
-

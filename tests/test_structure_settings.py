@@ -137,9 +137,7 @@ def _corner_mouse(kind, local, global_pos, button, buttons):
     from PyQt5.QtCore import QPointF, Qt
     from PyQt5.QtGui import QMouseEvent
 
-    return QMouseEvent(
-        kind, QPointF(local), QPointF(global_pos), button, buttons, Qt.NoModifier
-    )
+    return QMouseEvent(kind, QPointF(local), QPointF(global_pos), button, buttons, Qt.NoModifier)
 
 
 def test_structure_column_corner_drag_resizes_depiction(qapp):  # noqa: ARG001
@@ -182,9 +180,7 @@ def test_structure_column_corner_drag_resizes_depiction(qapp):  # noqa: ARG001
     view.structure_depict_resized.connect(lambda w, h: chosen.append((int(w), int(h))))
     local = rect.center()
     origin = view.viewport().mapToGlobal(local)
-    press = _corner_mouse(
-        QEvent.MouseButtonPress, local, origin, Qt.LeftButton, Qt.LeftButton
-    )
+    press = _corner_mouse(QEvent.MouseButtonPress, local, origin, Qt.LeftButton, Qt.LeftButton)
     assert view.viewportEvent(press)
     moved = local + QPoint(40, 20)
     move = _corner_mouse(
