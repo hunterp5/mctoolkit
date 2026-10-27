@@ -207,6 +207,9 @@ def _nvidia_gpu_present() -> bool:
         exe = shutil.which("nvidia-smi")
         if not exe:
             return False
+        from ..platform_support.session_runtime import require_tool
+
+        require_tool(exe, "nvidia-smi")
         proc = subprocess.run(
             [exe, "-L"],
             capture_output=True,

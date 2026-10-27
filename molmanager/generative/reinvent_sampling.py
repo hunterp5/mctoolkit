@@ -525,6 +525,9 @@ def describe_reinvent(user_path: str = "") -> tuple[bool, str]:
     if shared:
         return False, shared
     try:
+        from ..platform_support.session_runtime import ToolDenied, require_tool
+
+        require_tool(exe, "REINVENT")
         proc = subprocess.run(
             [exe, "-V"],
             capture_output=True,
@@ -537,7 +540,7 @@ def describe_reinvent(user_path: str = "") -> tuple[bool, str]:
             env=_child_environment(exe),
             creationflags=_CREATE_NO_WINDOW if sys.platform.startswith("win") else 0,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError, ToolDenied) as exc:
         return False, f"Could not run REINVENT: {exc}"
     detail = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
     first = detail.splitlines()[0] if detail else f"exit code {proc.returncode}"
@@ -746,6 +749,9 @@ def _run_process(
         raise ReinventSamplingCancelled("Sampling stopped.")
     command = [executable, "--log-level", "info", *extra_args, str(config)]
     try:
+        from ..platform_support.session_runtime import ToolDenied, require_tool
+
+        require_tool(executable, "REINVENT")
         proc = subprocess.Popen(
             command,
             cwd=str(cwd),
@@ -759,7 +765,7 @@ def _run_process(
             env=_child_environment(executable),
             creationflags=_CREATE_NO_WINDOW if sys.platform.startswith("win") else 0,
         )
-    except OSError as exc:
+    except (OSError, ToolDenied) as exc:
         raise ReinventSamplingError(f"Could not start REINVENT: {exc}") from exc
 
     lines: queue.Queue[str | None] = queue.Queue()

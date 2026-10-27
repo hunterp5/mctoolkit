@@ -178,6 +178,10 @@ def run_linux_tool(
     with suppress(OSError):
         work = work.resolve()
     work.mkdir(parents=True, exist_ok=True)
+    if args:
+        from .session_runtime import require_tool
+
+        require_tool(str(args[0]), Path(str(args[0])).name)
     quoted = " ".join(shlex.quote(str(a)) for a in args)
     if sys.platform.startswith("win"):
         script = f"cd {shlex.quote(windows_path_to_wsl(work))} && {quoted}"

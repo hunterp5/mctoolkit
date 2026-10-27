@@ -19,17 +19,21 @@
 One runtime exists per process. Table caches, plot shells, and scratch
 sessions live under its directory and are removed when the process exits.
 ``MOLMANAGER_OFFLINE=1`` refuses network lookups. ``MOLMANAGER_SQL_WRITES=0``
-refuses SQL that modifies a database. Both default to today's behavior.
+refuses SQL that modifies a database. ``MOLMANAGER_TOOL_ALLOWLIST`` limits which
+external programs may start, and ``MOLMANAGER_TOOL_DIGESTS`` pins their SHA-256.
+All four default to today's behavior.
 """
 
 from __future__ import annotations
 
 import atexit
+import hashlib
 import logging
 import os
 import re
 import shutil
 import tempfile
+import threading
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -46,6 +50,15 @@ _LEGACY_PLOT_GLOB = "MOLMANAGER_plot_shell_*.html"
 
 _current: SessionRuntime | None = None
 _atexit_armed = False
+_digest_cache: dict[tuple[str, int, int], str] = {}
+_digest_lock = threading.Lock()
+
+
+class ToolDenied(RuntimeError):
+    """An external program was refused by the allowlist or a digest pin."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
 
 
 class NetworkDisabled(RuntimeError):
@@ -155,6 +168,28 @@ def sql_writes_allowed() -> bool:
     return _env_bool("MOLMANAGER_SQL_WRITES", True)
 
 
+def require_tool(executable: str, purpose: str) -> None:
+    """Allow *executable* to start, then record the launch.
+
+    Unset ``MOLMANAGER_TOOL_ALLOWLIST`` allows every program. Set it to a
+    comma-separated list of file names or full paths, or to a text file of one
+    name per line. Unset ``MOLMANAGER_TOOL_DIGESTS`` skips hashing. Set it to a
+    text file of ``sha256`` and a file name or path. A configured pin file that
+    is missing, or a file whose digest differs, refuses the launch.
+    """
+    label = Path(executable).name or str(executable).strip() or purpose
+    if not _allowlist_permits(executable):
+        audit("tool-denied", f"{purpose} {label}")
+        raise ToolDenied(
+            f"{label} is not in MOLMANAGER_TOOL_ALLOWLIST, so {purpose} was not started."
+        )
+    problem = _digest_problem(executable)
+    if problem:
+        audit("tool-denied", f"{purpose} {label}")
+        raise ToolDenied(problem)
+    audit("tool-launch", f"{purpose} {label}")
+
+
 def require_network(purpose: str) -> None:
     """Raise :class:`NetworkDisabled` when offline mode is set."""
     if network_allowed():
@@ -198,6 +233,117 @@ def _env_bool(name: str, default: bool) -> bool:
     return default
 
 
+def _name_key(text: str) -> str:
+    return os.path.normcase(text.strip())
+
+
+def _allowlist_tokens() -> list[str] | None:
+    """``None`` when no allowlist is configured. An empty list denies every tool."""
+    raw = (os.environ.get("MOLMANAGER_TOOL_ALLOWLIST") or "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    if path.is_file():
+        tokens: list[str] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            item = line.split("#", 1)[0].strip()
+            if item:
+                tokens.append(item)
+        return tokens
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def _allowlist_permits(executable: str) -> bool:
+    tokens = _allowlist_tokens()
+    if tokens is None:
+        return True
+    name = _name_key(Path(executable).name)
+    resolved = _existing_file(executable)
+    for token in tokens:
+        if _name_key(Path(token).name) == name or _name_key(token) == name:
+            return True
+        if resolved is not None and _same_file(token, resolved):
+            return True
+    return False
+
+
+def _digest_problem(executable: str) -> str | None:
+    raw = (os.environ.get("MOLMANAGER_TOOL_DIGESTS") or "").strip()
+    if not raw:
+        return None
+    pin_path = Path(raw)
+    if not pin_path.is_file():
+        return "MOLMANAGER_TOOL_DIGESTS is set, but that file was not found."
+    pins = _parse_digest_file(pin_path)
+    path = _existing_file(executable)
+    label = Path(executable).name or executable
+    if path is None:
+        return f"{label} is not an existing file, so its digest cannot be checked."
+    digest = _file_sha256(path)
+    allowed = pins.get(_name_key(path.name), set()) | pins.get(_name_key(str(path)), set())
+    if digest in allowed:
+        return None
+    return f"{path.name} does not match MOLMANAGER_TOOL_DIGESTS, so it was not started."
+
+
+def _parse_digest_file(path: Path) -> dict[str, set[str]]:
+    pins: dict[str, set[str]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        text = line.split("#", 1)[0].strip()
+        if not text:
+            continue
+        digest, _, name = text.partition(" ")
+        digest = digest.strip().lower()
+        name = name.strip()
+        if len(digest) != 64 or not name:
+            continue
+        pins.setdefault(_name_key(name), set()).add(digest)
+        pins.setdefault(_name_key(Path(name).name), set()).add(digest)
+    return pins
+
+
+def _existing_file(executable: str) -> Path | None:
+    candidate = Path(executable)
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def _same_file(token: str, resolved: Path) -> bool:
+    other = Path(token)
+    if not other.is_file():
+        return _name_key(token) == _name_key(str(resolved))
+    try:
+        return other.resolve() == resolved.resolve()
+    except OSError:
+        return False
+
+
+def _file_sha256(path: Path) -> str:
+    try:
+        stat = path.stat()
+        key = (str(path.resolve()), int(stat.st_size), int(stat.st_mtime_ns))
+    except OSError:
+        key = None
+    if key is not None:
+        with _digest_lock:
+            cached = _digest_cache.get(key)
+        if cached is not None:
+            return cached
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    text = digest.hexdigest()
+    if key is not None:
+        with _digest_lock:
+            _digest_cache[key] = text
+    return text
+
+
 def _pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
@@ -207,8 +353,9 @@ def _pid_alive(pid: int) -> bool:
         os.kill(pid, 0)
     except PermissionError:
         return True
-    except OSError as exc:
+    except (OSError, SystemError) as exc:
         # Windows error 5: the process exists but this user cannot signal it.
+        # A missing process can also surface as SystemError from os.kill.
         if getattr(exc, "winerror", None) == 5:
             return True
         return False

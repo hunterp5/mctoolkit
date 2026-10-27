@@ -77,6 +77,10 @@ def _package_root_from(extracted: Path) -> Path:
 
 def _clone_git(dest: Path, progress: ProgressFn | None) -> None:
     _emit(progress, "Cloning BioTransformer from Bitbucket…")
+    from ..platform_support.session_runtime import require_tool
+
+    git = shutil.which("git") or "git"
+    require_tool(git, "BioTransformer")
     subprocess.run(
         ["git", "clone", "--depth", "1", BITBUCKET_GIT, str(dest)],
         check=True,
@@ -98,7 +102,7 @@ def _download_zip(dest: Path, progress: ProgressFn | None) -> None:
 
 def fetch_biotransformer_package(work: Path, progress: ProgressFn | None = None) -> Path:
     """Clone or unzip the official package into ``work`` and return the layout root."""
-    from ..platform_support.session_runtime import require_network
+    from ..platform_support.session_runtime import ToolDenied, require_network
 
     require_network("BioTransformer")
     git = shutil.which("git")
@@ -107,7 +111,7 @@ def fetch_biotransformer_package(work: Path, progress: ProgressFn | None = None)
         try:
             _clone_git(clone_dir, progress)
             return _package_root_from(clone_dir)
-        except (OSError, subprocess.CalledProcessError) as exc:
+        except (OSError, subprocess.CalledProcessError, ToolDenied) as exc:
             _emit(progress, f"Git clone failed ({exc}); trying zip download.")
             if clone_dir.exists():
                 shutil.rmtree(clone_dir, ignore_errors=True)

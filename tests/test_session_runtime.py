@@ -24,9 +24,11 @@ import pytest
 
 from molmanager.platform_support.session_runtime import (
     NetworkDisabled,
+    ToolDenied,
     current_runtime,
     network_allowed,
     require_network,
+    require_tool,
     sql_writes_allowed,
 )
 from molmanager.storage.sqlite_table_store import SqliteTableStore
@@ -92,3 +94,31 @@ def test_foreign_scratch_session_is_copied(tmp_path: Path) -> None:
     assert Path(copied).read_bytes() == b"session"
     assert runtime.contains(copied)
     assert runtime.retain_foreign_session(copied) == copied
+
+
+def test_allowlist_limits_which_program_can_start(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("MOLMANAGER_TOOL_DIGESTS", raising=False)
+    program = tmp_path / "gnina.exe"
+    program.write_bytes(b"tool")
+    monkeypatch.delenv("MOLMANAGER_TOOL_ALLOWLIST", raising=False)
+    require_tool(str(program), "Gnina")
+    monkeypatch.setenv("MOLMANAGER_TOOL_ALLOWLIST", "obabel")
+    with pytest.raises(ToolDenied, match="gnina.exe"):
+        require_tool(str(program), "Gnina")
+    monkeypatch.setenv("MOLMANAGER_TOOL_ALLOWLIST", "gnina.exe")
+    require_tool(str(program), "Gnina")
+
+
+def test_digest_pin_rejects_a_changed_program(tmp_path: Path, monkeypatch) -> None:
+    import hashlib
+
+    monkeypatch.delenv("MOLMANAGER_TOOL_ALLOWLIST", raising=False)
+    program = tmp_path / "obabel.exe"
+    program.write_bytes(b"openbabel")
+    pins = tmp_path / "digests.txt"
+    pins.write_text(hashlib.sha256(b"openbabel").hexdigest() + " obabel.exe\n", encoding="utf-8")
+    monkeypatch.setenv("MOLMANAGER_TOOL_DIGESTS", str(pins))
+    require_tool(str(program), "Open Babel")
+    program.write_bytes(b"changed")
+    with pytest.raises(ToolDenied, match="does not match"):
+        require_tool(str(program), "Open Babel")

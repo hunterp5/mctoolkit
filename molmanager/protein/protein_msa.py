@@ -241,6 +241,9 @@ def _run_mafft_popen(
     *,
     cancel_event: threading.Event | None,
 ) -> tuple[int, str, str]:
+    from ..platform_support.session_runtime import require_tool
+
+    require_tool(argv[0], "MAFFT")
     proc = subprocess.Popen(
         argv,
         cwd=cwd,

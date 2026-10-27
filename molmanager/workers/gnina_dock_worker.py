@@ -62,6 +62,9 @@ def start_gnina_qprocess(
     work_dir: str = "",
 ) -> None:
     """Start Gnina on *proc* (WSL login shell on Windows, native elsewhere)."""
+    from ..platform_support.session_runtime import require_tool
+
+    require_tool(exe, "Gnina")
     wd = (work_dir or "").strip()
     if gnina_uses_wsl():
         program, args = gnina_qprocess_spec(exe, launch, work_dir=wd)
@@ -103,12 +106,23 @@ class GninaDockWorker(QObject):
         return self.proc.state() != QProcess.NotRunning
 
     def start_process(self, launch: list[str]) -> None:
+        from PyQt5.QtWidgets import QMessageBox
+
+        from ..platform_support.session_runtime import ToolDenied
+
         self._stop_requested = False
         self._discard_finish = False
         h = self._host
-        h._dismiss_for_run()
-        exe = h._resolved_exe or h._gnina_executable()
-        start_gnina_qprocess(self.proc, exe, launch, work_dir=h.edit_wd.text())
+        try:
+            h._dismiss_for_run()
+            exe = h._resolved_exe or h._gnina_executable()
+            start_gnina_qprocess(self.proc, exe, launch, work_dir=h.edit_wd.text())
+        except ToolDenied as exc:
+            h._clear_batch()
+            reveal = getattr(h, "_reveal_dock_dialog", None)
+            if callable(reveal):
+                reveal()
+            QMessageBox.warning(h, "Dock", str(exc))
 
     def stop(self) -> None:
         h = self._host

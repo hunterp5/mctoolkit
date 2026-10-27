@@ -399,6 +399,9 @@ def _run_confab_cli(sdf: str, params: SystematicConfParams, obabel: str) -> str:
         out = tmp_path / "out.sdf"
         inp.write_text(sdf, encoding="utf-8")
         cmd = confab_cli_command(obabel, inp, out, params)
+        from ..platform_support.session_runtime import require_tool
+
+        require_tool(cmd[0], "Open Babel")
         try:
             proc = subprocess.run(
                 cmd,

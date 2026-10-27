@@ -866,6 +866,9 @@ def probe_install(python_text: str = "", config_text: str = "") -> tuple[bool, s
     config = resolve_config(config_text)
     assert config is not None
     try:
+        from ..platform_support.session_runtime import ToolDenied, require_tool
+
+        require_tool(python, "AiZynthFinder")
         proc = subprocess.run(
             [python, "-c", _IMPORT_SNIPPET],
             capture_output=True,
@@ -878,7 +881,7 @@ def probe_install(python_text: str = "", config_text: str = "") -> tuple[bool, s
             cwd=str(config.parent),
             **_no_window_kwargs(),
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError, ToolDenied) as exc:
         return False, f"Could not start {python}: {exc}"
     version = (proc.stdout or "").strip().splitlines()
     if proc.returncode == 0 and version:
@@ -943,6 +946,9 @@ def run_search(
             _write_search_config(python, config, config_path, payload)
         command = aizynthcli_command(python, config_path, smiles_file, output, checkpoint, options)
         try:
+            from ..platform_support.session_runtime import ToolDenied, require_tool
+
+            require_tool(command[0], "AiZynthFinder")
             proc = subprocess.Popen(
                 command,
                 cwd=str(config.parent),
@@ -954,7 +960,7 @@ def run_search(
                 env=child_environment(Path(python)),
                 **_no_window_kwargs(),
             )
-        except OSError as exc:
+        except (OSError, ToolDenied) as exc:
             raise AizynthRunError(f"Could not start {python}: {exc}") from exc
         tails = {"stdout": "", "stderr": ""}
         threads = [

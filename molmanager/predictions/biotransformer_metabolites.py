@@ -111,6 +111,9 @@ def uses_cyp_mode(metabolism: str) -> bool:
 def _java_reports_64bit(java: str) -> bool:
     """True when ``java -version`` looks 64-bit, or when the binary cannot be probed."""
     try:
+        from ..platform_support.session_runtime import ToolDenied, require_tool
+
+        require_tool(java, "BioTransformer")
         proc = subprocess.run(
             [java, "-version"],
             capture_output=True,
@@ -118,6 +121,8 @@ def _java_reports_64bit(java: str) -> bool:
             timeout=8,
             check=False,
         )
+    except ToolDenied:
+        return False
     except (OSError, subprocess.SubprocessError):
         return True
     text = f"{proc.stdout} {proc.stderr}"
@@ -338,6 +343,9 @@ def run_java_command(
     """Run a subprocess, honouring cancel and timeout. Returns (returncode, stdout, stderr)."""
     if _app_is_shutting_down() or (cancel is not None and cancel()):
         raise RuntimeError(BIOTRANSFORMER_CANCELLED)
+    from ..platform_support.session_runtime import require_tool
+
+    require_tool(args[0], "BioTransformer")
     proc = subprocess.Popen(
         args,
         cwd=str(cwd),

@@ -322,6 +322,9 @@ def _run_xtb(
     }
     if sys.platform.startswith("win") and _CREATE_NO_WINDOW:
         kwargs["creationflags"] = _CREATE_NO_WINDOW
+    from ..platform_support.session_runtime import require_tool
+
+    require_tool(argv[0], "xtb")
     return subprocess.run(argv, **kwargs)
 
 

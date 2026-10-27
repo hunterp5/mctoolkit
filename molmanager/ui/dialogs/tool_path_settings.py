@@ -136,6 +136,9 @@ def _probe_java(path: str) -> tuple[bool, str]:
             return False, "Java is not on PATH."
         exe = str(hit)
     try:
+        from ...platform_support.session_runtime import ToolDenied, require_tool
+
+        require_tool(exe, "Java")
         proc = subprocess.run(
             [exe, "-version"],
             capture_output=True,
@@ -143,7 +146,7 @@ def _probe_java(path: str) -> tuple[bool, str]:
             timeout=20,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError, ToolDenied) as exc:
         return False, f"Could not run Java: {exc}"
     detail = ((proc.stderr or "") + "\n" + (proc.stdout or "")).strip()
     first = detail.splitlines()[0] if detail else f"exit code {proc.returncode}"

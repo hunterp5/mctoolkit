@@ -428,6 +428,9 @@ def _run_conforge_cli(sdf: str, params: ConforgeParams, exe: str) -> str:
         out = Path(tmp) / "out.sdf"
         inp.write_text(sdf, encoding="utf-8")
         cmd = confgen_cli_command(exe, inp, out, params)
+        from ..platform_support.session_runtime import require_tool
+
+        require_tool(cmd[0], "CONFORGE")
         proc = subprocess.run(
             cmd,
             capture_output=True,

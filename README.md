@@ -505,6 +505,8 @@ Optional settings for power users and IT deployments:
 | `MOLMANAGER_DISABLE_CUSTOM_CALC` | Set to `1` / `true` to disable Tools → Custom Calculator |
 | `MOLMANAGER_OFFLINE` | Set to `1` / `true` to refuse PubChem, ChEMBL, SureChEMBL, ZINC, vendor lookup, BioTransformer download, and the 3Dmol network script |
 | `MOLMANAGER_SQL_WRITES` | Set to `0` / `false` to refuse SQL that modifies a database, even if Read-only is unchecked |
+| `MOLMANAGER_TOOL_ALLOWLIST` | Comma-separated program names or paths, or a text file of one name per line. Unset allows every external program |
+| `MOLMANAGER_TOOL_DIGESTS` | Text file of `sha256` and a program name or path. Unset does not hash programs. A mismatch refuses that launch |
 | `MOLMANAGER_LOG_DIR` | Directory for rotating `molmanager.log` (platform default under user app data / state) |
 | `MOLMANAGER_LOG_TO_FILE` | Set to `0` / `false` to disable file logging (console only) |
 | `MOLMANAGER_BUNDLE_DIR` | Folder containing optional `gnina` / `vina` binaries |
