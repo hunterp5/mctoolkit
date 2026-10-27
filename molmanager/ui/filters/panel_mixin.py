@@ -20,14 +20,10 @@ from __future__ import annotations
 
 from .filter_apply_mixin import FilterApplyMixin
 from .filter_bounds_mixin import FilterBoundsMixin
-from .filter_cards_mixin import FilterCardsMixin
-from .filter_substructure_mixin import FilterSubstructureMixin
 
 
 class FilterPanelMixin(
-    FilterCardsMixin,
     FilterApplyMixin,
-    FilterSubstructureMixin,
     FilterBoundsMixin,
 ):
     """Expects the :class:`~molmanager.ui.app_kernel.AppKernel` surface on ``self``

@@ -208,6 +208,18 @@ class WorkspaceTools:
         self.table_search = _LazyMixinHost(
             app, lambda: _load("molmanager.ui.main_window.table_search_mixin", "TableSearchMixin")
         )
+        self.table_edit = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.table_edit_mixin", "TableEditMixin")
+        )
+        self.filter_cards = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.filters.filter_cards_mixin", "FilterCardsMixin")
+        )
+        self.filter_substructure = _LazyMixinHost(
+            app,
+            lambda: _load(
+                "molmanager.ui.filters.filter_substructure_mixin", "FilterSubstructureMixin"
+            ),
+        )
 
 
 def _load(module: str, name: str):
