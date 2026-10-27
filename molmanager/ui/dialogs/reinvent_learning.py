@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Chemistry → REINVENT → Learning. One reinforcement-learning stage, then new rows."""
+"""Chemistry → REINVENT → Learning. One reinforcement-learning stage."""
 
 from __future__ import annotations
 
@@ -27,19 +27,23 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
+    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from ...generative.reinvent_learning import (
     CONFIRM_LEARNING_COUNT,
+    DIVERSITY_FILTERS,
     LearningOutcome,
     LearningRequest,
     ReinventLearningError,
@@ -47,7 +51,10 @@ from ...generative.reinvent_learning import (
     execute_learning,
     validate_request,
 )
+from ...generative.reinvent_results import open_results_table, results_status, skipped_suffix
 from ...generative.reinvent_sampling import (
+    EXTRA_FLAGS_PLACEHOLDER,
+    EXTRA_FLAGS_TOOLTIP,
     GENERATORS,
     MISSING_REINVENT_MSG,
     ReinventSamplingCancelled,
@@ -105,27 +112,34 @@ class _LearningWorker(QRunnable):
 
 
 class ReinventLearningDialog(QDialog):
-    """Optimize a REINVENT agent for one stage and append the best molecules."""
+    """Optimize a REINVENT agent for one stage and open the best molecules in a new table."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_app = parent
         self._worker: _LearningWorker | None = None
+        self._pending_records: tuple[tuple[str, dict[str, str]], ...] = ()
         self._signals = _LearningSignals(self)
         self._signals.log.connect(self._append_log)
         self._signals.finished.connect(self._on_finished)
         self._signals.failed.connect(self._on_failed)
         self.setWindowTitle(TOOL_REINVENT_LEARNING)
-        self.setMinimumWidth(680)
+        self.setMinimumSize(720, 640)
 
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
         intro = QLabel(
-            "Trains a REINVENT 4 agent for one stage and appends the best molecules. "
+            "Trains a REINVENT 4 agent for one stage and opens the best molecules in a new table. "
             "Set the command under Settings → Configure → REINVENT. "
             "Scores are RDKit properties. Docking and ChemProp models are not in this dialog."
         )
         intro.setWordWrap(True)
-        root.addWidget(intro)
+        outer.addWidget(intro)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        root = QVBoxLayout(body)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
 
         model_box, form = boxed_form("Model")
         self.generator_combo = QComboBox()
@@ -252,10 +266,81 @@ class ReinventLearningDialog(QDialog):
         self.diversity_check = QCheckBox("Penalize repeated scaffolds")
         self.diversity_check.setChecked(True)
         self.diversity_check.setToolTip(
-            "Identical Murcko scaffolds are memorized once 25 molecules score above 0.4. "
-            "Further copies of that scaffold are penalized."
+            "Memorize scaffolds that score well, then penalize further copies."
         )
+        self.diversity_check.toggled.connect(self._sync_diversity)
         learn_form.addRow("", self.diversity_check)
+
+        self.diversity_options = QWidget()
+        diversity_form = QFormLayout(self.diversity_options)
+        diversity_form.setContentsMargins(0, 0, 0, 0)
+        self.diversity_type = QComboBox()
+        for key, label in DIVERSITY_FILTERS:
+            self.diversity_type.addItem(label, key)
+        self.diversity_type.setToolTip("How REINVENT decides that two molecules are the same idea.")
+        self.diversity_type.currentIndexChanged.connect(self._sync_diversity)
+        diversity_form.addRow("Filter", self.diversity_type)
+
+        self.diversity_bucket = QSpinBox()
+        self.diversity_bucket.setRange(1, 10_000)
+        self.diversity_bucket.setValue(25)
+        self.diversity_bucket.setToolTip(
+            "How many molecules of one scaffold are accepted before further copies are penalized."
+        )
+        self._bucket_label = QLabel("Bucket size")
+        diversity_form.addRow(self._bucket_label, self.diversity_bucket)
+
+        self.diversity_minscore = QDoubleSpinBox()
+        self.diversity_minscore.setRange(0.0, 1.0)
+        self.diversity_minscore.setDecimals(2)
+        self.diversity_minscore.setSingleStep(0.05)
+        self.diversity_minscore.setValue(0.4)
+        self.diversity_minscore.setToolTip(
+            "A molecule has to score at least this high to enter the memory."
+        )
+        self._minscore_label = QLabel("Min score")
+        diversity_form.addRow(self._minscore_label, self.diversity_minscore)
+
+        self.diversity_minsimilarity = QDoubleSpinBox()
+        self.diversity_minsimilarity.setRange(0.0, 1.0)
+        self.diversity_minsimilarity.setDecimals(2)
+        self.diversity_minsimilarity.setSingleStep(0.05)
+        self.diversity_minsimilarity.setValue(0.4)
+        self.diversity_minsimilarity.setToolTip(
+            "Scaffolds at least this similar to one already memorized count as the same scaffold."
+        )
+        self._minsimilarity_label = QLabel("Min similarity")
+        diversity_form.addRow(self._minsimilarity_label, self.diversity_minsimilarity)
+
+        self.diversity_penalty = QDoubleSpinBox()
+        self.diversity_penalty.setRange(0.0, 1.0)
+        self.diversity_penalty.setDecimals(2)
+        self.diversity_penalty.setSingleStep(0.05)
+        self.diversity_penalty.setValue(0.5)
+        self.diversity_penalty.setToolTip(
+            "Multiplier applied when the same SMILES is seen again. 0.5 is REINVENT's default."
+        )
+        self._penalty_label = QLabel("Penalty")
+        diversity_form.addRow(self._penalty_label, self.diversity_penalty)
+        learn_form.addRow("", self.diversity_options)
+
+        self.seed_spin = QSpinBox()
+        self.seed_spin.setRange(0, 2_147_483_647)
+        self.seed_spin.setSpecialValueText("auto")
+        self.seed_spin.setValue(0)
+        self.seed_spin.setToolTip("Fixes REINVENT's random seed. Auto leaves it unset.")
+        learn_form.addRow("Random seed", self.seed_spin)
+
+        self.isomeric_check = QCheckBox("Keep stereochemistry in SMILES")
+        self.isomeric_check.setToolTip(
+            "Write isomeric SMILES. Off uses non-isomeric SMILES, which is REINVENT's default."
+        )
+        learn_form.addRow("", self.isomeric_check)
+
+        self.extra_flags_edit = QLineEdit()
+        self.extra_flags_edit.setPlaceholderText(EXTRA_FLAGS_PLACEHOLDER)
+        self.extra_flags_edit.setToolTip(EXTRA_FLAGS_TOOLTIP)
+        learn_form.addRow("Extra flags", self.extra_flags_edit)
 
         agent_row = QHBoxLayout()
         self.agent_edit = QLineEdit()
@@ -299,7 +384,13 @@ class ReinventLearningDialog(QDialog):
         self.qed_check.setToolTip(
             "RDKit quantitative estimate of drug-likeness, already on a 0–1 scale."
         )
-        score_form.addRow("", self.qed_check)
+        self.qed_weight_spin = self._weight_spin()
+        qed_row = QHBoxLayout()
+        qed_row.addWidget(self.qed_check)
+        qed_row.addWidget(QLabel("weight"))
+        qed_row.addWidget(self.qed_weight_spin)
+        qed_row.addStretch(1)
+        score_form.addRow("", qed_row)
 
         mw_row = QHBoxLayout()
         self.mw_check = QCheckBox("Molecular weight")
@@ -317,6 +408,9 @@ class ReinventLearningDialog(QDialog):
         mw_row.addWidget(self.mw_low_spin)
         mw_row.addWidget(QLabel("to"))
         mw_row.addWidget(self.mw_high_spin)
+        mw_row.addWidget(QLabel("weight"))
+        self.mw_weight_spin = self._weight_spin()
+        mw_row.addWidget(self.mw_weight_spin)
         mw_row.addStretch(1)
         score_form.addRow("", mw_row)
 
@@ -335,6 +429,9 @@ class ReinventLearningDialog(QDialog):
         logp_row.addWidget(self.slogp_low_spin)
         logp_row.addWidget(QLabel("to"))
         logp_row.addWidget(self.slogp_high_spin)
+        logp_row.addWidget(QLabel("weight"))
+        self.slogp_weight_spin = self._weight_spin()
+        logp_row.addWidget(self.slogp_weight_spin)
         logp_row.addStretch(1)
         score_form.addRow("", logp_row)
 
@@ -342,18 +439,45 @@ class ReinventLearningDialog(QDialog):
         self.sa_check.setToolTip(
             "Ertl SA score. Values near 2 score high. Values of 5 and above score low."
         )
-        score_form.addRow("", self.sa_check)
+        self.sa_weight_spin = self._weight_spin()
+        sa_row = QHBoxLayout()
+        sa_row.addWidget(self.sa_check)
+        sa_row.addWidget(QLabel("weight"))
+        sa_row.addWidget(self.sa_weight_spin)
+        sa_row.addStretch(1)
+        score_form.addRow("", sa_row)
 
         self.similarity_check = QCheckBox("Similarity to reference molecules")
         self.similarity_check.setToolTip(
-            "Morgan fingerprint radius 2. Each reference is its own term in the combined score."
+            "Morgan fingerprints. Each reference is its own term in the combined score."
         )
+        self.similarity_weight_spin = self._weight_spin()
+        similarity_row = QHBoxLayout()
+        similarity_row.addWidget(self.similarity_check)
+        similarity_row.addWidget(QLabel("weight"))
+        similarity_row.addWidget(self.similarity_weight_spin)
+        similarity_row.addStretch(1)
         self.similarity_check.toggled.connect(self._sync_reference_editor)
-        score_form.addRow("", self.similarity_check)
+        score_form.addRow("", similarity_row)
         root.addWidget(scoring)
 
         self.reference_box = QGroupBox("Similarity references")
         ref_layout = QVBoxLayout(self.reference_box)
+        fp_row = QHBoxLayout()
+        self.radius_spin = QSpinBox()
+        self.radius_spin.setRange(1, 6)
+        self.radius_spin.setValue(2)
+        self.radius_spin.setToolTip("Morgan fingerprint radius. 2 is REINVENT's default.")
+        self.counts_check = QCheckBox("Counts")
+        self.counts_check.setToolTip("Use count fingerprints instead of bit fingerprints.")
+        self.features_check = QCheckBox("Features")
+        self.features_check.setToolTip("Use feature invariants instead of atom types.")
+        fp_row.addWidget(QLabel("Radius"))
+        fp_row.addWidget(self.radius_spin)
+        fp_row.addWidget(self.counts_check)
+        fp_row.addWidget(self.features_check)
+        fp_row.addStretch(1)
+        ref_layout.addLayout(fp_row)
         ref_row = QHBoxLayout()
         self.reference_source = QComboBox()
         self.reference_source.addItem("Selected rows", _SEED_SELECTED)
@@ -391,7 +515,7 @@ class ReinventLearningDialog(QDialog):
         self.keep_spin.setRange(1, 5000)
         self.keep_spin.setValue(50)
         self.keep_spin.setToolTip(
-            "How many unique molecules to append, keeping the highest score of each."
+            "How many unique molecules to open, keeping the highest score of each."
         )
         result_form.addRow("Keep best", self.keep_spin)
         root.addWidget(results)
@@ -403,23 +527,56 @@ class ReinventLearningDialog(QDialog):
         self.stop_button = QPushButton("Stop")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self._on_stop)
+        self.add_button = QPushButton("Add to this table")
+        self.add_button.setEnabled(False)
+        self.add_button.setToolTip("Append the molecules from the last run to this table.")
+        self.add_button.clicked.connect(self._add_pending)
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.close)
         buttons.addWidget(self.learn_button)
         buttons.addWidget(self.stop_button)
+        buttons.addWidget(self.add_button)
         buttons.addStretch(1)
         buttons.addWidget(close_button)
-        root.addLayout(buttons)
+        outer.addLayout(buttons)
 
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
         self.log_edit.setMinimumHeight(120)
         self.log_edit.setPlaceholderText("REINVENT output")
         apply_monospace_to_text_edit(self.log_edit)
-        root.addWidget(self.log_edit, 1)
+        outer.addWidget(self.log_edit, 1)
 
         self._on_generator_changed()
+        self._sync_diversity()
         make_window_minimizable(self)
+
+    def _weight_spin(self) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setRange(0.0, 100.0)
+        spin.setDecimals(2)
+        spin.setSingleStep(0.25)
+        spin.setValue(1.0)
+        spin.setToolTip("Weight of this term when the scores are combined.")
+        return spin
+
+    def _sync_diversity(self, *_args) -> None:
+        enabled = self.diversity_check.isChecked()
+        self.diversity_options.setVisible(enabled)
+        kind = str(self.diversity_type.currentData() or "")
+        same_smiles = kind == "PenalizeSameSmiles"
+        similar = kind == "ScaffoldSimilarity"
+        for widget in (
+            self._bucket_label,
+            self.diversity_bucket,
+            self._minscore_label,
+            self.diversity_minscore,
+        ):
+            widget.setVisible(enabled and not same_smiles)
+        self._minsimilarity_label.setVisible(enabled and similar)
+        self.diversity_minsimilarity.setVisible(enabled and similar)
+        self._penalty_label.setVisible(enabled and same_smiles)
+        self.diversity_penalty.setVisible(enabled and same_smiles)
 
     def request(
         self,
@@ -461,6 +618,22 @@ class ReinventLearningDialog(QDialog):
             seeds=seeds,
             agent_output=self.agent_edit.text().strip(),
             scaffold_smarts=self.scaffold_edit.text().strip(),
+            qed_weight=float(self.qed_weight_spin.value()),
+            mw_weight=float(self.mw_weight_spin.value()),
+            slogp_weight=float(self.slogp_weight_spin.value()),
+            sa_weight=float(self.sa_weight_spin.value()),
+            similarity_weight=float(self.similarity_weight_spin.value()),
+            seed=int(self.seed_spin.value()),
+            isomeric_smiles=self.isomeric_check.isChecked(),
+            extra_flags=self.extra_flags_edit.text().strip(),
+            diversity_type=str(self.diversity_type.currentData()),
+            diversity_bucket=int(self.diversity_bucket.value()),
+            diversity_minscore=float(self.diversity_minscore.value()),
+            diversity_minsimilarity=float(self.diversity_minsimilarity.value()),
+            diversity_penalty=float(self.diversity_penalty.value()),
+            similarity_radius=int(self.radius_spin.value()),
+            similarity_counts=self.counts_check.isChecked(),
+            similarity_features=self.features_check.isChecked(),
         )
 
     def closeEvent(self, event) -> None:  # noqa: N802 — Qt API name
@@ -599,6 +772,8 @@ class ReinventLearningDialog(QDialog):
             QMessageBox.warning(self, TOOL_REINVENT_LEARNING, MISSING_REINVENT_MSG)
             return
         self.log_edit.clear()
+        self._pending_records = ()
+        self.add_button.setEnabled(False)
         self._set_running(True)
         worker = _LearningWorker(executable, request, self._signals)
         self._worker = worker
@@ -664,17 +839,33 @@ class ReinventLearningDialog(QDialog):
             self.rate_spin,
             self.randomize_check,
             self.diversity_check,
+            self.diversity_type,
+            self.diversity_bucket,
+            self.diversity_minscore,
+            self.diversity_minsimilarity,
+            self.diversity_penalty,
+            self.seed_spin,
+            self.isomeric_check,
+            self.extra_flags_edit,
             self.agent_edit,
             self.aggregation_combo,
             self.qed_check,
+            self.qed_weight_spin,
             self.mw_check,
             self.mw_low_spin,
             self.mw_high_spin,
+            self.mw_weight_spin,
             self.slogp_check,
             self.slogp_low_spin,
             self.slogp_high_spin,
+            self.slogp_weight_spin,
             self.sa_check,
+            self.sa_weight_spin,
             self.similarity_check,
+            self.similarity_weight_spin,
+            self.radius_spin,
+            self.counts_check,
+            self.features_check,
             self.reference_source,
             self.reference_text,
             self.alerts_check,
@@ -684,6 +875,8 @@ class ReinventLearningDialog(QDialog):
             self.scaffold_sketch,
         ):
             widget.setEnabled(not running)
+        if running:
+            self.add_button.setEnabled(False)
 
     def _append_log(self, line: str) -> None:
         self.log_edit.append(line)
@@ -691,35 +884,52 @@ class ReinventLearningDialog(QDialog):
     def _on_finished(self, outcome: LearningOutcome) -> None:
         self._worker = None
         self._set_running(False)
-        added = 0
-        app = self.parent_app
-        if (
-            outcome.records
-            and app is not None
-            and hasattr(app, "add_rows_from_external_records_batch")
-        ):
-            added = int(
-                app.add_rows_from_external_records_batch(
-                    list(outcome.records),
-                    render_structures=True,
-                )
-            )
-        skipped = ""
-        if outcome.skipped_invalid:
-            skipped = f" Skipped {outcome.skipped_invalid} invalid SMILES."
-        if outcome.skipped_scaffold:
-            skipped += f" Skipped {outcome.skipped_scaffold} that missed the scaffold."
-        if outcome.cancelled:
-            message = f"Stopped. Added {added} row(s).{skipped}"
-        elif added:
-            message = f"Added {added} row(s).{skipped}"
-        else:
-            message = f"REINVENT finished without any valid molecules.{skipped}"
+        self._pending_records = tuple(outcome.records)
+        self.add_button.setEnabled(bool(self._pending_records))
+        skipped = skipped_suffix(
+            invalid=outcome.skipped_invalid,
+            scaffold=outcome.skipped_scaffold,
+        )
+        open_error = ""
+        if outcome.records:
+            try:
+                path = open_results_table(outcome.records, stem="REINVENT learning")
+                self._append_log(str(path))
+            except OSError as exc:
+                open_error = str(exc)
+        message = results_status(
+            count=len(outcome.records),
+            cancelled=outcome.cancelled,
+            skipped=skipped,
+            open_error=open_error,
+        )
         self._append_log(message)
+        app = self.parent_app
         if app is not None and hasattr(app, "status_label"):
             app.status_label.setText(f"{TOOL_REINVENT_LEARNING}: {message}")
-        if not outcome.cancelled and added == 0:
+        if open_error:
+            QMessageBox.warning(self, TOOL_REINVENT_LEARNING, message)
+        elif not outcome.cancelled and not outcome.records:
             QMessageBox.information(self, TOOL_REINVENT_LEARNING, message)
+
+    def _add_pending(self) -> None:
+        records = self._pending_records
+        app = self.parent_app
+        if not records or app is None or not hasattr(app, "add_rows_from_external_records_batch"):
+            QMessageBox.information(
+                self,
+                TOOL_REINVENT_LEARNING,
+                "There are no molecules from the last run to add.",
+            )
+            return
+        added = int(
+            app.add_rows_from_external_records_batch(list(records), render_structures=True)
+        )
+        self.add_button.setEnabled(False)
+        message = f"Added {added} row(s) to this table."
+        self._append_log(message)
+        if hasattr(app, "status_label"):
+            app.status_label.setText(f"{TOOL_REINVENT_LEARNING}: {message}")
 
     def _on_failed(self, message: str) -> None:
         self._worker = None
