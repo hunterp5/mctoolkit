@@ -1,0 +1,5 @@
+# Windows wheels for these Qt binaries stop at 5.15.2.
+# Later releases publish Linux and macOS only, so the newest release
+# cannot be the pin for the Windows setup.
+PyQt5-Qt5==5.15.2
+PyQtWebEngine-Qt5==5.15.2

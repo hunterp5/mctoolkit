@@ -17,7 +17,7 @@ This document supports building an installer (PyInstaller, Inno Setup, MSI, etc.
 | Component | How it ships |
 |-----------|----------------|
 | molmanager app (`molmanager` package) | PyInstaller one-folder/one-file, or `pip install -e .` |
-| Python dependencies | `requirements-core.txt` or `requirements.txt`, then `pip install -e .` |
+| Python dependencies | `requirements-core.lock` for the published core bundle; `requirements-core.txt` or `requirements.txt` for a development install |
 | 3Dmol.js | Already in `molmanager/ui/static/` |
 | AutoDock Vina | **Optional** binary in `molmanager/resources/bin/<platform>/` (not redistributed in git) |
 
@@ -73,6 +73,14 @@ pyinstaller packaging/molmanager.spec
 ```
 
 Output under `dist/MolManager/`. The spec also copies help pages and reaction presets next to the package, which is where `resources_dir()` looks. UPX is off. `codesign_identity` stays unset until a signing certificate is available.
+
+The published core bundle does not install the floating ranges in `requirements-core.txt`. Actions installs `requirements-core.lock`: exact versions and SHA-256 hashes for Python 3.11 on Windows x64 and Linux x86_64. Regenerate it from the repo root when a core dependency changes:
+
+```bash
+python -m uv pip compile requirements-core.txt -o requirements-core.lock --universal --python-version 3.11 --generate-hashes -c packaging/qt-wheel-constraints.txt
+```
+
+`packaging/qt-wheel-constraints.txt` pins `PyQt5-Qt5` and `PyQtWebEngine-Qt5` to 5.15.2. Later releases on PyPI publish Linux and macOS wheels only, so the newest Qt build cannot install on the Windows setup. A development install can still use `requirements-core.txt`. The lock is the set the installer freezes.
 
 Actions workflow `Package` builds that unsigned core bundle on Ubuntu, and on Windows it wraps the same folder with Inno Setup. Run it by hand or push a `v*` tag. It does not run on every push. The Windows artifact is `MolManager-<version>-setup.exe`. A quiet install that does not launch the app is:
 

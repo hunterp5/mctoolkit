@@ -1,6 +1,7 @@
 name: Package
 
-# Unsigned core desktop bundle. A signing certificate is not in this repo, so
+# Unsigned core desktop bundle. Runtime packages come from the hashed
+# requirements-core.lock. A signing certificate is not in this repo, so
 # codesign_identity stays unset. This does not run on every push: the test CI
 # stays the fast gate. Run it by hand, or by pushing a v* tag.
 on:
@@ -20,7 +21,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements-core.txt
+          cache-dependency-path: requirements-core.lock
 
       - name: Install Qt libraries the bundle loads
         run: |
@@ -50,9 +51,9 @@ jobs:
       - name: Install the core app and PyInstaller
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-core.txt
+          pip install -r requirements-core.lock
           pip install --no-deps .
-          pip install "pyinstaller>=6.0"
+          pip install "pyinstaller==6.22.3"
 
       - name: Build the one-folder bundle
         run: pyinstaller packaging/molmanager.spec
@@ -81,14 +82,14 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements-core.txt
+          cache-dependency-path: requirements-core.lock
 
       - name: Install the core app and PyInstaller
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-core.txt
+          pip install -r requirements-core.lock
           pip install --no-deps .
-          pip install "pyinstaller>=6.0"
+          pip install "pyinstaller==6.22.3"
 
       - name: Build the one-folder bundle
         run: pyinstaller packaging/molmanager.spec
