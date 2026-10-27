@@ -72,7 +72,7 @@ pip install pyinstaller
 pyinstaller packaging/molmanager.spec
 ```
 
-Output under `dist/molmanager/`. You still need to ship:
+Output under `dist/molmanager/`. UPX is off in the spec. `codesign_identity` stays unset until a signing certificate is available, and CI does not build this artifact yet. You still need to ship:
 
 - Qt platform plugins (PyInstaller usually collects these)
 - Optional `resources/bin/` for Gnina

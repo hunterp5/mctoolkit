@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Starter PyInstaller spec — run from repo root:
 #   pyinstaller packaging/molmanager.spec
+# UPX is off. Packing fights code signing and is commonly flagged by scanners.
+# codesign_identity stays unset until a signing certificate is available.
 
 import sys
 from pathlib import Path
@@ -46,7 +48,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -61,7 +63,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name="MolManager",
 )
