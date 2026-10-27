@@ -1,6 +1,6 @@
 # REINVENT Learning
 
-REINVENT Learning runs one reinforcement-learning stage with a local **REINVENT 4** install and appends the best molecules to the table.
+REINVENT Learning runs one reinforcement-learning stage with a local **REINVENT 4** install and opens the best molecules in a new table.
 
 The agent starts from a prior, samples a batch, scores it, and updates itself. That repeats until the step limit or the stop score. MolManager then keeps the highest-scoring unique SMILES.
 
@@ -28,22 +28,25 @@ Scores are RDKit components that ship with REINVENT: QED, molecular weight, Slog
 - **Batch size** - molecules scored at each step. 64 is REINVENT's default.
 - **Max steps** / **Min steps** - the stage stops at the maximum. It can stop earlier, after the minimum, when the mean score reaches **Stop score**.
 - **Sigma** and **Learning rate** - DAP reward scale and Adam step size. 128 and 0.0001 are REINVENT's defaults.
-- **Penalize repeated scaffolds** - an identical Murcko scaffold is memorized after 25 molecules score above 0.4. Further copies are penalized.
-- **Save agent** - copy the learned checkpoint. Blank discards the agent after the molecules are added.
+- **Penalize repeated scaffolds** - on by default. **Filter** chooses identical Murcko scaffolds, topological scaffolds, similar scaffolds, or the same SMILES. **Bucket size** and **Min score** are 25 and 0.4 for the scaffold filters. Similar scaffolds also use **Min similarity**. Same SMILES uses **Penalty**.
+- **Random seed** - fixes the run. **Auto** leaves REINVENT's seed unset.
+- **Keep stereochemistry in SMILES** - write isomeric SMILES. Off is REINVENT's default.
+- **Extra flags** - more `reinvent` options, such as `--log-level debug` or `--log-filename`. `--device` and `--seed` here override the fields above.
+- **Save agent** - copy the learned checkpoint. Blank discards the agent after the molecules are opened.
 - **Combine** - geometric mean or arithmetic mean of the score terms.
-- **Scaffold** - optional SMARTS. The agent is rewarded for molecules that contain it, and only those matches are appended. **Sketcher…** draws the pattern. For R-groups, a pattern with `*` is also the scaffold that gets decorated.
-- **QED**, **Molecular weight**, **SlogP**, **SA score** - each can be turned on. Weight and SlogP use a window; outside that window the term falls toward zero. SA score favors values near 2 and penalizes values of 5 and above.
-- **Similarity** - Morgan fingerprints, radius 2, against each reference. Each reference is its own term.
+- **Scaffold** - optional SMARTS. The agent is rewarded for molecules that contain it, and only those matches are opened. **Sketcher…** draws the pattern. For R-groups, a pattern with `*` is also the scaffold that gets decorated.
+- **QED**, **Molecular weight**, **SlogP**, **SA score** - each can be turned on, with a **weight**. Molecular weight and SlogP use a window; outside that window the term falls toward zero. SA score favors values near 2 and penalizes values of 5 and above.
+- **Similarity** - Morgan fingerprints against each reference. **Radius**, **Counts**, and **Features** set the fingerprint. Each reference is its own term, and **weight** applies to each of them.
 - **Drop REINVENT's unwanted groups** - the published SMARTS filter. A match scores zero. **More SMARTS** adds patterns, one per line.
-- **Keep best** - how many unique molecules to append. The same molecule is stored once, at its highest score.
+- **Keep best** - how many unique molecules to open. The same molecule is stored once, at its highest score.
 
 ## Workflow
 
 1. Set **Settings → Configure → REINVENT** if sampling has not already done that.
 2. Open **Chemistry → REINVENT → Learning**.
 3. Pick the generator, model, and scores. For anything except de novo, choose seeds.
-4. Click **Learn** and leave the dialog open. **Stop** ends the process and still adds molecules written so far.
-5. Rows arrive with **REINVENT_Score**, **REINVENT_Step**, the generator, the model, and the component scores.
+4. Click **Learn** and leave the dialog open. **Stop** ends the process and still opens molecules written so far.
+5. The best rows open in a new MolManager table with **REINVENT_Score**, **REINVENT_Step**, the generator, the model, and the component scores. This table is unchanged until you click **Add to this table**.
 
 ## Use cases
 
