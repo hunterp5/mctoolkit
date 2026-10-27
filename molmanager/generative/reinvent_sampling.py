@@ -39,6 +39,14 @@ from shutil import which
 
 from ..chem.molecule_conversion import mol_to_canonical_smiles
 
+EXTRA_FLAGS_PLACEHOLDER = "--log-level debug"
+EXTRA_FLAGS_TOOLTIP = (
+    "Extra options appended to the reinvent command. "
+    "Examples: --log-level debug, --log-filename C:\\temp\\reinvent.log, "
+    "--dotenv-filename C:\\env\\.env, --enable-rdkit-log-levels error. "
+    "--device and --seed here override the fields above."
+)
+
 MISSING_REINVENT_MSG = (
     "REINVENT was not found. Install REINVENT 4 in its own Python environment "
     "(it cannot share MolManager's environment), then set the reinvent command "
@@ -60,6 +68,22 @@ _SEED_HEADERS = {
 }
 _SAMPLE_STRATEGIES = frozenset({"multinomial", "beamsearch"})
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_VALUE_FLAGS = frozenset(
+    {
+        "-f",
+        "--config-format",
+        "-d",
+        "--device",
+        "-l",
+        "--log-filename",
+        "--log-level",
+        "-s",
+        "--seed",
+        "--dotenv-filename",
+    }
+)
+_REPEAT_FLAGS = frozenset({"--enable-rdkit-log-levels"})
+_STOP_FLAGS = frozenset({"-h", "--help", "-V", "--version"})
 
 
 @dataclass(frozen=True)
@@ -137,6 +161,10 @@ class SamplingRequest:
     sample_strategy: str
     temperature: float
     seeds: tuple[str, ...] = ()
+    scaffold_smarts: str = ""
+    seed: int = 0
+    isomeric_smiles: bool = False
+    extra_flags: str = ""
 
 
 @dataclass(frozen=True)
@@ -156,6 +184,7 @@ class SamplingOutcome:
     parsed: int
     skipped_invalid: int
     cancelled: bool
+    skipped_scaffold: int = 0
 
 
 class ReinventSamplingError(Exception):
@@ -244,6 +273,59 @@ def smiles_is_parseable(smiles: str) -> bool:
         del blocker
 
 
+def smarts_is_parseable(pattern: str) -> bool:
+    """True when RDKit can compile *pattern* as SMARTS."""
+    from rdkit import Chem, rdBase
+
+    blocker = rdBase.BlockLogs()
+    try:
+        return Chem.MolFromSmarts(pattern) is not None
+    finally:
+        del blocker
+
+
+def scaffold_error(smarts: str) -> str | None:
+    """Return a user-facing error, or ``None`` when *smarts* is empty or readable."""
+    text = (smarts or "").strip()
+    if not text:
+        return None
+    if smarts_is_parseable(text):
+        return None
+    return "The scaffold is not SMARTS RDKit could read."
+
+
+def effective_seeds(
+    generator: str,
+    seeds: tuple[str, ...],
+    scaffold_smarts: str,
+) -> tuple[str, ...]:
+    """Seeds plus an R-group scaffold, when that scaffold is SMILES with an attachment point."""
+    text = (scaffold_smarts or "").strip()
+    if generator != "libinvent" or "*" not in text or text in seeds:
+        return seeds
+    if not smiles_is_parseable(text):
+        return seeds
+    return (text, *seeds)
+
+
+def smiles_matches_scaffold(smiles: str, smarts: str) -> bool:
+    """True when *smiles* contains *smarts*. An empty pattern matches everything."""
+    text = (smarts or "").strip()
+    if not text:
+        return True
+    from rdkit import Chem, rdBase
+
+    blocker = rdBase.BlockLogs()
+    try:
+        pattern = Chem.MolFromSmarts(text)
+        mol = Chem.MolFromSmiles(smiles)
+        if pattern is None or mol is None:
+            return False
+        return bool(mol.HasSubstructMatch(pattern))
+    finally:
+        del blocker
+
+
 def validate_seeds(generator_key: str, seeds: tuple[str, ...]) -> str | None:
     """Return a user-facing error, or ``None`` when *seeds* fit *generator_key*."""
     spec = generator_by_key(generator_key)
@@ -272,13 +354,29 @@ def validate_request(request: SamplingRequest) -> str | None:
         return "Choose a device (cpu or cuda:0)."
     if spec.uses_sample_strategy and request.sample_strategy not in _SAMPLE_STRATEGIES:
         return "Choose multinomial or beam search."
-    return validate_seeds(request.generator, request.seeds)
+    if int(request.seed) < 0:
+        return "The random seed cannot be negative."
+    pattern = scaffold_error(request.scaffold_smarts)
+    if pattern:
+        return pattern
+    try:
+        parse_extra_flags(request.extra_flags)
+    except ValueError as exc:
+        return str(exc)
+    return validate_seeds(
+        request.generator,
+        effective_seeds(request.generator, request.seeds, request.scaffold_smarts),
+    )
 
 
 def estimated_sample_count(request: SamplingRequest) -> int:
     """How many SMILES REINVENT will try to draw (seeds times samples per seed)."""
     spec = generator_by_key(request.generator)
-    seeds = len(request.seeds) if spec.needs_seeds else 1
+    seeds = (
+        len(effective_seeds(request.generator, request.seeds, request.scaffold_smarts))
+        if spec.needs_seeds
+        else 1
+    )
     return max(0, seeds) * int(request.num_smiles)
 
 
@@ -293,14 +391,21 @@ def render_sampling_toml(
     lines = [
         'run_type = "sampling"',
         f"device = {_toml_str(request.device.strip())}",
-        "",
-        "[parameters]",
-        f"model_file = {_toml_str(_toml_path(request.model_file))}",
-        f"output_file = {_toml_str(output_file.as_posix())}",
-        f"num_smiles = {int(request.num_smiles)}",
-        f"unique_molecules = {_toml_bool(request.unique_molecules)}",
-        f"randomize_smiles = {_toml_bool(request.randomize_smiles)}",
     ]
+    if int(request.seed) > 0:
+        lines.append(f"seed = {int(request.seed)}")
+    lines.extend(
+        [
+            "",
+            "[parameters]",
+            f"model_file = {_toml_str(_toml_path(request.model_file))}",
+            f"output_file = {_toml_str(output_file.as_posix())}",
+            f"num_smiles = {int(request.num_smiles)}",
+            f"unique_molecules = {_toml_bool(request.unique_molecules)}",
+            f"randomize_smiles = {_toml_bool(request.randomize_smiles)}",
+            f"isomeric_smiles = {_toml_bool(request.isomeric_smiles)}",
+        ]
+    )
     if smiles_file is not None:
         lines.append(f"smiles_file = {_toml_str(smiles_file.as_posix())}")
     if spec.uses_sample_strategy:
@@ -316,9 +421,10 @@ def write_sampling_inputs(directory: Path, request: SamplingRequest) -> tuple[Pa
     directory.mkdir(parents=True, exist_ok=True)
     output = directory / "sampling.csv"
     smiles_path: Path | None = None
+    seeds = effective_seeds(request.generator, request.seeds, request.scaffold_smarts)
     if generator_by_key(request.generator).needs_seeds:
         smiles_path = directory / "seeds.smi"
-        payload = "\n".join(request.seeds) + "\n"
+        payload = "\n".join(seeds) + "\n"
         smiles_path.write_text(payload, encoding="utf-8", newline="\n")
     config = directory / "sampling.toml"
     config.write_text(
@@ -370,9 +476,13 @@ def outcome_from_csv(
     model = request.model_file.strip()
     records: list[tuple[str, dict[str, str]]] = []
     skipped = 0
+    missed_scaffold = 0
     for molecule in sampled:
         if not smiles_is_parseable(molecule.smiles):
             skipped += 1
+            continue
+        if not smiles_matches_scaffold(molecule.smiles, request.scaffold_smarts):
+            missed_scaffold += 1
             continue
         fields = {
             "REINVENT_NLL": molecule.nll,
@@ -387,6 +497,7 @@ def outcome_from_csv(
         parsed=len(sampled),
         skipped_invalid=skipped,
         cancelled=cancelled,
+        skipped_scaffold=missed_scaffold,
     )
 
 
@@ -466,8 +577,17 @@ def execute_sampling(
         log(f"REINVENT: {executable}")
         for line in config.read_text(encoding="utf-8").splitlines():
             log(line)
+        if (request.extra_flags or "").strip():
+            log(f"Extra flags: {request.extra_flags.strip()}")
         try:
-            return_code = _run_process(executable, config, directory, stopped, log)
+            return_code = _run_process(
+                executable,
+                config,
+                directory,
+                stopped,
+                log,
+                parse_extra_flags(request.extra_flags),
+            )
         except ReinventSamplingCancelled:
             log("Sampling stopped.")
             return outcome_from_csv(output, request, cancelled=True)
@@ -545,16 +665,86 @@ def _cell(row: list[str], index: int | None) -> str:
     return row[index].strip()
 
 
+def parse_extra_flags(text: str) -> tuple[str, ...]:
+    """Split a reinvent option line. Paths keep their backslashes.
+
+    Accepted options are the ones ``reinvent`` itself documents. A bare word,
+    or ``--version`` / ``--help``, is rejected because it would not run the config.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return ()
+    tokens = tuple(_split_flag_text(raw))
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        name, separator, _inline = token.partition("=")
+        if token in _STOP_FLAGS or name in _STOP_FLAGS:
+            raise ValueError(f"{name} stops REINVENT before the run.")
+        if name in _REPEAT_FLAGS:
+            if separator:
+                index += 1
+                continue
+            nxt = index + 1
+            if nxt >= len(tokens) or tokens[nxt].startswith("-"):
+                raise ValueError(f"{token} needs a value.")
+            index = nxt + 1
+            while index < len(tokens) and not tokens[index].startswith("-"):
+                index += 1
+            continue
+        if name in _VALUE_FLAGS:
+            if separator:
+                index += 1
+                continue
+            if index + 1 >= len(tokens) or tokens[index + 1].startswith("-"):
+                raise ValueError(f"{token} needs a value.")
+            index += 2
+            continue
+        if token.startswith("-"):
+            raise ValueError(f"REINVENT does not take {token}.")
+        raise ValueError("Extra flags are options such as --seed 1 or --log-level debug.")
+    return tokens
+
+
+def _split_flag_text(text: str) -> list[str]:
+    """Whitespace split that keeps quoted paths and does not treat ``\\`` as an escape."""
+    tokens: list[str] = []
+    buf: list[str] = []
+    quote = ""
+    for ch in text:
+        if quote:
+            if ch == quote:
+                quote = ""
+            else:
+                buf.append(ch)
+            continue
+        if ch in "\"'":
+            quote = ch
+            continue
+        if ch.isspace():
+            if buf:
+                tokens.append("".join(buf))
+                buf = []
+            continue
+        buf.append(ch)
+    if quote:
+        raise ValueError("Extra flags have an unmatched quote.")
+    if buf:
+        tokens.append("".join(buf))
+    return tokens
+
+
 def _run_process(
     executable: str,
     config: Path,
     cwd: Path,
     cancel: Callable[[], bool],
     on_log: Callable[[str], None],
+    extra_args: tuple[str, ...] = (),
 ) -> int:
     if cancel():
         raise ReinventSamplingCancelled("Sampling stopped.")
-    command = [executable, "--log-level", "info", str(config)]
+    command = [executable, "--log-level", "info", *extra_args, str(config)]
     try:
         proc = subprocess.Popen(
             command,

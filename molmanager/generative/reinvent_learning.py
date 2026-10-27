@@ -40,8 +40,13 @@ from .reinvent_sampling import (
     _toml_bool,
     _toml_path,
     _toml_str,
+    effective_seeds,
     generator_by_key,
+    parse_extra_flags,
+    scaffold_error,
+    smarts_is_parseable,
     smiles_is_parseable,
+    smiles_matches_scaffold,
     validate_seeds,
 )
 
@@ -67,6 +72,13 @@ UNWANTED_SMARTS: tuple[str, ...] = (
 )
 
 _AGGREGATIONS = frozenset({"geometric_mean", "arithmetic_mean"})
+DIVERSITY_FILTERS: tuple[tuple[str, str], ...] = (
+    ("IdenticalMurckoScaffold", "Identical Murcko scaffold"),
+    ("IdenticalTopologicalScaffold", "Identical topological scaffold"),
+    ("ScaffoldSimilarity", "Similar scaffolds"),
+    ("PenalizeSameSmiles", "Same SMILES"),
+)
+_DIVERSITY_TYPES = frozenset(key for key, _label in DIVERSITY_FILTERS)
 _SKIP_FIELDS = frozenset(
     {"smiles", "smiles_state", "agent", "prior", "target", "score", "step"}
 )
@@ -111,11 +123,23 @@ class LearningRequest:
     distance_threshold: int
     seeds: tuple[str, ...] = ()
     agent_output: str = ""
+    scaffold_smarts: str = ""
     qed_weight: float = 1.0
     mw_weight: float = 1.0
     slogp_weight: float = 1.0
     sa_weight: float = 1.0
     similarity_weight: float = 1.0
+    seed: int = 0
+    isomeric_smiles: bool = False
+    extra_flags: str = ""
+    diversity_type: str = "IdenticalMurckoScaffold"
+    diversity_bucket: int = 25
+    diversity_minscore: float = 0.4
+    diversity_minsimilarity: float = 0.4
+    diversity_penalty: float = 0.5
+    similarity_radius: int = 2
+    similarity_counts: bool = False
+    similarity_features: bool = False
 
 
 @dataclass(frozen=True)
@@ -126,6 +150,7 @@ class LearningOutcome:
     parsed: int
     skipped_invalid: int
     cancelled: bool
+    skipped_scaffold: int = 0
 
 
 def validate_request(request: LearningRequest) -> str | None:
@@ -158,13 +183,41 @@ def validate_request(request: LearningRequest) -> str | None:
         return "Choose geometric mean or arithmetic mean."
     if spec.key == "mol2mol" and request.sample_strategy not in {"multinomial", "beamsearch"}:
         return "Choose multinomial or beam search."
-    seed_error = validate_seeds(request.generator, request.seeds)
+    pattern_error = scaffold_error(request.scaffold_smarts)
+    if pattern_error:
+        return pattern_error
+    seed_error = validate_seeds(
+        request.generator,
+        effective_seeds(request.generator, request.seeds, request.scaffold_smarts),
+    )
     if seed_error:
         return seed_error
     if request.molecular_weight and float(request.mw_low) >= float(request.mw_high):
         return "Molecular weight needs a low value below the high value."
     if request.slogp and float(request.slogp_low) >= float(request.slogp_high):
         return "SlogP needs a low value below the high value."
+    if int(request.seed) < 0:
+        return "The random seed cannot be negative."
+    if request.diversity_filter:
+        if request.diversity_type not in _DIVERSITY_TYPES:
+            return "Choose a diversity filter."
+        if int(request.diversity_bucket) < 1:
+            return "The diversity bucket size must be at least 1."
+        if not 0.0 <= float(request.diversity_minscore) <= 1.0:
+            return "The diversity minimum score must be from 0 to 1."
+        if not 0.0 <= float(request.diversity_minsimilarity) <= 1.0:
+            return "The scaffold similarity cutoff must be from 0 to 1."
+        if not 0.0 <= float(request.diversity_penalty) <= 1.0:
+            return "The repeated-SMILES penalty must be from 0 to 1."
+    weight_error = _weight_error(request)
+    if weight_error:
+        return weight_error
+    if request.similarity and int(request.similarity_radius) < 1:
+        return "The fingerprint radius must be at least 1."
+    try:
+        parse_extra_flags(request.extra_flags)
+    except ValueError as exc:
+        return str(exc)
     if request.similarity and not request.similarity_smiles:
         return "Similarity needs at least one reference SMILES."
     for index, smiles in enumerate(request.similarity_smiles, start=1):
@@ -172,7 +225,7 @@ def validate_request(request: LearningRequest) -> str | None:
             return f"Reference {index} is not a SMILES RDKit could read."
     smarts = _alert_smarts(request)
     for index, pattern in enumerate(smarts, start=1):
-        if not _smarts_is_parseable(pattern):
+        if not smarts_is_parseable(pattern):
             return f"SMARTS pattern {index} is not a pattern RDKit could read ({pattern})."
     if not _has_scorer(request):
         return "Choose at least one score: QED, molecular weight, SlogP, SA score, or similarity."
@@ -200,16 +253,23 @@ def render_learning_toml(
     lines = [
         'run_type = "staged_learning"',
         f"device = {_toml_str(request.device.strip())}",
-        "",
-        "[parameters]",
-        f"prior_file = {model}",
-        f"agent_file = {model}",
-        f"summary_csv_prefix = {_toml_str(summary_prefix.as_posix())}",
-        "use_checkpoint = false",
-        "purge_memories = false",
-        f"batch_size = {int(request.batch_size)}",
-        f"randomize_smiles = {_toml_bool(request.randomize_smiles)}",
     ]
+    if int(request.seed) > 0:
+        lines.append(f"seed = {int(request.seed)}")
+    lines.extend(
+        [
+            "",
+            "[parameters]",
+            f"prior_file = {model}",
+            f"agent_file = {model}",
+            f"summary_csv_prefix = {_toml_str(summary_prefix.as_posix())}",
+            "use_checkpoint = false",
+            "purge_memories = false",
+            f"batch_size = {int(request.batch_size)}",
+            f"randomize_smiles = {_toml_bool(request.randomize_smiles)}",
+            f"isomeric_smiles = {_toml_bool(request.isomeric_smiles)}",
+        ]
+    )
     if smiles_file is not None:
         lines.append(f"smiles_file = {_toml_str(smiles_file.as_posix())}")
     if spec.key == "mol2mol":
@@ -230,9 +290,11 @@ def render_learning_toml(
         lines.extend(
             [
                 "[diversity_filter]",
-                'type = "IdenticalMurckoScaffold"',
-                "bucket_size = 25",
-                "minscore = 0.4",
+                f"type = {_toml_str(request.diversity_type)}",
+                f"bucket_size = {int(request.diversity_bucket)}",
+                f"minscore = {_toml_float(request.diversity_minscore)}",
+                f"minsimilarity = {_toml_float(request.diversity_minsimilarity)}",
+                f"penalty_multiplier = {_toml_float(request.diversity_penalty)}",
                 "",
             ]
         )
@@ -260,7 +322,8 @@ def write_learning_inputs(directory: Path, request: LearningRequest) -> tuple[Pa
     smiles_path: Path | None = None
     if generator_by_key(request.generator).needs_seeds:
         smiles_path = directory / "seeds.smi"
-        smiles_path.write_text("\n".join(request.seeds) + "\n", encoding="utf-8", newline="\n")
+        seeds = effective_seeds(request.generator, request.seeds, request.scaffold_smarts)
+        smiles_path.write_text("\n".join(seeds) + "\n", encoding="utf-8", newline="\n")
     summary = directory / "summary_1.csv"
     checkpoint = directory / "agent.chkpt"
     config = directory / "staged_learning.toml"
@@ -321,9 +384,13 @@ def outcome_from_summary(
     """Keep the highest-scoring unique molecules, up to ``request.keep``."""
     parsed, skipped = parse_learning_csv(path)
     spec = generator_by_key(request.generator)
+    missed_scaffold = 0
     best: dict[str, tuple[float, int, str, dict[str, str]]] = {}
     for record in parsed:
         smiles = _record_value(record, "smiles")
+        if not smiles_matches_scaffold(smiles, request.scaffold_smarts):
+            missed_scaffold += 1
+            continue
         key = _canonical_smiles(smiles) or smiles
         score = _as_float(_record_value(record, "score"))
         step = int(_as_float(_record_value(record, "step")))
@@ -365,6 +432,7 @@ def outcome_from_summary(
         parsed=len(parsed) + skipped,
         skipped_invalid=skipped,
         cancelled=cancelled,
+        skipped_scaffold=missed_scaffold,
     )
 
 
@@ -396,8 +464,17 @@ def execute_learning(
         log(f"REINVENT: {executable}")
         for line in config.read_text(encoding="utf-8").splitlines():
             log(line)
+        if (request.extra_flags or "").strip():
+            log(f"Extra flags: {request.extra_flags.strip()}")
         try:
-            return_code = _run_process(executable, config, directory, stopped, log)
+            return_code = _run_process(
+                executable,
+                config,
+                directory,
+                stopped,
+                log,
+                parse_extra_flags(request.extra_flags),
+            )
         except ReinventSamplingCancelled:
             log("Learning stopped.")
             _copy_agent(checkpoint, request.agent_output, log)
@@ -416,6 +493,20 @@ def execute_learning(
     finally:
         if owns_dir:
             shutil.rmtree(directory, ignore_errors=True)
+
+
+def _weight_error(request: LearningRequest) -> str | None:
+    named = (
+        (request.qed, "QED", request.qed_weight),
+        (request.molecular_weight, "molecular weight", request.mw_weight),
+        (request.slogp, "SlogP", request.slogp_weight),
+        (request.sa_score, "SA score", request.sa_weight),
+        (request.similarity, "similarity", request.similarity_weight),
+    )
+    for enabled, label, weight in named:
+        if enabled and float(weight) < 0:
+            return f"The {label} weight cannot be negative."
+    return None
 
 
 def _has_scorer(request: LearningRequest) -> bool:
@@ -494,6 +585,19 @@ def _scoring_blocks(request: LearningRequest) -> list[str]:
                 ],
             )
         )
+    scaffold = (request.scaffold_smarts or "").strip()
+    if scaffold:
+        blocks.extend(
+            _component(
+                "MatchingSubstructure",
+                "Scaffold match",
+                1.0,
+                params=[
+                    f"params.smarts = [{_toml_str(scaffold)}]",
+                    "params.use_chirality = false",
+                ],
+            )
+        )
     if request.similarity:
         endpoints: list[str] = []
         for index, smiles in enumerate(request.similarity_smiles, start=1):
@@ -503,9 +607,9 @@ def _scoring_blocks(request: LearningRequest) -> list[str]:
                     f"name = {_toml_str(f'Similarity {index}')}",
                     f"weight = {_toml_float(request.similarity_weight)}",
                     f"params.smiles = [{_toml_str(smiles)}]",
-                    "params.radius = 2",
-                    "params.use_counts = false",
-                    "params.use_features = false",
+                    f"params.radius = {int(request.similarity_radius)}",
+                    f"params.use_counts = {_toml_bool(request.similarity_counts)}",
+                    f"params.use_features = {_toml_bool(request.similarity_features)}",
                     "",
                 ]
             )
@@ -540,6 +644,7 @@ def _component(
     weight: float,
     *,
     transform: list[str] | None = None,
+    params: list[str] | None = None,
 ) -> list[str]:
     lines = [
         "[[stage.scoring.component]]",
@@ -551,6 +656,8 @@ def _component(
     ]
     if transform:
         lines.extend(transform)
+    if params:
+        lines.extend(params)
     lines.append("")
     return lines
 
@@ -608,12 +715,3 @@ def _canonical_smiles(smiles: str) -> str:
     finally:
         del blocker
 
-
-def _smarts_is_parseable(pattern: str) -> bool:
-    from rdkit import Chem, rdBase
-
-    blocker = rdBase.BlockLogs()
-    try:
-        return Chem.MolFromSmarts(pattern) is not None
-    finally:
-        del blocker

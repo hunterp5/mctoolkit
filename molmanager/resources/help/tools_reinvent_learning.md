@@ -31,6 +31,7 @@ Scores are RDKit components that ship with REINVENT: QED, molecular weight, Slog
 - **Penalize repeated scaffolds** - an identical Murcko scaffold is memorized after 25 molecules score above 0.4. Further copies are penalized.
 - **Save agent** - copy the learned checkpoint. Blank discards the agent after the molecules are added.
 - **Combine** - geometric mean or arithmetic mean of the score terms.
+- **Scaffold** - optional SMARTS. The agent is rewarded for molecules that contain it, and only those matches are appended. **Sketcher…** draws the pattern. For R-groups, a pattern with `*` is also the scaffold that gets decorated.
 - **QED**, **Molecular weight**, **SlogP**, **SA score** - each can be turned on. Weight and SlogP use a window; outside that window the term falls toward zero. SA score favors values near 2 and penalizes values of 5 and above.
 - **Similarity** - Morgan fingerprints, radius 2, against each reference. Each reference is its own term.
 - **Drop REINVENT's unwanted groups** - the published SMARTS filter. A match scores zero. **More SMARTS** adds patterns, one per line.

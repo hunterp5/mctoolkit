@@ -283,6 +283,45 @@ def test_dialog_switches_model_with_the_generator(qapp) -> None:  # noqa: ARG001
     dialog.close()
 
 
+def test_scaffold_keeps_matches_and_can_seed_libinvent(tmp_path: Path) -> None:
+    path = tmp_path / "sampling.csv"
+    path.write_text("SMILES,NLL\nc1ccccc1,1.0\nCCO,2.0\n", encoding="utf-8")
+    outcome = outcome_from_csv(
+        path,
+        _request(scaffold_smarts="c1ccccc1"),
+        cancelled=False,
+    )
+    assert [smiles for smiles, _fields in outcome.records] == ["c1ccccc1"]
+    assert outcome.skipped_scaffold == 1
+    assert validate_request(_request(scaffold_smarts="not smarts [")) is not None
+    seeded = validate_request(
+        _request(
+            generator="libinvent",
+            model_file=".libinvent",
+            sample_strategy="multinomial",
+            scaffold_smarts="*c1ccccc1",
+        )
+    )
+    assert seeded is None
+    _config, _csv = write_sampling_inputs(tmp_path / "job", _request(
+        generator="libinvent",
+        model_file=".libinvent",
+        sample_strategy="multinomial",
+        scaffold_smarts="*c1ccccc1",
+    ))
+    assert "*c1ccccc1" in (tmp_path / "job" / "seeds.smi").read_text(encoding="utf-8")
+
+
+def test_dialog_has_a_scaffold_field(qapp) -> None:  # noqa: ARG001
+    from molmanager.ui.dialogs.reinvent_sampling import ReinventSamplingDialog
+
+    dialog = ReinventSamplingDialog(None)
+    dialog.scaffold_edit.setText("c1ccccc1")
+    assert dialog.request().scaffold_smarts == "c1ccccc1"
+    assert dialog.scaffold_sketch.text() == "Sketcher…"
+    dialog.close()
+
+
 @pytest.mark.parametrize(
     ("generator", "strategy"),
     [("denovo", ""), ("libinvent", "multinomial")],

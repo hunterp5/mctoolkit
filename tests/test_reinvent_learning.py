@@ -219,6 +219,42 @@ print("learned", flush=True)
     assert (tmp_path / "work" / "staged_learning.toml").is_file()
 
 
+def test_scaffold_smarts_is_a_scoring_term_and_filters_rows(tmp_path: Path) -> None:
+    text = render_learning_toml(
+        _request(scaffold_smarts="c1ccccc1", qed=True),
+        summary_prefix=tmp_path / "summary",
+        checkpoint=tmp_path / "agent.chkpt",
+        smiles_file=None,
+    )
+    assert "[stage.scoring.component.MatchingSubstructure]" in text
+    assert 'params.smarts = ["c1ccccc1"]' in text
+    path = tmp_path / "summary_1.csv"
+    path.write_text(
+        "Agent,Prior,Target,Score,SMILES,SMILES_state,step\n"
+        "1,2,3,0.9000000,c1ccccc1,1,2\n"
+        "1,2,3,0.8000000,CCO,1,2\n",
+        encoding="utf-8",
+    )
+    outcome = outcome_from_summary(
+        path,
+        _request(scaffold_smarts="c1ccccc1", keep=10),
+        cancelled=False,
+    )
+    assert [smiles for smiles, _fields in outcome.records] == ["c1ccccc1"]
+    assert outcome.skipped_scaffold == 1
+    assert (
+        validate_request(
+            _request(
+                generator="libinvent",
+                model_file=".libinvent",
+                seeds=(),
+                scaffold_smarts="*c1ccccc1",
+            )
+        )
+        is None
+    )
+
+
 def test_write_inputs_and_dialog_defaults(qapp, tmp_path: Path) -> None:  # noqa: ARG001
     config, summary, checkpoint = write_learning_inputs(tmp_path, _request())
     text = config.read_text(encoding="utf-8")
@@ -236,6 +272,10 @@ def test_write_inputs_and_dialog_defaults(qapp, tmp_path: Path) -> None:  # noqa
     assert request.qed is True
     assert request.molecular_weight is True
     assert request.similarity is False
+    assert request.scaffold_smarts == ""
+    dialog.scaffold_edit.setText("c1ccccc1")
+    assert dialog.request().scaffold_smarts == "c1ccccc1"
+    assert dialog.scaffold_sketch.text() == "Sketcher…"
     assert dialog.seed_box.isHidden()
     assert dialog.reference_box.isHidden()
     dialog.generator_combo.setCurrentIndex(1)

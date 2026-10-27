@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Chemistry → REINVENT → Sampling. Runs a local REINVENT 4 install and appends SMILES."""
+"""Chemistry → REINVENT → Sampling. Runs a local REINVENT 4 install."""
 
 from __future__ import annotations
 
@@ -33,13 +33,17 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTextEdit,
     QVBoxLayout,
 )
 
+from ...generative.reinvent_results import open_results_table, results_status, skipped_suffix
 from ...generative.reinvent_sampling import (
     CONFIRM_SAMPLE_COUNT,
+    EXTRA_FLAGS_PLACEHOLDER,
+    EXTRA_FLAGS_TOOLTIP,
     GENERATORS,
     MISSING_REINVENT_MSG,
     ReinventSamplingCancelled,
@@ -54,6 +58,7 @@ from ...generative.reinvent_sampling import (
     validate_request,
 )
 from ..qt_widget_utils import apply_monospace_to_text_edit, boxed_form, make_window_minimizable
+from ..reinvent_sketch import fill_scaffold_from_sketcher
 from ..strings import TOOL_REINVENT_SAMPLING
 from ..threadpool_access import start_runnable_on_app_pool
 
@@ -101,22 +106,23 @@ class _SamplingWorker(QRunnable):
 
 
 class ReinventSamplingDialog(QDialog):
-    """Sample molecules with REINVENT 4 and append them to the table."""
+    """Sample molecules with REINVENT 4 and open them in a new table."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_app = parent
         self._worker: _SamplingWorker | None = None
+        self._pending_records: tuple[tuple[str, dict[str, str]], ...] = ()
         self._signals = _SamplingSignals(self)
         self._signals.log.connect(self._append_log)
         self._signals.finished.connect(self._on_finished)
         self._signals.failed.connect(self._on_failed)
         self.setWindowTitle(TOOL_REINVENT_SAMPLING)
-        self.setMinimumWidth(640)
+        self.setMinimumSize(640, 560)
 
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
         intro = QLabel(
-            "Samples molecules with a local REINVENT 4 install. "
+            "Samples molecules with a local REINVENT 4 install and opens them in a new table. "
             "Set the command under Settings → Configure → REINVENT. "
             "Prior ids such as .reinvent are files in that install's priors folder."
         )
@@ -194,6 +200,20 @@ class ReinventSamplingDialog(QDialog):
         )
         form.addRow("", self.unique_check)
         form.addRow("", self.randomize_check)
+
+        scaffold_row = QHBoxLayout()
+        self.scaffold_edit = QLineEdit()
+        self.scaffold_edit.setPlaceholderText("Optional SMARTS, such as c1ccc(*)cc1")
+        self.scaffold_edit.setToolTip(
+            "Keep molecules that contain this substructure. "
+            "For R-groups, a pattern with * is also the scaffold that gets decorated. "
+            "Sketcher draws it, including attachment points."
+        )
+        scaffold_row.addWidget(self.scaffold_edit, 1)
+        self.scaffold_sketch = QPushButton("Sketcher…")
+        self.scaffold_sketch.clicked.connect(self._sketch_scaffold)
+        scaffold_row.addWidget(self.scaffold_sketch)
+        form.addRow("Scaffold", scaffold_row)
         root.addWidget(sampling)
 
         self.seed_box = QGroupBox("Seeds")
@@ -258,6 +278,7 @@ class ReinventSamplingDialog(QDialog):
             sample_strategy=strategy,
             temperature=float(self.temperature_spin.value()),
             seeds=seeds,
+            scaffold_smarts=self.scaffold_edit.text().strip(),
         )
 
     def closeEvent(self, event) -> None:  # noqa: N802 — Qt API name
@@ -336,7 +357,7 @@ class ReinventSamplingDialog(QDialog):
         spec = GENERATORS[self.generator_combo.currentIndex()]
         seeds: tuple[str, ...] = ()
         if spec.needs_seeds:
-            gathered = self._seeds_for_run()
+            gathered = self._seeds_for_run(optional=self._scaffold_covers_seeds())
             if gathered is None:
                 return
             seeds = gathered
@@ -371,13 +392,21 @@ class ReinventSamplingDialog(QDialog):
             self._worker.cancel()
             self._append_log("Stopping…")
 
-    def _seeds_for_run(self) -> tuple[str, ...] | None:
+    def _scaffold_covers_seeds(self) -> bool:
+        text = self.scaffold_edit.text().strip()
+        spec = GENERATORS[self.generator_combo.currentIndex()]
+        return spec.key == "libinvent" and "*" in text
+
+    def _sketch_scaffold(self) -> None:
+        fill_scaffold_from_sketcher(self, self.scaffold_edit)
+
+    def _seeds_for_run(self, *, optional: bool = False) -> tuple[str, ...] | None:
         source = self.seed_source.currentData()
         if source == _SEED_PASTED:
             seeds = normalize_seed_lines(self.seed_text.toPlainText())
         else:
             seeds = tuple(self._table_seed_lines(only_selected=source == _SEED_SELECTED))
-        if seeds:
+        if seeds or optional:
             return seeds
         if source == _SEED_SELECTED:
             text = "Select one or more rows, or paste SMILES."
@@ -405,6 +434,8 @@ class ReinventSamplingDialog(QDialog):
         self.randomize_check.setEnabled(not running)
         self.seed_source.setEnabled(not running)
         self.seed_text.setEnabled(not running)
+        self.scaffold_edit.setEnabled(not running)
+        self.scaffold_sketch.setEnabled(not running)
 
     def _append_log(self, line: str) -> None:
         self.log_edit.append(line)
@@ -428,6 +459,8 @@ class ReinventSamplingDialog(QDialog):
         skipped = ""
         if outcome.skipped_invalid:
             skipped = f" Skipped {outcome.skipped_invalid} invalid SMILES."
+        if outcome.skipped_scaffold:
+            skipped += f" Skipped {outcome.skipped_scaffold} that missed the scaffold."
         if outcome.cancelled:
             message = f"Stopped. Added {added} row(s).{skipped}"
         elif added:

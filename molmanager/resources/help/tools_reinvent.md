@@ -29,6 +29,7 @@ De novo sampling needs no table rows. The other generators need seeds from the s
 - **Unique molecules** - drop duplicate canonical SMILES.
 - **Randomize seed SMILES** - shuffle atom order in the seeds before sampling.
 - **Seeds** - selected rows, all rows, or pasted SMILES (one per line). LibInvent scaffolds need an attachment point (`*`). LinkInvent lines look like `fragment|fragment`, and each fragment needs `*`. A cell that already contains `|` or `*` is sent as written.
+- **Scaffold** - optional SMARTS. Only molecules that contain it are appended. **Sketcher…** draws the pattern, including `*` attachment points. For R-groups, a pattern that contains `*` is also used as the scaffold to decorate, so the seed list can stay empty.
 
 ## Workflow
 

@@ -57,6 +57,7 @@ from ...generative.reinvent_sampling import (
     table_seed_lines,
 )
 from ..qt_widget_utils import apply_monospace_to_text_edit, boxed_form, make_window_minimizable
+from ..reinvent_sketch import fill_scaffold_from_sketcher
 from ..strings import TOOL_REINVENT_LEARNING
 from ..threadpool_access import start_runnable_on_app_pool
 
@@ -279,6 +280,20 @@ class ReinventLearningDialog(QDialog):
         )
         score_form.addRow("Combine", self.aggregation_combo)
 
+        scaffold_row = QHBoxLayout()
+        self.scaffold_edit = QLineEdit()
+        self.scaffold_edit.setPlaceholderText("Optional SMARTS, such as c1ccc(*)cc1")
+        self.scaffold_edit.setToolTip(
+            "Bias the agent toward molecules that contain this substructure, "
+            "and only append those matches. For R-groups, a pattern with * is also "
+            "the scaffold that gets decorated. Sketcher draws it."
+        )
+        scaffold_row.addWidget(self.scaffold_edit, 1)
+        self.scaffold_sketch = QPushButton("Sketcher…")
+        self.scaffold_sketch.clicked.connect(self._sketch_scaffold)
+        scaffold_row.addWidget(self.scaffold_sketch)
+        score_form.addRow("Scaffold", scaffold_row)
+
         self.qed_check = QCheckBox("QED")
         self.qed_check.setChecked(True)
         self.qed_check.setToolTip(
@@ -445,6 +460,7 @@ class ReinventLearningDialog(QDialog):
             distance_threshold=int(self.distance_spin.value()),
             seeds=seeds,
             agent_output=self.agent_edit.text().strip(),
+            scaffold_smarts=self.scaffold_edit.text().strip(),
         )
 
     def closeEvent(self, event) -> None:  # noqa: N802 — Qt API name
@@ -545,7 +561,12 @@ class ReinventLearningDialog(QDialog):
         spec = GENERATORS[self.generator_combo.currentIndex()]
         seeds: tuple[str, ...] = ()
         if spec.needs_seeds:
-            gathered = self._lines_for_run(self.seed_source, self.seed_text, "seed")
+            gathered = self._lines_for_run(
+                self.seed_source,
+                self.seed_text,
+                "seed",
+                optional=self._scaffold_covers_seeds(),
+            )
             if gathered is None:
                 return
             seeds = gathered
@@ -590,18 +611,28 @@ class ReinventLearningDialog(QDialog):
             self._worker.cancel()
             self._append_log("Stopping…")
 
+    def _scaffold_covers_seeds(self) -> bool:
+        text = self.scaffold_edit.text().strip()
+        spec = GENERATORS[self.generator_combo.currentIndex()]
+        return spec.key == "libinvent" and "*" in text
+
+    def _sketch_scaffold(self) -> None:
+        fill_scaffold_from_sketcher(self, self.scaffold_edit)
+
     def _lines_for_run(
         self,
         source: QComboBox,
         editor: QTextEdit,
         kind: str,
+        *,
+        optional: bool = False,
     ) -> tuple[str, ...] | None:
         which = source.currentData()
         if which == _SEED_PASTED:
             lines = normalize_seed_lines(editor.toPlainText())
         else:
             lines = tuple(table_seed_lines(self.parent_app, only_selected=which == _SEED_SELECTED))
-        if lines:
+        if lines or optional:
             return lines
         if which == _SEED_SELECTED:
             text = f"Select one or more rows, or paste a {kind} SMILES."
@@ -649,6 +680,8 @@ class ReinventLearningDialog(QDialog):
             self.alerts_check,
             self.smarts_text,
             self.keep_spin,
+            self.scaffold_edit,
+            self.scaffold_sketch,
         ):
             widget.setEnabled(not running)
 
@@ -674,6 +707,8 @@ class ReinventLearningDialog(QDialog):
         skipped = ""
         if outcome.skipped_invalid:
             skipped = f" Skipped {outcome.skipped_invalid} invalid SMILES."
+        if outcome.skipped_scaffold:
+            skipped += f" Skipped {outcome.skipped_scaffold} that missed the scaffold."
         if outcome.cancelled:
             message = f"Stopped. Added {added} row(s).{skipped}"
         elif added:
