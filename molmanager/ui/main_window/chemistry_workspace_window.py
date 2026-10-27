@@ -173,15 +173,14 @@ class _FilterCardsScrollArea(QScrollArea):
 class ChemistryWorkspaceWindow(
     QMainWindow,
     AppLifecycleMixin,
-    AppMenuMixin,
     TableUIMixin,
-    IngestExportMixin,
-    PlotToolsMixin,
 ):
     """Main window facade: table workspace, tools, and kernel-backed collaborators.
 
-    Remaining ``*_mixin`` bases are file-splits of this window, not reusable mixins.
-    Do not add more bases — new tools go on ``WorkspaceTools`` plus a window forward.
+    ``AppLifecycleMixin`` stays a base because Qt delivers ``closeEvent`` through
+    this class. ``TableUIMixin`` stays because the table, filters, and row lists
+    are one inheritance chain, not a leaf tool. Everything else is a
+    ``WorkspaceTools`` host plus a window forward. Do not add more bases.
     True multi-class mixins live on filter-card chrome and protein source pickers.
 
     Each row stores **one explicit structure** (connectivity + stereo as encoded). Isomerism scope
@@ -597,6 +596,7 @@ class ChemistryWorkspaceWindow(
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_table_menu)
         self.table.doubleClicked.connect(self._on_table_double_clicked)
+        self.table.structure_depict_resized.connect(self.commit_structure_depict_resize)
         self.table.set_row_selection_controller(
             TableRowSelectionController(
                 self.table, self.selection_store, oids_for_view_rows=self._oids_for_view_rows
@@ -825,6 +825,9 @@ install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.predict", (Pr
 install_window_forwards(
     ChemistryWorkspaceWindow, "workspace_tools.gui_settings", (GuiSettingsMixin,)
 )
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.menus", (AppMenuMixin,))
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.ingest", (IngestExportMixin,))
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.plots", (PlotToolsMixin,))
 install_window_forwards(
     ChemistryWorkspaceWindow,
     "workspace_tools.structure_prep",

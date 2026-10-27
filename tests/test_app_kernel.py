@@ -65,14 +65,11 @@ from molmanager.ui.tool_dialog_scope import ToolScopeHost
 _ALLOWED_WINDOW_MIXIN_BASES = frozenset(
     {
         AppLifecycleMixin,
-        AppMenuMixin,
         FilterApplyMixin,
         FilterBoundsMixin,
         FilterCardsMixin,
         FilterPanelMixin,
         FilterSubstructureMixin,
-        IngestExportMixin,
-        PlotToolsMixin,
         RowListsMixin,
         TableEditMixin,
         TableFindReplaceMixin,
@@ -133,6 +130,61 @@ def test_bind_mixin_methods_uses_kernel_as_self() -> None:
     collab = type("C", (), {})()
     bind_mixin_methods(collab, Host(), _Mixin)
     assert collab.greet("x") == "Hi x"
+
+
+def test_install_window_forwards_delegates_properties() -> None:
+    class Collab:
+        def __init__(self) -> None:
+            self.stored = 1
+
+        @property
+        def value(self) -> int:
+            return self.stored
+
+        @value.setter
+        def value(self, number: int) -> None:
+            self.stored = number
+
+    class Window:
+        def __init__(self) -> None:
+            self.tools = Collab()
+
+    class _Src:
+        @property
+        def value(self) -> int:
+            raise AssertionError("mixin body unused")
+
+        @value.setter
+        def value(self, number: int) -> None:
+            raise AssertionError("mixin body unused")
+
+    install_window_forwards(Window, "tools", (_Src,))
+    window = Window()
+    assert window.value == 1
+    window.value = 4
+    assert window.tools.stored == 4
+
+
+def test_lazy_mixin_host_property_writes_the_kernel() -> None:
+    from molmanager.ui.workspace_tools import _LazyMixinHost
+
+    class _Src:
+        @property
+        def value(self) -> int:
+            return self.stored
+
+        @value.setter
+        def value(self, number: int) -> None:
+            self.stored = number
+
+    class _Kernel:
+        stored = 0
+
+    kernel = _Kernel()
+    host = _LazyMixinHost(kernel, lambda: _Src)
+    host.value = 4
+    assert host.value == 4
+    assert kernel.stored == 4
 
 
 def test_install_window_forwards_delegates_to_collaborator() -> None:
@@ -223,6 +275,9 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
         SqlLoadMixin,
         TableCalcMixin,
         ViewerOpenersMixin,
+        AppMenuMixin,
+        IngestExportMixin,
+        PlotToolsMixin,
     )
     for cls in off_mro:
         assert cls not in mro
@@ -241,6 +296,9 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
     assert hasattr(w, "open_pubchem")
     assert hasattr(w, "load_from_sql")
     assert hasattr(w, "_init_gui_settings")
+    assert hasattr(w, "init_menubar")
+    assert hasattr(w, "load_file")
+    assert w.plot_dock is w.plot_dock
     assert hasattr(w, "_open_dimension_reduction_dialog")
     assert hasattr(w, "run_protonate")
     assert hasattr(w, "run_fast_prepare")

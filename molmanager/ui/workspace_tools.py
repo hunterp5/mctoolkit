@@ -37,10 +37,26 @@ from .reinvent_tools import ReinventTools
 class _LazyMixinHost:
     """Bind one or more mixin classes onto the kernel the first time they are needed."""
 
+    _HOST_ATTRS = frozenset({"_app", "_import_mixin", "_bound"})
+
     def __init__(self, app: AppKernel, import_mixin) -> None:
         self._app = app
         self._import_mixin = import_mixin
         self._bound: Any = None
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Property setters on the bound mixin (plot dock state) must reach the
+        # adapter. Names of this host stay here so init does not bind early.
+        if name in self._HOST_ATTRS:
+            object.__setattr__(self, name, value)
+            return
+        setattr(self._ensure(), name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name in self._HOST_ATTRS:
+            object.__delattr__(self, name)
+            return
+        delattr(self._ensure(), name)
 
     def _ensure(self) -> Any:
         if self._bound is None:
@@ -166,6 +182,16 @@ class WorkspaceTools:
         )
         self.gui_settings = _LazyMixinHost(
             app, lambda: _load("molmanager.ui.gui_settings_mixin", "GuiSettingsMixin")
+        )
+        self.menus = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.app_menu_mixin", "AppMenuMixin")
+        )
+        self.ingest = _LazyMixinHost(
+            app,
+            lambda: _load("molmanager.ui.main_window.ingest_export_mixin", "IngestExportMixin"),
+        )
+        self.plots = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.plot_tools_mixin", "PlotToolsMixin")
         )
 
 

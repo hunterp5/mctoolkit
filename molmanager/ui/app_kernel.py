@@ -137,7 +137,9 @@ def install_window_forwards(
 ) -> None:
     """Put one-line facade methods on *window_cls* that delegate to ``self.<attr>``.
 
-    *attr* may be dotted (``workspace_tools.cluster``).
+    *attr* may be dotted (``workspace_tools.cluster``). Properties delegate get
+    and set the same way, so a mixin can leave the base list without dropping
+    ``plot_dock``.
     """
     skipped = frozenset(skip)
     for cls in mixin_classes:
@@ -148,6 +150,9 @@ def install_window_forwards(
                 continue
             if isinstance(obj, staticmethod):
                 setattr(window_cls, name, staticmethod(obj.__func__))
+                continue
+            if isinstance(obj, property):
+                setattr(window_cls, name, _delegating_property(window_cls, attr, name, obj))
                 continue
             if not isinstance(obj, types.FunctionType):
                 continue
@@ -162,3 +167,28 @@ def install_window_forwards(
                 return fwd
 
             setattr(window_cls, name, _make())
+
+
+def _delegating_property(window_cls: type, attr: str, name: str, prop: property) -> property:
+    """Property on the window that reads and writes ``self.<attr>.<name>``."""
+
+    def fget(self: Any) -> Any:
+        return getattr(_collaborator(self, attr), name)
+
+    def fset(self: Any, value: Any) -> None:
+        setattr(_collaborator(self, attr), name, value)
+
+    def fdel(self: Any) -> None:
+        delattr(_collaborator(self, attr), name)
+
+    forwarded = property(
+        fget if prop.fget else None,
+        fset if prop.fset else None,
+        fdel if prop.fdel else None,
+        prop.__doc__,
+    )
+    getter = forwarded.fget
+    if getter is not None:
+        getter.__name__ = name
+        getter.__qualname__ = f"{window_cls.__name__}.{name}"
+    return forwarded
