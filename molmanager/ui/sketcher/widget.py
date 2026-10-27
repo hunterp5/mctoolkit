@@ -58,7 +58,7 @@ from .bonds import (
     _bond_unpack,
     sanitize_sketch_stereo_bonds,
 )
-from .contracted_labels import contracted_max_bonds, parse_edit_atom_input
+from .contracted_labels import parse_edit_atom_input
 from .iupac_rings import (
     exterior_ring_substituent_direction,
     fusion_ring_offsets_for_bond,
@@ -85,6 +85,14 @@ from .sketch_reactions import (
     join_reaction_string,
     plus_sign_positions,
     snap_arrow_end,
+)
+from .valence import (
+    default_valence,
+    max_bond_order_sum,
+    max_bond_order_sum_for_node,
+    max_valence,
+    target_valence_for_implicit_h,
+    valence_list_for_element,
 )
 from .rgroups import is_rgroup_node, rgroup_element, rgroup_label_from_element
 from .wildcards import (
@@ -659,39 +667,10 @@ class SketchWidget(QWidget):
         return len(self.connected_components())
 
     def _max_bond_order_sum(self, element: str, fc: int) -> int:
-        """
-        Allowed sum of bond orders to neighboring heavy atoms before implicit H.
-        Charge-aware so e.g. N+, O-, quaternary ammonium do not spuriously trip validation.
-        """
-        if fc == 1:
-            if element == "N":
-                return 4
-            if element == "O":
-                return 3
-            if element in ("S", "P"):
-                return 5
-        if fc == -1:
-            if element == "O":
-                return 1
-            if element == "N":
-                return 2
-        base = self._max_valence(element)
-        if fc > 0:
-            return max(1, base - fc)
-        if fc < 0:
-            return max(1, base + fc)
-        return base
+        return max_bond_order_sum(element, fc)
 
     def _max_bond_order_sum_for_node(self, n: dict[str, Any], fc: int) -> int:
-        ab_cap = contracted_max_bonds(n.get("abbrev"))
-        if ab_cap is not None:
-            return int(ab_cap)
-        if is_rgroup_node(n):
-            return 1
-        if _is_wildcard_node(n):
-            els = _normalize_wildcard_elements(n)
-            return max(self._max_bond_order_sum(el, fc) for el in els)
-        return self._max_bond_order_sum(n["element"], fc)
+        return max_bond_order_sum_for_node(n, fc)
 
     def sketch_has_wildcards(self) -> bool:
         return any(_is_wildcard_node(n) for n in self.nodes)
@@ -1030,112 +1009,16 @@ class SketchWidget(QWidget):
 
     # ---------- Valence checks ----------
     def _valence_list_for_element(self, element: str) -> list[int]:
-        """RDKit allowed valences for *element* (ascending), or empty if unknown."""
-        if rgroup_label_from_element(element) is not None:
-            return []
-        if element in ("H", "D", "T"):
-            return [1]
-        try:
-            pt = Chem.GetPeriodicTable()
-            an = pt.GetAtomicNumber(element)
-            if an <= 0:
-                return []
-            return sorted({int(v) for v in pt.GetValenceList(an) if int(v) > 0})
-        except Exception:
-            return []
+        return valence_list_for_element(element)
 
     def _default_valence(self, element: str) -> int:
-        """Common / lowest preferred valence (e.g. S=2), not the hypervalent maximum."""
-        if rgroup_label_from_element(element) is not None:
-            return 0
-        if element in ("H", "D", "T"):
-            return 1
-        try:
-            pt = Chem.GetPeriodicTable()
-            an = pt.GetAtomicNumber(element)
-            if an > 0:
-                dv = pt.GetDefaultValence(an)
-                if dv > 0:
-                    return int(dv)
-        except Exception:
-            pass
-        vlist = self._valence_list_for_element(element)
-        if vlist:
-            return min(vlist)
-        if element in ("Na", "K", "Rb", "Cs", "Li"):
-            return 1
-        if element in ("Mg", "Ca", "Sr", "Ba"):
-            return 2
-        if element in ("Zn", "Cd", "Hg", "Cu", "Ag", "Au", "Ni", "Pd", "Pt", "Co"):
-            return 4
-        return 4
+        return default_valence(element)
 
     def _max_valence(self, element: str) -> int:
-        """
-        Maximum allowed sum of incident bond orders (validation ceiling).
-
-        Uses RDKit's valence-list high end so sulfonamides / sulfones (S=6) and
-        phosphates (P=5/7) are legal. Do **not** use this for implicit-H counts —
-        see ``_target_valence_for_implicit_h``.
-        """
-        if rgroup_label_from_element(element) is not None:
-            return 1
-        if element in ("H", "D", "T"):
-            return 1
-        vlist = self._valence_list_for_element(element)
-        if vlist:
-            return max(vlist)
-        try:
-            pt = Chem.GetPeriodicTable()
-            an = pt.GetAtomicNumber(element)
-            if an > 0:
-                dv = pt.GetDefaultValence(an)
-                if dv > 0:
-                    return int(dv)
-        except Exception:
-            pass
-        if element in ("Na", "K", "Rb", "Cs", "Li"):
-            return 1
-        if element in ("Mg", "Ca", "Sr", "Ba"):
-            return 2
-        if element in ("Zn", "Cd", "Hg", "Cu", "Ag", "Au", "Ni", "Pd", "Pt", "Co"):
-            return 4
-        if element in ("P", "As"):
-            return 5
-        if element in ("S", "Se", "Te"):
-            return 6
-        return 8
+        return max_valence(element)
 
     def _target_valence_for_implicit_h(self, element: str, bond_sum: int, fc: int) -> int:
-        """
-        Valence used to estimate implicit H / condensed labels / lone pairs.
-
-        Chooses the smallest allowed valence ≥ current bond-order sum so divalent
-        sulfur (disulfides, thioethers) stays at 2 (not SH₄), while S with two
-        S=O doubles targets 6.
-        """
-        need = max(0, int(bond_sum))
-        if fc != 0 and element in ("N", "O", "S", "P"):
-            # Prefer the same charge-aware caps used for validation when specialized.
-            if fc == 1 and element in ("N", "O", "S", "P"):
-                return max(need, self._max_bond_order_sum(element, fc))
-            if fc == -1 and element in ("O", "N"):
-                return max(need, self._max_bond_order_sum(element, fc))
-        vlist = self._valence_list_for_element(element)
-        if not vlist:
-            base = self._default_valence(element)
-            if fc > 0:
-                return max(need, base - fc)
-            if fc < 0:
-                return max(need, base - fc)
-            return max(need, base)
-        candidates = [v for v in vlist if v >= need]
-        target = min(candidates) if candidates else max(vlist)
-        if fc > 0:
-            return max(need, target - fc)
-        if fc < 0:
-            return max(need, target - fc)
-        return target
+        return target_valence_for_implicit_h(element, bond_sum, fc)
 
     def _heavy_neighbor_count(self, node_id: int) -> int:
         n = 0
