@@ -62,11 +62,7 @@ from molmanager.ui.main_window.viewer_openers_mixin import ViewerOpenersMixin
 from molmanager.ui.tool_dialog_scope import ToolScopeHost
 
 # Frozen allowlist: adding a ChemistryWorkspaceWindow mixin base must fail this set.
-_ALLOWED_WINDOW_MIXIN_BASES = frozenset(
-    {
-        AppLifecycleMixin,
-    }
-)
+_ALLOWED_WINDOW_MIXIN_BASES = frozenset()
 
 
 # One role growing without bound would just be the kernel again under a new name.
@@ -278,6 +274,7 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
         FilterBoundsMixin,
         FilterPanelMixin,
         TableUIMixin,
+        AppLifecycleMixin,
     )
     for cls in off_mro:
         assert cls not in mro
@@ -306,6 +303,7 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
     assert hasattr(w, "apply_filters")
     assert hasattr(w, "calculate_global_bounds")
     assert hasattr(w, "clear_all")
+    assert hasattr(w, "_mark_session_dirty")
     assert hasattr(w, "_cancel_substructure_filter_job")
     assert w._search_col_combo is not None
     assert w.plot_dock is w.plot_dock

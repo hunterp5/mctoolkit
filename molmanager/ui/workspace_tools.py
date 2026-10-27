@@ -229,6 +229,9 @@ class WorkspaceTools:
         self.table_ui = _LazyMixinHost(
             app, lambda: _load("molmanager.ui.main_window.table_ui_mixin", "TableUIMixin")
         )
+        self.lifecycle = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.app_lifecycle_mixin", "AppLifecycleMixin")
+        )
 
 
 def _load(module: str, name: str):
