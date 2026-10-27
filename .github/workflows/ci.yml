@@ -68,7 +68,14 @@ jobs:
           sudo chmod 1777 /tmp/cores
           sudo sysctl -w kernel.core_pattern=/tmp/cores/core.%e.%p
 
+      # ulimit is a bash builtin. The Windows runner uses PowerShell, so a shared
+      # script failed there before pytest started and the suite never ran.
       - name: Run tests
+        if: runner.os != 'Linux'
+        run: python -m pytest tests/ -v --tb=short
+
+      - name: Run tests (Linux)
+        if: runner.os == 'Linux'
         run: |
           ulimit -c unlimited
           python -m pytest tests/ -v --tb=short
