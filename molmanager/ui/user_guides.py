@@ -373,13 +373,13 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_reinvent",
                 "REINVENT Sampling",
                 "REINVENT Sampling",
-                "Sample molecules with a local REINVENT 4 install and open them in a new table.",
+                "Sample molecules with a local REINVENT 4 install and open them in a browser.",
             ),
             _e(
                 "tools_reinvent_learning",
                 "REINVENT Learning",
                 "REINVENT Learning",
-                "Train a REINVENT 4 agent for one stage. Results open in a new table.",
+                "Train a REINVENT 4 agent for one stage. Results open in a browser.",
             ),
             _e(
                 "tools_activity_cliff",

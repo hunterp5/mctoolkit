@@ -1,6 +1,6 @@
 # REINVENT Sampling
 
-REINVENT Sampling draws molecules with a local **REINVENT 4** install and opens them in a new table.
+REINVENT Sampling draws molecules with a local **REINVENT 4** install and opens them in a results browser.
 
 REINVENT Sampling proposes structures from a fixed model. To optimize that model against scores, use REINVENT Learning. Transfer learning stays on the REINVENT command line.
 
@@ -32,7 +32,7 @@ De novo sampling needs no table rows. The other generators need seeds from the s
 - **Keep stereochemistry in SMILES** - write isomeric SMILES. Off is REINVENT's default.
 - **Extra flags** - more `reinvent` options, such as `--log-level debug` or `--log-filename`. `--device` and `--seed` here override the fields above.
 - **Seeds** - selected rows, all rows, or pasted SMILES (one per line). LibInvent scaffolds need an attachment point (`*`). LinkInvent lines look like `fragment|fragment`, and each fragment needs `*`. A cell that already contains `|` or `*` is sent as written.
-- **Scaffold** - optional SMARTS. Only molecules that contain it are opened. **Sketcher…** draws the pattern, including `*` attachment points. For R-groups, a pattern that contains `*` is also used as the scaffold to decorate, so the seed list can stay empty.
+- **Scaffold** - optional SMARTS. Only molecules that contain it are shown. **Sketcher…** draws the pattern, including `*` attachment points. For R-groups, a pattern that contains `*` is also used as the scaffold to decorate, so the seed list can stay empty.
 
 ## Workflow
 
@@ -40,7 +40,7 @@ De novo sampling needs no table rows. The other generators need seeds from the s
 2. Open **Chemistry → REINVENT → Sampling**.
 3. Pick the generator and model. For anything except de novo, choose seeds.
 4. Click **Sample** and leave the dialog open. Output is written in the log. **Stop** ends the process.
-5. Valid SMILES open in a new MolManager table with **REINVENT_NLL**, **REINVENT_Generator**, **REINVENT_Model**, and **REINVENT_Seed** when a seed was reported. This table is unchanged until you click **Add to this table**.
+5. Valid SMILES open in the REINVENT browser with **REINVENT_NLL**, **REINVENT_Generator**, **REINVENT_Model**, and **REINVENT_Seed** when a seed was reported. **Add to table** copies the ones you want into this table.
 
 ## Use cases
 
@@ -51,4 +51,4 @@ De novo sampling needs no table rows. The other generators need seeds from the s
 
 ## Tips and limits
 
-The priors are files next to the REINVENT install (`priors\reinvent.prior` and the LibInvent, LinkInvent, and Mol2Mol files). Public copies are on Zenodo (doi:10.5281/zenodo.15641296). CPU sampling is slower than a GPU. A run that would draw more than 20,000 SMILES asks before it starts. SMILES RDKit cannot read are counted in the log and are not opened. Closing the dialog stops the run. This does not train a model or call REINVENT's scoring plugins. Reinforcement learning is Chemistry → REINVENT → Learning.
+The priors are files next to the REINVENT install (`priors\reinvent.prior` and the LibInvent, LinkInvent, and Mol2Mol files). Public copies are on Zenodo (doi:10.5281/zenodo.15641296). CPU sampling is slower than a GPU. A run that would draw more than 20,000 SMILES asks before it starts. SMILES RDKit cannot read are counted in the log and are not shown. Closing the dialog stops the run. This does not train a model or call REINVENT's scoring plugins. Reinforcement learning is Chemistry → REINVENT → Learning.

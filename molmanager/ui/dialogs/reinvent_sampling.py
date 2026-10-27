@@ -40,7 +40,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from ...generative.reinvent_results import open_results_table, results_status, skipped_suffix
+from ...generative.reinvent_results import results_status, skipped_suffix
+from ..browsers.reinvent_browser import open_reinvent_browser
 from ...generative.reinvent_sampling import (
     CONFIRM_SAMPLE_COUNT,
     EXTRA_FLAGS_PLACEHOLDER,
@@ -107,13 +108,12 @@ class _SamplingWorker(QRunnable):
 
 
 class ReinventSamplingDialog(QDialog):
-    """Sample molecules with REINVENT 4 and open them in a new table."""
+    """Sample molecules with REINVENT 4 and open them in the results browser."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_app = parent
         self._worker: _SamplingWorker | None = None
-        self._pending_records: tuple[tuple[str, dict[str, str]], ...] = ()
         self._signals = _SamplingSignals(self)
         self._signals.log.connect(self._append_log)
         self._signals.finished.connect(self._on_finished)
@@ -122,13 +122,6 @@ class ReinventSamplingDialog(QDialog):
         self.setMinimumSize(640, 560)
 
         outer = QVBoxLayout(self)
-        intro = QLabel(
-            "Samples molecules with a local REINVENT 4 install and opens them in a new table. "
-            "Set the command under Settings → Configure → REINVENT. "
-            "Prior ids such as .reinvent are files in that install's priors folder."
-        )
-        intro.setWordWrap(True)
-        outer.addWidget(intro)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         body = QWidget()
@@ -271,15 +264,10 @@ class ReinventSamplingDialog(QDialog):
         self.stop_button = QPushButton("Stop")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self._on_stop)
-        self.add_button = QPushButton("Add to this table")
-        self.add_button.setEnabled(False)
-        self.add_button.setToolTip("Append the molecules from the last run to this table.")
-        self.add_button.clicked.connect(self._add_pending)
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.close)
         buttons.addWidget(self.sample_button)
         buttons.addWidget(self.stop_button)
-        buttons.addWidget(self.add_button)
         buttons.addStretch(1)
         buttons.addWidget(close_button)
         outer.addLayout(buttons)
@@ -413,8 +401,6 @@ class ReinventSamplingDialog(QDialog):
             QMessageBox.warning(self, TOOL_REINVENT_SAMPLING, MISSING_REINVENT_MSG)
             return
         self.log_edit.clear()
-        self._pending_records = ()
-        self.add_button.setEnabled(False)
         self._set_running(True)
         worker = _SamplingWorker(executable, request, self._signals)
         self._worker = worker
@@ -474,8 +460,6 @@ class ReinventSamplingDialog(QDialog):
         self.seed_text.setEnabled(not running)
         self.scaffold_edit.setEnabled(not running)
         self.scaffold_sketch.setEnabled(not running)
-        if running:
-            self.add_button.setEnabled(False)
 
     def _append_log(self, line: str) -> None:
         self.log_edit.append(line)
@@ -483,52 +467,27 @@ class ReinventSamplingDialog(QDialog):
     def _on_finished(self, outcome: SamplingOutcome) -> None:
         self._worker = None
         self._set_running(False)
-        self._pending_records = tuple(outcome.records)
-        self.add_button.setEnabled(bool(self._pending_records))
         skipped = skipped_suffix(
             invalid=outcome.skipped_invalid,
             scaffold=outcome.skipped_scaffold,
         )
-        open_error = ""
         if outcome.records:
-            try:
-                path = open_results_table(outcome.records, stem="REINVENT sampling")
-                self._append_log(str(path))
-            except OSError as exc:
-                open_error = str(exc)
+            open_reinvent_browser(
+                self.parent_app,
+                outcome.records,
+                title=TOOL_REINVENT_SAMPLING,
+            )
         message = results_status(
             count=len(outcome.records),
             cancelled=outcome.cancelled,
             skipped=skipped,
-            open_error=open_error,
         )
         self._append_log(message)
         app = self.parent_app
         if app is not None and hasattr(app, "status_label"):
             app.status_label.setText(f"{TOOL_REINVENT_SAMPLING}: {message}")
-        if open_error:
-            QMessageBox.warning(self, TOOL_REINVENT_SAMPLING, message)
-        elif not outcome.cancelled and not outcome.records:
+        if not outcome.cancelled and not outcome.records:
             QMessageBox.information(self, TOOL_REINVENT_SAMPLING, message)
-
-    def _add_pending(self) -> None:
-        records = self._pending_records
-        app = self.parent_app
-        if not records or app is None or not hasattr(app, "add_rows_from_external_records_batch"):
-            QMessageBox.information(
-                self,
-                TOOL_REINVENT_SAMPLING,
-                "There are no molecules from the last run to add.",
-            )
-            return
-        added = int(
-            app.add_rows_from_external_records_batch(list(records), render_structures=True)
-        )
-        self.add_button.setEnabled(False)
-        message = f"Added {added} row(s) to this table."
-        self._append_log(message)
-        if hasattr(app, "status_label"):
-            app.status_label.setText(f"{TOOL_REINVENT_SAMPLING}: {message}")
 
     def _on_failed(self, message: str) -> None:
         self._worker = None

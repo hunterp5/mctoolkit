@@ -568,7 +568,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 tooltip=(
                     "Sample molecules with a local REINVENT 4 install "
                     "(de novo, R-groups, linkers, or similar molecules) "
-                    "and open them in a new table."
+                    "and open them in a results browser."
                 ),
             ),
             action(
@@ -576,7 +576,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "open_reinvent_learning",
                 tooltip=(
                     "Run one REINVENT 4 reinforcement-learning stage against RDKit scores "
-                    "and open the best molecules in a new table."
+                    "and open the best molecules in a results browser."
                 ),
             ),
             tooltips_visible=True,

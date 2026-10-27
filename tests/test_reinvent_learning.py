@@ -294,7 +294,6 @@ def test_write_inputs_and_dialog_defaults(qapp, tmp_path: Path) -> None:  # noqa
     assert request.qed_weight == 1.0
     assert request.seed == 0
     assert request.extra_flags == ""
-    assert dialog.add_button.isEnabled() is False
     dialog.diversity_type.setCurrentIndex(dialog.diversity_type.findData("PenalizeSameSmiles"))
     assert dialog.diversity_bucket.isHidden()
     assert not dialog.diversity_penalty.isHidden()

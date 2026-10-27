@@ -321,7 +321,6 @@ def test_dialog_has_a_scaffold_field(qapp) -> None:  # noqa: ARG001
     assert dialog.request().scaffold_smarts == "c1ccccc1"
     assert dialog.request().seed == 0
     assert dialog.request().extra_flags == ""
-    assert dialog.add_button.isEnabled() is False
     assert dialog.scaffold_sketch.text() == "Sketcher…"
     dialog.seed_spin.setValue(9)
     dialog.isomeric_check.setChecked(True)
@@ -385,27 +384,43 @@ pathlib.Path(match.group(1)).write_text("SMILES,NLL\\nCCO,1.0\\n", encoding="utf
     assert argv[-1].endswith("sampling.toml")
 
 
-def test_results_open_in_a_new_table(monkeypatch) -> None:
-    from rdkit import Chem
-
-    from molmanager.generative import reinvent_results as results
-
-    launched: list[list[str]] = []
-
-    def fake_popen(command, **_kwargs):
-        launched.append(list(command))
-        return object()
-
-    monkeypatch.setattr(results.subprocess, "Popen", fake_popen)
-    path = results.open_results_table(
-        (("CCO", {"REINVENT_NLL": "1.5"}), ("not-a-mol", {"REINVENT_NLL": "9"})),
-        stem="REINVENT sampling",
+def test_reinvent_browser_lists_rows_and_adds_them(qapp) -> None:  # noqa: ARG001
+    from molmanager.generative.reinvent_results import results_status
+    from molmanager.ui.browsers.reinvent_browser import (
+        ReinventBrowserWidget,
+        add_reinvent_records_to_table,
     )
-    mols = [mol for mol in Chem.SDMolSupplier(str(path), removeHs=False) if mol is not None]
-    assert len(mols) == 1
-    assert mols[0].GetProp("REINVENT_NLL") == "1.5"
-    assert launched[0][1:4] == ["-m", "molmanager", "--open"]
-    assert launched[0][4] == str(path)
-    assert results.results_status(count=1, cancelled=False, skipped="") == (
-        "Opened 1 molecule in a new table."
+
+    widget = ReinventBrowserWidget(None)
+    widget.set_records([("CCO", {"REINVENT_NLL": "1.5"})], title="REINVENT Sampling")
+    assert widget._window_title == "REINVENT Sampling Browser"
+    assert widget._table.rowCount() == 1
+    assert widget._table.item(0, 1).text() == "CCO"
+    assert widget._table.item(0, 2).text() == "1.5"
+    widget.close()
+
+    class _App:
+        def __init__(self) -> None:
+            self.rows: list = []
+
+        def existing_canonical_structure_keys(self) -> set[str]:
+            return set()
+
+        def canonical_structure_key_from_smiles(self, smiles: str) -> str:
+            return smiles
+
+        def add_rows_from_external_records_batch(self, batch, render_structures=True) -> int:
+            self.rows.extend(batch)
+            return len(batch)
+
+    app = _App()
+    added, skipped = add_reinvent_records_to_table(
+        app,
+        (("CCO", {"REINVENT_NLL": "1.5"}), ("CCO", {"REINVENT_NLL": "2"})),
+        unique_only=True,
+    )
+    assert (added, skipped) == (1, 1)
+    assert app.rows[0][0] == "CCO"
+    assert results_status(count=1, cancelled=False, skipped="") == (
+        "Opened 1 molecule in the REINVENT browser."
     )
