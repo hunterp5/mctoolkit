@@ -62,6 +62,7 @@ from rdkit import Chem
 from rdkit.Chem import Draw
 
 from ...predictions.aizynthfinder_run import leaf_stock_counts, sort_routes
+from ..dialogs.ord_search import OrdSearchDialog
 from ...table.structure_image import molecule_pixmap
 from ..qt_widget_utils import make_window_minimizable, make_window_resizable
 from ..strings import TOOL_RETROSYNTHESIS
@@ -1107,7 +1108,25 @@ class _StepBranch(QWidget):
         smiles = str(getattr(self._button, "reaction_smiles", "") or "")
         search.setEnabled(bool(ord_conditions_url(smiles)))
         if menu.exec_(global_pos) is search:
-            open_ord_conditions(smiles)
+            self._open_ord_search(smiles)
+
+    def _open_ord_search(self, smiles: str) -> None:
+        query = _ord_reaction_query(smiles)
+        if not query:
+            return
+        dialog = OrdSearchDialog(query, parent=self._route_owner())
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _route_owner(self):
+        parent = self.parentWidget()
+        while parent is not None:
+            owner = getattr(parent, "_route_dialog", None)
+            if owner is not None:
+                return owner
+            parent = parent.parentWidget()
+        return self.window()
 
     def _select(self) -> None:
         parent = self.parentWidget()

@@ -773,6 +773,7 @@ def test_step_button_searches_open_reaction_database(qapp, monkeypatch) -> None:
     from PyQt5.QtWidgets import QApplication, QMenu, QPushButton
 
     import molmanager.ui.browsers.route_browser as route_browser
+    from molmanager.ui.dialogs.ord_search import OrdSearchDialog
 
     url = route_browser.ord_conditions_url("[CH3:1][OH:2]>>[CH3:1][O:2][CH3]")
     decoded = unquote(url)
@@ -780,14 +781,6 @@ def test_step_button_searches_open_reaction_database(qapp, monkeypatch) -> None:
     assert "reaction_smarts=CO>>COC" in decoded
     assert ":1" not in decoded
     assert route_browser.ord_conditions_url("not a reaction") == ""
-
-    opened: list[str] = []
-
-    def _open(target) -> bool:
-        opened.append(target.toString())
-        return True
-
-    monkeypatch.setattr(route_browser.QDesktopServices, "openUrl", _open)
 
     class _ImmediateMenu(QMenu):
         def exec_(self, *_args, **_kwargs):  # noqa: N802
@@ -838,9 +831,12 @@ def test_step_button_searches_open_reaction_database(qapp, monkeypatch) -> None:
             button.mapToGlobal(QPoint(4, 4)),
         ),
     )
+    opened = dialog.findChildren(OrdSearchDialog)
     assert len(opened) == 1
-    assert unquote(opened[0]).startswith("https://open-reaction-database.org/search?")
-    assert "CC.O>>CCO" in unquote(opened[0])
+    assert opened[0].reaction.toPlainText() == "CC.O>>CCO"
+    assert opened[0].chirality.isChecked() is False
+    assert opened[0].limit.value() == 100
+    opened[0].close()
     dialog.close()
 
 
