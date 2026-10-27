@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Choose one bioisostere product for the atoms selected on the sketch."""
+"""Choose a bioisostere product for the atoms selected on the sketch."""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ from PyQt5.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
 )
 
@@ -32,7 +34,7 @@ from ...chem.bioisosteres import CATEGORY_LABELS, Bioisostere
 
 
 class BioisostereReplacementDialog(QDialog):
-    """Lists transforms that touch the selection, then the product of the chosen one."""
+    """Classes collapse to their replacements. Selecting a class lists every product."""
 
     def __init__(
         self,
@@ -42,12 +44,13 @@ class BioisostereReplacementDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Bioisosteric Replacement")
         self.setModal(True)
-        self._options = options
 
         root = QVBoxLayout(self)
         root.addWidget(QLabel("Replacement"))
-        self._transforms = QListWidget(self)
-        self._transforms.currentRowChanged.connect(self._show_products)
+        self._transforms = QTreeWidget(self)
+        self._transforms.setHeaderHidden(True)
+        self._transforms.setRootIsDecorated(True)
+        self._transforms.currentItemChanged.connect(self._show_products)
         root.addWidget(self._transforms, 1)
 
         root.addWidget(QLabel("Product"))
@@ -61,22 +64,69 @@ class BioisostereReplacementDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
-        for row, products in options:
-            category = CATEGORY_LABELS.get(row.category, row.category)
-            item = QListWidgetItem(f"{category} — {row.name}")
-            item.setToolTip(row.summary)
-            item.setData(Qt.UserRole, products)
-            self._transforms.addItem(item)
-        if self._transforms.count():
-            self._transforms.setCurrentRow(0)
-        self.resize(520, 420)
+        self._fill_classes(options)
+        if self._transforms.topLevelItemCount():
+            self._transforms.setCurrentItem(self._transforms.topLevelItem(0))
+        self.resize(520, 480)
 
-    def _show_products(self, row: int) -> None:
+    def _fill_classes(
+        self,
+        options: tuple[tuple[Bioisostere, tuple[str, ...]], ...],
+    ) -> None:
+        grouped: dict[str, list[tuple[Bioisostere, tuple[str, ...]]]] = {
+            key: [] for key in CATEGORY_LABELS
+        }
+        for row, products in options:
+            grouped.setdefault(row.category, []).append((row, products))
+        order = list(CATEGORY_LABELS)
+        for key in grouped:
+            if key not in order:
+                order.append(key)
+        for key in order:
+            rows = grouped.get(key) or []
+            if not rows:
+                continue
+            label = CATEGORY_LABELS.get(key, key)
+            noun = "replacement" if len(rows) == 1 else "replacements"
+            parent = QTreeWidgetItem([f"{label} ({len(rows)} {noun})"])
+            parent.setToolTip(0, "Every replacement in this class that matches the selection.")
+            parent.setFlags(parent.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            for row, products in rows:
+                child = QTreeWidgetItem([row.name])
+                child.setToolTip(0, row.summary)
+                child.setData(0, Qt.UserRole, products)
+                parent.addChild(child)
+            parent.setExpanded(False)
+            self._transforms.addTopLevelItem(parent)
+
+    def _show_products(self, current: QTreeWidgetItem | None, _previous=None) -> None:
         self._products.clear()
-        item = self._transforms.item(row)
-        products = () if item is None else item.data(Qt.UserRole) or ()
-        for smiles in products:
-            self._products.addItem(QListWidgetItem(str(smiles)))
+        if current is None:
+            return
+        if current.parent() is None:
+            sources = [current.child(index) for index in range(current.childCount())]
+            show_name = True
+        else:
+            sources = [current]
+            show_name = False
+        seen: dict[str, list[str]] = {}
+        order: list[str] = []
+        for source in sources:
+            name = source.text(0)
+            for smiles in _stored_smiles(source):
+                if smiles in seen:
+                    if name not in seen[smiles]:
+                        seen[smiles].append(name)
+                    continue
+                seen[smiles] = [name]
+                order.append(smiles)
+        for smiles in order:
+            names = seen[smiles]
+            text = f"{', '.join(names)} — {smiles}" if show_name else smiles
+            item = QListWidgetItem(text)
+            item.setData(Qt.UserRole, smiles)
+            item.setToolTip(smiles)
+            self._products.addItem(item)
         if self._products.count():
             self._products.setCurrentRow(0)
 
@@ -84,4 +134,14 @@ class BioisostereReplacementDialog(QDialog):
         item = self._products.currentItem()
         if item is None:
             return ""
-        return item.text().strip()
+        stored = item.data(Qt.UserRole)
+        if isinstance(stored, str) and stored.strip():
+            return stored.strip()
+        return ""
+
+
+def _stored_smiles(item: QTreeWidgetItem) -> tuple[str, ...]:
+    raw = item.data(0, Qt.UserRole)
+    if not raw:
+        return ()
+    return tuple(str(smiles) for smiles in raw if str(smiles).strip())

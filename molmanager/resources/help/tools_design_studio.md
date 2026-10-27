@@ -17,7 +17,7 @@ The strip reads the molecule on the canvas. SAR Matrix can send a row's structur
 ## Options
 
 - **Canvas** — the sketcher. **Edit → Clear Sketch** empties the drawing. **View → Fit structure to window** scales it to the canvas, and **Original size** restores the size it had when it was opened. Ring templates show the heavy atoms they place. **File → Add to Table** asks, then adds new rows, as in the standalone sketcher.
-- **Chemistry → Bioisosteric Replacement** — select one or more atoms, then choose a replacement that matches that selection. The rest of the sketch stays.
+- **Chemistry → Bioisosteric Replacement** — select one or more atoms. Replacements that match are grouped by class. The class is collapsed; open it to pick one replacement. Selecting the class lists every product from that class. The rest of the sketch stays.
 - **Suggestions** — **Update** reads the last MMP run and the table's R-group columns. Click a row to put that analog on the canvas. MMP rows with a small structural change and a large activity shift are marked **activity cliff**, with a SALI value, so the median is not treated as a smooth trend. R-group rows are one-substituent swaps, scored as the reference activity plus the difference in substituent means. Each row also shows the druglike MPO.
 - **Accept** — add the sketch to the table, if it is not already there, and to the **Design queue** list.
 - **Add to table** — append the current sketch as a new row without adding it to the list.

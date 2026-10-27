@@ -91,6 +91,43 @@ def test_two_transforms_keep_their_own_keys() -> None:
     assert ("acid_to_hydroxamic", "CC(=O)NO") in pairs
 
 
+def test_replacement_dialog_groups_classes(qapp) -> None:
+    from molmanager.ui.sketcher.bioisostere_dialog import BioisostereReplacementDialog
+
+    acid = get_bioisostere("acid_to_tetrazole")
+    hydroxamic = get_bioisostere("acid_to_hydroxamic")
+    fluoro = get_bioisostere("aryl_h_to_f")
+    dialog = BioisostereReplacementDialog(
+        (
+            (acid, ("Cc1nn[nH]n1",)),
+            (hydroxamic, ("CC(=O)NO", "Cc1nn[nH]n1")),
+            (fluoro, ("Fc1ccccc1",)),
+        )
+    )
+    tree = dialog._transforms
+    assert tree.topLevelItemCount() == 2
+    aromatic = tree.topLevelItem(0)
+    acids = tree.topLevelItem(1)
+    assert aromatic.text(0).startswith("Aromatic hydrogen")
+    assert acids.text(0).startswith("Carboxylic acid")
+    assert aromatic.childCount() == 1
+    assert acids.childCount() == 2
+    assert not acids.isExpanded()
+
+    tree.setCurrentItem(acids)
+    assert dialog._products.count() == 2
+    labels = [dialog._products.item(index).text() for index in range(dialog._products.count())]
+    assert labels[0].startswith("Carboxylic acid to tetrazole")
+    assert "CC(=O)NO" in labels[1]
+    assert dialog.chosen_smiles() == "Cc1nn[nH]n1"
+
+    tree.setCurrentItem(acids.child(1))
+    assert dialog._products.count() == 2
+    assert dialog._products.item(0).text() == "CC(=O)NO"
+    assert dialog.chosen_smiles() == "CC(=O)NO"
+    dialog.close()
+
+
 def test_unknown_key_raises() -> None:
     try:
         get_bioisostere("not_a_transform")
