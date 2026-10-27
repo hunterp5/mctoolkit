@@ -451,3 +451,109 @@ def test_design_studio_has_original_size_clear_and_ring_pictures(qapp):
         dialog._force_close = True
         dialog.close()
         qapp.processEvents()
+
+
+def test_design_list_collects_suggestions_and_bioisosteres(qapp):
+    from types import SimpleNamespace
+
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QLabel
+
+    from molmanager.ui.design_studio_panel import DesignStudioPanel
+
+    pair = MmpPair(
+        oid_a=1,
+        oid_b=2,
+        smiles_a="Cc1ccccc1",
+        smiles_b="Clc1ccccc1",
+        activity_a=5.0,
+        activity_b=6.5,
+        delta_activity=1.5,
+        transform="C[*:1]>>Cl[*:1]",
+        core="c1ccc([*:1])cc1",
+        sidechain_a="C[*:1]",
+        sidechain_b="Cl[*:1]",
+    )
+    sent: list[str] = []
+    app = SimpleNamespace(
+        _mmp_last_pairs=[pair],
+        mols={1: Chem.MolFromSmiles("CCO")},
+        status_label=QLabel(),
+    )
+    panel = DesignStudioPanel(app)
+    panel._strip._start_or_coalesce_ionization = lambda *_args, **_kwargs: None
+    panel._sketcher._append_molecules_from_smiles_parts = (
+        lambda parts: sent.extend(parts) or len(parts)
+    )
+    try:
+        assert panel._design_list._add_btn.text() == "Add suggestions"
+        assert panel._design_list._send_btn.text() == "Send to table"
+        assert panel.load_molecule(Chem.MolFromSmiles("Cc1ccccc1"))
+        panel._design_list.add_bioisosteres([("Carboxylic acid to tetrazole", "CC(=O)O")])
+        panel._design_list.add_suggestions()
+        labels = _design_labels(panel)
+        assert any(label.startswith("Bioisostere") for label in labels)
+        assert any(label.startswith("Suggestion") for label in labels)
+        count = panel._design_list._list.count()
+        panel._design_list.add_suggestions()
+        assert panel._design_list._list.count() == count
+        assert "already on the design list" in panel._status.currentMessage()
+
+        _select_where(panel, lambda item: item.text().startswith("Suggestion"))
+        panel._design_list.send_selected()
+        assert sent == ["Clc1ccccc1"]
+
+        sent.clear()
+        panel._design_list.add_bioisosteres([("Known", "CCO")])
+        ethanol = Chem.MolToSmiles(Chem.MolFromSmiles("CCO"))
+        _select_where(panel, lambda item: item.data(Qt.UserRole) == ethanol)
+        panel._design_list.send_selected()
+        assert sent == []
+        assert "already in the table" in panel._status.currentMessage()
+    finally:
+        panel.shutdown()
+        panel.close()
+        qapp.processEvents()
+
+
+def test_bioisostere_replacement_adds_to_the_design_list(qapp, monkeypatch):
+    from PyQt5.QtWidgets import QDialog
+
+    from molmanager.chem.bioisosteres import get_bioisostere
+    from molmanager.ui.design_studio_panel import DesignStudioPanel
+    from molmanager.ui.sketcher.bioisostere_dialog import BioisostereReplacementDialog
+
+    acid = get_bioisostere("acid_to_tetrazole")
+    monkeypatch.setattr(
+        "molmanager.chem.bioisosteres.matching_bioisosteres",
+        lambda _mol, _atom_indices: ((acid, ("Cc1nn[nH]n1",)),),
+    )
+    monkeypatch.setattr(BioisostereReplacementDialog, "exec_", lambda _self: QDialog.Accepted)
+    panel = DesignStudioPanel(None)
+    panel._strip._start_or_coalesce_ionization = lambda *_args, **_kwargs: None
+    try:
+        assert panel.load_molecule(Chem.MolFromSmiles("CC(=O)O"))
+        before = panel.current_smiles()
+        canvas = panel._sketcher.canvas
+        canvas.selected_nodes = [int(node["id"]) for node in canvas.nodes]
+        panel._sketcher._open_bioisostere_replacement()
+        assert panel.current_smiles() == before
+        assert any("tetrazole" in label for label in _design_labels(panel))
+        assert panel._status.currentMessage() == "Added 1 bioisostere to the design list."
+    finally:
+        panel.shutdown()
+        panel.close()
+        qapp.processEvents()
+
+
+def _design_labels(panel) -> list[str]:
+    widget = panel._design_list._list
+    return [widget.item(index).text() for index in range(widget.count())]
+
+
+def _select_where(panel, predicate) -> None:
+    widget = panel._design_list._list
+    widget.clearSelection()
+    for index in range(widget.count()):
+        item = widget.item(index)
+        item.setSelected(bool(predicate(item)))
