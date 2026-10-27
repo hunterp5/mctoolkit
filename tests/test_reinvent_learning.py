@@ -288,4 +288,53 @@ def test_write_inputs_and_dialog_defaults(qapp, tmp_path: Path) -> None:  # noqa
     assert not dialog.temperature_spin.isHidden()
     dialog.similarity_check.setChecked(True)
     assert not dialog.reference_box.isHidden()
+    request = dialog.request()
+    assert request.diversity_type == "IdenticalMurckoScaffold"
+    assert request.diversity_bucket == 25
+    assert request.qed_weight == 1.0
+    assert request.seed == 0
+    assert request.extra_flags == ""
+    assert dialog.add_button.isEnabled() is False
+    dialog.diversity_type.setCurrentIndex(dialog.diversity_type.findData("PenalizeSameSmiles"))
+    assert dialog.diversity_bucket.isHidden()
+    assert not dialog.diversity_penalty.isHidden()
+    dialog.qed_weight_spin.setValue(2.5)
+    dialog.extra_flags_edit.setText("--seed 4")
+    assert dialog.request().qed_weight == 2.5
+    assert dialog.request().extra_flags == "--seed 4"
     dialog.close()
+
+
+def test_optional_learning_fields_reach_the_toml(tmp_path: Path) -> None:
+    text = render_learning_toml(
+        _request(
+            qed=False,
+            molecular_weight=False,
+            unwanted_groups=False,
+            similarity=True,
+            similarity_smiles=("CCO",),
+            similarity_weight=2.5,
+            similarity_radius=3,
+            similarity_counts=True,
+            diversity_type="ScaffoldSimilarity",
+            diversity_bucket=10,
+            diversity_minscore=0.2,
+            diversity_minsimilarity=0.6,
+            seed=4,
+            isomeric_smiles=True,
+        ),
+        summary_prefix=tmp_path / "summary",
+        checkpoint=tmp_path / "agent.chkpt",
+        smiles_file=None,
+    )
+    assert 'type = "ScaffoldSimilarity"' in text
+    assert "bucket_size = 10" in text
+    assert "minscore = 0.2" in text
+    assert "minsimilarity = 0.6" in text
+    assert "weight = 2.5" in text
+    assert "params.radius = 3" in text
+    assert "params.use_counts = true" in text
+    assert "seed = 4" in text
+    assert "isomeric_smiles = true" in text
+    assert validate_request(_request(extra_flags="rm -rf")) is not None
+    assert validate_request(_request(qed_weight=-1)) is not None

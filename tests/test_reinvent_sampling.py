@@ -29,6 +29,7 @@ from molmanager.generative.reinvent_sampling import (
     execute_sampling,
     normalize_seed_lines,
     outcome_from_csv,
+    parse_extra_flags,
     parse_sampling_csv,
     render_sampling_toml,
     seed_text_for_row,
@@ -318,7 +319,17 @@ def test_dialog_has_a_scaffold_field(qapp) -> None:  # noqa: ARG001
     dialog = ReinventSamplingDialog(None)
     dialog.scaffold_edit.setText("c1ccccc1")
     assert dialog.request().scaffold_smarts == "c1ccccc1"
+    assert dialog.request().seed == 0
+    assert dialog.request().extra_flags == ""
+    assert dialog.add_button.isEnabled() is False
     assert dialog.scaffold_sketch.text() == "Sketcher…"
+    dialog.seed_spin.setValue(9)
+    dialog.isomeric_check.setChecked(True)
+    dialog.extra_flags_edit.setText("--log-level debug")
+    request = dialog.request()
+    assert request.seed == 9
+    assert request.isomeric_smiles is True
+    assert request.extra_flags == "--log-level debug"
     dialog.close()
 
 
@@ -331,4 +342,70 @@ def test_validate_request_accepts_a_ready_job(generator: str, strategy: str) -> 
     assert (
         validate_request(_request(generator=generator, sample_strategy=strategy, seeds=seeds))
         is None
+    )
+
+
+def test_optional_sampling_fields_and_extra_flags(tmp_path: Path) -> None:
+    text = render_sampling_toml(
+        _request(seed=3, isomeric_smiles=True),
+        output_file=tmp_path / "sampling.csv",
+        smiles_file=None,
+    )
+    assert "seed = 3" in text
+    assert "isomeric_smiles = true" in text
+    flags = parse_extra_flags('--seed 7 --log-filename "C:\\temp\\reinvent.log"')
+    assert flags == ("--seed", "7", "--log-filename", "C:\\temp\\reinvent.log")
+    assert parse_extra_flags("") == ()
+    assert validate_request(_request(extra_flags="--not-a-flag")) is not None
+    assert validate_request(_request(extra_flags="--seed")) is not None
+    assert validate_request(_request(seed=-1)) is not None
+
+
+def test_extra_flags_reach_the_command(tmp_path: Path) -> None:
+    argv_path = tmp_path / "argv.txt"
+    body = f"""
+import pathlib
+import re
+import sys
+
+pathlib.Path({str(argv_path)!r}).write_text("\\n".join(sys.argv), encoding="utf-8")
+text = pathlib.Path(sys.argv[-1]).read_text(encoding="utf-8")
+match = re.search(r'output_file = "([^"]+)"', text)
+pathlib.Path(match.group(1)).write_text("SMILES,NLL\\nCCO,1.0\\n", encoding="utf-8")
+"""
+    outcome = execute_sampling(
+        str(_fake_reinvent(tmp_path, body)),
+        _request(extra_flags="--log-level debug"),
+        work_dir=tmp_path / "work",
+    )
+    argv = argv_path.read_text(encoding="utf-8").splitlines()
+    assert outcome.records[0][0] == "CCO"
+    assert "--log-level" in argv
+    assert "debug" in argv
+    assert argv[-1].endswith("sampling.toml")
+
+
+def test_results_open_in_a_new_table(monkeypatch) -> None:
+    from rdkit import Chem
+
+    from molmanager.generative import reinvent_results as results
+
+    launched: list[list[str]] = []
+
+    def fake_popen(command, **_kwargs):
+        launched.append(list(command))
+        return object()
+
+    monkeypatch.setattr(results.subprocess, "Popen", fake_popen)
+    path = results.open_results_table(
+        (("CCO", {"REINVENT_NLL": "1.5"}), ("not-a-mol", {"REINVENT_NLL": "9"})),
+        stem="REINVENT sampling",
+    )
+    mols = [mol for mol in Chem.SDMolSupplier(str(path), removeHs=False) if mol is not None]
+    assert len(mols) == 1
+    assert mols[0].GetProp("REINVENT_NLL") == "1.5"
+    assert launched[0][1:4] == ["-m", "molmanager", "--open"]
+    assert launched[0][4] == str(path)
+    assert results.results_status(count=1, cancelled=False, skipped="") == (
+        "Opened 1 molecule in a new table."
     )
