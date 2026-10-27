@@ -46,6 +46,7 @@ from ..platform_support.qt_webengine_flags import (
     refuse_remote_viewer_script,
     webengine_views_supported,
 )
+from .app_kernel import bind_mixin_methods, install_window_forwards
 from .dockable_plot import (
     PLOT_BODY_MARGINS,
     PLOT_BODY_SPACING,
@@ -97,10 +98,11 @@ def _multi_conf_block_count(blocks_json_b64: str | None) -> int:
     return len(blocks) if isinstance(blocks, list) else 0
 
 
-class Molecule3DViewerWidget(Mol3DConfMixin, Mol3DChromeMixin, QWidget):
+class Molecule3DViewerWidget(Mol3DChromeMixin, QWidget):
     """Interactive 3Dmol structure viewer; float or dock beside the compound table.
 
-    ``Mol3DConfMixin`` / ``Mol3DChromeMixin`` are a file-split of this widget.
+    Conformer navigation is forwarded. Chrome stays a base because ``event``
+    calls ``super()`` to reach ``QWidget``.
     """
 
     dockable_in_workspace = True
@@ -122,6 +124,7 @@ class Molecule3DViewerWidget(Mol3DConfMixin, Mol3DChromeMixin, QWidget):
         source_oid: int | None = None,
     ):
         super().__init__(None)
+        self._conf = _bind_3d_conf(self)
         self.parent_app = parent_app
         self._window_title = window_title
         self._flat = bool(flat)
@@ -549,3 +552,13 @@ class Molecule3DViewerWidget(Mol3DConfMixin, Mol3DChromeMixin, QWidget):
         if first:
             self._web_did_initial_zoom = True
         self._refit_standalone_viewer(web, zoom=first)
+
+
+def _bind_3d_conf(widget: Molecule3DViewerWidget):
+    """Bind conformer-table methods so ``self`` stays the viewer widget."""
+    host = type("Mol3DConfAdapter", (), {})()
+    bind_mixin_methods(host, widget, Mol3DConfMixin)
+    return host
+
+
+install_window_forwards(Molecule3DViewerWidget, "_conf", (Mol3DConfMixin,))
