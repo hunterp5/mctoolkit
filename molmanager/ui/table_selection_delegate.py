@@ -87,6 +87,10 @@ class RowHighlightDelegate(QStyledItemDelegate):
             self._pixmap_delegate = delg
         return delg
 
+    def depiction_delegates(self) -> list:
+        """Structure painters used for pixmap columns (created on first use)."""
+        return [self._pixmap_style_delegate()]
+
     def paint(self, painter, option, index) -> None:  # noqa: N802
         if self._cell_has_pixmap(index):
             self._pixmap_style_delegate().paint(painter, option, index)

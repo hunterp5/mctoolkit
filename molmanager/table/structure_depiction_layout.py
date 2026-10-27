@@ -87,6 +87,51 @@ def structure_column_minimum_width(*, zoomed: bool = False) -> int:
     return int(depict_w) + int(STRUCTURE_COLUMN_HORIZONTAL_PADDING)
 
 
+def structure_depict_size_for_corner_drag(
+    origin_width: int,
+    origin_height: int,
+    content_width: int,
+    delta_x: int,
+    delta_y: int,
+) -> tuple[int, int]:
+    """Depiction size after dragging a structure column's bottom-right corner.
+
+    *content_width* is the picture width in that column (a reaction scheme is wider
+    than one molecule). Horizontal motion scales the shared depiction size so that
+    picture's right edge follows the pointer. Vertical motion changes height by
+    *delta_y* pixels. Both axes are clamped to the depiction limits.
+    """
+    span = max(1, int(content_width))
+    grown = int(origin_width) * (span + int(delta_x)) / span
+    width = _clamp_structure_width(int(round(grown)))
+    height = _clamp_structure_height(int(origin_height) + int(delta_y))
+    return width, height
+
+
+def structure_column_width_for_depict_scale(
+    origin_column_width: int,
+    origin_content_width: int,
+    origin_depict_width: int,
+    new_depict_width: int,
+) -> int:
+    """Column width that keeps user slack while the depiction scales.
+
+    Slack is space beyond the picture and the usual horizontal padding. A column
+    that was already only as wide as its picture changes by the same amount as
+    the picture.
+    """
+    origin_depict = max(1, int(origin_depict_width))
+    scale = int(new_depict_width) / origin_depict
+    content = max(1, int(round(int(origin_content_width) * scale)))
+    slack = max(
+        0,
+        int(origin_column_width)
+        - int(origin_content_width)
+        - int(STRUCTURE_COLUMN_HORIZONTAL_PADDING),
+    )
+    return content + int(STRUCTURE_COLUMN_HORIZONTAL_PADDING) + slack
+
+
 def reaction_depict_size(*, zoomed: bool = False) -> tuple[int, int]:
     """PNG size for a reaction scheme: same height as molecules, wider canvas."""
     scale = 2 if zoomed else 1

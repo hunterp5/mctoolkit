@@ -70,6 +70,10 @@ class StructureLayoutMixin:
         if persist:
             self.rerender_structure_column_for_new_size()
 
+    def commit_structure_depict_resize(self, width: int, height: int) -> None:
+        """Save a depiction size chosen by dragging a structure column corner, and redraw."""
+        self.apply_structure_depict_size(int(width), int(height), persist=True)
+
     def rerender_structure_column_for_new_size(self) -> None:
         """Re-draw Structure cells after depiction size changed in Settings.
 
