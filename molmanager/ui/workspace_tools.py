@@ -193,6 +193,9 @@ class WorkspaceTools:
         self.plots = _LazyMixinHost(
             app, lambda: _load("molmanager.ui.main_window.plot_tools_mixin", "PlotToolsMixin")
         )
+        self.row_lists = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.row_lists_mixin", "RowListsMixin")
+        )
 
 
 def _load(module: str, name: str):

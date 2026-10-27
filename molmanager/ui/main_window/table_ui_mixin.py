@@ -42,7 +42,6 @@ from ...chem.molecule_conversion import (
 from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
 
 from ..filters import FilterPanelMixin
-from .row_lists_mixin import RowListsMixin
 from .table_edit_mixin import TableEditMixin
 from .table_find_replace_mixin import TableFindReplaceMixin
 from .table_menu_mixin import TableMenuMixin
@@ -56,7 +55,6 @@ class TableUIMixin(
     TableMenuMixin,
     TableSearchMixin,
     TableFindReplaceMixin,
-    RowListsMixin,
     FilterPanelMixin,
 ):
     def _open_column_color_dialog(self, col: int) -> None:

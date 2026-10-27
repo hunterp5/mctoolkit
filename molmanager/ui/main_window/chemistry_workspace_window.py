@@ -116,8 +116,9 @@ from .predict_tools_mixin import PredictToolsMixin
 from .protonate_tools_mixin import ProtonateToolsMixin
 from .qsar_mixin import QsarMixin
 from .reaction_tools_mixin import ReactionToolsMixin
-from .render_2d_mixin import Render2DMixin
 from .render2d_results_mixin import Render2DResultsMixin
+from .render_2d_mixin import Render2DMixin
+from .row_lists_mixin import RowListsMixin
 from .sali_mixin import SaliMixin
 from .session_plots_mixin import SessionPlotsMixin
 from .session_restore_mixin import SessionRestoreMixin
@@ -178,9 +179,9 @@ class ChemistryWorkspaceWindow(
     """Main window facade: table workspace, tools, and kernel-backed collaborators.
 
     ``AppLifecycleMixin`` stays a base because Qt delivers ``closeEvent`` through
-    this class. ``TableUIMixin`` stays because the table, filters, and row lists
-    are one inheritance chain, not a leaf tool. Everything else is a
-    ``WorkspaceTools`` host plus a window forward. Do not add more bases.
+    this class. ``TableUIMixin`` stays because edit, search, find and replace,
+    and the filter mixins are one inheritance chain. Row lists and the other
+    tools are ``WorkspaceTools`` hosts plus a window forward. Do not add more bases.
     True multi-class mixins live on filter-card chrome and protein source pickers.
 
     Each row stores **one explicit structure** (connectivity + stereo as encoded). Isomerism scope
@@ -828,6 +829,7 @@ install_window_forwards(
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.menus", (AppMenuMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.ingest", (IngestExportMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.plots", (PlotToolsMixin,))
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.row_lists", (RowListsMixin,))
 install_window_forwards(
     ChemistryWorkspaceWindow,
     "workspace_tools.structure_prep",
