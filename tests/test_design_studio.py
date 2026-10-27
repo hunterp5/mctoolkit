@@ -418,6 +418,7 @@ def test_design_studio_has_original_size_clear_and_ring_pictures(qapp):
         assert "Original size" in _menu_labels(sketcher, "View")
         assert "Fit structure to window" in _menu_labels(sketcher, "View")
         assert sketcher.tb_structure_status.parent() is panel._status
+        assert sketcher.tb_structure_status.isVisible()
         assert not sketcher._status_bar.isVisible()
         assert panel._status.height() == sketcher._status_bar.height()
         assert not panel._status.isSizeGripEnabled()

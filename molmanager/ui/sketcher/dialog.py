@@ -1714,7 +1714,8 @@ class SketcherDialog(QDialog):
         menu = QMenu("Chemistry", bar)
         action = QAction("Bioisosteric Replacement…", self)
         action.setToolTip(
-            "Replace the selected atoms with one bioisostere. The rest of the sketch is kept."
+            "Add bioisosteric replacements of the selected atoms to the design list. "
+            "A class lists every match in that class."
         )
         action.triggered.connect(self._open_bioisostere_replacement)
         menu.addAction(action)
@@ -1725,7 +1726,7 @@ class SketcherDialog(QDialog):
             bar.addMenu(menu)
 
     def _open_bioisostere_replacement(self) -> None:
-        """Apply one bioisostere to the atoms selected on the canvas."""
+        """Add bioisosteres of the selected atoms to the design list."""
         selected = self.canvas._atoms_for_selection_move()
         if not selected:
             QMessageBox.information(
@@ -1771,12 +1772,21 @@ class SketcherDialog(QDialog):
         dialog = BioisostereReplacementDialog(options, self)
         if dialog.exec_() != QDialog.Accepted:
             return
-        smiles = dialog.chosen_smiles()
-        product = Chem.MolFromSmiles(smiles) if smiles else None
-        if product is None:
+        products = dialog.designs_to_add()
+        if not products:
+            self.show_sketch_status("Choose a replacement to add.")
             return
-        self.load_structure_from_mol(product, confirm_if_nonempty=False)
-        self.show_sketch_status("Replaced the selection with a bioisostere.")
+        design_list = getattr(self, "_design_list", None)
+        add = getattr(design_list, "add_bioisosteres", None)
+        if not callable(add):
+            self.show_sketch_status("This window has no design list.")
+            return
+        added = add(products)
+        if added:
+            noun = "bioisostere" if added == 1 else "bioisosteres"
+            self.show_sketch_status(f"Added {added} {noun} to the design list.")
+            return
+        self.show_sketch_status("Those bioisosteres are already on the design list.")
 
     def _open_physical_properties(self) -> None:
         """Open (or raise) the modeless Physical Properties window."""
@@ -1899,6 +1909,8 @@ class SketcherDialog(QDialog):
         _apply_status_bar_metrics(bar)
         bar.setSizeGripEnabled(False)
         bar.addPermanentWidget(self.tb_structure_status)
+        # Leaving the sketcher status bar hides this button. The new bar does not show it again.
+        self.tb_structure_status.show()
 
     def set_embedded(self, embedded: bool) -> None:
         """Host this dialog inside another widget. Escape no longer closes it.
