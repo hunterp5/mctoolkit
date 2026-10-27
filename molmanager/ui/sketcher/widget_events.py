@@ -33,7 +33,11 @@ from .wildcards import _is_wildcard_node
 
 
 class SketchWidgetEventsMixin:
-    """Qt event handlers: pointer, keys, undo/redo shortcuts (mixed into ``SketchWidget``)."""
+    """Qt event handlers forwarded onto ``SketchWidget``.
+
+    Unhandled input calls ``QWidget`` directly. ``super()`` would look up the
+    host that binds these methods, not the sketch widget.
+    """
 
     def _release_marquee_mouse_grab_if_any(self) -> None:
         if QWidget.mouseGrabber() is self:
@@ -380,7 +384,7 @@ class SketchWidgetEventsMixin:
 
     def mouseDoubleClickEvent(self, ev):
         if ev.button() != Qt.LeftButton:
-            return super().mouseDoubleClickEvent(ev)
+            return QWidget.mouseDoubleClickEvent(self, ev)
         pt = self._widget_point_to_model(ev.pos())
         if self._hit_reaction_arrow(pt) and self._hit_node(pt) is None:
             self._open_reaction_text_dialog()
@@ -389,9 +393,9 @@ class SketchWidgetEventsMixin:
         hit = self._hit_node(pt)
         bi, _bd = self._hit_bond(pt)
         if hit is None and bi is None:
-            return super().mouseDoubleClickEvent(ev)
+            return QWidget.mouseDoubleClickEvent(self, ev)
         if not self.nodes:
-            return super().mouseDoubleClickEvent(ev)
+            return QWidget.mouseDoubleClickEvent(self, ev)
         seed: int | None = None
         if hit is not None:
             seed = hit["id"]
@@ -399,14 +403,14 @@ class SketchWidgetEventsMixin:
             a, b, _, __ = _bond_unpack(self.bonds[bi])
             seed = a
         if seed is None:
-            return super().mouseDoubleClickEvent(ev)
+            return QWidget.mouseDoubleClickEvent(self, ev)
         comp: set[int] | None = None
         for c in self.connected_components():
             if seed in c:
                 comp = c
                 break
         if not comp:
-            return super().mouseDoubleClickEvent(ev)
+            return QWidget.mouseDoubleClickEvent(self, ev)
         self._activate_select_mode_from_parent()
         self.selected_nodes = sorted(comp)
         self._sync_selected_bonds_from_nodes()
@@ -984,14 +988,14 @@ class SketchWidgetEventsMixin:
         except Exception:
             pass
 
-        super().keyPressEvent(ev)
+        QWidget.keyPressEvent(self, ev)
 
     def keyReleaseEvent(self, ev):
         if ev.key() == Qt.Key_Space and not ev.isAutoRepeat():
             self._space_pan = False
             ev.accept()
             return
-        super().keyReleaseEvent(ev)
+        QWidget.keyReleaseEvent(self, ev)
 
     def wheelEvent(self, ev):
         delta = ev.angleDelta().y()
@@ -1003,4 +1007,4 @@ class SketchWidgetEventsMixin:
 
     def focusOutEvent(self, ev):
         self._space_pan = False
-        super().focusOutEvent(ev)
+        QWidget.focusOutEvent(self, ev)

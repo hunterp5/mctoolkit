@@ -102,7 +102,7 @@ def _count_label(count: int, singular: str) -> str:
     return f"{count} {noun}"
 
 
-class SketchWidget(SketchWidgetEventsMixin, QWidget):
+class SketchWidget(QWidget):
     """
     Chemical sketch widget: place atoms, draw bonds by dragging, adjust bond order,
     erase, select/move, templates, undo/redo, and export SMILES via RDKit.
@@ -131,6 +131,7 @@ class SketchWidget(SketchWidgetEventsMixin, QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        self._sketch_events = _bind_sketch_mixin(self, SketchWidgetEventsMixin)
         self._sketch_rdkit = _bind_sketch_mixin(self, SketchWidgetRdkitMixin)
         self._sketch_paint = _bind_sketch_mixin(self, SketchWidgetPaintMixin)
         self.setMinimumSize(500, 400)
@@ -3657,5 +3658,6 @@ def _bind_sketch_mixin(widget: SketchWidget, mixin: type):
     return host
 
 
+install_window_forwards(SketchWidget, "_sketch_events", (SketchWidgetEventsMixin,))
 install_window_forwards(SketchWidget, "_sketch_rdkit", (SketchWidgetRdkitMixin,))
 install_window_forwards(SketchWidget, "_sketch_paint", (SketchWidgetPaintMixin,))
