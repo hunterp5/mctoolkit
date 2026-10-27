@@ -771,10 +771,13 @@ def test_copy_includes_selected_entry_rows(qapp):  # noqa: ARG001
 
     w = ChemistryWorkspaceWindow()
     _seed_rows(w, 3)
+    # Structure copy reads the molecule store, not the SMILES cell.
+    for oid in (0, 2):
+        w.mols[oid] = Chem.MolFromSmiles("C" * (oid + 1))
     w.select_table_oids({0, 2})
     assert not w.table.selectionModel().hasSelection()
     w.edit_copy()
-    # Structure (col 1) copies the SMILES text; ID_HIDDEN is never copied.
+    # Stored structure, the SMILES cell, then MW. ID_HIDDEN is never copied.
     assert QApplication.clipboard().text() == "C\tC\t0\nCCC\tCCC\t2"
     w.close()
 
