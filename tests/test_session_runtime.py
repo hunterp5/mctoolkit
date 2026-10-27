@@ -118,6 +118,26 @@ def test_machine_policy_overrides_the_environment(tmp_path: Path, monkeypatch) -
     assert sql_writes_allowed() is False
 
 
+def test_sql_host_label_drops_the_password() -> None:
+    from molmanager.platform_support.session_runtime import sql_host_label
+
+    url = "postgresql+psycopg://alice:secret@db.example:5432/chem"
+    label = sql_host_label(url)
+    assert label == "db.example"
+    assert "secret" not in label
+    assert sql_host_label("sqlite:///C:/data/compounds.db") == "sqlite"
+
+
+def test_audit_path_keeps_only_the_file_name(tmp_path: Path, monkeypatch) -> None:
+    from molmanager.platform_support.session_runtime import audit_path
+
+    monkeypatch.setenv("MOLMANAGER_LOG_DIR", str(tmp_path))
+    audit_path("file-open", r"C:\secret\program\compounds.sdf")
+    text = (tmp_path / "audit.log").read_text(encoding="utf-8")
+    assert "compounds.sdf" in text
+    assert "secret" not in text
+
+
 def test_missing_policy_file_leaves_the_environment_in_effect(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         "molmanager.platform_support.session_runtime.machine_policy_path",

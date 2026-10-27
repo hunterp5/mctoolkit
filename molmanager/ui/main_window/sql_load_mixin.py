@@ -126,6 +126,9 @@ class SqlLoadMixin:
             li = 0
 
         logger.debug("load_from_sql url=%s read_only=%s", redact_sqlalchemy_url(url), read_only)
+        from ...platform_support.session_runtime import audit_sql_load
+
+        audit_sql_load(url)
 
         out_url, eng_kw = engine_kwargs_for_sql_load(
             url,

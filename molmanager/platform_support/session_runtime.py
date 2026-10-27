@@ -215,6 +215,41 @@ def audit(event: str, detail: str = "") -> None:
         logger.warning("Could not append the audit log (%s)", exc)
 
 
+def audit_path(event: str, path: str) -> None:
+    """Record a file event by file name only, not the directory."""
+    name = Path(str(path or "")).name.strip() or "unnamed"
+    audit(event, name)
+
+
+def sql_host_label(url: str) -> str:
+    """Host for an audit line. SQLite is ``sqlite``. Passwords are not included."""
+    raw = (url or "").strip()
+    if not raw:
+        return "empty"
+    scheme, separator, rest = raw.partition("://")
+    if not separator:
+        return "unknown"
+    if scheme.lower().startswith("sqlite"):
+        return "sqlite"
+    rest = rest.split("?", 1)[0]
+    if "@" in rest:
+        rest = rest.rsplit("@", 1)[1]
+    hostport = rest.split("/", 1)[0]
+    if hostport.startswith("["):
+        end = hostport.find("]")
+        host = hostport[1:end] if end > 1 else ""
+    elif hostport.count(":") == 1:
+        host = hostport.split(":", 1)[0]
+    else:
+        host = hostport
+    return host or "unknown"
+
+
+def audit_sql_load(url: str) -> None:
+    """Record the database host for a SQL load."""
+    audit("sql-load", sql_host_label(url))
+
+
 def _close_current() -> None:
     if _current is not None:
         _current.close()

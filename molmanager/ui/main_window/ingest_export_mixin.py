@@ -67,6 +67,9 @@ class IngestExportMixin:
     def load_file(self, path: str) -> None:
         if self._reject_unopenable_path(path, title="Open File"):
             return
+        from ...platform_support.session_runtime import audit_path
+
+        audit_path("file-open", path)
         remember_recent(KIND_FILE, path)
         self._note_open_attempt("Open File")
         self._accept_file_ingest_results()
@@ -114,6 +117,9 @@ class IngestExportMixin:
         """Load molecules from disk and append them to the current table (merge columns as needed)."""
         if self._reject_unopenable_path(path, title="Import Data"):
             return
+        from ...platform_support.session_runtime import audit_path
+
+        audit_path("file-import", path)
         remember_recent(KIND_FILE, path)
         self._note_open_attempt("Import Data")
         self._accept_file_ingest_results()
@@ -229,6 +235,9 @@ class IngestExportMixin:
                 ext = ".sdf"
             if not path.lower().endswith(ext.lower()):
                 path += ext
+            from ...platform_support.session_runtime import audit_path
+
+            audit_path("file-export", path)
             h_map = {h: i for i, h in enumerate(self.headers)}
             chunk = max(256, int(load_config().ingest_gui_chunk_size))
             self._export_busy = True

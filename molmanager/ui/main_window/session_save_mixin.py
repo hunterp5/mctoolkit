@@ -591,6 +591,10 @@ class SessionSaveMixin:
         *adopt_source* is false when the file is only a launch bundle for another
         window. The open session then keeps its current path.
         """
+        from ...platform_support.session_runtime import audit_path, current_runtime
+
+        if not current_runtime().contains(path):
+            audit_path("session-save", path)
         pending = {
             "path": path,
             "clear_dirty": bool(clear_dirty),
@@ -730,6 +734,9 @@ class SessionSaveMixin:
             self._warn_could_not_open("Open Session", message)
             return False
         self._note_open_attempt("Open Session")
+        from ...platform_support.session_runtime import audit_path
+
+        audit_path("session-open", path)
         self._session_source_path = path
         try:
             self._open_session_v4_file(path)

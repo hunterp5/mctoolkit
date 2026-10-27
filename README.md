@@ -518,7 +518,7 @@ Optional settings for power users and IT deployments:
 
 **Legacy env aliases:** `CHEMMANAGER_*` variables are still mapped to `MOLMANAGER_*` when the new name is unset, with a deprecation warning. Prefer `MOLMANAGER_*` only.
 
-**Logs:** MolManager writes a rotating log file (default on) and shows the path in the crash dialog on uncaught exceptions.
+**Logs:** MolManager writes a rotating log file (default on) and shows the path in the crash dialog on uncaught exceptions. `audit.log` in that same folder records file opens, imports, exports, session saves, SQL hosts, and external-program launches. It stores file names and hosts, not folder paths, SQL passwords, or structures.
 **SQL URLs in logs:** at `DEBUG`, connection URLs are logged with credentials redacted.
 
 ---
