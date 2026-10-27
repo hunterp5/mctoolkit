@@ -157,3 +157,85 @@ def test_dialog_shows_a_search_error(qapp) -> None:  # noqa: ARG001
     dialog.search_button.click()
     assert dialog.status.text() == "Minimum temperature must be a number."
     dialog.close()
+
+
+def test_sketcher_button_writes_a_complete_reaction(qapp, monkeypatch) -> None:  # noqa: ARG001
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    import molmanager.ui.sketcher.dialog as sketch_dialog
+    from molmanager.ui.dialogs.ord_search import OrdSearchDialog
+
+    loaded: list[str] = []
+
+    class _Canvas:
+        def __init__(self, nodes: list[int], smarts: str) -> None:
+            self.nodes = nodes
+            self.reaction_arrow = (1, 2) if nodes else None
+            self.smarts = smarts
+
+        def load_reaction_smarts(self, text: str) -> bool:
+            loaded.append(text)
+            return True
+
+        def to_reaction_smarts(self) -> str:
+            return self.smarts
+
+    class _Sketch:
+        def __init__(
+            self, parent=None, *, nodes: list[int] | None = None, smarts: str = ""
+        ) -> None:
+            self.canvas = _Canvas(list(nodes or []), smarts)
+
+        def setModal(self, *_args) -> None:
+            return None
+
+        def setWindowModality(self, *_args) -> None:
+            return None
+
+        def setAttribute(self, *_args) -> None:
+            return None
+
+        def exec_(self) -> int:
+            QApplication.processEvents()
+            return 0
+
+        def deleteLater(self) -> None:
+            return None
+
+        def show_sketch_status(self, _message: str) -> None:
+            return None
+
+    monkeypatch.setattr(
+        sketch_dialog,
+        "SketcherDialog",
+        lambda parent=None: _Sketch(parent, nodes=[1], smarts="C>>CO"),
+    )
+    dialog = OrdSearchDialog("CC.O>>CCO")
+    dialog.sketch_button.click()
+    assert loaded == ["CC.O>>CCO"]
+    assert dialog.reaction.toPlainText() == "C>>CO"
+
+    notices: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda *_args, **_kwargs: notices.append("shown"),
+    )
+    monkeypatch.setattr(
+        sketch_dialog,
+        "SketcherDialog",
+        lambda parent=None: _Sketch(parent, nodes=[1], smarts=""),
+    )
+    dialog.sketch_button.click()
+    assert dialog.reaction.toPlainText() == "C>>CO"
+    assert notices == ["shown"]
+
+    monkeypatch.setattr(
+        sketch_dialog,
+        "SketcherDialog",
+        lambda parent=None: _Sketch(parent, nodes=[], smarts=""),
+    )
+    dialog.sketch_button.click()
+    assert dialog.reaction.toPlainText() == "C>>CO"
+    assert notices == ["shown"]
+    dialog.close()

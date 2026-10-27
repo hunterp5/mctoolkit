@@ -44,6 +44,22 @@ from molmanager.ui.sketcher.sketch_reactions import (
 from molmanager.ui.sketcher.widget import SketchWidget
 
 
+def test_load_reaction_smarts_places_both_sides(qapp) -> None:  # noqa: ARG001
+    from PyQt5.QtWidgets import QApplication
+
+    widget = SketchWidget()
+    try:
+        assert widget.load_reaction_smarts("CC.O>>CCO")
+        left, _arrow, right = widget.to_reaction_smarts().partition(">>")
+        assert "CC" in left and "O" in left
+        assert "CCO" in right or "OCC" in right
+        assert widget.reaction_arrow is not None
+        assert widget.load_reaction_smarts("not a reaction") is False
+        QApplication.processEvents()
+    finally:
+        widget.close()
+
+
 def test_fragment_side_tail_is_reactant() -> None:
     assert fragment_side(0.0, 0.0, 10.0, 0.0, 40.0, 0.0) == "reactant"
     assert fragment_side(50.0, 0.0, 10.0, 0.0, 40.0, 0.0) == "product"
