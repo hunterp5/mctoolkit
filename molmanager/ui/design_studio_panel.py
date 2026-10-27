@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Sketcher with a live descriptor strip and a suggestion rail.
+"""Sketcher with a live descriptor strip and a design list.
 
 Opens in its own window. It is not docked into the table workspace.
 """
@@ -44,7 +44,6 @@ from PyQt5.QtWidgets import (
 from rdkit import Chem
 
 from ..analysis.design_studio import (
-    DESIGN_QUEUE_NAME,
     DesignSnapshot,
     DesignSuggestion,
     SeriesRow,
@@ -66,6 +65,19 @@ logger = logging.getLogger(__name__)
 
 _PKA_FAILED = "pKa calculation failed"
 _TERM_DIGITS = {"MW": 2, "LogP": 2, "TPSA": 1, "QED": 3, "RotBonds": 0}
+
+
+def _canonical_smiles(smiles: str) -> str:
+    text = (smiles or "").strip()
+    if not text:
+        return ""
+    mol = Chem.MolFromSmiles(text)
+    if mol is None:
+        return ""
+    try:
+        return Chem.MolToSmiles(mol, canonical=True) or ""
+    except (RuntimeError, ValueError, TypeError):
+        return ""
 
 
 def _fmt_num(value: float | None, digits: int = 2) -> str:
@@ -409,75 +421,184 @@ def _term_label(key: str) -> str:
     return key
 
 
-class SuggestionRail(QWidget):
-    """Ranked analogs from MMP transforms and one-point R-group swaps."""
+class DesignList(QWidget):
+    """Suggestions and bioisosteric replacements that can be sent to the table."""
 
     def __init__(self, studio: DesignStudioPanel):
         super().__init__(studio)
         self._studio = studio
-        self._suggestions: list[DesignSuggestion] = []
+        self._entries: list[DesignSuggestion] = []
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 4, 8, 8)
         root.setSpacing(6)
-        title = QLabel("Suggestions")
+        title = QLabel("Design list")
         title_font = QFont(title.font())
         title_font.setBold(True)
         title.setFont(title_font)
         title.setToolTip(
-            "MMP transforms that raise activity on this structure, then one-point "
-            "R-group swaps scored from the series. A cliff note means a small change "
-            "with a large activity shift, so the median is not a smooth trend."
+            "Suggestions and bioisosteric replacements for this session. "
+            "Select rows and send the ones you want to the table."
         )
         root.addWidget(title)
         self._list = QListWidget(self)
-        self._list.setSelectionMode(QListWidget.SingleSelection)
+        self._list.setSelectionMode(QListWidget.ExtendedSelection)
         self._list.itemClicked.connect(self._apply_current)
+        self._list.itemSelectionChanged.connect(self._sync_buttons)
         root.addWidget(self._list, 1)
         buttons = QHBoxLayout()
-        self._update_btn = QPushButton("Update", self)
-        self._update_btn.setToolTip(
-            "Rebuild suggestions from the last MMP run and the table's R-group columns."
+        self._add_btn = QPushButton("Add suggestions", self)
+        self._add_btn.setToolTip(
+            "Add MMP transforms and one-point R-group swaps for the current sketch."
         )
-        style_plot_footer_text_button(self._update_btn)
-        self._update_btn.clicked.connect(self.refresh)
-        self._accept_btn = QPushButton("Accept", self)
-        self._accept_btn.setToolTip(
-            f"Add the sketch to the table and to the {DESIGN_QUEUE_NAME} list."
-        )
-        style_plot_footer_text_button(self._accept_btn)
-        self._accept_btn.clicked.connect(studio.accept_sketch)
-        self._add_btn = QPushButton("Add to table", self)
-        self._add_btn.setToolTip("Append the current sketch as a new table row.")
         style_plot_footer_text_button(self._add_btn)
-        self._add_btn.clicked.connect(studio._add_sketch_to_table)
-        buttons.addWidget(self._update_btn)
-        buttons.addWidget(self._accept_btn)
+        self._add_btn.clicked.connect(self.add_suggestions)
+        self._send_btn = QPushButton("Send to table", self)
+        self._send_btn.setToolTip("Add the selected designs to the main table.")
+        style_plot_footer_text_button(self._send_btn)
+        self._send_btn.clicked.connect(self.send_selected)
+        self._remove_btn = QPushButton("Remove", self)
+        self._remove_btn.setToolTip("Remove the selected designs from this list.")
+        style_plot_footer_text_button(self._remove_btn)
+        self._remove_btn.clicked.connect(self.remove_selected)
         buttons.addWidget(self._add_btn)
+        buttons.addWidget(self._send_btn)
+        buttons.addWidget(self._remove_btn)
         root.addLayout(buttons)
+        self._rebuild()
 
-    def refresh(self) -> None:
+    def add_suggestions(self) -> None:
+        """Append MMP and R-group ideas for the current sketch. Existing rows stay."""
         studio = self._studio
-        mol = studio.current_mol()
         pairs = []
         app = studio.parent_app
         if app is not None:
             pairs = list(getattr(app, "_mmp_last_pairs", None) or [])
-        suggestions = mmp_suggestions(mol, pairs)
+        suggestions = mmp_suggestions(studio.current_mol(), pairs)
         suggestions.extend(rgroup_swap_suggestions(studio.current_smiles(), studio.series_rows()))
-        self._suggestions = suggestions
-        self._list.clear()
         if not suggestions:
-            item = QListWidgetItem("No suggestions. Run MMP, or decompose a series.")
-            item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
-            self._list.addItem(item)
-            studio.show_status("No suggestions for this structure.")
+            studio.show_status("No suggestions for this structure. Run MMP, or decompose a series.")
             return
-        for suggestion in suggestions:
-            item = QListWidgetItem(f"{suggestion.title}\n{suggestion.detail}")
-            item.setToolTip(suggestion.detail)
-            item.setData(Qt.UserRole, suggestion.smiles)
+        added = self._append(suggestions)
+        if added:
+            studio.show_status(f"Added {added} suggestion(s) to the design list.")
+            return
+        studio.show_status("Those suggestions are already on the design list.")
+
+    def add_bioisosteres(self, products: list[tuple[str, str]]) -> int:
+        """Append ``(replacement name, SMILES)`` rows. Returns how many were new."""
+        entries: list[DesignSuggestion] = []
+        for name, smiles in products:
+            canon = _canonical_smiles(smiles)
+            if not canon:
+                continue
+            title = (name or "").strip() or "Bioisostere"
+            entries.append(
+                DesignSuggestion(smiles=canon, title=title, detail=canon, source="bioisostere")
+            )
+        return self._append(entries)
+
+    def send_selected(self) -> None:
+        """Add the selected designs to the main table. Rows that are already there stay put."""
+        studio = self._studio
+        smiles = self._selected_smiles()
+        if not smiles:
+            studio.show_status("Select designs to send to the table.")
+            return
+        app = studio.parent_app
+        if app is None:
+            studio.show_status("Open the Design Studio from a table before sending designs.")
+            return
+        fresh = [one for one in smiles if _oid_with_smiles(app, one) is None]
+        already = len(smiles) - len(fresh)
+        if not fresh:
+            studio.show_status("Those designs are already in the table.")
+            return
+        noun = "design" if len(fresh) == 1 else "designs"
+        if not studio._sketcher._confirm_table_write(
+            "Send to table",
+            f"Send {len(fresh)} {noun} to the table as new rows?",
+        ):
+            return
+        added = studio._sketcher._append_molecules_from_smiles_parts(fresh)
+        if added <= 0:
+            studio.show_status("Could not add these designs to the table.")
+            return
+        sent = "design" if added == 1 else "designs"
+        message = f"Sent {added} {sent} to the table."
+        if already:
+            message += f" {already} already there."
+        studio.show_status(message)
+        status = getattr(app, "status_label", None)
+        if status is not None:
+            status.setText(f"{TOOL_DESIGN_STUDIO}: {message}")
+
+    def remove_selected(self) -> None:
+        indices = []
+        for item in self._list.selectedItems():
+            index = item.data(Qt.UserRole + 1)
+            if isinstance(index, int):
+                indices.append(index)
+        if not indices:
+            return
+        for index in sorted(set(indices), reverse=True):
+            if 0 <= index < len(self._entries):
+                del self._entries[index]
+        self._rebuild()
+        self._studio.show_status("Removed the selected designs.")
+
+    def _append(self, entries: list[DesignSuggestion]) -> int:
+        known = {entry.smiles for entry in self._entries}
+        added = 0
+        for entry in entries:
+            smiles = _canonical_smiles(entry.smiles)
+            if not smiles or smiles in known:
+                continue
+            known.add(smiles)
+            self._entries.append(
+                DesignSuggestion(
+                    smiles=smiles,
+                    title=entry.title,
+                    detail=entry.detail,
+                    source=entry.source,
+                )
+            )
+            added += 1
+        if added:
+            self._rebuild()
+        return added
+
+    def _selected_smiles(self) -> list[str]:
+        found: list[str] = []
+        seen: set[str] = set()
+        for item in self._list.selectedItems():
+            raw = item.data(Qt.UserRole)
+            if not isinstance(raw, str) or not raw.strip() or raw in seen:
+                continue
+            seen.add(raw)
+            found.append(raw)
+        return found
+
+    def _rebuild(self) -> None:
+        self._list.clear()
+        if not self._entries:
+            item = QListWidgetItem("No designs yet.")
+            item.setFlags(item.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsEnabled)
             self._list.addItem(item)
-        studio.show_status(f"{len(suggestions)} suggestion(s).")
+            self._sync_buttons()
+            return
+        for index, entry in enumerate(self._entries):
+            kind = "Bioisostere" if entry.source == "bioisostere" else "Suggestion"
+            item = QListWidgetItem(f"{kind} · {entry.title}\n{entry.detail}")
+            item.setToolTip(entry.detail)
+            item.setData(Qt.UserRole, entry.smiles)
+            item.setData(Qt.UserRole + 1, index)
+            self._list.addItem(item)
+        self._sync_buttons()
+
+    def _sync_buttons(self) -> None:
+        has_selection = bool(self._selected_smiles())
+        self._send_btn.setEnabled(has_selection)
+        self._remove_btn.setEnabled(has_selection)
 
     def _apply_current(self, item: QListWidgetItem) -> None:
         smiles = item.data(Qt.UserRole)
@@ -487,7 +608,7 @@ class SuggestionRail(QWidget):
 
 
 class DesignStudioPanel(QWidget):
-    """Sketcher on the left, scores and suggestions on the right."""
+    """Sketcher on the left, scores and the design list on the right."""
 
     dockable_in_workspace = False
     supports_floating_title = False
@@ -517,11 +638,12 @@ class DesignStudioPanel(QWidget):
         scroll.setMinimumWidth(250)
         scroll.setMaximumWidth(320)
 
-        self._rail = SuggestionRail(self)
+        self._design_list = DesignList(self)
+        self._sketcher._design_list = self._design_list
         right = QSplitter(Qt.Vertical, self._sketcher)
         right.setChildrenCollapsible(False)
         right.addWidget(scroll)
-        right.addWidget(self._rail)
+        right.addWidget(self._design_list)
         right.setStretchFactor(0, 1)
         right.setStretchFactor(1, 1)
         self._sketcher.place_beside_canvas(right)
@@ -563,24 +685,20 @@ class DesignStudioPanel(QWidget):
             parent_app._design_studio_dialog = dialog
         return dialog
 
-    def load_molecule(
-        self, mol: Chem.Mol, *, caption: str = "", refresh_suggestions: bool = True
-    ) -> bool:
-        """Replace the sketch. *caption* is the line above the scores."""
+    def load_molecule(self, mol: Chem.Mol, *, caption: str = "") -> bool:
+        """Replace the sketch. The design list is left as it is."""
         self._strip.set_caption(caption)
         loaded = self._sketcher.load_structure_from_mol(mol, confirm_if_nonempty=False)
         if loaded:
             self._strip.schedule_refresh()
-            if refresh_suggestions:
-                self._rail.refresh()
         return loaded
 
     def load_smiles(self, smiles: str, *, caption: str = "") -> bool:
         mol = Chem.MolFromSmiles((smiles or "").strip())
         if mol is None:
-            self.show_status("That suggestion could not be read.")
+            self.show_status("That design could not be read.")
             return False
-        return self.load_molecule(mol, caption=caption, refresh_suggestions=False)
+        return self.load_molecule(mol, caption=caption)
 
     def show_status(self, message: str) -> None:
         """One line at the bottom of the studio, the same role as the sketcher status bar."""
@@ -602,7 +720,7 @@ class DesignStudioPanel(QWidget):
             return ""
 
     def series_rows(self) -> list[SeriesRow]:
-        """Decomposed table rows the rail can use for one-point swaps."""
+        """Decomposed table rows used for one-point swaps."""
         app = self.parent_app
         model = getattr(app, "_table_model", None) if app is not None else None
         headers = list(getattr(app, "headers", []) or [])
@@ -646,40 +764,8 @@ class DesignStudioPanel(QWidget):
             )
         return rows
 
-    def accept_sketch(self) -> None:
-        """Add the canvas to the table, if it is new, and to the Design queue list."""
-        app = self.parent_app
-        smiles = self.current_smiles()
-        if app is None or not smiles:
-            self.show_status("Draw a structure before accepting it.")
-            return
-        store_factory = getattr(app, "_row_list_store", None)
-        if not callable(store_factory):
-            self.show_status("This window cannot store a Design queue list.")
-            return
-        existing = _oid_with_smiles(app, smiles)
-        if existing is None:
-            before = int(getattr(app, "next_oid", 0))
-            added = self._sketcher._append_molecules_from_smiles_parts([smiles])
-            if added <= 0:
-                self.show_status("Could not add this structure to the table.")
-                return
-            existing = before
-        store_factory().add(DESIGN_QUEUE_NAME, [int(existing)])
-        rebuild = getattr(app, "_rebuild_lists_menu", None)
-        if callable(rebuild):
-            rebuild()
-        message = f"Added row {existing} to {DESIGN_QUEUE_NAME}."
-        self.show_status(message)
-        status = getattr(app, "status_label", None)
-        if status is not None:
-            status.setText(f"{TOOL_DESIGN_STUDIO}: {message}")
-
     def shutdown(self) -> None:
         self._strip.shutdown()
-
-    def _add_sketch_to_table(self) -> None:
-        self._sketcher._add_to_table()
 
     def closeEvent(self, event) -> None:  # noqa: N802 — Qt API
         self.shutdown()

@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Choose a bioisostere product for the atoms selected on the sketch."""
+"""Choose bioisostere products to add to the Design Studio list."""
 
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ class BioisostereReplacementDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Bioisosteric Replacement")
         self.setModal(True)
+        self._only_current = False
 
         root = QVBoxLayout(self)
         root.addWidget(QLabel("Replacement"))
@@ -55,11 +56,16 @@ class BioisostereReplacementDialog(QDialog):
 
         root.addWidget(QLabel("Product"))
         self._products = QListWidget(self)
-        self._products.itemDoubleClicked.connect(lambda *_args: self.accept())
+        self._products.itemDoubleClicked.connect(self._accept_current)
         root.addWidget(self._products, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
-        buttons.button(QDialogButtonBox.Ok).setText("Replace")
+        add_button = buttons.button(QDialogButtonBox.Ok)
+        add_button.setText("Add to design list")
+        add_button.setToolTip(
+            "Add every product listed for the selected class or replacement. "
+            "Double-click one product to add only that product."
+        )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
@@ -125,10 +131,30 @@ class BioisostereReplacementDialog(QDialog):
             text = f"{', '.join(names)} — {smiles}" if show_name else smiles
             item = QListWidgetItem(text)
             item.setData(Qt.UserRole, smiles)
+            item.setData(Qt.UserRole + 1, ", ".join(names))
             item.setToolTip(smiles)
             self._products.addItem(item)
         if self._products.count():
             self._products.setCurrentRow(0)
+
+    def _accept_current(self, *_args) -> None:
+        self._only_current = True
+        self.accept()
+
+    def designs_to_add(self) -> list[tuple[str, str]]:
+        """``(replacement name, SMILES)`` for the products this dialog should add."""
+        if self._only_current:
+            pair = _product_pair(self._products.currentItem())
+            return [pair] if pair is not None else []
+        found: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for index in range(self._products.count()):
+            pair = _product_pair(self._products.item(index))
+            if pair is None or pair[1] in seen:
+                continue
+            seen.add(pair[1])
+            found.append(pair)
+        return found
 
     def chosen_smiles(self) -> str:
         item = self._products.currentItem()
@@ -138,6 +164,17 @@ class BioisostereReplacementDialog(QDialog):
         if isinstance(stored, str) and stored.strip():
             return stored.strip()
         return ""
+
+
+def _product_pair(item: QListWidgetItem | None) -> tuple[str, str] | None:
+    if item is None:
+        return None
+    smiles = item.data(Qt.UserRole)
+    name = item.data(Qt.UserRole + 1)
+    if not isinstance(smiles, str) or not smiles.strip():
+        return None
+    title = name.strip() if isinstance(name, str) and name.strip() else smiles.strip()
+    return title, smiles.strip()
 
 
 def _stored_smiles(item: QTreeWidgetItem) -> tuple[str, ...]:
