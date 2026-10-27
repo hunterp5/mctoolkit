@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Table chrome file-split for ``ChemistryWorkspaceWindow`` (edit/menu/search/filters)."""
+"""Table chrome file-split for ``ChemistryWorkspaceWindow`` (edit and filters)."""
 
 from __future__ import annotations
 
@@ -43,18 +43,12 @@ from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
 
 from ..filters import FilterPanelMixin
 from .table_edit_mixin import TableEditMixin
-from .table_find_replace_mixin import TableFindReplaceMixin
-from .table_menu_mixin import TableMenuMixin
-from .table_search_mixin import TableSearchMixin
 
 logger = logging.getLogger(__name__)
 
 
 class TableUIMixin(
     TableEditMixin,
-    TableMenuMixin,
-    TableSearchMixin,
-    TableFindReplaceMixin,
     FilterPanelMixin,
 ):
     def _open_column_color_dialog(self, col: int) -> None:

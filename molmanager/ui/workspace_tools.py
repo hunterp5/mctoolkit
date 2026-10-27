@@ -196,6 +196,18 @@ class WorkspaceTools:
         self.row_lists = _LazyMixinHost(
             app, lambda: _load("molmanager.ui.main_window.row_lists_mixin", "RowListsMixin")
         )
+        self.find_replace = _LazyMixinHost(
+            app,
+            lambda: _load(
+                "molmanager.ui.main_window.table_find_replace_mixin", "TableFindReplaceMixin"
+            ),
+        )
+        self.table_menu = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.table_menu_mixin", "TableMenuMixin")
+        )
+        self.table_search = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.table_search_mixin", "TableSearchMixin")
+        )
 
 
 def _load(module: str, name: str):

@@ -131,6 +131,9 @@ from .structure_layout_mixin import StructureLayoutMixin
 from .structure_writeback_mixin import StructureWritebackMixin
 from .table_calc_mixin import TableCalcMixin
 from .table_chemistry_access_mixin import TableChemistryAccessMixin
+from .table_find_replace_mixin import TableFindReplaceMixin
+from .table_menu_mixin import TableMenuMixin
+from .table_search_mixin import TableSearchMixin
 from .table_selection_mixin import TableSelectionMixin
 from .table_ui_mixin import TableUIMixin
 from .viewer_openers_mixin import ViewerOpenersMixin
@@ -179,9 +182,10 @@ class ChemistryWorkspaceWindow(
     """Main window facade: table workspace, tools, and kernel-backed collaborators.
 
     ``AppLifecycleMixin`` stays a base because Qt delivers ``closeEvent`` through
-    this class. ``TableUIMixin`` stays because edit, search, find and replace,
-    and the filter mixins are one inheritance chain. Row lists and the other
-    tools are ``WorkspaceTools`` hosts plus a window forward. Do not add more bases.
+    this class. ``TableUIMixin`` stays because cell edit and the filter mixins
+    are still one inheritance chain. Search, find and replace, column menus,
+    and the other tools are ``WorkspaceTools`` hosts plus a window forward.
+    Do not add more bases.
     True multi-class mixins live on filter-card chrome and protein source pickers.
 
     Each row stores **one explicit structure** (connectivity + stereo as encoded). Isomerism scope
@@ -830,6 +834,13 @@ install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.menus", (AppM
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.ingest", (IngestExportMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.plots", (PlotToolsMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.row_lists", (RowListsMixin,))
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.find_replace", (TableFindReplaceMixin,)
+)
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.table_menu", (TableMenuMixin,))
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.table_search", (TableSearchMixin,)
+)
 install_window_forwards(
     ChemistryWorkspaceWindow,
     "workspace_tools.structure_prep",

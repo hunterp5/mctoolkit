@@ -71,9 +71,6 @@ _ALLOWED_WINDOW_MIXIN_BASES = frozenset(
         FilterPanelMixin,
         FilterSubstructureMixin,
         TableEditMixin,
-        TableFindReplaceMixin,
-        TableMenuMixin,
-        TableSearchMixin,
         TableUIMixin,
     }
 )
@@ -278,6 +275,9 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
         IngestExportMixin,
         PlotToolsMixin,
         RowListsMixin,
+        TableFindReplaceMixin,
+        TableMenuMixin,
+        TableSearchMixin,
     )
     for cls in off_mro:
         assert cls not in mro
@@ -299,6 +299,9 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
     assert hasattr(w, "init_menubar")
     assert hasattr(w, "load_file")
     assert hasattr(w, "apply_row_list")
+    assert hasattr(w, "find_replace_find_next")
+    assert hasattr(w, "show_table_menu")
+    assert w._search_col_combo is not None
     assert w.plot_dock is w.plot_dock
     assert hasattr(w, "_open_dimension_reduction_dialog")
     assert hasattr(w, "run_protonate")
