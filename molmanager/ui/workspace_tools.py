@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Lazy leaf-tool adapters (cluster, dimred, QSAR, Free-Wilson, MPO, medchem, structure-prep).
+"""Lazy leaf-tool adapters.
 
 Importing this module does not import the tool mixins or their dialogs.
 First use of a property loads that mixin and binds it to the kernel.
@@ -105,6 +105,68 @@ class WorkspaceTools:
         self.structure_prep = _LazyMixinHost(app, _load_structure_prep)
         self.macros = MacroTools(app)
         self.reinvent = ReinventTools(app)
+        self.conformers = _LazyMixinHost(
+            app,
+            lambda: _load(
+                "molmanager.ui.main_window.conformers_tools_mixin", "ConformersToolsMixin"
+            ),
+        )
+        self.descriptors = _LazyMixinHost(
+            app,
+            lambda: _load(
+                "molmanager.ui.main_window.descriptors_tools_mixin", "DescriptorsToolsMixin"
+            ),
+        )
+        self.fragments = _LazyMixinHost(
+            app,
+            lambda: _load("molmanager.ui.main_window.fragment_tools_mixin", "FragmentToolsMixin"),
+        )
+        self.mmp = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.mmp_mixin", "MmpMixin")
+        )
+        self.activity_cliffs = _LazyMixinHost(
+            app,
+            lambda: _load("molmanager.ui.main_window.activity_cliff_mixin", "ActivityCliffMixin"),
+        )
+        self.mmp_neighborhood = _LazyMixinHost(
+            app,
+            lambda: _load(
+                "molmanager.ui.main_window.mmp_neighborhood_mixin", "MmpNeighborhoodMixin"
+            ),
+        )
+        self.sali = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.sali_mixin", "SaliMixin")
+        )
+        self.reactions = _LazyMixinHost(
+            app,
+            lambda: _load("molmanager.ui.main_window.reaction_tools_mixin", "ReactionToolsMixin"),
+        )
+        self.table_calc = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.table_calc_mixin", "TableCalcMixin")
+        )
+        self.viewers = _LazyMixinHost(
+            app,
+            lambda: _load("molmanager.ui.main_window.viewer_openers_mixin", "ViewerOpenersMixin"),
+        )
+        self.external_records = _LazyMixinHost(
+            app,
+            lambda: _load(
+                "molmanager.ui.main_window.external_records_mixin", "ExternalRecordsMixin"
+            ),
+        )
+        self.dock = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.dock_tools_mixin", "DockToolsMixin")
+        )
+        self.sql = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.sql_load_mixin", "SqlLoadMixin")
+        )
+        self.predict = _LazyMixinHost(
+            app,
+            lambda: _load("molmanager.ui.main_window.predict_tools_mixin", "PredictToolsMixin"),
+        )
+        self.gui_settings = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.gui_settings_mixin", "GuiSettingsMixin")
+        )
 
 
 def _load(module: str, name: str):

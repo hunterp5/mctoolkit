@@ -49,10 +49,12 @@ from molmanager.ui.main_window.mmp_neighborhood_mixin import MmpNeighborhoodMixi
 from molmanager.ui.main_window.plot_tools_mixin import PlotToolsMixin
 from molmanager.ui.main_window.predict_tools_mixin import PredictToolsMixin
 from molmanager.ui.main_window.reaction_tools_mixin import ReactionToolsMixin
+from molmanager.ui.main_window.row_lists_mixin import RowListsMixin
 from molmanager.ui.main_window.sali_mixin import SaliMixin
 from molmanager.ui.main_window.sql_load_mixin import SqlLoadMixin
 from molmanager.ui.main_window.table_calc_mixin import TableCalcMixin
 from molmanager.ui.main_window.table_edit_mixin import TableEditMixin
+from molmanager.ui.main_window.table_find_replace_mixin import TableFindReplaceMixin
 from molmanager.ui.main_window.table_menu_mixin import TableMenuMixin
 from molmanager.ui.main_window.table_search_mixin import TableSearchMixin
 from molmanager.ui.main_window.table_ui_mixin import TableUIMixin
@@ -62,34 +64,21 @@ from molmanager.ui.tool_dialog_scope import ToolScopeHost
 # Frozen allowlist: adding a ChemistryWorkspaceWindow mixin base must fail this set.
 _ALLOWED_WINDOW_MIXIN_BASES = frozenset(
     {
-        ActivityCliffMixin,
         AppLifecycleMixin,
         AppMenuMixin,
-        ConformersToolsMixin,
-        DescriptorsToolsMixin,
-        DockToolsMixin,
-        ExternalRecordsMixin,
         FilterApplyMixin,
         FilterBoundsMixin,
         FilterCardsMixin,
         FilterPanelMixin,
         FilterSubstructureMixin,
-        FragmentToolsMixin,
-        GuiSettingsMixin,
         IngestExportMixin,
-        MmpMixin,
-        MmpNeighborhoodMixin,
         PlotToolsMixin,
-        PredictToolsMixin,
-        ReactionToolsMixin,
-        SaliMixin,
-        SqlLoadMixin,
-        TableCalcMixin,
+        RowListsMixin,
         TableEditMixin,
+        TableFindReplaceMixin,
         TableMenuMixin,
         TableSearchMixin,
         TableUIMixin,
-        ViewerOpenersMixin,
     }
 )
 
@@ -219,6 +208,21 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
         FastPrepareToolsMixin,
         StructureEditMixin,
         StructureWritebackMixin,
+        ActivityCliffMixin,
+        ConformersToolsMixin,
+        DescriptorsToolsMixin,
+        DockToolsMixin,
+        ExternalRecordsMixin,
+        FragmentToolsMixin,
+        GuiSettingsMixin,
+        MmpMixin,
+        MmpNeighborhoodMixin,
+        PredictToolsMixin,
+        ReactionToolsMixin,
+        SaliMixin,
+        SqlLoadMixin,
+        TableCalcMixin,
+        ViewerOpenersMixin,
     )
     for cls in off_mro:
         assert cls not in mro
@@ -234,6 +238,9 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
     assert hasattr(w, "_ensure_columns")
     assert hasattr(w, "_abort_if_only_selected_but_empty")
     assert hasattr(w, "open_cluster_dialog")
+    assert hasattr(w, "open_pubchem")
+    assert hasattr(w, "load_from_sql")
+    assert hasattr(w, "_init_gui_settings")
     assert hasattr(w, "_open_dimension_reduction_dialog")
     assert hasattr(w, "run_protonate")
     assert hasattr(w, "run_fast_prepare")

@@ -177,21 +177,6 @@ class ChemistryWorkspaceWindow(
     TableUIMixin,
     IngestExportMixin,
     PlotToolsMixin,
-    ConformersToolsMixin,
-    DescriptorsToolsMixin,
-    FragmentToolsMixin,
-    MmpMixin,
-    ActivityCliffMixin,
-    MmpNeighborhoodMixin,
-    SaliMixin,
-    ReactionToolsMixin,
-    TableCalcMixin,
-    ViewerOpenersMixin,
-    ExternalRecordsMixin,
-    DockToolsMixin,
-    SqlLoadMixin,
-    PredictToolsMixin,
-    GuiSettingsMixin,
 ):
     """Main window facade: table workspace, tools, and kernel-backed collaborators.
 
@@ -809,6 +794,37 @@ install_window_forwards(
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.mpo", (MpoMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.macros", (MacroTools,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.reinvent", (ReinventTools,))
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.conformers", (ConformersToolsMixin,)
+)
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.descriptors", (DescriptorsToolsMixin,)
+)
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.fragments", (FragmentToolsMixin,)
+)
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.mmp", (MmpMixin,))
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.activity_cliffs", (ActivityCliffMixin,)
+)
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.mmp_neighborhood", (MmpNeighborhoodMixin,)
+)
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.sali", (SaliMixin,))
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.reactions", (ReactionToolsMixin,)
+)
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.table_calc", (TableCalcMixin,))
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.viewers", (ViewerOpenersMixin,))
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.external_records", (ExternalRecordsMixin,)
+)
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.dock", (DockToolsMixin,))
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.sql", (SqlLoadMixin,))
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.predict", (PredictToolsMixin,))
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.gui_settings", (GuiSettingsMixin,)
+)
 install_window_forwards(
     ChemistryWorkspaceWindow,
     "workspace_tools.structure_prep",
