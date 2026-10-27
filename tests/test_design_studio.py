@@ -453,6 +453,28 @@ def test_design_studio_has_original_size_clear_and_ring_pictures(qapp):
         qapp.processEvents()
 
 
+def test_design_studio_opens_tall_enough_for_the_tool_rail(qapp):
+    from molmanager.ui.design_studio_panel import DesignStudioPanel
+
+    panel = DesignStudioPanel(None)
+    panel._strip._start_or_coalesce_ionization = lambda *_args, **_kwargs: None
+    dialog = panel.create_floating_dialog(None)
+    try:
+        needed = panel.height_to_fit_tool_rail()
+        assert needed > 760
+        dialog.resize(dialog.width(), needed)
+        dialog.show()
+        qapp.processEvents()
+        scroll = panel._sketcher._rail_scroll
+        assert scroll.viewport().height() >= scroll.widget().minimumSizeHint().height()
+        assert scroll.verticalScrollBar().maximum() == 0
+    finally:
+        panel.shutdown()
+        dialog._force_close = True
+        dialog.close()
+        qapp.processEvents()
+
+
 def test_design_list_collects_suggestions_and_bioisosteres(qapp):
     from types import SimpleNamespace
 

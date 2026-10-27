@@ -771,7 +771,9 @@ class SketcherDialog(QDialog):
 
         rail_page = QWidget()
         rail_page.setLayout(toolbar_outer)
+        self._rail_page = rail_page
         rail_scroll = QScrollArea()
+        self._rail_scroll = rail_scroll
         rail_scroll.setWidgetResizable(True)
         rail_scroll.setFrameShape(QFrame.NoFrame)
         rail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)

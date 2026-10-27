@@ -28,6 +28,7 @@ from typing import Any
 from PyQt5.QtCore import QEvent, QObject, QRunnable, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont
 from PyQt5.QtWidgets import (
+    QApplication,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -675,6 +676,21 @@ class DesignStudioPanel(QWidget):
     def embedded_minimum_width(self) -> int:
         return 760
 
+    def height_to_fit_tool_rail(self) -> int:
+        """Client height that shows the left tool rail without a vertical scrollbar."""
+        page = getattr(self._sketcher, "_rail_page", None)
+        if page is None:
+            return self._status.height()
+        layout = page.layout()
+        if layout is not None:
+            layout.activate()
+        rail = max(page.minimumSizeHint().height(), page.sizeHint().height())
+        bar = self._sketcher.layout().menuBar() if self._sketcher.layout() is not None else None
+        menu = bar.sizeHint().height() if bar is not None else 0
+        status = self._status.height() or self._status.sizeHint().height()
+        margins = self.layout().contentsMargins()
+        return rail + menu + status + margins.top() + margins.bottom() + self.layout().spacing()
+
     def embedded_preferred_width(self) -> int:
         return 1100
 
@@ -823,6 +839,25 @@ def _oid_with_smiles(app, smiles: str) -> int | None:
 
 class DesignStudioWindow(BrowserHostDialog):
     """Floating shell for :class:`DesignStudioPanel`."""
+
+    def __init__(self, parent: Any = None, *, panel: QWidget | None = None):
+        super().__init__(parent, panel=panel)
+        self._fit_tool_rail()
+
+    def _fit_tool_rail(self) -> None:
+        """Open tall enough for the left tool rail when the screen allows it."""
+        fit = getattr(self._panel, "height_to_fit_tool_rail", None)
+        if not callable(fit):
+            return
+        needed = int(fit())
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            cap = screen.availableGeometry().height() - 48
+            if cap > 0:
+                needed = min(needed, cap)
+        needed = max(needed, self.minimumHeight())
+        if self.height() < needed:
+            self.resize(max(self.width(), self.minimumWidth()), needed)
 
     def changeEvent(self, event) -> None:  # noqa: N802 — Qt API
         super().changeEvent(event)
