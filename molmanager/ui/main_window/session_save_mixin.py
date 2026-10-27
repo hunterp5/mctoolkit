@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
-import sys
 from collections.abc import Callable
 from functools import partial
 
@@ -34,6 +32,7 @@ from ...ionization.microstate_cache import serialize_ionization_sidecar
 from ...ionization.microstate_cache import snapshot as ionization_snapshot
 from ...services.filter_config import cfg_column
 from ...storage import EnsembleStore, MolStore
+from ...platform_support.session_runtime import launch_molmanager
 from ...table.open_messages import (
     damaged_session_message,
     legacy_session_message,
@@ -62,7 +61,7 @@ class SessionSaveMixin:
     def new_session(self) -> None:
         """Launch a new MolManager instance with nothing loaded."""
         try:
-            subprocess.Popen([sys.executable, "-m", "molmanager"], close_fds=True)
+            launch_molmanager()
         except Exception as e:
             QMessageBox.warning(self, "New Session", str(e))
 
@@ -264,9 +263,7 @@ class SessionSaveMixin:
         )
 
     def _launch_duplicate_session(self, path: str) -> None:
-        subprocess.Popen(
-            [sys.executable, "-m", "molmanager", "--load-session", path], close_fds=True
-        )
+        launch_molmanager("--load-session", path)
 
     def _session_bundle_temp_path(self) -> str:
         """Return a new ``.cms`` path under this process's temp directory (does not write)."""

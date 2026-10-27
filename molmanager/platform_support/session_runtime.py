@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -431,22 +432,71 @@ def _file_sha256(path: Path) -> str:
     return text
 
 
+def launch_molmanager(*args: str) -> subprocess.Popen:
+    """Start another MolManager window that does not share this console.
+
+    The new process checks which runtime directories are still in use. On
+    Windows that check must not be a console control event, and the window
+    must not be attached to this console, or Ctrl+C is delivered here too.
+    """
+    command = [sys.executable, "-m", "molmanager", *args]
+    options: dict[str, object] = {"close_fds": True}
+    if sys.platform == "win32":
+        # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+        options["creationflags"] = 0x08000000 | 0x00000200
+        options["stdin"] = subprocess.DEVNULL
+        options["stdout"] = subprocess.DEVNULL
+        options["stderr"] = subprocess.DEVNULL
+    return subprocess.Popen(command, **options)
+
+
 def _pid_alive(pid: int) -> bool:
+    """True when *pid* is a running process.
+
+    ``os.kill(pid, 0)`` is not a probe on Windows. Signal 0 is
+    ``CTRL_C_EVENT``, and that event is delivered to every process on the
+    console, not only to *pid*.
+    """
     if pid <= 0:
         return False
     if pid == os.getpid():
         return True
+    if sys.platform == "win32":
+        return _windows_pid_alive(pid)
     try:
         os.kill(pid, 0)
     except PermissionError:
         return True
-    except (OSError, SystemError) as exc:
-        # Windows error 5: the process exists but this user cannot signal it.
-        # A missing process can also surface as SystemError from os.kill.
-        if getattr(exc, "winerror", None) == 5:
-            return True
+    except OSError:
         return False
     return True
+
+
+def _windows_pid_alive(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    # PROCESS_QUERY_LIMITED_INFORMATION. Error 5 means the process exists.
+    handle = kernel32.OpenProcess(0x1000, False, pid)
+    if not handle:
+        return ctypes.get_last_error() == 5
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return int(code.value) == 259
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def _sweep_stale_runtime_dirs(*, keep: Path) -> None:

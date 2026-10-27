@@ -18,13 +18,18 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+from molmanager.platform_support import session_runtime
 from molmanager.platform_support.session_runtime import (
     NetworkDisabled,
     ToolDenied,
+    _pid_alive,
     current_runtime,
     network_allowed,
     require_network,
@@ -173,3 +178,15 @@ def test_digest_pin_rejects_a_changed_program(tmp_path: Path, monkeypatch) -> No
     program.write_bytes(b"changed")
     with pytest.raises(ToolDenied, match="does not match"):
         require_tool(str(program), "Open Babel")
+
+
+def test_pid_probe_does_not_signal_the_console(monkeypatch) -> None:
+    def refuse_kill(*_args, **_kwargs):
+        raise AssertionError("os.kill broadcasts Ctrl+C on Windows when the signal is 0")
+
+    if sys.platform == "win32":
+        monkeypatch.setattr(session_runtime.os, "kill", refuse_kill)
+    assert _pid_alive(os.getpid()) is True
+    finished = subprocess.Popen([sys.executable, "-c", "pass"])
+    finished.wait(timeout=30)
+    assert _pid_alive(finished.pid) is False
