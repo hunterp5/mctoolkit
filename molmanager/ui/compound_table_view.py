@@ -614,6 +614,8 @@ class CompoundTableView(QTableView):
         super().__init__(parent)
         self._row_selection: TableRowSelectionController | None = None
         self._row_number_width_model = None
+        self._compound_model = None
+        self._structure_column_min_width = structure_column_minimum_width()
         self._corner_grips: dict[int, StructureColumnCornerGrip] = {}
         self._corner_grip_model = None
         self._positioning_corner_grips = False
@@ -637,8 +639,6 @@ class CompoundTableView(QTableView):
         with suppress(TypeError):
             hh.sectionPressed.disconnect()
         self.setSortingEnabled(False)
-        self._compound_model = None
-        self._structure_column_min_width = structure_column_minimum_width()
         hh.sectionResized.connect(self._on_horizontal_section_resized)
 
     def set_row_selection_controller(self, controller: TableRowSelectionController) -> None:
@@ -985,7 +985,9 @@ class CompoundTableView(QTableView):
         height = structure_depict_height()
         changed = width != int(state["origin_w"]) or height != int(state["origin_h"])
         if changed:
-            self._apply_depict_row_heights(visible_only=False)
+            # Rows that still use the default pick up the new height here. Rows already
+            # resized (a zoomed row, or one under the pointer) are set from the drag.
+            self._apply_depict_row_heights(visible_only=True)
         self._depict_resize = None
         self._release_corner_grip_mouse()
         self._set_depiction_preview(False, 0, 0)
@@ -1022,7 +1024,7 @@ class CompoundTableView(QTableView):
             viewport.update()
 
     def _structure_logical_columns(self) -> list[int]:
-        model = self._compound_model
+        model = getattr(self, "_compound_model", None)
         if model is not None:
             count = int(model.columnCount())
         elif self.model() is not None:
@@ -1095,15 +1097,20 @@ class CompoundTableView(QTableView):
         )
         heights: dict[int, int] = state["origin_row_heights"]
         zoomed: set[int] = state["zoomed_rows"]
+        # Read heights before changing the default. Qt applies a new default to every
+        # row that has not been resized on its own, which would hide the original.
+        pending: list[int] = []
+        for row in rows:
+            if row not in heights:
+                current = int(header.sectionSize(row))
+                heights[row] = current
+                if current >= threshold:
+                    zoomed.add(row)
+            pending.append(row)
         header.blockSignals(True)
         try:
             header.setDefaultSectionSize(base)
-            for row in rows:
-                if row not in heights:
-                    current = int(header.sectionSize(row))
-                    heights[row] = current
-                    if current >= threshold:
-                        zoomed.add(row)
+            for row in pending:
                 target = zoom_h if row in zoomed else base
                 if int(header.sectionSize(row)) != target:
                     header.resizeSection(row, target)

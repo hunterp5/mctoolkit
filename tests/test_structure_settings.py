@@ -123,7 +123,7 @@ def test_column_width_keeps_slack_while_depiction_scales() -> None:
 
 
 def test_structure_column_corner_drag_resizes_depiction(qapp):  # noqa: ARG001
-    from PyQt5.QtCore import QEvent, QPoint, Qt
+    from PyQt5.QtCore import QEvent, QPointF, Qt
     from PyQt5.QtGui import QMouseEvent, QPixmap
     from PyQt5.QtWidgets import QApplication
 
@@ -157,10 +157,12 @@ def test_structure_column_corner_drag_resizes_depiction(qapp):  # noqa: ARG001
 
     chosen: list[tuple[int, int]] = []
     view.structure_depict_resized.connect(lambda w, h: chosen.append((int(w), int(h))))
-    local = QPoint(4, 4)
+    local = QPointF(4, 4)
+    origin = QPointF(100, 100)
     press = QMouseEvent(
         QEvent.MouseButtonPress,
         local,
+        origin,
         Qt.LeftButton,
         Qt.LeftButton,
         Qt.NoModifier,
@@ -168,7 +170,8 @@ def test_structure_column_corner_drag_resizes_depiction(qapp):  # noqa: ARG001
     grip.mousePressEvent(press)
     move = QMouseEvent(
         QEvent.MouseMove,
-        local + QPoint(40, 20),
+        local + QPointF(40, 20),
+        origin + QPointF(40, 20),
         Qt.LeftButton,
         Qt.LeftButton,
         Qt.NoModifier,
@@ -180,10 +183,15 @@ def test_structure_column_corner_drag_resizes_depiction(qapp):  # noqa: ARG001
     assert view.rowHeight(0) == structure_row_default_height()
     assert view.rowHeight(1) == structure_row_default_height()
     assert chosen == []
+    delegate = view.itemDelegateForColumn(col)
+    live = delegate._pixmap_for_cell(QPixmap(origin_w, origin_h))
+    assert live.width() == origin_w + 40
+    assert live.height() == origin_h + 20
 
     release = QMouseEvent(
         QEvent.MouseButtonRelease,
-        local + QPoint(40, 20),
+        local + QPointF(40, 20),
+        origin + QPointF(40, 20),
         Qt.LeftButton,
         Qt.NoButton,
         Qt.NoModifier,
@@ -205,8 +213,8 @@ def test_structure_column_corner_drag_resizes_depiction(qapp):  # noqa: ARG001
 
 
 def test_structure_column_corner_drag_cancel_restores_size(qapp):  # noqa: ARG001
-    from PyQt5.QtCore import QEvent, Qt
-    from PyQt5.QtGui import QKeyEvent
+    from PyQt5.QtCore import QEvent, QPointF, Qt
+    from PyQt5.QtGui import QKeyEvent, QMouseEvent
     from PyQt5.QtWidgets import QApplication
 
     from molmanager.ui.compound_table_model import CompoundTableModel, CompoundTableView
@@ -222,30 +230,36 @@ def test_structure_column_corner_drag_cancel_restores_size(qapp):  # noqa: ARG00
     origin_w = structure_depict_width()
     origin_h = structure_depict_height()
     origin_col = structure_column_minimum_width()
-    origin_row = structure_row_default_height()
     view.setColumnWidth(col, origin_col)
     QApplication.processEvents()
+    origin_row = view.rowHeight(0)
     grip = view.structure_corner_grip(col)
     assert grip is not None
-    from PyQt5.QtCore import QPoint
-    from PyQt5.QtGui import QMouseEvent
-
-    local = QPoint(2, 2)
+    local = QPointF(2, 2)
+    origin = QPointF(80, 80)
     grip.mousePressEvent(
         QMouseEvent(
-            QEvent.MouseButtonPress, local, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier
+            QEvent.MouseButtonPress,
+            local,
+            origin,
+            Qt.LeftButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
         )
     )
     grip.mouseMoveEvent(
         QMouseEvent(
             QEvent.MouseMove,
-            local + QPoint(30, 12),
+            local + QPointF(30, 40),
+            origin + QPointF(30, 40),
             Qt.LeftButton,
             Qt.LeftButton,
             Qt.NoModifier,
         )
     )
     assert structure_depict_width() == origin_w + 30
+    assert structure_depict_height() == origin_h + 40
+    assert view.rowHeight(0) != origin_row
     chosen: list[tuple[int, int]] = []
     view.structure_depict_resized.connect(lambda w, h: chosen.append((w, h)))
     view.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
