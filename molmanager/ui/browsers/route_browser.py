@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
-from PyQt5.QtCore import QEvent, QPoint, QRectF, Qt, QTimer, QUrl
+from PyQt5.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, QUrl
 from PyQt5.QtGui import (
     QBrush,
     QColor,
@@ -35,12 +35,14 @@ from PyQt5.QtGui import (
     QPixmap,
 )
 from PyQt5.QtWidgets import (
+    QAbstractButton,
     QAbstractItemView,
     QApplication,
     QComboBox,
     QDialog,
     QFrame,
     QGraphicsItem,
+    QGraphicsProxyWidget,
     QGraphicsScene,
     QGraphicsView,
     QHBoxLayout,
@@ -88,6 +90,9 @@ _SCENE_SPAN = 100000
 _ZOOM_MIN = 0.25
 _ZOOM_MAX = 4.0
 _ZOOM_STEP = 1.1
+_PAN_SLOP = 4
+_RATIO_CAP = 4.0
+_BACKING_PIXELS = 16_000_000
 _CHEMICAL_FIELDS = frozenset({"reaction", "template", "smiles", "smarts", "inchi", "inchikey"})
 _ORD_SEARCH_URL = "https://open-reaction-database.org/search"
 
@@ -147,6 +152,86 @@ def _unmapped_side(mols) -> str:
     return ".".join(pieces)
 
 
+def _device_ratio() -> float:
+    """Screen pixels per logical pixel. Drawings use this so they stay sharp."""
+    app = QApplication.instance()
+    if app is None:
+        return 1.0
+    return max(1.0, float(app.devicePixelRatio()))
+
+
+def _backing_ratio(width: int, height: int, ratio: float) -> float:
+    """Pixel ratio for a tree of *width* × *height*, capped so the bitmap stays bounded."""
+    ratio = min(_RATIO_CAP, max(1.0, ratio))
+    pixels = max(1, width) * max(1, height) * ratio * ratio
+    if pixels > _BACKING_PIXELS:
+        ratio *= (_BACKING_PIXELS / pixels) ** 0.5
+    return max(1.0, ratio)
+
+
+def _render_widget(widget: QWidget, ratio: float) -> QPixmap:
+    """Rasterize *widget* at *ratio* physical pixels per logical pixel."""
+    width = max(1, int(round(widget.width() * ratio)))
+    height = max(1, int(round(widget.height() * ratio)))
+    pixmap = QPixmap(width, height)
+    pixmap.setDevicePixelRatio(1.0)
+    pixmap.fill(widget.palette().color(QPalette.Window))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setRenderHint(QPainter.TextAntialiasing, True)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+    painter.scale(ratio, ratio)
+    widget.render(painter, QPoint())
+    painter.end()
+    pixmap.setDevicePixelRatio(ratio)
+    return pixmap
+
+
+class _SharpProxy(QGraphicsProxyWidget):
+    """Draw the embedded tree at screen resolution instead of scaling a 1× bitmap."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setCacheMode(QGraphicsItem.NoCache)
+        self._cache: QPixmap | None = None
+        self._key: tuple[int, int, int] | None = None
+        self._painting = False
+        self._ignore_updates = False
+
+    def invalidate(self) -> None:
+        if self._painting or self._ignore_updates or self._cache is None:
+            return
+        self._cache = None
+        self._key = None
+        self.update()
+
+    def _accept_updates(self) -> None:
+        self._ignore_updates = False
+
+    def paint(self, painter, option, widget=None) -> None:  # noqa: N802
+        del option, widget
+        hosted = self.widget()
+        if hosted is None or hosted.width() < 1 or hosted.height() < 1:
+            return
+        view = next(
+            (item for item in self.scene().views() if isinstance(item, _RouteCanvas)),
+            None,
+        )
+        ratio = view.depict_ratio() if view is not None else 1.0
+        key = (hosted.width(), hosted.height(), int(round(ratio * 1000)))
+        if self._cache is None or self._key != key:
+            self._painting = True
+            try:
+                self._cache = _render_widget(hosted, ratio)
+            finally:
+                self._painting = False
+                self._ignore_updates = True
+                QTimer.singleShot(0, self._accept_updates)
+            self._key = key
+        if self._cache is not None:
+            painter.drawPixmap(QPointF(0, 0), self._cache)
+
+
 def _is_chemical_field(field: str, value: str) -> bool:
     """Reaction SMILES, templates, and other structure strings can be copied."""
     name = field.strip().lower().replace(" ", "_")
@@ -156,7 +241,7 @@ def _is_chemical_field(field: str, value: str) -> bool:
 
 
 class _RouteCanvas(QGraphicsView):
-    """Route drawing. Center-click to pan, and scroll to zoom around the pointer."""
+    """Route drawing. Drag with the left button to pan, and scroll to zoom."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -164,17 +249,21 @@ class _RouteCanvas(QGraphicsView):
         scene.setSceneRect(QRectF(-_SCENE_SPAN, -_SCENE_SPAN, 2 * _SCENE_SPAN, 2 * _SCENE_SPAN))
         self.setScene(scene)
         self._content: QWidget | None = None
-        self._proxy = None
+        self._proxy: _SharpProxy | None = None
         self._zoom = 1.0
+        self._pending: QPoint | None = None
         self._pan: tuple[QPoint, int, int] | None = None
         self._app_filter = False
         self._pan_cursor = False
+        self.on_transform = None
         self.setFrameShape(QFrame.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self.setResizeAnchor(QGraphicsView.NoAnchor)
-        self.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        self.setRenderHint(QPainter.Antialiasing, True)
+        self.setRenderHint(QPainter.TextAntialiasing, True)
+        self.setRenderHint(QPainter.SmoothPixmapTransform, False)
         self.setBackgroundBrush(self.palette().brush(QPalette.Base))
         self.setMinimumSize(120, 120)
         self.viewport().installEventFilter(self)
@@ -182,9 +271,18 @@ class _RouteCanvas(QGraphicsView):
 
     def set_content(self, widget: QWidget) -> None:
         self._content = widget
-        self._proxy = self.scene().addWidget(widget)
-        self._proxy.setCacheMode(QGraphicsItem.NoCache)
+        self._proxy = _SharpProxy()
+        self._proxy.setWidget(widget)
+        self.scene().addItem(self._proxy)
+        self._apply_background()
         self.watch(widget)
+
+    def depict_ratio(self) -> float:
+        """Physical pixels per logical pixel for the tree at the current zoom."""
+        content = self._content
+        width = content.width() if content is not None else 1
+        height = content.height() if content is not None else 1
+        return _backing_ratio(width, height, _device_ratio() * self._zoom)
 
     def place_content(self) -> None:
         """Park the drawing with its right side in view. It may extend past every edge."""
@@ -198,15 +296,44 @@ class _RouteCanvas(QGraphicsView):
         bounds = proxy.sceneBoundingRect()
         margin = 12
         self.centerOn(bounds.right() - view.width() / 2 + margin, bounds.center().y())
+        self._notify_transform()
+
+    def _apply_background(self) -> None:
+        """Paint the tree plate with the same base color as the canvas."""
+        color = self.palette().color(QPalette.Base)
+        brush = QBrush(color)
+        self.setBackgroundBrush(brush)
+        scene = self.scene()
+        if scene is not None:
+            scene.setBackgroundBrush(brush)
+        content = self._content
+        if content is None:
+            return
+        palette = content.palette()
+        palette.setColor(QPalette.Window, color)
+        palette.setColor(QPalette.Base, color)
+        content.setPalette(palette)
+        content.setAutoFillBackground(True)
+        content.setObjectName("route-tree")
+        content.setAttribute(Qt.WA_StyledBackground, True)
+        content.setStyleSheet("QWidget#route-tree { background-color: palette(base); }")
+        if self._proxy is not None:
+            self._proxy.invalidate()
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() == QEvent.PaletteChange:
+            self._apply_background()
 
     def watch(self, root: QWidget) -> None:
-        """Listen for center-clicks on *root* and the cards added under it."""
+        """Listen for drags on *root* and the cards added under it."""
         root.installEventFilter(self)
         for child in root.findChildren(QWidget):
             child.installEventFilter(self)
 
     def end_pan(self) -> None:
         self._pan = None
+        self._pending = None
         if QWidget.mouseGrabber() is self.viewport():
             self.viewport().releaseMouse()
         if self._app_filter:
@@ -220,38 +347,71 @@ class _RouteCanvas(QGraphicsView):
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         kind = event.type()
+        if kind == QEvent.UpdateRequest and self._content_widget(obj):
+            if self._proxy is not None:
+                self._proxy.invalidate()
+            return False
         if kind == QEvent.Wheel and self._on_canvas(obj):
             if event.spontaneous():
                 self._zoom_at(self._wheel_steps(event), self._wheel_anchor(obj, event))
             return True
-        if kind == QEvent.MouseButtonPress and event.button() == Qt.MiddleButton:
-            if not self._on_canvas(obj):
-                return super().eventFilter(obj, event)
-            self._begin_pan(QCursor.pos() if event.spontaneous() else event.globalPos())
-            return True
-        if self._pan is not None and kind == QEvent.MouseMove:
-            if not event.spontaneous():
-                return True
-            buttons = event.buttons() or QApplication.mouseButtons()
-            if buttons and not (buttons & Qt.MiddleButton):
-                self.end_pan()
-                return False
-            origin, horizontal, vertical = self._pan
-            delta = QCursor.pos() - origin
-            self.horizontalScrollBar().setValue(horizontal - delta.x())
-            self.verticalScrollBar().setValue(vertical - delta.y())
-            return True
-        if self._pan is not None and kind == QEvent.WindowDeactivate:
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            if self._on_canvas(obj):
+                self._pending = self._pointer(event)
+                self._install_app_filter()
+            return False
+        if kind == QEvent.MouseMove and (self._pending is not None or self._pan is not None):
+            return self._move_pan(event)
+        if kind == QEvent.WindowDeactivate and (self._pan is not None or self._pending is not None):
             self.end_pan()
             return False
-        if (
-            self._pan is not None
-            and kind == QEvent.MouseButtonRelease
-            and event.button() == Qt.MiddleButton
-        ):
-            self.end_pan()
-            return True
+        if kind == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            panning = self._pan is not None
+            if panning or self._pending is not None:
+                self.end_pan()
+            return panning
         return super().eventFilter(obj, event)
+
+    def _move_pan(self, event) -> bool:
+        if not event.spontaneous():
+            return self._pan is not None
+        buttons = event.buttons() or QApplication.mouseButtons()
+        if not (buttons & Qt.LeftButton):
+            return self._pan is not None
+        if self._pan is None:
+            origin = self._pending
+            if origin is None:
+                return False
+            if (QCursor.pos() - origin).manhattanLength() < _PAN_SLOP:
+                return False
+            self._cancel_button_down()
+            self._begin_pan(origin)
+        origin, horizontal, vertical = self._pan
+        delta = QCursor.pos() - origin
+        self.horizontalScrollBar().setValue(horizontal - delta.x())
+        self.verticalScrollBar().setValue(vertical - delta.y())
+        return True
+
+    def _pointer(self, event) -> QPoint:
+        if event.spontaneous():
+            return QPoint(QCursor.pos())
+        return QPoint(event.globalPos())
+
+    def _cancel_button_down(self) -> None:
+        content = self._content
+        if content is not None:
+            for button in content.findChildren(QAbstractButton):
+                if button.isDown():
+                    button.setDown(False)
+        grabber = QWidget.mouseGrabber()
+        if grabber is not None and grabber is not self.viewport():
+            grabber.releaseMouse()
+
+    def _install_app_filter(self) -> None:
+        app = QApplication.instance()
+        if app is not None and not self._app_filter:
+            app.installEventFilter(self)
+            self._app_filter = True
 
     def _begin_pan(self, origin: QPoint) -> None:
         self._pan = (
@@ -259,14 +419,16 @@ class _RouteCanvas(QGraphicsView):
             self.horizontalScrollBar().value(),
             self.verticalScrollBar().value(),
         )
-        app = QApplication.instance()
-        if app is not None and not self._app_filter:
-            app.installEventFilter(self)
-            self._app_filter = True
+        self._install_app_filter()
         if not self._pan_cursor:
             QApplication.setOverrideCursor(Qt.ClosedHandCursor)
             self._pan_cursor = True
         QTimer.singleShot(0, self._grab_pan)
+
+    def _notify_transform(self) -> None:
+        callback = self.on_transform
+        if callback is not None:
+            callback()
 
     def _grab_pan(self) -> None:
         """Take the mouse after the press, so the drag is not dropped."""
@@ -293,6 +455,7 @@ class _RouteCanvas(QGraphicsView):
         self.verticalScrollBar().setValue(
             self.verticalScrollBar().value() + shifted.y() - anchor.y()
         )
+        self._notify_transform()
 
     def _wheel_steps(self, event) -> float:
         angle = event.angleDelta().y()
@@ -315,8 +478,11 @@ class _RouteCanvas(QGraphicsView):
     def _on_canvas(self, obj) -> bool:
         if obj is self or obj is self.viewport():
             return True
+        return self._content_widget(obj)
+
+    def _content_widget(self, obj) -> bool:
         content = self._content
-        if content is None:
+        if content is None or obj is self or obj is self.viewport():
             return False
         if obj is content:
             return True
@@ -357,6 +523,7 @@ class RouteBrowserDialog(QDialog):
         self._routes: list[dict] = []
         self._pixmaps: dict[tuple, QPixmap | None] = {}
         self._reaction_pixmaps: dict[tuple, QPixmap | None] = {}
+        self._depict_key: int | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 8)
@@ -378,6 +545,7 @@ class RouteBrowserDialog(QDialog):
         self._steps_layout.setContentsMargins(4, 4, 4, 4)
         self._steps_layout.setSpacing(12)
         self._route_scroll = _RouteCanvas()
+        self._route_scroll.on_transform = self._sync_depictions
         self._route_scroll.set_content(self._steps_host)
 
         canvas_column = QWidget()
@@ -401,6 +569,11 @@ class RouteBrowserDialog(QDialog):
 
         make_window_minimizable(self)
         make_window_resizable(self)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._route_scroll._apply_background()
+        self._sync_depictions()
 
     def hideEvent(self, event) -> None:  # noqa: N802
         self._route_scroll.end_pan()
@@ -564,10 +737,35 @@ class RouteBrowserDialog(QDialog):
         layout.activate()
         self._route_scroll.place_content()
 
+    def _sync_depictions(self) -> None:
+        key = int(round(self._route_scroll.depict_ratio() * 1000))
+        if key == self._depict_key:
+            return
+        self._depict_key = key
+        self._repaint_structures()
+
+    def _repaint_structures(self) -> None:
+        for card in self.molecule_cards():
+            label = card.findChild(QLabel)
+            pixmap = self._pixmap_for(getattr(card, "_smiles", ""))
+            if label is not None and isinstance(pixmap, QPixmap) and not pixmap.isNull():
+                label.setPixmap(pixmap)
+        for label in self._steps_host.findChildren(QLabel):
+            step = getattr(label, "_reaction_step", None)
+            if not isinstance(step, dict):
+                continue
+            pixmap = self._reaction_pixmap_for(step)
+            if isinstance(pixmap, QPixmap) and not pixmap.isNull():
+                label.setPixmap(pixmap)
+        proxy = self._route_scroll._proxy
+        if isinstance(proxy, _SharpProxy):
+            proxy.invalidate()
+
     def _pixmap_for(self, smiles: str) -> QPixmap | None:
-        key = (smiles, _CARD_W, _CARD_H)
+        ratio = self._route_scroll.depict_ratio()
+        key = (smiles, _CARD_W, _CARD_H, int(round(ratio * 1000)))
         if key not in self._pixmaps:
-            self._pixmaps[key] = _molecule_pixmap(smiles, _CARD_W, _CARD_H)
+            self._pixmaps[key] = _molecule_pixmap(smiles, _CARD_W, _CARD_H, ratio)
         return self._pixmaps[key]
 
     def _reaction_pixmap_for(self, step: dict) -> QPixmap | None:
@@ -577,9 +775,12 @@ class RouteBrowserDialog(QDialog):
             for item in step.get("reactants") or []
             if str(item.get("smiles") or "").strip()
         ]
-        key = (product, tuple(reactants), _STEP_W, _STEP_H)
+        ratio = self._route_scroll.depict_ratio()
+        key = (product, tuple(reactants), _STEP_W, _STEP_H, int(round(ratio * 1000)))
         if key not in self._reaction_pixmaps:
-            self._reaction_pixmaps[key] = _reaction_pixmap(product, reactants, _STEP_W, _STEP_H)
+            self._reaction_pixmaps[key] = _reaction_pixmap(
+                product, reactants, _STEP_W, _STEP_H, ratio
+            )
         return self._reaction_pixmaps[key]
 
 
@@ -1007,16 +1208,23 @@ def _probability_text(value: object) -> str:
         return str(value)
 
 
-def _molecule_pixmap(smiles: str, width: int, height: int) -> QPixmap | None:
+def _molecule_pixmap(smiles: str, width: int, height: int, ratio: float) -> QPixmap | None:
     mol = Chem.MolFromSmiles(smiles) if smiles else None
     if mol is None:
         return None
+    app_ratio = _device_ratio()
+    scale = ratio / app_ratio if app_ratio else ratio
     try:
-        pixmap = molecule_pixmap(mol, width, height)
+        pixmap = molecule_pixmap(
+            mol,
+            max(1, int(round(width * scale))),
+            max(1, int(round(height * scale))),
+        )
     except (ValueError, RuntimeError):
         return None
     if pixmap.isNull():
         return None
+    pixmap.setDevicePixelRatio(ratio)
     return pixmap
 
 
@@ -1033,6 +1241,7 @@ class _StepWidget(QWidget):
         root.addWidget(title)
         image = QLabel()
         image.setAlignment(Qt.AlignCenter)
+        image._reaction_step = step
         pixmap = pixmap_for(step)
         if isinstance(pixmap, QPixmap) and not pixmap.isNull():
             image.setPixmap(pixmap)
@@ -1047,20 +1256,29 @@ class _StepWidget(QWidget):
             root.addWidget(detail)
 
 
-def _reaction_pixmap(product: str, reactants: list[str], width: int, height: int) -> QPixmap | None:
+def _reaction_pixmap(
+    product: str, reactants: list[str], width: int, height: int, ratio: float
+) -> QPixmap | None:
     if not product or not reactants:
-        return _molecule_pixmap(product, width, height)
+        return _molecule_pixmap(product, width, height, ratio)
     smiles = ".".join(reactants) + ">>" + product
     try:
         reaction = Chem.rdChemReactions.ReactionFromSmarts(smiles, useSmiles=True)
         if reaction is None:
-            return _molecule_pixmap(product, width, height)
-        drawer = Draw.MolDraw2DCairo(int(width), int(height))
+            return _molecule_pixmap(product, width, height, ratio)
+        drawer = Draw.MolDraw2DCairo(
+            max(1, int(round(width * ratio))),
+            max(1, int(round(height * ratio))),
+        )
         drawer.DrawReaction(reaction)
         drawer.FinishDrawing()
         image = QImage.fromData(bytes(drawer.GetDrawingText()))
     except (ValueError, RuntimeError):
-        return _molecule_pixmap(product, width, height)
+        return _molecule_pixmap(product, width, height, ratio)
     if image.isNull():
         return None
-    return QPixmap.fromImage(image)
+    pixmap = QPixmap.fromImage(image)
+    if pixmap.isNull():
+        return None
+    pixmap.setDevicePixelRatio(ratio)
+    return pixmap

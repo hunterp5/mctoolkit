@@ -357,6 +357,7 @@ def test_route_browser_lists_one_step(qapp, monkeypatch) -> None:  # noqa: ARG00
     assert "zinc" in green.toolTip()
     _assert_card_copy_menu(cards, monkeypatch)
     _assert_tree_overflows(dialog)
+    _assert_sharp_depictions(dialog)
     dialog.route_table.selectRow(1)
     assert dialog.molecule_cards() == []
     step_titles = [
@@ -388,6 +389,11 @@ def _assert_step_details_toggle(dialog) -> None:
     assert buttons[0].reaction_smiles == "CC.O>>CCO"
     buttons[0].click()
     QApplication.processEvents()
+    buttons[0].setChecked(False)
+    dialog._clear_step_table()
+    _click_step_button(buttons[0])
+    assert buttons[0].isChecked()
+    assert dialog.step_table.rowCount() > 0
     fields = [dialog.step_table.item(row, 0).text() for row in range(dialog.step_table.rowCount())]
     values = [dialog.step_table.item(row, 1).text() for row in range(dialog.step_table.rowCount())]
     assert "policy_name" in fields
@@ -459,8 +465,8 @@ def _assert_canvas_pans(dialog) -> None:
         QEvent.MouseButtonPress,
         QPoint(20, 20),
         origin,
-        Qt.MiddleButton,
-        Qt.MiddleButton,
+        Qt.LeftButton,
+        Qt.LeftButton,
         Qt.NoModifier,
     )
     move = _Spontaneous(
@@ -468,7 +474,7 @@ def _assert_canvas_pans(dialog) -> None:
         QPoint(70, 50),
         origin + shift,
         Qt.NoButton,
-        Qt.MiddleButton,
+        Qt.LeftButton,
         Qt.NoModifier,
     )
     drift = QMouseEvent(
@@ -476,14 +482,14 @@ def _assert_canvas_pans(dialog) -> None:
         QPoint(200, 20),
         origin + QPoint(400, 0),
         Qt.NoButton,
-        Qt.MiddleButton,
+        Qt.LeftButton,
         Qt.NoModifier,
     )
     release = _Spontaneous(
         QEvent.MouseButtonRelease,
         QPoint(70, 50),
         origin + shift,
-        Qt.MiddleButton,
+        Qt.LeftButton,
         Qt.NoButton,
         Qt.NoModifier,
     )
@@ -492,6 +498,44 @@ def _assert_canvas_pans(dialog) -> None:
         down = canvas.verticalScrollBar()
         start_h, start_v = across.value(), down.value()
         watched = canvas.mapToScene(QPoint(40, 40))
+        middle = _Spontaneous(
+            QEvent.MouseButtonPress,
+            QPoint(20, 20),
+            origin,
+            Qt.MiddleButton,
+            Qt.MiddleButton,
+            Qt.NoModifier,
+        )
+        middle_move = _Spontaneous(
+            QEvent.MouseMove,
+            QPoint(70, 50),
+            origin + shift,
+            Qt.NoButton,
+            Qt.MiddleButton,
+            Qt.NoModifier,
+        )
+        QApplication.sendEvent(viewport, middle)
+        held["at"] = origin + shift
+        QApplication.sendEvent(viewport, middle_move)
+        assert across.value() == start_h
+        assert down.value() == start_v
+        assert canvas._pan is None
+        held["at"] = origin
+        QApplication.sendEvent(viewport, press)
+        QApplication.sendEvent(
+            viewport,
+            _Spontaneous(
+                QEvent.MouseButtonRelease,
+                QPoint(20, 20),
+                origin,
+                Qt.LeftButton,
+                Qt.NoButton,
+                Qt.NoModifier,
+            ),
+        )
+        assert across.value() == start_h
+        assert down.value() == start_v
+        assert canvas._pan is None
         QApplication.sendEvent(viewport, press)
         held["at"] = origin + shift
         QApplication.sendEvent(viewport, move)
@@ -512,7 +556,7 @@ def _assert_canvas_pans(dialog) -> None:
                 QPoint(8, 8),
                 origin + far,
                 Qt.NoButton,
-                Qt.MiddleButton,
+                Qt.LeftButton,
                 Qt.NoModifier,
             ),
         )
@@ -555,6 +599,72 @@ def _assert_canvas_zooms(canvas, viewport, origin) -> None:
     back = canvas.mapFromScene(watched)
     assert abs(back.x() - anchor.x()) <= 2
     assert abs(back.y() - anchor.y()) <= 2
+
+
+def _click_step_button(button) -> None:
+    from PyQt5.QtCore import QEvent, QPoint, Qt
+    from PyQt5.QtGui import QMouseEvent
+    from PyQt5.QtWidgets import QApplication
+
+    class _Spontaneous(QMouseEvent):
+        def spontaneous(self) -> bool:  # noqa: N802
+            return True
+
+    local = QPoint(max(1, button.width() // 2), max(1, button.height() // 2))
+    global_pos = button.mapToGlobal(local)
+    QApplication.sendEvent(
+        button,
+        _Spontaneous(
+            QEvent.MouseButtonPress,
+            local,
+            global_pos,
+            Qt.LeftButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        ),
+    )
+    QApplication.sendEvent(
+        button,
+        _Spontaneous(
+            QEvent.MouseButtonRelease,
+            local,
+            global_pos,
+            Qt.LeftButton,
+            Qt.NoButton,
+            Qt.NoModifier,
+        ),
+    )
+    QApplication.processEvents()
+
+
+def _assert_sharp_depictions(dialog) -> None:
+    from PyQt5.QtGui import QPalette
+    from PyQt5.QtWidgets import QLabel
+
+    from molmanager.ui.browsers.route_browser import _SharpProxy
+
+    canvas = dialog._route_scroll
+    _assert_canvas_zooms(canvas, canvas.viewport(), canvas.mapToGlobal(dialog.rect().topLeft()))
+    ratio = canvas.depict_ratio()
+    assert ratio > 1.05
+    card = dialog.molecule_cards()[0]
+    label = card.findChild(QLabel)
+    pixmap = label.pixmap()
+    assert pixmap is not None and not pixmap.isNull()
+    assert abs(pixmap.devicePixelRatio() - ratio) < 0.05
+    assert pixmap.width() > label.width()
+    canvas.grab()
+    cache = canvas._proxy._cache
+    assert isinstance(canvas._proxy, _SharpProxy)
+    assert cache is not None and not cache.isNull()
+    assert abs(cache.devicePixelRatio() - ratio) < 0.05
+    assert cache.width() > dialog._steps_host.width()
+    host = dialog._steps_host
+    assert host.objectName() == "route-tree"
+    assert "palette(base)" in host.styleSheet()
+    base = canvas.palette().color(QPalette.Base)
+    assert canvas.backgroundBrush().color() == base
+    assert host.palette().color(QPalette.Window) == base
 
 
 def test_branch_lines_reach_reagent_cards(qapp) -> None:  # noqa: ARG001
