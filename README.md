@@ -595,3 +595,5 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 The full license text is in [LICENSE](LICENSE).
+
+PyQt5 is used under the GPL. A build that includes that Qt library stays GPL-3. Shipping the same application under a proprietary license would require a commercial Qt license instead. The Linux CI job writes `sbom.cdx.json` for the environment it tested and uploads that file with the run.
