@@ -189,6 +189,12 @@ class OrdSearchDialog(QDialog):
         self.reaction.setFixedHeight(64)
         self.reaction.setToolTip("The reaction to look up. Atom maps are ignored.")
         form.addRow("Reaction SMARTS", self.reaction)
+        self.sketch_button = QPushButton("Sketcher…")
+        self.sketch_button.setToolTip(
+            "Draw the reaction. Reactants go on the tail of the arrow and products on the head."
+        )
+        self.sketch_button.clicked.connect(self._edit_in_sketcher)
+        form.addRow("", self.sketch_button)
         self.chirality = QCheckBox("Match stereochemistry")
         self.chirality.setChecked(False)
         self.chirality.setToolTip(
@@ -248,6 +254,46 @@ class OrdSearchDialog(QDialog):
         form.addRow("Similarity", self.similarity)
         self._sync_similarity()
         return group
+
+    def _edit_in_sketcher(self) -> None:
+        """Open the sketcher on this reaction and keep a complete drawing."""
+        from PyQt5.QtCore import QTimer
+        from PyQt5.QtWidgets import QMessageBox
+
+        try:
+            from ..sketcher.dialog import SketcherDialog
+        except ImportError as exc:
+            QMessageBox.warning(self, self.windowTitle(), str(exc))
+            return
+        sketch = SketcherDialog(self)
+        sketch.setModal(True)
+        sketch.setWindowModality(Qt.ApplicationModal)
+        sketch.setAttribute(Qt.WA_DeleteOnClose, False)
+        text = self.reaction.toPlainText().strip()
+        if text:
+            QTimer.singleShot(0, lambda: self._load_sketch_reaction(sketch, text))
+        sketch.exec_()
+        try:
+            smarts = (sketch.canvas.to_reaction_smarts() or "").strip()
+            drawn = bool(sketch.canvas.nodes or sketch.canvas.reaction_arrow is not None)
+        except (AttributeError, RuntimeError):
+            smarts = ""
+            drawn = False
+        sketch.deleteLater()
+        if smarts:
+            self.reaction.setPlainText(smarts)
+            return
+        if drawn:
+            QMessageBox.information(
+                self,
+                self.windowTitle(),
+                "Draw reactants on the tail of the arrow and products on the head.",
+            )
+
+    def _load_sketch_reaction(self, sketch, text: str) -> None:
+        if sketch.canvas.load_reaction_smarts(text):
+            return
+        sketch.show_sketch_status("The reaction SMARTS could not be drawn.")
 
     def _sync_similarity(self) -> None:
         self.similarity.setEnabled(self.match.currentData() == "similarity")
