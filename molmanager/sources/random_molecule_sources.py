@@ -235,6 +235,9 @@ def _looks_like_html_or_captcha(raw: str, content_type: str | None) -> bool:
 
 
 def _http_get_text(url: str, *, timeout: float, error_prefix: str) -> str:
+    from ..platform_support.session_runtime import require_network
+
+    require_network(error_prefix or "network")
     req = urllib.request.Request(
         url,
         headers={"Accept": "application/json, text/plain, */*", "User-Agent": _USER_AGENT},

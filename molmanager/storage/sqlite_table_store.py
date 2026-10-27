@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 from pathlib import Path
 
 
@@ -27,14 +26,27 @@ def _quoted_ident(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
 
 
+def unlink_sqlite_files(path: str | Path) -> None:
+    """Delete a SQLite file and its WAL sidecars. Missing files are ignored."""
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            Path(str(path) + suffix).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 class SqliteTableStore:
     """Materialize row dicts in SQLite and query them in pages."""
 
-    def __init__(self, db_path: str | Path | None = None) -> None:
+    def __init__(self, db_path: str | Path | None = None, *, delete_on_close: bool = False) -> None:
         if db_path is None:
-            self._path = Path(tempfile.gettempdir()) / "MOLMANAGER_table_cache.sqlite3"
+            from ..platform_support.session_runtime import current_runtime
+
+            self._path = current_runtime().allocate_sqlite("table-cache-")
+            self._delete_on_close = True
         else:
             self._path = Path(db_path)
+            self._delete_on_close = delete_on_close
         self._conn = sqlite3.connect(str(self._path))
         self._conn.row_factory = sqlite3.Row
         try:
@@ -60,7 +72,12 @@ class SqliteTableStore:
         return self._path
 
     def close(self) -> None:
-        self._conn.close()
+        try:
+            self._conn.close()
+        except sqlite3.Error:
+            pass
+        if self._delete_on_close:
+            unlink_sqlite_files(self._path)
 
     def _data_columns(self, headers: list[str]) -> list[str]:
         return [h for h in headers if h not in ("ID_HIDDEN", "Structure")]

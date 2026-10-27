@@ -104,6 +104,9 @@ def main(argv: list[str] | None = None) -> int:
 
     hide_owned_windows_console()
     _configure_logging()
+    from .platform_support.session_runtime import install_runtime
+
+    install_runtime()
     try:
         configure_rdkit_for_desktop_app()
     except RuntimeError as exc:
@@ -136,6 +139,9 @@ def main(argv: list[str] | None = None) -> int:
             lambda: w._warn_could_not_open("Open File", no_path_message(kind="file")),
         )
     if load_session:
+        from .platform_support.session_runtime import current_runtime
+
+        load_session = current_runtime().retain_foreign_session(load_session)
         try:
             w.apply_saved_session_from_file(load_session)
         except Exception as e:

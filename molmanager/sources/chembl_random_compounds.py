@@ -41,6 +41,9 @@ class RandomChemblMolecule:
 
 
 def _http_get_json(url: str, *, timeout: float = 60.0) -> dict[str, Any]:
+    from ..platform_support.session_runtime import require_network
+
+    require_network("ChEMBL")
     req = urllib.request.Request(
         url, headers={"Accept": "application/json", "User-Agent": _USER_AGENT}
     )

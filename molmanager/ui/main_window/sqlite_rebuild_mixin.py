@@ -76,15 +76,11 @@ class SqliteRebuildMixin:
         data_headers = [
             h for h in self.headers[2:] if h and not self._table_model.is_pixmap_data_column(h)
         ]
-        import os
-        import tempfile
         from pathlib import Path
 
-        fd, db_path = tempfile.mkstemp(prefix="MOLMANAGER_sqlite_", suffix=".sqlite3")
-        try:
-            os.close(fd)
-        except OSError:
-            pass
+        from ...platform_support.session_runtime import current_runtime
+
+        db_path = str(current_runtime().allocate_sqlite("sqlite-rebuild-"))
         self._sqlite_rebuild_pending_path = Path(db_path)
         n_rows = self._table_model.rowCount()
         from ..background_jobs import register_background_job
@@ -184,12 +180,15 @@ class SqliteRebuildMixin:
         job_id = getattr(self, "_sqlite_rebuild_bg_job_id", None)
         self._unregister_sqlite_rebuild_background_job(job_gen)
         if job_gen != getattr(self, "_sqlite_rebuild_gen", -1):
+            from ...storage.sqlite_table_store import unlink_sqlite_files
+
+            unlink_sqlite_files(db_path)
             return
         finish = getattr(self, "_finish_tool_progress", None)
         if callable(finish):
             finish("Indexing table", status_message=None, job_id=job_id)
         try:
-            new_store = SqliteTableStore(db_path)
+            new_store = SqliteTableStore(db_path, delete_on_close=True)
             old = getattr(self, "_sqlite_store", None)
             self._sqlite_store = new_store
             if old is not None:
@@ -225,6 +224,11 @@ class SqliteRebuildMixin:
             finish("Indexing table", status_message=None, job_id=job_id)
         logger.warning("SQLite rebuild failed: %s", msg)
         self._sqlite_rebuild_in_progress = False
+        pending = getattr(self, "_sqlite_rebuild_pending_path", None)
         self._sqlite_rebuild_pending_path = None
+        if pending is not None:
+            from ...storage.sqlite_table_store import unlink_sqlite_files
+
+            unlink_sqlite_files(pending)
         self._sqlite_rebuild_pending_filters = False
         self.status_label.setText("Table indexing failed — filters may be slow until data changes.")

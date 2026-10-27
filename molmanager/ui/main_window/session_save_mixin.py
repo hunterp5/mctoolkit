@@ -20,11 +20,8 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import subprocess
 import sys
-import tempfile
-import time
 from collections.abc import Callable
 from functools import partial
 
@@ -272,11 +269,10 @@ class SessionSaveMixin:
         )
 
     def _session_bundle_temp_path(self) -> str:
-        """Return a new ``.cms`` path under the temp session directory (does not write)."""
-        session_dir = os.path.join(tempfile.gettempdir(), "MolManagerSessions")
-        os.makedirs(session_dir, exist_ok=True)
-        fname = f"session_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}.cms"
-        return os.path.join(session_dir, fname)
+        """Return a new ``.cms`` path under this process's temp directory (does not write)."""
+        from ...platform_support.session_runtime import current_runtime
+
+        return current_runtime().session_copy_path()
 
     def _session_data_headers(self) -> list[str]:
         return [h for h in self.headers if h not in ("ID_HIDDEN", "Structure")]

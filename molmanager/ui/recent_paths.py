@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -53,7 +52,9 @@ class RecentEntry:
 
 def ephemeral_session_dir() -> str:
     """Temp folder used for Duplicate Session bundles."""
-    return os.path.join(tempfile.gettempdir(), "MolManagerSessions")
+    from ..platform_support.session_runtime import current_runtime
+
+    return str(current_runtime().sessions_dir())
 
 
 def remember_recent(kind: str, path: str) -> None:

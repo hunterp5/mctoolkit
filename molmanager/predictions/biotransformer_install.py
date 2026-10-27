@@ -98,6 +98,9 @@ def _download_zip(dest: Path, progress: ProgressFn | None) -> None:
 
 def fetch_biotransformer_package(work: Path, progress: ProgressFn | None = None) -> Path:
     """Clone or unzip the official package into ``work`` and return the layout root."""
+    from ..platform_support.session_runtime import require_network
+
+    require_network("BioTransformer")
     git = shutil.which("git")
     clone_dir = work / "src"
     if git:

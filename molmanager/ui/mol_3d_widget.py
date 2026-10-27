@@ -22,6 +22,7 @@ import base64
 import json
 import logging
 import shutil
+from contextlib import suppress
 from pathlib import Path
 
 from PyQt5.QtCore import QTemporaryDir, QTimer, QUrl, Qt
@@ -40,7 +41,11 @@ from PyQt5.QtWidgets import (
 
 from rdkit import Chem
 
-from ..platform_support.qt_webengine_flags import webengine_views_supported
+from ..platform_support.qt_webengine_flags import (
+    apply_viewer_webengine_settings,
+    refuse_remote_viewer_script,
+    webengine_views_supported,
+)
 from .dockable_plot import (
     PLOT_BODY_MARGINS,
     PLOT_BODY_SPACING,
@@ -162,18 +167,13 @@ class Molecule3DViewerWidget(Mol3DConfMixin, Mol3DChromeMixin, QWidget):
         try:
             if not webengine_views_supported():
                 raise RuntimeError("WebEngine is unavailable on this platform plugin")
-            from PyQt5.QtWebEngineWidgets import QWebEngineSettings, QWebEngineView
+            from PyQt5.QtWebEngineWidgets import QWebEngineView
 
             web = QWebEngineView(self)
             web.setContextMenuPolicy(Qt.NoContextMenu)
             _wire_webengine_console_logger(web)
-            try:
-                s = web.settings()
-                s.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
-                s.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
-                s.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
-            except Exception:
-                pass
+            with suppress(Exception):
+                apply_viewer_webengine_settings(web.settings())
             if bundled_3dmol_available():
                 self._viewer_tmp = QTemporaryDir()
                 if not self._viewer_tmp.isValid():
@@ -194,6 +194,7 @@ class Molecule3DViewerWidget(Mol3DConfMixin, Mol3DChromeMixin, QWidget):
                     index.write_text(_offline_index_html(mol_b64, flat=flat), encoding="utf-8")
                 web.load(QUrl.fromLocalFile(str(index.resolve())))
             else:
+                refuse_remote_viewer_script()
                 if multi_conf_blocks_json_b64 is not None:
                     web.setHtml(
                         _cdn_fallback_html_multiconf(

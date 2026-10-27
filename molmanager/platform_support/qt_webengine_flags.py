@@ -265,3 +265,26 @@ def _release_qtwebengine_prewarm() -> None:
         view.deleteLater()
     except RuntimeError:
         pass
+
+
+def apply_viewer_webengine_settings(settings) -> None:
+    """JavaScript on. Remote URLs follow ``MOLMANAGER_OFFLINE``."""
+    from PyQt5.QtWebEngineWidgets import QWebEngineSettings
+
+    from .session_runtime import network_allowed
+
+    settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
+    settings.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
+    settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, network_allowed())
+
+
+def refuse_remote_viewer_script() -> None:
+    """Raise when a missing local 3Dmol bundle would be loaded from the network."""
+    from .session_runtime import network_allowed
+
+    if network_allowed():
+        return
+    raise RuntimeError(
+        "The bundled 3D viewer is missing and MOLMANAGER_OFFLINE is set, "
+        "so the viewer will not load a script from the network."
+    )

@@ -19,15 +19,15 @@
 from __future__ import annotations
 
 import json
-import tempfile
 import webbrowser
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PyQt5.QtCore import QObject, QTimer, QUrl, pyqtSlot
 from PyQt5.QtWebChannel import QWebChannel
 from PyQt5.QtWidgets import QVBoxLayout, QWidget
 from plotly import graph_objects as go
+
+from ..platform_support.session_runtime import current_runtime
 
 from ..plotting.plot_marker_color import marker_selection_opacities
 from .layout_perf import perf_span
@@ -88,8 +88,8 @@ class PlotlyInteractiveView(QWidget):
     ) -> None:
         super().__init__(parent)
         self.parent_app = parent_app
-        self._plot_shell_path = (
-            Path(tempfile.gettempdir()) / f"MOLMANAGER_plot_shell_{id(self)}.html"
+        self._plot_shell_path = current_runtime().temp_file(
+            f"MOLMANAGER_plot_shell_{id(self)}.html"
         )
         self._last_browser_opened_path: str | None = None
         self.plotted_oids: list[int] = []

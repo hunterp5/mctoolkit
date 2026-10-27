@@ -67,6 +67,9 @@ def _pubchem_similarity_sort_key(res: PubChemResult) -> float:
 
 
 def _get_pubchem_compound_by_smiles(smiles: str):
+    from ...platform_support.session_runtime import require_network
+
+    require_network("PubChem")
     try:
         import pubchempy as pcp
     except Exception as e:
@@ -112,6 +115,9 @@ class _PubChemBatchWorker(QRunnable):
 
     def run(self) -> None:
         try:
+            from ...platform_support.session_runtime import require_network
+
+            require_network("PubChem")
             import pubchempy as pcp
         except Exception as e:
             self.signals.finished.emit([], [f"ERROR: {e}"])

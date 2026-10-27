@@ -22,6 +22,7 @@ import base64
 import json
 import logging
 import shutil
+from contextlib import suppress
 from pathlib import Path
 
 from PyQt5.QtCore import QTemporaryDir, QTimer, QUrl, Qt
@@ -29,7 +30,11 @@ from PyQt5.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from rdkit import Chem
 
-from ..platform_support.qt_webengine_flags import webengine_views_supported
+from ..platform_support.qt_webengine_flags import (
+    apply_viewer_webengine_settings,
+    refuse_remote_viewer_script,
+    webengine_views_supported,
+)
 from .mol_viewer_3d import (
     _BUNDLED_3DMOL,
     _RESET_STRUCTURE_JS,
@@ -525,18 +530,13 @@ class DockComplexEmbedView(QWidget):
             return
         self._bootstrapped = True
         try:
-            from PyQt5.QtWebEngineWidgets import QWebEngineSettings, QWebEngineView
+            from PyQt5.QtWebEngineWidgets import QWebEngineView
 
             web = QWebEngineView(self)
             web.setContextMenuPolicy(Qt.NoContextMenu)
             _wire_webengine_console_logger(web)
-            try:
-                s = web.settings()
-                s.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
-                s.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
-                s.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
-            except Exception:
-                pass
+            with suppress(Exception):
+                apply_viewer_webengine_settings(web.settings())
             web.loadFinished.connect(self._on_load_finished)
             if bundled_3dmol_available():
                 self._viewer_tmp = QTemporaryDir()
@@ -548,6 +548,7 @@ class DockComplexEmbedView(QWidget):
                 index.write_text(build_dock_complex_html(), encoding="utf-8")
                 web.load(QUrl.fromLocalFile(str(index.resolve())))
             else:
+                refuse_remote_viewer_script()
                 web.setHtml(build_dock_complex_html(), QUrl("https://3dmol.org/"))
             self._web = web
             self._status.hide()

@@ -92,6 +92,7 @@ class JobScheduler(Protocol):
 class StoreAccess(Protocol):
     """Persistent sidecars and the undo stack."""
 
+    session_runtime: Any
     _sqlite_store: Any
     _confs_blocks_sidecar: Any
     _undo_stack: QUndoStack

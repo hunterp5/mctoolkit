@@ -186,6 +186,9 @@ def _offer_from_source(source: object) -> VendorOffer | None:
 
 def _request(url: str, *, data: bytes | None, accept: str) -> bytes | None:
     """HTTP body, or ``None`` on 404. Other failures raise ``PubChemVendorError``."""
+    from ..platform_support.session_runtime import require_network
+
+    require_network("PubChem")
     last_error: BaseException | None = None
     for attempt in range(_RETRIES):
         req = urllib.request.Request(

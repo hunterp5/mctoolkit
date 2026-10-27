@@ -503,6 +503,8 @@ Optional settings for power users and IT deployments:
 | `MOLMANAGER_PG_CONNECT_TIMEOUT` | PostgreSQL connect timeout seconds (default `30`) |
 | `MOLMANAGER_SQLITE_BACKEND_PAGE_SIZE` | SQLite cache page size for filters (default `5000`) |
 | `MOLMANAGER_DISABLE_CUSTOM_CALC` | Set to `1` / `true` to disable Tools → Custom Calculator |
+| `MOLMANAGER_OFFLINE` | Set to `1` / `true` to refuse PubChem, ChEMBL, SureChEMBL, ZINC, vendor lookup, BioTransformer download, and the 3Dmol network script |
+| `MOLMANAGER_SQL_WRITES` | Set to `0` / `false` to refuse SQL that modifies a database, even if Read-only is unchecked |
 | `MOLMANAGER_LOG_DIR` | Directory for rotating `molmanager.log` (platform default under user app data / state) |
 | `MOLMANAGER_LOG_TO_FILE` | Set to `0` / `false` to disable file logging (console only) |
 | `MOLMANAGER_BUNDLE_DIR` | Folder containing optional `gnina` / `vina` binaries |

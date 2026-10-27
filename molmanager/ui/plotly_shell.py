@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 from plotly.offline import get_plotlyjs
+
+from ..platform_support.session_runtime import current_runtime
 
 from .web_resize_scheduler import web_resize_scheduler_js
 
@@ -36,9 +37,7 @@ def sanitized_plotly_js() -> str:
     global _PLOTLY_JS
     if _PLOTLY_JS is None:
         _PLOTLY_JS = (
-            get_plotlyjs()
-            .replace(":focus-visible", ":focus")
-            .replace("</script>", "<\\/script>")
+            get_plotlyjs().replace(":focus-visible", ":focus").replace("</script>", "<\\/script>")
         )
     return _PLOTLY_JS
 
@@ -76,7 +75,7 @@ def ensure_interactive_plot_shell() -> Path:
     path = _SHELL_PATHS.get(overlay_max)
     if path is not None and path.is_file():
         return path
-    path = Path(tempfile.gettempdir()) / f"MOLMANAGER_plot_shell_{overlay_max}.html"
+    path = current_runtime().temp_file(f"MOLMANAGER_plot_shell_{overlay_max}.html")
     path.write_text(_interactive_plot_shell_html_for(overlay_max), encoding="utf-8")
     _SHELL_PATHS[overlay_max] = path
     return path

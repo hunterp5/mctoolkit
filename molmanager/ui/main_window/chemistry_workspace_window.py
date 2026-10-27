@@ -441,6 +441,9 @@ class ChemistryWorkspaceWindow(
             log_every=cfg.perf_log_every,
         )
         # Local SQLite cache for text/numeric filter pushdown and column search at 100k+ rows.
+        from ...platform_support.session_runtime import current_runtime
+
+        self.session_runtime = current_runtime()
         self._sqlite_store = SqliteTableStore()
         self._confs_blocks_sidecar = EnsembleStore()
         self._sqlite_store_dirty = False

@@ -43,6 +43,9 @@ def _json_request(
     payload: dict[str, Any] | None = None,
     timeout: float = 120.0,
 ) -> dict[str, Any]:
+    from ..platform_support.session_runtime import require_network
+
+    require_network("SureChEMBL")
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {"Accept": "application/json"}
     if payload is not None:

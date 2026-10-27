@@ -85,7 +85,16 @@ class SqlLoadMixin:
                 )
             table = tname
 
+        from ...platform_support.session_runtime import sql_writes_allowed
+
+        policy_blocks_writes = not sql_writes_allowed()
+        if policy_blocks_writes:
+            read_only = True
         if query and sql_looks_destructive(query):
+            if policy_blocks_writes:
+                raise ValueError(
+                    "SQL that modifies the database is disabled (MOLMANAGER_SQL_WRITES=0)."
+                )
             if read_only:
                 raise ValueError(
                     "This SQL looks like it may modify the database. "

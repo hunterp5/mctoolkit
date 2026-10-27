@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+from contextlib import suppress
 from pathlib import Path
 
 from PyQt5.QtCore import (
@@ -39,7 +40,11 @@ from PyQt5.QtCore import (
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
-from ..platform_support.qt_webengine_flags import webengine_views_supported
+from ..platform_support.qt_webengine_flags import (
+    apply_viewer_webengine_settings,
+    refuse_remote_viewer_script,
+    webengine_views_supported,
+)
 from ..workers.process_pool_utils import application_is_shutting_down
 from .mol_3d_html import _BUNDLED_3DMOL, _wire_webengine_console_logger, bundled_3dmol_available
 from .protein_viewer_html import build_protein_viewer_html
@@ -144,20 +149,15 @@ class ProteinEmbedView(QWidget):
         self._bootstrapped = True
         try:
             from PyQt5.QtWebChannel import QWebChannel
-            from PyQt5.QtWebEngineWidgets import QWebEngineSettings, QWebEngineView
+            from PyQt5.QtWebEngineWidgets import QWebEngineView
 
             web = QWebEngineView(self)
             web.setFocusPolicy(Qt.StrongFocus)
             web.setContextMenuPolicy(Qt.NoContextMenu)
             web.installEventFilter(self)
             _wire_webengine_console_logger(web)
-            try:
-                s = web.settings()
-                s.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
-                s.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
-                s.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
-            except Exception:
-                pass
+            with suppress(Exception):
+                apply_viewer_webengine_settings(web.settings())
             channel = QWebChannel(web.page())
             channel.registerObject("proteinBridge", self._bridge)
             web.page().setWebChannel(channel)
@@ -173,6 +173,7 @@ class ProteinEmbedView(QWidget):
                 index.write_text(build_protein_viewer_html(), encoding="utf-8")
                 web.load(QUrl.fromLocalFile(str(index.resolve())))
             else:
+                refuse_remote_viewer_script()
                 web.setHtml(build_protein_viewer_html(), QUrl("https://3dmol.org/"))
             self._web = web
             proxy = web.focusProxy()

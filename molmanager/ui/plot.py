@@ -39,9 +39,6 @@ __all__ = [
     "resolve_plot_mode",
 ]
 
-import tempfile
-from pathlib import Path
-
 from PyQt5.QtCore import QEvent, Qt, QTimer
 from PyQt5.QtWebChannel import QWebChannel
 from PyQt5.QtWidgets import (
@@ -57,6 +54,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ..platform_support.session_runtime import current_runtime
 from ..plotting.plot_axes import (
     AXIS_NONE,
     PLOT_SESSION_KIND,
@@ -138,8 +136,8 @@ class PlotWidget(
         self._build_plot_ui()
 
     def _init_plot_state(self) -> None:
-        self._plot_shell_path = (
-            Path(tempfile.gettempdir()) / f"MOLMANAGER_plot_shell_{id(self)}.html"
+        self._plot_shell_path = current_runtime().temp_file(
+            f"MOLMANAGER_plot_shell_{id(self)}.html"
         )
         self._last_browser_opened_path: str | None = None
         self._plotted_oids: list[int] = []

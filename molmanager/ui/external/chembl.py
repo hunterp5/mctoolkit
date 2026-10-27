@@ -83,6 +83,9 @@ class ChEMBLResult:
 
 
 def _client():
+    from ...platform_support.session_runtime import require_network
+
+    require_network("ChEMBL")
     try:
         from chembl_webresource_client.new_client import new_client
     except Exception as e:
@@ -295,6 +298,13 @@ class _ChEMBLBatchWorker(QRunnable):
             self._run_impl()
 
     def _run_impl(self) -> None:
+        from ...platform_support.session_runtime import NetworkDisabled, require_network
+
+        try:
+            require_network("ChEMBL")
+        except NetworkDisabled as exc:
+            self.signals.finished.emit([], [f"ERROR: {exc}"], "", "")
+            return
         from chembl_webresource_client.new_client import new_client
         from chembl_webresource_client.settings import Settings
 
