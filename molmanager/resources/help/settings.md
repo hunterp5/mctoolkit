@@ -19,7 +19,7 @@ Global UI preferences for this installation/session; they do not alter table che
 - **GUI**
   - **Theme** - **Light Mode** / **Dark Mode** / **Groovy Mode**, plus named custom themes.
   - **Custom Colors...** (under **Theme**) - edit named custom themes (palette roles, save/delete).
-  - **2D Render...** - pixel size of 2D structure drawings in the Structure column. The same size can be changed by dragging the corner mark at the bottom-right of a structure column.
+  - **2D Render...** - pixel size of 2D structure drawings in the Structure column. The same size can be changed by dragging the dark triangle at the bottom-right of a structure cell.
   - **Font...** - **Application font size**, **Table font size**, **Table text alignment** (3×3: top/center/bottom × left/center/right), **Reset to Default**.
 - **Hotkeys...** - category/command/shortcut table with OK/Cancel, **Clear Selected**, and **Reset to Default**.
 - **Status Bar** - show or hide the bottom bar (status messages and memory use).

@@ -23,7 +23,16 @@ from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from PyQt5.QtCore import QEvent, QItemSelectionModel, QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPalette, QPen, QPixmap
+from PyQt5.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 from PyQt5.QtWidgets import (
     QAbstractButton,
     QAbstractItemView,
@@ -177,76 +186,21 @@ def scaled_structure_pixmap(
     return pix.scaled(target_w, target_h, Qt.IgnoreAspectRatio, Qt.FastTransformation)
 
 
-class StructureColumnCornerGrip(QWidget):
-    """Transparent drag handle at the bottom-right of one structure column."""
-
-    def __init__(self, view: "CompoundTableView", logical_column: int) -> None:
-        super().__init__(view.viewport())
-        self._view = view
-        self._logical = int(logical_column)
-        self._hovered = False
-        self.setFixedSize(_STRUCTURE_CORNER_GRIP_PX, _STRUCTURE_CORNER_GRIP_PX)
-        self.setCursor(Qt.SizeFDiagCursor)
-        self.setFocusPolicy(Qt.NoFocus)
-        self.setAutoFillBackground(False)
-        self.setAttribute(Qt.WA_NoSystemBackground, True)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setStyleSheet("background: transparent;")
-        self.setToolTip("Drag to resize structure depictions")
-        self.hide()
-
-    def paintEvent(self, _event) -> None:  # noqa: N802
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        right = self.width() - 2
-        bottom = self.height() - 2
-        dark = QColor(40, 40, 40) if self._hovered else QColor(70, 70, 70)
-        for pen in (QPen(QColor(255, 255, 255), 3), QPen(dark, 1.4)):
-            painter.setPen(pen)
-            for inset in (4, 8, 12):
-                painter.drawLine(right - inset, bottom, right, bottom - inset)
-        painter.end()
-
-    def enterEvent(self, event) -> None:  # noqa: N802
-        self._hovered = True
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:  # noqa: N802
-        self._hovered = False
-        self.update()
-        super().leaveEvent(event)
-
-    def mousePressEvent(self, event) -> None:  # noqa: N802
-        if event.button() == Qt.LeftButton:
-            self.grabMouse()
-            self._view.begin_structure_depict_resize(self._logical, event.globalPos())
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802
-        if self._view.structure_depict_resize_active():
-            self._view.update_structure_depict_resize(event.globalPos())
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
-        if event.button() == Qt.LeftButton and self._view.structure_depict_resize_active():
-            if QWidget.mouseGrabber() is self:
-                self.releaseMouse()
-            self._view.finish_structure_depict_resize()
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
-
-    def keyPressEvent(self, event) -> None:  # noqa: N802
-        if event.key() == Qt.Key_Escape and self._view.structure_depict_resize_active():
-            self._view.cancel_structure_depict_resize()
-            event.accept()
-            return
-        super().keyPressEvent(event)
+def paint_structure_corner_mark(painter: QPainter, rect: QRect) -> None:
+    """Dark resize triangle in the bottom-right of a structure cell."""
+    right = float(rect.right())
+    bottom = float(rect.bottom())
+    span = float(min(rect.width(), rect.height()) - 3)
+    if span < 6:
+        return
+    path = QPainterPath()
+    path.moveTo(right - span, bottom)
+    path.lineTo(right, bottom)
+    path.lineTo(right, bottom - span)
+    path.closeSubpath()
+    painter.setPen(QPen(QColor(255, 255, 255), 1.75))
+    painter.setBrush(QColor(32, 32, 32))
+    painter.drawPath(path)
 
 
 class StructureDelegate(QStyledItemDelegate):
@@ -616,10 +570,8 @@ class CompoundTableView(QTableView):
         self._row_number_width_model = None
         self._compound_model = None
         self._structure_column_min_width = structure_column_minimum_width()
-        self._corner_grips: dict[int, StructureColumnCornerGrip] = {}
-        self._corner_grip_model = None
-        self._positioning_corner_grips = False
         self._depict_resize: dict | None = None
+        self._corner_cursor = False
         self.setVerticalHeader(CompoundTableRowHeaderView(self))
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableView.SelectItems)
@@ -640,6 +592,10 @@ class CompoundTableView(QTableView):
             hh.sectionPressed.disconnect()
         self.setSortingEnabled(False)
         hh.sectionResized.connect(self._on_horizontal_section_resized)
+        viewport = self.viewport()
+        if viewport is not None:
+            viewport.setMouseTracking(True)
+            viewport.setAttribute(Qt.WA_Hover, True)
 
     def set_row_selection_controller(self, controller: TableRowSelectionController) -> None:
         """Route row-header, select-all, and cell-clear input to *controller*."""
@@ -740,9 +696,17 @@ class CompoundTableView(QTableView):
     def updateGeometries(self) -> None:  # noqa: N802
         super().updateGeometries()
         self._extend_horizontal_scroll_for_resize_grip()
-        # QTableView construction calls this before the grip state exists.
-        if getattr(self, "_corner_grips", None) is not None:
-            self._position_structure_corner_grips()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        # Construction paints once before the corner-drag state exists.
+        if hasattr(self, "_depict_resize"):
+            self._paint_structure_corner_marks()
+
+    def viewportEvent(self, event) -> bool:  # noqa: N802
+        if hasattr(self, "_depict_resize") and self._handle_structure_corner_event(event):
+            return True
+        return bool(super().viewportEvent(event))
 
     def _extend_horizontal_scroll_for_resize_grip(self) -> None:
         """Keep a few pixels of scroll past the last section so its right grip stays on-screen."""
@@ -799,14 +763,10 @@ class CompoundTableView(QTableView):
     def _on_horizontal_section_resized(
         self, logical_index: int, _old_size: int, new_size: int
     ) -> None:
-        if getattr(self, "_corner_grips", None) is None:
-            return
         if not self._column_is_structure_sized(logical_index):
-            self._position_structure_corner_grips()
             return
         min_w = self._structure_column_min_width
         if new_size >= min_w:
-            self._position_structure_corner_grips()
             return
         hh = self.horizontalHeader()
         hh.blockSignals(True)
@@ -814,7 +774,6 @@ class CompoundTableView(QTableView):
             self.setColumnWidth(logical_index, min_w)
         finally:
             hh.blockSignals(False)
-        self._position_structure_corner_grips()
 
     def setModel(self, model) -> None:  # noqa: N802
         """Keep the row-number column width tied to whichever model the view shows."""
@@ -822,7 +781,6 @@ class CompoundTableView(QTableView):
         # Connect after the view so this runs once the row count has already landed.
         self._bind_row_number_column_width(model)
         self.sync_row_number_column_width()
-        self._bind_structure_corner_grips(model)
 
     def _bind_row_number_column_width(self, model) -> None:
         previous = self._row_number_width_model
@@ -870,46 +828,38 @@ class CompoundTableView(QTableView):
         """True while the user is dragging a structure-column corner grip."""
         return self._depict_resize is not None
 
-    def structure_corner_grip(self, logical_column: int) -> StructureColumnCornerGrip | None:
-        """The corner grip for *logical_column*, once the view has positioned it."""
-        return self._corner_grips.get(int(logical_column))
-
-    def structure_column_corner_grip_rect(self, logical_column: int) -> QRect | None:
-        """Viewport rectangle of the bottom-right grip, or ``None`` when it is off-screen.
-
-        The grip sits on the column's right edge and on the bottom of the visible rows
-        (the last row, or the bottom of the viewport when more rows continue below).
-        """
+    def structure_cell_corner_rect(self, row: int, logical_column: int) -> QRect | None:
+        """Viewport rectangle of the resize triangle on one structure cell."""
         logical = int(logical_column)
         if not self._column_is_structure_sized(logical):
             return None
         header = self.horizontalHeader()
-        viewport = self.viewport()
         model = self.model()
-        if header is None or viewport is None or model is None or header.isSectionHidden(logical):
+        if header is None or model is None or header.isSectionHidden(logical):
             return None
-        if int(model.rowCount()) <= 0:
+        index = model.index(int(row), logical)
+        if not index.isValid():
             return None
-        left = int(header.sectionViewportPosition(logical))
-        width = int(header.sectionSize(logical))
-        right = left + width
-        view_w = int(viewport.width())
-        view_h = int(viewport.height())
-        if right > view_w or right < _STRUCTURE_CORNER_GRIP_PX or left >= view_w:
+        viewport = self.viewport()
+        if viewport is None:
             return None
-        last = int(model.rowCount()) - 1
-        content_bottom = int(self.rowViewportPosition(last)) + int(self.rowHeight(last))
-        if content_bottom <= 0:
-            return None
-        bottom = min(content_bottom, view_h)
-        if bottom < _STRUCTURE_CORNER_GRIP_PX:
+        # Keep the triangle on screen when the cell runs past the viewport.
+        cell = self.visualRect(index).intersected(viewport.rect())
+        if cell.width() < _STRUCTURE_CORNER_GRIP_PX or cell.height() < _STRUCTURE_CORNER_GRIP_PX:
             return None
         return QRect(
-            right - _STRUCTURE_CORNER_GRIP_PX,
-            bottom - _STRUCTURE_CORNER_GRIP_PX,
+            cell.right() - _STRUCTURE_CORNER_GRIP_PX + 1,
+            cell.bottom() - _STRUCTURE_CORNER_GRIP_PX + 1,
             _STRUCTURE_CORNER_GRIP_PX,
             _STRUCTURE_CORNER_GRIP_PX,
         )
+
+    def structure_column_corner_grip_rect(self, logical_column: int) -> QRect | None:
+        """Corner mark on the first visible cell of a structure column."""
+        rows = self._visible_row_range()
+        if rows is None:
+            return None
+        return self.structure_cell_corner_rect(int(rows.start), int(logical_column))
 
     def begin_structure_depict_resize(self, logical_column: int, global_pos: QPoint) -> None:
         """Start a corner drag that resizes every structure depiction."""
@@ -989,9 +939,8 @@ class CompoundTableView(QTableView):
             # resized (a zoomed row, or one under the pointer) are set from the drag.
             self._apply_depict_row_heights(visible_only=True)
         self._depict_resize = None
-        self._release_corner_grip_mouse()
+        self._release_corner_mouse()
         self._set_depiction_preview(False, 0, 0)
-        self._position_structure_corner_grips()
         viewport = self.viewport()
         if viewport is not None:
             viewport.update()
@@ -1004,7 +953,7 @@ class CompoundTableView(QTableView):
         if state is None:
             return
         self._depict_resize = None
-        self._release_corner_grip_mouse()
+        self._release_corner_mouse()
         set_structure_depict_size(int(state["origin_w"]), int(state["origin_h"]), persist=False)
         self._set_depiction_preview(False, 0, 0)
         self.set_structure_column_minimum_width(int(state["origin_min"]))
@@ -1018,7 +967,6 @@ class CompoundTableView(QTableView):
             if header is not None:
                 header.blockSignals(False)
         self._restore_depict_row_heights(state)
-        self._position_structure_corner_grips()
         viewport = self.viewport()
         if viewport is not None:
             viewport.update()
@@ -1144,60 +1092,94 @@ class CompoundTableView(QTableView):
             if callable(setter):
                 setter(bool(active), int(origin_w), int(origin_h))
 
-    def _release_corner_grip_mouse(self) -> None:
-        grabber = QWidget.mouseGrabber()
-        if grabber is not None and grabber in self._corner_grips.values():
-            grabber.releaseMouse()
+    def _visible_row_range(self) -> range | None:
+        model = self.model()
+        viewport = self.viewport()
+        if model is None or viewport is None or int(model.rowCount()) <= 0:
+            return None
+        count = int(model.rowCount())
+        top = self.rowAt(0)
+        if top < 0:
+            top = 0
+        bottom = self.rowAt(max(0, int(viewport.height()) - 1))
+        if bottom < 0:
+            bottom = count - 1
+        if bottom < top:
+            return None
+        return range(int(top), min(count - 1, int(bottom)) + 1)
 
-    def _bind_structure_corner_grips(self, model) -> None:
-        previous = self._corner_grip_model
-        if previous is model:
-            return
-        if previous is not None:
-            for signal in (
-                previous.modelReset,
-                previous.rowsInserted,
-                previous.rowsRemoved,
-                previous.columnsInserted,
-                previous.layoutChanged,
-            ):
-                with suppress(TypeError, RuntimeError):
-                    signal.disconnect(self._position_structure_corner_grips)
-        self._corner_grip_model = model
-        if model is None:
-            return
-        model.modelReset.connect(self._position_structure_corner_grips)
-        model.rowsInserted.connect(self._position_structure_corner_grips)
-        model.rowsRemoved.connect(self._position_structure_corner_grips)
-        model.columnsInserted.connect(self._position_structure_corner_grips)
-        model.layoutChanged.connect(self._position_structure_corner_grips)
-        self._position_structure_corner_grips()
+    def _structure_corner_column_at(self, pos: QPoint) -> int:
+        rows = self._visible_row_range()
+        if rows is None:
+            return -1
+        point = QPoint(int(pos.x()), int(pos.y()))
+        for logical in self._structure_logical_columns():
+            for row in rows:
+                rect = self.structure_cell_corner_rect(row, logical)
+                if rect is not None and rect.contains(point):
+                    return logical
+        return -1
 
-    def _position_structure_corner_grips(self, *_args) -> None:
-        if self._positioning_corner_grips:
+    def _paint_structure_corner_marks(self) -> None:
+        viewport = self.viewport()
+        rows = self._visible_row_range()
+        if viewport is None or rows is None:
             return
-        self._positioning_corner_grips = True
+        painter = QPainter(viewport)
+        painter.setRenderHint(QPainter.Antialiasing, True)
         try:
-            wanted = set(self._structure_logical_columns())
-            for logical in list(self._corner_grips):
-                if logical not in wanted:
-                    grip = self._corner_grips.pop(logical)
-                    grip.hide()
-                    grip.deleteLater()
-            viewport = self.viewport()
-            if viewport is None:
-                return
-            for logical in wanted:
-                grip = self._corner_grips.get(logical)
-                if grip is None:
-                    grip = StructureColumnCornerGrip(self, logical)
-                    self._corner_grips[logical] = grip
-                rect = self.structure_column_corner_grip_rect(logical)
-                if rect is None:
-                    grip.hide()
-                    continue
-                grip.setGeometry(rect)
-                grip.show()
-                grip.raise_()
+            for logical in self._structure_logical_columns():
+                for row in rows:
+                    rect = self.structure_cell_corner_rect(row, logical)
+                    if rect is not None:
+                        paint_structure_corner_mark(painter, rect)
         finally:
-            self._positioning_corner_grips = False
+            painter.end()
+
+    def _handle_structure_corner_event(self, event) -> bool:
+        etype = event.type()
+        if etype == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            logical = self._structure_corner_column_at(event.pos())
+            if logical < 0:
+                return False
+            self.begin_structure_depict_resize(logical, event.globalPos())
+            viewport = self.viewport()
+            if viewport is not None:
+                viewport.grabMouse()
+                viewport.setCursor(Qt.SizeFDiagCursor)
+                self._corner_cursor = True
+            return True
+        if self._depict_resize is not None and etype == QEvent.MouseMove:
+            self.update_structure_depict_resize(event.globalPos())
+            return True
+        if self._depict_resize is not None and etype == QEvent.MouseButtonRelease:
+            if event.button() == Qt.LeftButton:
+                self.finish_structure_depict_resize()
+                return True
+            return False
+        if etype in (QEvent.MouseMove, QEvent.HoverMove) and self._depict_resize is None:
+            self._update_corner_cursor(event.pos())
+        elif etype == QEvent.Leave and self._depict_resize is None:
+            self._update_corner_cursor(QPoint(-1, -1))
+        return False
+
+    def _update_corner_cursor(self, pos: QPoint) -> None:
+        viewport = self.viewport()
+        if viewport is None or self._depict_resize is not None:
+            return
+        over = self._structure_corner_column_at(pos) >= 0
+        if over:
+            viewport.setCursor(Qt.SizeFDiagCursor)
+            self._corner_cursor = True
+            return
+        if self._corner_cursor:
+            viewport.unsetCursor()
+            self._corner_cursor = False
+
+    def _release_corner_mouse(self) -> None:
+        viewport = self.viewport()
+        if viewport is not None and QWidget.mouseGrabber() is viewport:
+            viewport.releaseMouse()
+        if self._corner_cursor and self._depict_resize is None and viewport is not None:
+            viewport.unsetCursor()
+            self._corner_cursor = False

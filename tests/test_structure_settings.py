@@ -122,9 +122,29 @@ def test_column_width_keeps_slack_while_depiction_scales() -> None:
     assert structure_column_width_for_depict_scale(238, 210, 210, 250) == 278
 
 
+def _dark_corner_pixels(view, rect) -> int:
+    image = view.viewport().grab().toImage()
+    dark = 0
+    for x in range(rect.right() - 5, rect.right() + 1):
+        for y in range(rect.bottom() - 5, rect.bottom() + 1):
+            color = image.pixelColor(x, y)
+            if color.red() < 80 and color.green() < 80 and color.blue() < 80:
+                dark += 1
+    return dark
+
+
+def _corner_mouse(kind, local, global_pos, button, buttons):
+    from PyQt5.QtCore import QPointF, Qt
+    from PyQt5.QtGui import QMouseEvent
+
+    return QMouseEvent(
+        kind, QPointF(local), QPointF(global_pos), button, buttons, Qt.NoModifier
+    )
+
+
 def test_structure_column_corner_drag_resizes_depiction(qapp):  # noqa: ARG001
-    from PyQt5.QtCore import QEvent, QPointF, Qt
-    from PyQt5.QtGui import QMouseEvent, QPixmap
+    from PyQt5.QtCore import QEvent, QPoint, Qt
+    from PyQt5.QtGui import QPixmap
     from PyQt5.QtWidgets import QApplication
 
     from molmanager.ui.compound_table_model import CompoundTableModel, CompoundTableView
@@ -142,41 +162,39 @@ def test_structure_column_corner_drag_resizes_depiction(qapp):  # noqa: ARG001
     origin_w = structure_depict_width()
     origin_h = structure_depict_height()
     view.setColumnWidth(col, structure_column_minimum_width())
+    view.viewport().update()
     QApplication.processEvents()
 
-    rect = view.structure_column_corner_grip_rect(col)
-    assert rect is not None
+    rect = view.structure_cell_corner_rect(0, col)
+    lower = view.structure_cell_corner_rect(1, col)
+    assert rect is not None and lower is not None
+    assert lower.top() > rect.bottom()
     header = view.horizontalHeader()
     column_right = int(header.sectionViewportPosition(col)) + int(view.columnWidth(col)) - 1
-    assert rect.right() == column_right
+    assert column_right - 2 <= rect.right() <= column_right
     assert rect.width() == 16
-    grip = view.structure_corner_grip(col)
-    assert grip is not None and grip.isVisible()
-    assert view.structure_column_corner_grip_rect(0) is None
-    assert view.structure_column_corner_grip_rect(model._headers.index("SMILES")) is None
+    assert view.structure_cell_corner_rect(0, 0) is None
+    assert view.structure_cell_corner_rect(0, model._headers.index("SMILES")) is None
+    assert _dark_corner_pixels(view, rect) >= 4
+    assert _dark_corner_pixels(view, lower) >= 4
 
     chosen: list[tuple[int, int]] = []
     view.structure_depict_resized.connect(lambda w, h: chosen.append((int(w), int(h))))
-    local = QPointF(4, 4)
-    origin = QPointF(100, 100)
-    press = QMouseEvent(
-        QEvent.MouseButtonPress,
-        local,
-        origin,
-        Qt.LeftButton,
-        Qt.LeftButton,
-        Qt.NoModifier,
+    local = rect.center()
+    origin = view.viewport().mapToGlobal(local)
+    press = _corner_mouse(
+        QEvent.MouseButtonPress, local, origin, Qt.LeftButton, Qt.LeftButton
     )
-    grip.mousePressEvent(press)
-    move = QMouseEvent(
+    assert view.viewportEvent(press)
+    moved = local + QPoint(40, 20)
+    move = _corner_mouse(
         QEvent.MouseMove,
-        local + QPointF(40, 20),
-        origin + QPointF(40, 20),
+        moved,
+        origin + QPoint(40, 20),
         Qt.LeftButton,
         Qt.LeftButton,
-        Qt.NoModifier,
     )
-    grip.mouseMoveEvent(move)
+    assert view.viewportEvent(move)
     assert structure_depict_width() == origin_w + 40
     assert structure_depict_height() == origin_h + 20
     assert view.columnWidth(col) == structure_column_minimum_width()
@@ -188,15 +206,14 @@ def test_structure_column_corner_drag_resizes_depiction(qapp):  # noqa: ARG001
     assert live.width() == origin_w + 40
     assert live.height() == origin_h + 20
 
-    release = QMouseEvent(
+    release = _corner_mouse(
         QEvent.MouseButtonRelease,
-        local + QPointF(40, 20),
-        origin + QPointF(40, 20),
+        moved,
+        origin + QPoint(40, 20),
         Qt.LeftButton,
         Qt.NoButton,
-        Qt.NoModifier,
     )
-    grip.mouseReleaseEvent(release)
+    assert view.viewportEvent(release)
     assert chosen == [(origin_w + 40, origin_h + 20)]
     assert view.structure_depict_resize_active() is False
 
@@ -214,7 +231,7 @@ def test_structure_column_corner_drag_resizes_depiction(qapp):  # noqa: ARG001
 
 def test_structure_column_corner_drag_cancel_restores_size(qapp):  # noqa: ARG001
     from PyQt5.QtCore import QEvent, QPointF, Qt
-    from PyQt5.QtGui import QKeyEvent, QMouseEvent
+    from PyQt5.QtGui import QKeyEvent
     from PyQt5.QtWidgets import QApplication
 
     from molmanager.ui.compound_table_model import CompoundTableModel, CompoundTableView
@@ -233,28 +250,20 @@ def test_structure_column_corner_drag_cancel_restores_size(qapp):  # noqa: ARG00
     view.setColumnWidth(col, origin_col)
     QApplication.processEvents()
     origin_row = view.rowHeight(0)
-    grip = view.structure_corner_grip(col)
-    assert grip is not None
-    local = QPointF(2, 2)
-    origin = QPointF(80, 80)
-    grip.mousePressEvent(
-        QMouseEvent(
-            QEvent.MouseButtonPress,
-            local,
-            origin,
-            Qt.LeftButton,
-            Qt.LeftButton,
-            Qt.NoModifier,
-        )
+    rect = view.structure_cell_corner_rect(0, col)
+    assert rect is not None
+    local = rect.center()
+    origin = view.viewport().mapToGlobal(local)
+    assert view.viewportEvent(
+        _corner_mouse(QEvent.MouseButtonPress, local, origin, Qt.LeftButton, Qt.LeftButton)
     )
-    grip.mouseMoveEvent(
-        QMouseEvent(
+    assert view.viewportEvent(
+        _corner_mouse(
             QEvent.MouseMove,
             local + QPointF(30, 40),
             origin + QPointF(30, 40),
             Qt.LeftButton,
             Qt.LeftButton,
-            Qt.NoModifier,
         )
     )
     assert structure_depict_width() == origin_w + 30
@@ -288,9 +297,9 @@ def test_pixmap_column_has_a_corner_grip(qapp):  # noqa: ARG001
     smiles = model._headers.index("SMILES")
     view.setColumnWidth(smiles, 160)
     QApplication.processEvents()
-    rect = view.structure_column_corner_grip_rect(smiles)
+    view.viewport().update()
+    QApplication.processEvents()
+    rect = view.structure_cell_corner_rect(0, smiles)
     assert rect is not None
-    grip = view.structure_corner_grip(smiles)
-    assert grip is not None and grip.isVisible()
-    assert "resize structure depictions" in grip.toolTip()
+    assert _dark_corner_pixels(view, rect) >= 4
     view.deleteLater()
