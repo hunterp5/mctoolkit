@@ -251,7 +251,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_design_studio",
                 "Design Studio",
                 "Design Studio",
-                "Tools → Design Studio. Floating sketcher, property strip, and suggestion rail.",
+                "Tools → Design Studio. Floating sketcher, property strip, and design list.",
             ),
             _e(
                 "tools_gen_conformations",

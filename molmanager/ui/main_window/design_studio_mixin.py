@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Design Studio: a floating sketcher, property strip, and suggestion rail."""
+"""Design Studio: a floating sketcher, property strip, and design list."""
 
 from __future__ import annotations
 

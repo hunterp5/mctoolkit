@@ -1,6 +1,6 @@
 # Design Studio
 
-The Design Studio is a sketcher with a live property strip and a suggestion rail. Descriptors and a druglike MPO score update as the sketch changes. The status bar along the bottom reports the same sketch messages as the sketcher. An empty SAR Matrix cell can be built into that sketch.
+The Design Studio is a sketcher with a live property strip and a design list. Descriptors and a druglike MPO score update as the sketch changes. The status bar along the bottom reports the same sketch messages as the sketcher. An empty SAR Matrix cell can be built into that sketch.
 
 ## Goal
 
@@ -17,10 +17,8 @@ The strip reads the molecule on the canvas. SAR Matrix can send a row's structur
 ## Options
 
 - **Canvas** — the sketcher. **Edit → Clear Sketch** empties the drawing. **View → Fit structure to window** scales it to the canvas, and **Original size** restores the size it had when it was opened. Ring templates show the heavy atoms they place. **File → Add to Table** asks, then adds new rows, as in the standalone sketcher.
-- **Chemistry → Bioisosteric Replacement** — select one or more atoms. Replacements that match are grouped by class. The class is collapsed; open it to pick one replacement. Selecting the class lists every product from that class. The rest of the sketch stays.
-- **Suggestions** — **Update** reads the last MMP run and the table's R-group columns. Click a row to put that analog on the canvas. MMP rows with a small structural change and a large activity shift are marked **activity cliff**, with a SALI value, so the median is not treated as a smooth trend. R-group rows are one-substituent swaps, scored as the reference activity plus the difference in substituent means. Each row also shows the druglike MPO.
-- **Accept** — add the sketch to the table, if it is not already there, and to the **Design queue** list.
-- **Add to table** — append the current sketch as a new row without adding it to the list.
+- **Chemistry → Bioisosteric Replacement** — select one or more atoms. Replacements that match are grouped by class. The class is collapsed; open it to pick one replacement. Selecting the class lists every product from that class. **Add to design list** adds every product shown for that class or replacement. Double-click one product to add only that product. The sketch stays unchanged.
+- **Design list** — suggestions and bioisosteric replacements for this session. **Add suggestions** reads the last MMP run and the table's R-group columns and appends new analogs. A row already on the list is not added again. Click a row to put that structure on the canvas. MMP rows with a small structural change and a large activity shift are marked **activity cliff**, with a SALI value, so the median is not treated as a smooth trend. R-group rows are one-substituent swaps, scored as the reference activity plus the difference in substituent means. Each suggestion also shows the druglike MPO. **Send to table** adds the selected rows to the main table. **Remove** drops the selected rows from the list.
 - **Properties** — sit beside the canvas, in the same row as the tool rail. The table lists MW, LogP, TPSA, QED, rotatable bonds, and hydrogen-bond donors and acceptors. The score column is the 0–1 desirability, and only that column is colored. The combined druglike score is that column’s geometric mean.
   - **MW** is 1 at or below 350 and 0 at or above 500.
   - **LogP** is 1 at 2.5 and 0 outside 0–5.
@@ -33,9 +31,10 @@ The strip reads the molecule on the canvas. SAR Matrix can send a row's structur
 ## Workflow
 
 1. Open **Tools → Design Studio**, or right-click a structure cell and choose **Open in Design Studio**. It opens in its own window. The table row stays unchanged. Undo, copy, paste, and delete edit the sketch. The other application shortcuts, such as open, save, and search, still run.
-2. Draw or edit. The strip refreshes shortly after each change. **Update** rebuilds the suggestion rail.
-3. **Accept** when the analog should join the **Design queue** list. **Add to table** keeps a row without that list.
-4. From a SAR Matrix, click an empty or predicted cell. **Design** sends the selected cell, including one that already has a compound.
+2. Draw or edit. The strip refreshes shortly after each change.
+3. **Add suggestions** for MMP and R-group ideas. **Chemistry → Bioisosteric Replacement** adds replacements for the selected atoms. Click a row to inspect it on the canvas.
+4. Select the designs you want and **Send to table**. The others stay on the list.
+5. From a SAR Matrix, click an empty or predicted cell. **Design** sends the selected cell, including one that already has a compound.
 
 ## Use cases
 
@@ -45,4 +44,4 @@ The strip reads the molecule on the canvas. SAR Matrix can send a row's structur
 
 ## Tips and limits
 
-The druglike score is a fixed profile, not the criteria from **Data → MPO Scoring**. A property outside its gate makes the geometric mean zero. Suggestions need a finished **Data → MMP** run, or R-group columns from core-based decomposition plus one numeric activity column. The sketch has to match a row in that series before an R-group swap is offered. There is no stored QSAR model to score a structure that is not in the table. Building a SAR cell needs one shared Core SMILES and R-group labels that each contain an attachment point. pKa stays blank when Uni-pKa cannot assign a value; the other scores keep the fast estimate.
+The druglike score is a fixed profile, not the criteria from **Data → MPO Scoring**. A property outside its gate makes the geometric mean zero. Suggestions need a finished **Data → MMP** run, or R-group columns from core-based decomposition plus one numeric activity column. The sketch has to match a row in that series before an R-group swap is offered. There is no stored QSAR model to score a structure that is not in the table. Sending a design that is already a table row does not add a second copy. Building a SAR cell needs one shared Core SMILES and R-group labels that each contain an attachment point. pKa stays blank when Uni-pKa cannot assign a value; the other scores keep the fast estimate.

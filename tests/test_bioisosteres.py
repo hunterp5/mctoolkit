@@ -125,6 +125,9 @@ def test_replacement_dialog_groups_classes(qapp) -> None:
     assert dialog._products.count() == 2
     assert dialog._products.item(0).text() == "CC(=O)NO"
     assert dialog.chosen_smiles() == "CC(=O)NO"
+    assert [smiles for _name, smiles in dialog.designs_to_add()] == ["CC(=O)NO", "Cc1nn[nH]n1"]
+    dialog._accept_current()
+    assert dialog.designs_to_add() == [("Carboxylic acid to hydroxamic acid", "CC(=O)NO")]
     dialog.close()
 
 

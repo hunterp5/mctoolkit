@@ -315,7 +315,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             "Design Studio…",
             "open_design_studio",
             tooltip=(
-                "Open a sketcher with a live descriptor strip and suggestion rail. "
+                "Open a sketcher with a live descriptor strip and a design list. "
                 "An empty SAR Matrix cell builds that analog here."
             ),
         ),

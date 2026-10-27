@@ -61,7 +61,6 @@ DRUGLIKE_MPO_SPECS: tuple[DesirabilitySpec, ...] = (
     DesirabilitySpec("RotBonds", "linear", "minimize", low=5.0, high=10.0),
 )
 
-DESIGN_QUEUE_NAME = "Design queue"
 _CLIFF_HEAVY_ATOMS = 4
 _CLIFF_ABS_DELTA = 1.0
 _SUGGESTION_LIMIT = 8
@@ -223,7 +222,7 @@ def compute_design_snapshot(mol: Chem.Mol | None) -> DesignSnapshot:
 
 @dataclass(frozen=True)
 class SeriesRow:
-    """One decomposed table row the suggestion rail can swap a substituent on."""
+    """One decomposed table row a suggestion can swap a substituent on."""
 
     core_smiles: str
     substituents: tuple[tuple[str, str], ...]
@@ -233,7 +232,7 @@ class SeriesRow:
 
 @dataclass(frozen=True)
 class DesignSuggestion:
-    """One analog the rail can drop onto the canvas."""
+    """One analog the design list can hold."""
 
     smiles: str
     title: str
