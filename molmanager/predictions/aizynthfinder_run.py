@@ -310,6 +310,7 @@ class SearchOptions:
     exclude_target_from_stock: bool = True
     max_routes: int = 25
     cluster: bool = False
+    all_algorithms: bool = False
 
     def overlay(self) -> dict:
         return {
@@ -329,7 +330,9 @@ class SearchOptions:
         }
 
     def to_json(self) -> str:
-        return json.dumps(self.overlay() | {"cluster": self.cluster})
+        return json.dumps(
+            self.overlay() | {"cluster": self.cluster, "all_algorithms": self.all_algorithms}
+        )
 
     @classmethod
     def from_json(cls, raw: str) -> SearchOptions:
@@ -357,6 +360,7 @@ class SearchOptions:
             exclude_target_from_stock=bool(search.get("exclude_target_from_stock", True)),
             max_routes=_int(post.get("max_routes"), 25),
             cluster=bool(payload.get("cluster", False)),
+            all_algorithms=bool(payload.get("all_algorithms", False)),
         )
 
 
@@ -447,6 +451,224 @@ def aizynthcli_command(
     if options.cluster:
         command.append("--cluster")
     return command
+
+
+def all_algorithms_payload(options: SearchOptions) -> dict:
+    """Settings for one process that runs every search algorithm."""
+    return {
+        "algorithms": [[label, value] for label, value in _ALGORITHMS],
+        "policies": list(options.policies),
+        "filters": list(options.filters),
+        "stocks": list(options.stocks),
+        "max_routes": int(options.max_routes),
+    }
+
+
+def all_algorithms_command(
+    python: str,
+    config: Path,
+    smiles_file: Path,
+    checkpoint: Path,
+    payload: Path,
+) -> list[str]:
+    """Argv that loads the models once and searches with every algorithm."""
+    return [
+        python,
+        "-c",
+        _ALL_ALGORITHMS_SCRIPT,
+        str(config),
+        str(smiles_file),
+        str(checkpoint),
+        str(payload),
+    ]
+
+
+_ALL_ALGORITHMS_SCRIPT = r"""
+import json
+import re
+import sys
+from pathlib import Path
+
+_MAP = re.compile(r":\d+")
+
+
+def _canon(text):
+    raw = _MAP.sub("", str(text or ""))
+    if ">>" not in raw:
+        return raw
+    left, right = raw.split(">>", 1)
+
+    def pieces(side):
+        return ".".join(sorted(part for part in side.split(".") if part))
+
+    return pieces(left) + ">>" + pieces(right)
+
+
+def _fingerprint(node):
+    if not isinstance(node, dict):
+        return ""
+    children = node.get("children") or []
+    child_keys = tuple(
+        sorted(_fingerprint(child) for child in children if isinstance(child, dict))
+    )
+    return json.dumps([_canon(node.get("smiles")), child_keys], separators=(",", ":"))
+
+
+def _state_score(tree):
+    scores = tree.get("scores") if isinstance(tree.get("scores"), dict) else {}
+    for key, value in scores.items():
+        if str(key).lower() == "state score":
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def _solved(tree):
+    meta = tree.get("metadata") if isinstance(tree.get("metadata"), dict) else {}
+    return bool(meta.get("is_solved"))
+
+
+def _step_count(node):
+    count = 0
+    for child in node.get("children") or []:
+        if not isinstance(child, dict):
+            continue
+        if ">>" in str(child.get("smiles") or ""):
+            count += 1
+        count += _step_count(child)
+    return count
+
+
+def merge_runs(runs, max_routes):
+    ranked = []
+    for label, stats, trees, stock in runs:
+        for tree in trees:
+            ranked.append((_solved(tree), _state_score(tree), label, tree, stats, stock))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    kept = {}
+    chosen = []
+    for _solved_flag, _score, label, tree, stats, stock in ranked:
+        key = _fingerprint(tree)
+        if key in kept:
+            meta = kept[key].setdefault("metadata", {})
+            names = str(meta.get("algorithm") or "")
+            if label and label not in names.split(", "):
+                meta["algorithm"] = f"{names}, {label}" if names else label
+            continue
+        meta = tree.get("metadata")
+        if not isinstance(meta, dict):
+            meta = {}
+            tree["metadata"] = meta
+        meta["algorithm"] = label
+        kept[key] = tree
+        chosen.append((tree, stats, stock))
+    limit = max(1, int(max_routes))
+    chosen = chosen[:limit]
+    base = dict(chosen[0][1] if chosen else runs[0][1])
+    search_time = 0.0
+    nodes = 0
+    first_times = []
+    stocks = {}
+    completed = []
+    any_solved = False
+    for label, stats, _trees, stock in runs:
+        completed.append(label)
+        try:
+            search_time += float(stats.get("search_time") or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            nodes += int(stats.get("number_of_nodes") or 0)
+        except (TypeError, ValueError):
+            pass
+        if stats.get("is_solved"):
+            any_solved = True
+            try:
+                moment = float(stats.get("first_solution_time") or 0)
+            except (TypeError, ValueError):
+                moment = 0.0
+            if moment > 0:
+                first_times.append(moment)
+        if isinstance(stock, dict):
+            stocks.update(stock)
+    trees = [tree for tree, _stats, _stock in chosen]
+    solved_routes = sum(1 for tree in trees if _solved(tree))
+    base["trees"] = trees
+    base["stock_info"] = stocks
+    base["search_time"] = search_time
+    base["number_of_nodes"] = nodes
+    base["is_solved"] = bool(solved_routes or any_solved)
+    base["number_of_solved_routes"] = solved_routes
+    base["number_of_routes"] = len(trees)
+    base["top_score"] = _state_score(trees[0]) if trees else 0
+    base["number_of_steps"] = _step_count(trees[0]) if trees else 0
+    if first_times:
+        base["first_solution_time"] = min(first_times)
+    base["algorithms"] = ", ".join(completed)
+    return base
+
+
+def main():
+    from aizynthfinder.aizynthfinder import AiZynthFinder
+
+    config, smiles_file, checkpoint, payload_path = sys.argv[1:5]
+    payload = json.loads(Path(payload_path).read_text(encoding="utf-8"))
+    finder = AiZynthFinder(configfile=config)
+    stocks = list(payload.get("stocks") or [])
+    finder.stock.select(stocks or finder.stock.items)
+    policies = list(payload.get("policies") or [])
+    finder.expansion_policy.select(policies or [finder.expansion_policy.items[0]])
+    filters = list(payload.get("filters") or [])
+    if filters:
+        finder.filter_policy.select(filters)
+    else:
+        finder.filter_policy.select_all()
+    algorithms = list(payload.get("algorithms") or [])
+    max_routes = int(payload.get("max_routes") or 25)
+    smiles = [
+        line.strip()
+        for line in Path(smiles_file).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    wrote = 0
+    for smi in smiles:
+        runs = []
+        finder.target_smiles = smi
+        for label, algorithm in algorithms:
+            finder.config.search.algorithm = algorithm
+            try:
+                finder.prepare_tree()
+                finder.tree_search()
+                finder.build_routes()
+                finder.routes.compute_scores(*finder.scorers.objects())
+                stats = finder.extract_statistics()
+                trees = list(
+                    finder.routes.dict_with_extra(
+                        include_metadata=True,
+                        include_scores=True,
+                    )
+                )
+                runs.append((label, stats, trees, finder.stock_info()))
+            except Exception as exc:
+                print(f"{label} failed for {smi}: {exc}", flush=True)
+        if not runs:
+            print(f"No algorithm finished for {smi}", flush=True)
+            continue
+        results = merge_runs(runs, max_routes)
+        with open(checkpoint, "a", encoding="utf-8") as handle:
+            line = json.dumps({"processed_smiles": smi, "results": results})
+            handle.write(line + "\n")
+        wrote += 1
+        print(f"Done with {smi}", flush=True)
+    if not wrote:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+"""
 
 
 def summary_columns(stats: dict) -> dict[str, str]:
@@ -944,7 +1166,19 @@ def run_search(
             payload = work / "search.json"
             payload.write_text(json.dumps(options.overlay()), encoding="utf-8")
             _write_search_config(python, config, config_path, payload)
-        command = aizynthcli_command(python, config_path, smiles_file, output, checkpoint, options)
+        if options is not None and options.all_algorithms:
+            algorithms = work / "algorithms.json"
+            algorithms.write_text(
+                json.dumps(all_algorithms_payload(options)),
+                encoding="utf-8",
+            )
+            command = all_algorithms_command(
+                python, config_path, smiles_file, checkpoint, algorithms
+            )
+        else:
+            command = aizynthcli_command(
+                python, config_path, smiles_file, output, checkpoint, options
+            )
         try:
             from ..platform_support.session_runtime import ToolDenied, require_tool
 

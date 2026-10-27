@@ -758,6 +758,7 @@ def test_search_options_select_policies_and_limits() -> None:
     assert restored.max_routes == 8
     assert restored.exploration == 1.8
     assert restored.cluster is True
+    assert restored.all_algorithms is False
     command = aizynth.aizynthcli_command(
         "python",
         Path("config.yml"),
@@ -776,6 +777,84 @@ def test_search_options_select_policies_and_limits() -> None:
     assert overlay["search"]["time_limit"] == 180
     assert overlay["search"]["algorithm_config"]["C"] == 1.8
     assert overlay["post_processing"]["max_routes"] == 8
+
+
+def test_all_algorithms_merges_distinct_routes() -> None:
+    options = aizynth.SearchOptions(policies=("uspto",), max_routes=2, all_algorithms=True)
+    restored = aizynth.SearchOptions.from_json(options.to_json())
+    assert restored.all_algorithms is True
+    payload = aizynth.all_algorithms_payload(options)
+    assert [item[1] for item in payload["algorithms"]] == [
+        value for _label, value in aizynth._ALGORITHMS
+    ]
+    assert payload["max_routes"] == 2
+    command = aizynth.all_algorithms_command(
+        "python",
+        Path("config.yml"),
+        Path("smiles.txt"),
+        Path("checkpoint.jsonl"),
+        Path("algorithms.json"),
+    )
+    assert "aizynthcli" not in command[2]
+    assert command[3:] == ["config.yml", "smiles.txt", "checkpoint.jsonl", "algorithms.json"]
+    namespace = {"__name__": "algorithms"}
+    exec(aizynth._ALL_ALGORITHMS_SCRIPT, namespace)  # noqa: S102
+    shared = {
+        "smiles": "CCO",
+        "metadata": {"is_solved": True},
+        "scores": {"state score": 0.4},
+        "children": [{"smiles": "CC.O>>CCO", "children": []}],
+    }
+    other = {
+        "smiles": "CCO",
+        "metadata": {"is_solved": False},
+        "scores": {"state score": 0.9},
+        "children": [{"smiles": "C.CO>>CCO", "children": []}],
+    }
+    duplicate = {
+        "smiles": "CCO",
+        "metadata": {"is_solved": True},
+        "scores": {"state score": 0.2},
+        "children": [{"smiles": "O.CC>>CCO", "children": []}],
+    }
+    merged = namespace["merge_runs"](
+        [
+            (
+                "Monte Carlo",
+                {
+                    "search_time": 1.5,
+                    "number_of_nodes": 10,
+                    "is_solved": True,
+                    "first_solution_time": 1.0,
+                },
+                [shared],
+                {"CC": ["zinc"]},
+            ),
+            (
+                "Retro*",
+                {"search_time": 2.0, "number_of_nodes": 4, "is_solved": False},
+                [other, duplicate],
+                {},
+            ),
+        ],
+        25,
+    )
+    assert len(merged["trees"]) == 2
+    assert merged["trees"][0]["metadata"]["algorithm"] == "Monte Carlo, Retro*"
+    assert merged["trees"][0]["metadata"]["is_solved"] is True
+    assert merged["search_time"] == 3.5
+    assert merged["number_of_nodes"] == 14
+    assert merged["is_solved"] is True
+    assert merged["number_of_routes"] == 2
+    assert merged["algorithms"] == "Monte Carlo, Retro*"
+    capped = namespace["merge_runs"](
+        [
+            ("Monte Carlo", {"search_time": 1, "number_of_nodes": 1}, [shared, other], {}),
+        ],
+        1,
+    )
+    assert len(capped["trees"]) == 1
+    assert capped["trees"][0]["metadata"]["is_solved"] is True
 
 
 def test_retrosynthesis_dialog_lists_config_policies(qapp, monkeypatch, tmp_path: Path) -> None:
@@ -815,6 +894,11 @@ def test_retrosynthesis_dialog_lists_config_policies(qapp, monkeypatch, tmp_path
     chosen = dialog._search_options()
     assert chosen.policies == ("uspto",)
     assert chosen.time_limit == 120
+    assert dialog.try_all.isChecked() is False
+    dialog.try_all.setChecked(True)
+    assert dialog.algorithm.isEnabled() is False
+    assert dialog.cluster.isEnabled() is False
+    assert dialog._search_options().all_algorithms is True
     dialog.close()
 
 

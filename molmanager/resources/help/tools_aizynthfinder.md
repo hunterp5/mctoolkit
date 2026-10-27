@@ -21,7 +21,7 @@ A structure column, **Selected Rows Only**, or one pasted SMILES. The Python int
 - **Selected Rows Only** - limit the table scope.
 - **Policies, filters, and stocks** - the names listed in ``config.yml``. Every policy is on until you clear one. AiZynthFinder would otherwise use only the first policy.
 - **Time limit, iterations, maximum reactions, routes to keep** - search limits for this run. The original ``config.yml`` is not rewritten.
-- **Algorithm** - Monte Carlo by default. Retro*, breadth-first, and proof-number search are available.
+- **Algorithm** - Monte Carlo by default. Retro*, breadth-first, and proof-number search are available. **Try all algorithms** runs those four one after another in the same process and keeps the distinct routes. Each one uses the full time limit, and clustering applies only to a single algorithm.
 - **Exploration (C)** - how widely Monte Carlo tries less likely reactions.
 - **Stop at the first solved route** and **Cluster similar routes** - optional.
 - **Search** - queue the job. Cancel keeps rows that already finished.

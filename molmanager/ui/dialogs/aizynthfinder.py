@@ -220,6 +220,14 @@ class AizynthFinderDialog(QDialog):
         if index >= 0:
             self.algorithm.setCurrentIndex(index)
         form.addRow("Algorithm", self.algorithm)
+        self.try_all = QCheckBox("Try all algorithms")
+        self.try_all.setToolTip(
+            "Run Monte Carlo, Retro*, breadth-first, and proof number in one search, "
+            "then keep the distinct routes. Each algorithm uses the full time limit."
+        )
+        self.try_all.setChecked(saved.all_algorithms)
+        self.try_all.toggled.connect(self._on_try_all)
+        form.addRow(self.try_all)
         self.return_first = QCheckBox("Stop at the first solved route")
         self.return_first.setChecked(saved.return_first)
         form.addRow(self.return_first)
@@ -229,7 +237,12 @@ class AizynthFinderDialog(QDialog):
         self.cluster = QCheckBox("Cluster similar routes")
         self.cluster.setChecked(saved.cluster)
         form.addRow(self.cluster)
+        self._on_try_all(self.try_all.isChecked())
         return box
+
+    def _on_try_all(self, checked: bool) -> None:
+        self.algorithm.setEnabled(not checked)
+        self.cluster.setEnabled(not checked)
 
     def _search_options(self) -> SearchOptions:
         return SearchOptions(
@@ -245,6 +258,7 @@ class AizynthFinderDialog(QDialog):
             exclude_target_from_stock=self.exclude_target.isChecked(),
             max_routes=int(self.max_routes.value()),
             cluster=self.cluster.isChecked(),
+            all_algorithms=self.try_all.isChecked(),
         )
 
 
