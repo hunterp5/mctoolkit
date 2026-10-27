@@ -17,7 +17,7 @@ Starts from a blank canvas or an existing molecule when launched in an edit cont
 ## Options
 
 - **Canvas** - interactive drawing surface. The structure is drawn with the same depiction as the Structure column. The mouse wheel zooms toward the cursor. Drag with the middle button, or hold Space and drag, to pan. Arrow keys nudge a selection.
-- **Draw** - a blank sketch opens here. A sketch opened from a table row opens in Select.
+- **Draw** - a blank sketch opens here. A sketch opened from a table row opens in Lasso.
 - **Chain** - drag to grow a zigzag carbon chain on the 30° grid. A short click places one carbon. The whole chain is one undo step.
 - **Tools** - the left rail, under the menu, is two buttons wide. Sunken lines separate modes, bonds, common rings, charge and the reaction arrow, elements, and `*` / `?` / R. The columns line up. Every square button is the same size.
 - **Bond** - single, double, triple, wedge, hash, wavy, and dative are buttons in the rail. Keys 1, 2, and 3 set the bond order. Dative bonds are dashed.

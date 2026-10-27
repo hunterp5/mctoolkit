@@ -184,8 +184,10 @@ def test_arrow_nudge_moves_the_selection(qapp) -> None:  # noqa: ARG001
 
 def test_loaded_sketch_starts_in_select(qapp) -> None:  # noqa: ARG001
     dialog = SketcherDialog(QWidget(), initial_mol=Chem.MolFromSmiles("CCO"))
-    assert dialog.select_btn.isChecked()
+    assert dialog.lasso_btn.isChecked()
+    assert not dialog.select_btn.isChecked()
     assert dialog.canvas.select_mode
+    assert dialog.canvas.select_tool == "lasso"
     assert dialog._status_bar.currentMessage() == "Ready."
     dialog.close()
 

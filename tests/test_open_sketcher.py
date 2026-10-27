@@ -69,8 +69,10 @@ def test_open_sketcher_loads_a_structure(qapp) -> None:  # noqa: ARG001
     dialog = SketcherDialog(initial_mol=mol)
     dialog.show()
     qapp.processEvents()
-    assert dialog.select_btn.isChecked()
+    assert dialog.lasso_btn.isChecked()
+    assert not dialog.select_btn.isChecked()
     assert dialog.canvas.select_mode
+    assert dialog.canvas.select_tool == "lasso"
     assert len(dialog.canvas.nodes) >= 7
     assert any(node["element"] == "O" for node in dialog.canvas.nodes)
     dialog.canvas.repaint()
