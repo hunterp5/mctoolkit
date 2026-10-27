@@ -33,7 +33,7 @@ from molmanager.table.session_v4 import (
     split_manifest,
     write_session_v4,
 )
-from molmanager.ui.column_store import ColumnStore
+from molmanager.table.column_store import ColumnStore
 
 
 def _render_db(path: Path, rows: list[tuple[int, bytes]]) -> Path:

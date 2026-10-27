@@ -58,7 +58,7 @@ from molmanager.table.session_v4 import (  # noqa: E402
     split_manifest,
     write_session_v4,
 )
-from molmanager.ui.column_store import ColumnStore  # noqa: E402
+from molmanager.table.column_store import ColumnStore  # noqa: E402
 
 _GZIP_MAGIC = b"\x1f\x8b"
 _ZIP_MAGIC = b"PK"

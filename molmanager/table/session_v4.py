@@ -49,7 +49,7 @@ from typing import Any
 
 import numpy as np
 
-from ..ui.column_store import ColumnBlob, ColumnStore
+from .column_store import ColumnBlob, ColumnStore
 
 SESSION_FORMAT = "molmanager_session"
 SESSION_VERSION = 4

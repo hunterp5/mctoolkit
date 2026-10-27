@@ -23,7 +23,7 @@ from rdkit import Chem
 
 from molmanager.storage import MolStore
 from molmanager.table.session_v4 import SessionOpenResult, SessionSaveSnapshot, is_session_v4
-from molmanager.ui.column_store import ColumnStore
+from molmanager.table.column_store import ColumnStore
 from molmanager.workers import (
     SessionOpenSignals,
     SessionOpenWorker,

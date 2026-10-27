@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from molmanager.ui.column_store import ColumnStore
+from molmanager.table.column_store import ColumnStore
 from molmanager.ui.compound_table_model import CompoundTableModel, _Row
 
 

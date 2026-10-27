@@ -48,7 +48,7 @@ from ..table.structure_depiction_layout import (
 )
 from ..storage.structure_render_store import StructureRenderStore
 from ..chem.molecule_conversion import safe_float
-from .column_store import ColumnStore
+from ..table.column_store import ColumnStore
 from .compound_table_bounds_mixin import CompoundTableBoundsMixin
 from .compound_table_bulk_mixin import CompoundTableBulkMixin
 from .compound_table_color_mixin import CompoundTableColorMixin
