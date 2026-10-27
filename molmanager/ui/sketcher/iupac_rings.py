@@ -511,16 +511,20 @@ def spiro_second_ring_offsets_y_up(
     """
     Offsets for a new ring sharing the origin (spiro atom) without overlapping the old ring.
 
-    Places the new regular/large ring so its first two bonds bisect the larger exterior
-    angle opposite the existing ring neighbors (GR-4.2.4 / GR-3.3).
+    The shared atom is vertex 0. The ring body is aimed into the largest gap between
+    existing neighbor directions, so the bisector of the two new bonds — not either
+    bond itself — follows that gap (GR-4.2.4 / GR-3.3). A single neighbor grows the
+    ring directly opposite that bond. The new bonds stay clear of nearby bonds.
     """
     n = max(3, int(n_atoms))
     offsets = ring_vertex_offsets_y_up(n, bond_length=bond_length)
     angs = sorted(
         math.atan2(dy, dx) for dx, dy in existing_ring_neighbor_dirs if math.hypot(dx, dy) > 1e-6
     )
-    if len(angs) < 2:
+    if not angs:
         target = 0.0
+    elif len(angs) == 1:
+        target = (angs[0] + math.pi) % (2.0 * math.pi)
     else:
         max_gap = -1.0
         best_mid = 0.0
@@ -536,8 +540,12 @@ def spiro_second_ring_offsets_y_up(
         return offsets
     ox0, oy0 = offsets[0]
     translated = [(x - ox0, y - oy0) for x, y in offsets]
-    ddx, ddy = translated[1]
-    cur = math.atan2(ddy, ddx)
+    # Centroid from the shared atom is the bisector into the ring, not one edge.
+    cx = sum(x for x, _y in translated) / n
+    cy = sum(y for _x, y in translated) / n
+    if math.hypot(cx, cy) < 1e-6:
+        cx, cy = translated[1]
+    cur = math.atan2(cy, cx)
     rot = target - cur
     cos_r, sin_r = math.cos(rot), math.sin(rot)
     return [(x * cos_r - y * sin_r, x * sin_r + y * cos_r) for x, y in translated]
