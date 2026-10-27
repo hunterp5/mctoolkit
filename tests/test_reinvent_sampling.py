@@ -316,6 +316,52 @@ def test_scaffold_keeps_matches_and_can_seed_libinvent(tmp_path: Path) -> None:
     assert "*c1ccccc1" in (tmp_path / "job" / "seeds.smi").read_text(encoding="utf-8")
 
 
+def test_denovo_indazole_scaffold_is_decorated_and_matches_both_tautomers(tmp_path: Path) -> None:
+    from rdkit import Chem
+
+    from molmanager.generative.reinvent_sampling import (
+        decoration_seeds,
+        estimated_sample_count,
+        prepare_sampling_request,
+        smiles_matches_scaffold,
+    )
+
+    indazole = "c1ccc2[nH]ncc2c1"
+    other = "c1ccc2n[nH]cc2c1"
+    assert smiles_matches_scaffold(indazole, indazole)
+    assert smiles_matches_scaffold(other, indazole)
+    assert smiles_matches_scaffold("CCO", indazole) is False
+    seeds = decoration_seeds(indazole)
+    assert len(seeds) == 6
+    assert all("*" in seed and smiles_matches_scaffold(seed, indazole) for seed in seeds)
+    prepared = prepare_sampling_request(_request(scaffold_smarts=indazole, num_smiles=50))
+    assert prepared.generator == "libinvent"
+    assert prepared.model_file == ".libinvent"
+    assert prepared.sample_strategy == "multinomial"
+    assert prepared.seeds == seeds
+    assert estimated_sample_count(_request(scaffold_smarts=indazole, num_smiles=50)) == (
+        len(seeds) * prepared.num_smiles
+    )
+    assert validate_request(_request(scaffold_smarts=indazole, num_smiles=50)) is None
+    assert prepare_sampling_request(_request(scaffold_smarts="[#7]a1aaaaa1")).generator == "denovo"
+    config, _csv = write_sampling_inputs(
+        tmp_path / "job",
+        _request(scaffold_smarts=indazole, num_smiles=12),
+    )
+    text = config.read_text(encoding="utf-8")
+    assert 'model_file = ".libinvent"' in text
+    assert 'sample_strategy = "multinomial"' in text
+    written = (tmp_path / "job" / "seeds.smi").read_text(encoding="utf-8")
+    for seed in seeds:
+        assert seed in written
+    rows = tmp_path / "kept.csv"
+    rows.write_text(f"SMILES,NLL\n{other},1.0\nCCO,2.0\n", encoding="utf-8")
+    outcome = outcome_from_csv(rows, _request(scaffold_smarts=indazole), cancelled=False)
+    assert [smiles for smiles, _fields in outcome.records] == [other]
+    query = Chem.MolFromSmarts(Chem.MolToSmarts(Chem.MolFromSmiles(indazole)))
+    assert Chem.MolFromSmiles(other).HasSubstructMatch(query)
+
+
 def test_dialog_has_a_scaffold_field(qapp) -> None:  # noqa: ARG001
     from molmanager.ui.dialogs.reinvent_sampling import ReinventSamplingDialog
 

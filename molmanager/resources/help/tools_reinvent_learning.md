@@ -34,7 +34,7 @@ Scores are RDKit components that ship with REINVENT: QED, molecular weight, Slog
 - **Extra flags** - more `reinvent` options, such as `--log-level debug` or `--log-filename`. `--device` and `--seed` here override the fields above.
 - **Save agent** - copy the learned checkpoint. Blank discards the agent after the molecules are shown.
 - **Combine** - geometric mean or arithmetic mean of the score terms.
-- **Scaffold** - optional SMARTS. The agent is rewarded for molecules that contain it, and only those matches are shown. **Sketcher…** draws the pattern. For R-groups, a pattern with `*` is also the scaffold that gets decorated.
+- **Scaffold** - optional SMARTS. The agent is rewarded for molecules that contain it, and only those matches are shown. **Sketcher…** draws the pattern. A SMILES scaffold on de novo is decorated with LibInvent, because de novo cannot be aimed at a core. SMARTS that is not a molecule stays a score and a filter. For R-groups, a pattern with `*` is also the scaffold that gets decorated. Either indazole tautomer matches.
 - **QED**, **Molecular weight**, **SlogP**, **SA score** - each can be turned on, with a **weight**. Molecular weight and SlogP use a window; outside that window the term falls toward zero. SA score favors values near 2 and penalizes values of 5 and above.
 - **Similarity** - Morgan fingerprints against each reference. **Radius**, **Counts**, and **Features** set the fingerprint. Each reference is its own term, and **weight** applies to each of them.
 - **Drop REINVENT's unwanted groups** - the published SMARTS filter. A match scores zero. **More SMARTS** adds patterns, one per line.

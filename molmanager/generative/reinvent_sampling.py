@@ -33,7 +33,7 @@ import sys
 import tempfile
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from shutil import which
 
@@ -294,6 +294,89 @@ def scaffold_error(smarts: str) -> str | None:
     return "The scaffold is not SMARTS RDKit could read."
 
 
+def decoration_seeds(pattern: str) -> tuple[str, ...]:
+    """LibInvent scaffolds for a SMILES core, one ``*`` in place of each hydrogen.
+
+    A pattern that already contains ``*`` is returned unchanged when it is SMILES.
+    SMARTS that is not a molecule yields nothing, so de novo sampling can only
+    filter on it.
+    """
+    text = (pattern or "").strip()
+    if not text:
+        return ()
+    if "*" in text:
+        return (text,) if smiles_is_parseable(text) else ()
+    from rdkit import Chem, rdBase
+
+    blocker = rdBase.BlockLogs()
+    try:
+        mol = Chem.MolFromSmiles(text)
+        if mol is None:
+            return ()
+        found: list[str] = []
+        seen: set[str] = set()
+        for atom in mol.GetAtoms():
+            if atom.GetAtomicNum() <= 1 or atom.GetTotalNumHs() < 1:
+                continue
+            smiles = _smiles_with_attachment(mol, atom.GetIdx())
+            if smiles and smiles not in seen:
+                seen.add(smiles)
+                found.append(smiles)
+        return tuple(found)
+    finally:
+        del blocker
+
+
+def scaffold_scoring_smarts(pattern: str) -> str:
+    """SMARTS for REINVENT's substructure scorer.
+
+    A SMILES scaffold is converted without explicit hydrogens, so either
+    tautomer of a ring such as indazole still matches. Patterns that already
+    contain ``*``, and SMARTS that is not a molecule, are passed through.
+    """
+    text = (pattern or "").strip()
+    if not text or "*" in text:
+        return text
+    from rdkit import Chem, rdBase
+
+    blocker = rdBase.BlockLogs()
+    try:
+        mol = Chem.MolFromSmiles(text)
+        if mol is None:
+            return text
+        return Chem.MolToSmarts(mol) or text
+    finally:
+        del blocker
+
+
+def prepare_sampling_request(request: SamplingRequest) -> SamplingRequest:
+    """Decorate a de novo SMILES scaffold with LibInvent.
+
+    The Reinvent prior cannot be aimed at a core, so a molecule scaffold is
+    sampled as R-groups on that core. A SMARTS pattern that is not a molecule
+    stays a filter on the de novo draw.
+    """
+    if request.generator != "denovo":
+        return request
+    seeds = decoration_seeds(request.scaffold_smarts)
+    if not seeds:
+        return request
+    per_seed = max(1, (int(request.num_smiles) + len(seeds) - 1) // len(seeds))
+    return replace(
+        request,
+        generator="libinvent",
+        model_file=generator_by_key("libinvent").default_model,
+        sample_strategy="multinomial",
+        num_smiles=per_seed,
+        seeds=seeds,
+    )
+
+
+SCAFFOLD_DECORATION_NOTE = (
+    "De novo cannot be aimed at a scaffold. Decorating it with the LibInvent prior instead."
+)
+
+
 def effective_seeds(
     generator: str,
     seeds: tuple[str, ...],
@@ -309,7 +392,11 @@ def effective_seeds(
 
 
 def smiles_matches_scaffold(smiles: str, smarts: str) -> bool:
-    """True when *smiles* contains *smarts*. An empty pattern matches everything."""
+    """True when *smiles* contains *smarts*. An empty pattern matches everything.
+
+    A scaffold that is a molecule is matched as that molecule, so the explicit
+    hydrogen in ``c1ccc2[nH]ncc2c1`` still hits the other indazole tautomer.
+    """
     text = (smarts or "").strip()
     if not text:
         return True
@@ -317,9 +404,15 @@ def smiles_matches_scaffold(smiles: str, smarts: str) -> bool:
 
     blocker = rdBase.BlockLogs()
     try:
-        pattern = Chem.MolFromSmarts(text)
         mol = Chem.MolFromSmiles(smiles)
-        if pattern is None or mol is None:
+        if mol is None:
+            return False
+        if "*" not in text:
+            query = Chem.MolFromSmiles(text)
+            if query is not None:
+                return bool(mol.HasSubstructMatch(query))
+        pattern = Chem.MolFromSmarts(text)
+        if pattern is None:
             return False
         return bool(mol.HasSubstructMatch(pattern))
     finally:
@@ -342,6 +435,7 @@ def validate_seeds(generator_key: str, seeds: tuple[str, ...]) -> str | None:
 
 def validate_request(request: SamplingRequest) -> str | None:
     """Return a user-facing error, or ``None`` when *request* can be written."""
+    request = prepare_sampling_request(request)
     try:
         spec = generator_by_key(request.generator)
     except KeyError:
@@ -371,6 +465,7 @@ def validate_request(request: SamplingRequest) -> str | None:
 
 def estimated_sample_count(request: SamplingRequest) -> int:
     """How many SMILES REINVENT will try to draw (seeds times samples per seed)."""
+    request = prepare_sampling_request(request)
     spec = generator_by_key(request.generator)
     seeds = (
         len(effective_seeds(request.generator, request.seeds, request.scaffold_smarts))
@@ -418,6 +513,7 @@ def render_sampling_toml(
 
 def write_sampling_inputs(directory: Path, request: SamplingRequest) -> tuple[Path, Path]:
     """Write ``sampling.toml`` and, when needed, ``seeds.smi``. Return both paths' config and CSV."""
+    request = prepare_sampling_request(request)
     directory.mkdir(parents=True, exist_ok=True)
     output = directory / "sampling.csv"
     smiles_path: Path | None = None
@@ -561,7 +657,8 @@ def execute_sampling(
     work_dir: Path | None = None,
 ) -> SamplingOutcome:
     """Write a temp config, run *executable*, and parse the CSV. The temp dir is removed."""
-    message = validate_request(request)
+    prepared = prepare_sampling_request(request)
+    message = validate_request(prepared)
     if message:
         raise ReinventSamplingError(message)
     shared = _app_python_problem(executable)
@@ -576,12 +673,14 @@ def execute_sampling(
     log = on_log or (lambda _line: None)
     stopped = cancel or (lambda: False)
     try:
-        config, output = write_sampling_inputs(directory, request)
+        if prepared.generator != request.generator:
+            log(SCAFFOLD_DECORATION_NOTE)
+        config, output = write_sampling_inputs(directory, prepared)
         log(f"REINVENT: {executable}")
         for line in config.read_text(encoding="utf-8").splitlines():
             log(line)
-        if (request.extra_flags or "").strip():
-            log(f"Extra flags: {request.extra_flags.strip()}")
+        if (prepared.extra_flags or "").strip():
+            log(f"Extra flags: {prepared.extra_flags.strip()}")
         try:
             return_code = _run_process(
                 executable,
@@ -589,21 +688,41 @@ def execute_sampling(
                 directory,
                 stopped,
                 log,
-                parse_extra_flags(request.extra_flags),
+                parse_extra_flags(prepared.extra_flags),
             )
         except ReinventSamplingCancelled:
             log("Sampling stopped.")
-            return outcome_from_csv(output, request, cancelled=True)
+            return outcome_from_csv(output, prepared, cancelled=True)
         if return_code != 0:
             raise ReinventSamplingError(
                 f"REINVENT exited with status {return_code}. See the log for details."
             )
         if not output.is_file():
             raise ReinventSamplingError("REINVENT did not write a sampling CSV.")
-        return outcome_from_csv(output, request, cancelled=False)
+        return outcome_from_csv(output, prepared, cancelled=False)
     finally:
         if owns_dir:
             shutil.rmtree(directory, ignore_errors=True)
+
+
+def _smiles_with_attachment(mol, atom_index: int) -> str | None:
+    """Copy *mol* with ``*`` bonded in place of one hydrogen on *atom_index*."""
+    from rdkit import Chem
+
+    try:
+        edited = Chem.RWMol(mol)
+        atom = edited.GetAtomWithIdx(atom_index)
+        if atom.GetNumExplicitHs():
+            atom.SetNumExplicitHs(0)
+        dummy = edited.AddAtom(Chem.Atom(0))
+        edited.AddBond(atom_index, dummy, Chem.BondType.SINGLE)
+        Chem.SanitizeMol(edited)
+        smiles = Chem.MolToSmiles(edited)
+    except (ValueError, RuntimeError):
+        return None
+    if not smiles or "*" not in smiles or not smiles_is_parseable(smiles):
+        return None
+    return smiles
 
 
 def _validate_seed_line(spec: ReinventGenerator, index: int, line: str) -> str | None:

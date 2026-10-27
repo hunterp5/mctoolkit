@@ -227,7 +227,7 @@ def test_scaffold_smarts_is_a_scoring_term_and_filters_rows(tmp_path: Path) -> N
         smiles_file=None,
     )
     assert "[stage.scoring.component.MatchingSubstructure]" in text
-    assert 'params.smarts = ["c1ccccc1"]' in text
+    assert 'params.smarts = ["[#6]1:[#6]:[#6]:[#6]:[#6]:[#6]:1"]' in text
     path = tmp_path / "summary_1.csv"
     path.write_text(
         "Agent,Prior,Target,Score,SMILES,SMILES_state,step\n"
@@ -253,6 +253,37 @@ def test_scaffold_smarts_is_a_scoring_term_and_filters_rows(tmp_path: Path) -> N
         )
         is None
     )
+    indazole = "c1ccc2[nH]ncc2c1"
+    config, _summary, _checkpoint = write_learning_inputs(
+        tmp_path / "indazole",
+        _request(scaffold_smarts=indazole, qed=True),
+    )
+    written = config.read_text(encoding="utf-8")
+    assert 'prior_file = ".libinvent"' in written
+    assert "smiles_file" in written
+    assert "[#6]1:[#6]:[#6]:[#6]2:[#7]:[#7]:[#6]:[#6]:2:[#6]:1" in written
+    seeds = (tmp_path / "indazole" / "seeds.smi").read_text(encoding="utf-8")
+    assert "*" in seeds
+    other = "c1ccc2n[nH]cc2c1"
+    kept = outcome_from_summary(
+        path,
+        _request(scaffold_smarts=indazole, keep=10),
+        cancelled=False,
+    )
+    assert kept.records == ()
+    tautomer = tmp_path / "tautomer.csv"
+    tautomer.write_text(
+        "Agent,Prior,Target,Score,SMILES,SMILES_state,step\n"
+        f"1,2,3,0.9000000,{other},1,2\n"
+        "1,2,3,0.8000000,CCO,1,2\n",
+        encoding="utf-8",
+    )
+    matched = outcome_from_summary(
+        tautomer,
+        _request(scaffold_smarts=indazole, keep=10),
+        cancelled=False,
+    )
+    assert [smiles for smiles, _fields in matched.records] == [other]
 
 
 def test_write_inputs_and_dialog_defaults(qapp, tmp_path: Path) -> None:  # noqa: ARG001

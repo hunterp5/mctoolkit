@@ -224,6 +224,8 @@ class ReinventSamplingDialog(QDialog):
         self.scaffold_edit.setPlaceholderText("Optional SMARTS, such as c1ccc(*)cc1")
         self.scaffold_edit.setToolTip(
             "Keep molecules that contain this substructure. "
+            "A SMILES scaffold on de novo is decorated with LibInvent, "
+            "because de novo cannot be aimed at a core. "
             "For R-groups, a pattern with * is also the scaffold that gets decorated. "
             "Sketcher draws it, including attachment points."
         )

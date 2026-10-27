@@ -29,7 +29,7 @@ import io
 import shutil
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .reinvent_sampling import (
@@ -40,10 +40,13 @@ from .reinvent_sampling import (
     _toml_bool,
     _toml_path,
     _toml_str,
+    SCAFFOLD_DECORATION_NOTE,
+    decoration_seeds,
     effective_seeds,
     generator_by_key,
     parse_extra_flags,
     scaffold_error,
+    scaffold_scoring_smarts,
     smarts_is_parseable,
     smiles_is_parseable,
     smiles_matches_scaffold,
@@ -151,8 +154,30 @@ class LearningOutcome:
     skipped_scaffold: int = 0
 
 
+def prepare_learning_request(request: LearningRequest) -> LearningRequest:
+    """Decorate a de novo SMILES scaffold with LibInvent.
+
+    The Reinvent prior cannot be aimed at a core. A molecule scaffold is
+    learned as R-groups on that core. SMARTS that is not a molecule stays a
+    score and a filter on the de novo run.
+    """
+    if request.generator != "denovo":
+        return request
+    seeds = decoration_seeds(request.scaffold_smarts)
+    if not seeds:
+        return request
+    return replace(
+        request,
+        generator="libinvent",
+        model_file=generator_by_key("libinvent").default_model,
+        sample_strategy="multinomial",
+        seeds=seeds,
+    )
+
+
 def validate_request(request: LearningRequest) -> str | None:
     """Return a user-facing error, or ``None`` when *request* can be written."""
+    request = prepare_learning_request(request)
     try:
         spec = generator_by_key(request.generator)
     except KeyError:
@@ -316,6 +341,7 @@ def render_learning_toml(
 
 def write_learning_inputs(directory: Path, request: LearningRequest) -> tuple[Path, Path, Path]:
     """Write the config, optional seeds, and return config, summary CSV, and checkpoint paths."""
+    request = prepare_learning_request(request)
     directory.mkdir(parents=True, exist_ok=True)
     smiles_path: Path | None = None
     if generator_by_key(request.generator).needs_seeds:
@@ -443,7 +469,8 @@ def execute_learning(
     work_dir: Path | None = None,
 ) -> LearningOutcome:
     """Write a temp config, run *executable*, and read the summary CSV."""
-    message = validate_request(request)
+    prepared = prepare_learning_request(request)
+    message = validate_request(prepared)
     if message:
         raise ReinventLearningError(message)
     shared = _app_python_problem(executable)
@@ -458,12 +485,14 @@ def execute_learning(
     log = on_log or (lambda _line: None)
     stopped = cancel or (lambda: False)
     try:
-        config, summary, checkpoint = write_learning_inputs(directory, request)
+        if prepared.generator != request.generator:
+            log(SCAFFOLD_DECORATION_NOTE)
+        config, summary, checkpoint = write_learning_inputs(directory, prepared)
         log(f"REINVENT: {executable}")
         for line in config.read_text(encoding="utf-8").splitlines():
             log(line)
-        if (request.extra_flags or "").strip():
-            log(f"Extra flags: {request.extra_flags.strip()}")
+        if (prepared.extra_flags or "").strip():
+            log(f"Extra flags: {prepared.extra_flags.strip()}")
         try:
             return_code = _run_process(
                 executable,
@@ -471,14 +500,14 @@ def execute_learning(
                 directory,
                 stopped,
                 log,
-                parse_extra_flags(request.extra_flags),
+                parse_extra_flags(prepared.extra_flags),
             )
         except ReinventSamplingCancelled:
             log("Learning stopped.")
-            _copy_agent(checkpoint, request.agent_output, log)
-            return outcome_from_summary(summary, request, cancelled=True)
-        outcome = outcome_from_summary(summary, request, cancelled=False)
-        _copy_agent(checkpoint, request.agent_output, log)
+            _copy_agent(checkpoint, prepared.agent_output, log)
+            return outcome_from_summary(summary, prepared, cancelled=True)
+        outcome = outcome_from_summary(summary, prepared, cancelled=False)
+        _copy_agent(checkpoint, prepared.agent_output, log)
         if return_code != 0 and not outcome.records:
             raise ReinventLearningError(
                 f"REINVENT exited with status {return_code}. See the log for details."
@@ -591,7 +620,7 @@ def _scoring_blocks(request: LearningRequest) -> list[str]:
                 "Scaffold match",
                 1.0,
                 params=[
-                    f"params.smarts = [{_toml_str(scaffold)}]",
+                    f"params.smarts = [{_toml_str(scaffold_scoring_smarts(scaffold))}]",
                     "params.use_chirality = false",
                 ],
             )

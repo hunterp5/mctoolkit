@@ -32,7 +32,7 @@ De novo sampling needs no table rows. The other generators need seeds from the s
 - **Keep stereochemistry in SMILES** - write isomeric SMILES. Off is REINVENT's default.
 - **Extra flags** - more `reinvent` options, such as `--log-level debug` or `--log-filename`. `--device` and `--seed` here override the fields above.
 - **Seeds** - selected rows, all rows, or pasted SMILES (one per line). LibInvent scaffolds need an attachment point (`*`). LinkInvent lines look like `fragment|fragment`, and each fragment needs `*`. A cell that already contains `|` or `*` is sent as written.
-- **Scaffold** - optional SMARTS. Only molecules that contain it are shown. **Sketcher…** draws the pattern, including `*` attachment points. For R-groups, a pattern that contains `*` is also used as the scaffold to decorate, so the seed list can stay empty.
+- **Scaffold** - optional SMARTS. Only molecules that contain it are shown. **Sketcher…** draws the pattern, including `*` attachment points. A SMILES scaffold on de novo, such as `c1ccc2[nH]ncc2c1`, is decorated with LibInvent: de novo cannot be aimed at a core, so each hydrogen becomes an attachment point and the LibInvent prior grows R-groups there. A SMARTS pattern that is not a molecule stays a filter on the de novo sample. For R-groups, a pattern that contains `*` is also used as the scaffold to decorate, so the seed list can stay empty. Either indazole tautomer matches.
 
 ## Workflow
 
