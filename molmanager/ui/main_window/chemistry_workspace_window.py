@@ -72,6 +72,8 @@ from ..compound_table_model import (
 )
 from ..filter_proxy_model import FilterProxyModel
 from ..filters.cards import FilterCardsHost
+from ..filters.filter_apply_mixin import FilterApplyMixin
+from ..filters.filter_bounds_mixin import FilterBoundsMixin
 from ..filters.filter_cards_mixin import FilterCardsMixin
 from ..filters.filter_substructure_mixin import FilterSubstructureMixin
 from ..progress_controller import ProgressController
@@ -185,9 +187,9 @@ class ChemistryWorkspaceWindow(
     """Main window facade: table workspace, tools, and kernel-backed collaborators.
 
     ``AppLifecycleMixin`` stays a base because Qt delivers ``closeEvent`` through
-    this class. ``TableUIMixin`` stays because filter apply and numeric bounds
-    are still inherited through it. Filter cards, substructure matching, and
-    the other tools are ``WorkspaceTools`` hosts plus a window forward.
+    this class. ``TableUIMixin`` stays because its own methods are the table
+    chrome that is not a separate tool. Filter apply, numeric bounds, and the
+    other tools are ``WorkspaceTools`` hosts plus a window forward.
     Do not add more bases.
     True multi-class mixins live on filter-card chrome and protein source pickers.
 
@@ -852,6 +854,12 @@ install_window_forwards(
     ChemistryWorkspaceWindow,
     "workspace_tools.filter_substructure",
     (FilterSubstructureMixin,),
+)
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.filter_apply", (FilterApplyMixin,)
+)
+install_window_forwards(
+    ChemistryWorkspaceWindow, "workspace_tools.filter_bounds", (FilterBoundsMixin,)
 )
 install_window_forwards(
     ChemistryWorkspaceWindow,

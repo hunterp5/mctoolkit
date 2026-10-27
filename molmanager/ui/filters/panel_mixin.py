@@ -14,21 +14,17 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""File-split of the filter panel on ``ChemistryWorkspaceWindow`` (not a reusable mixin)."""
+"""File-split of the filter panel on ``ChemistryWorkspaceWindow`` (not a reusable mixin).
+
+Filter cards, substructure matching, filter apply, and numeric bounds are
+``WorkspaceTools`` hosts. This class remains so existing imports keep a name.
+"""
 
 from __future__ import annotations
 
-from .filter_apply_mixin import FilterApplyMixin
-from .filter_bounds_mixin import FilterBoundsMixin
 
+class FilterPanelMixin:
+    """Expects the :class:`~molmanager.ui.app_kernel.AppKernel` surface on ``self``.
 
-class FilterPanelMixin(
-    FilterApplyMixin,
-    FilterBoundsMixin,
-):
-    """Expects the :class:`~molmanager.ui.app_kernel.AppKernel` surface on ``self``
-    (``headers``, ``_table_model``, ``table``, ``mols``, ``filters``, ``f_panel``,
-    ``f_container``, ``global_bounds``, ``status_label``, ``threadpool``,
-    ``_apply_filters_timer``, optional ``_substructure_filter_signals``), provided by
-    ``ChemistryWorkspaceWindow``.
+    The methods now live on ``WorkspaceTools`` hosts. The window forwards them.
     """

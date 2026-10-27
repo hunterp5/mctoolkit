@@ -65,9 +65,6 @@ from molmanager.ui.tool_dialog_scope import ToolScopeHost
 _ALLOWED_WINDOW_MIXIN_BASES = frozenset(
     {
         AppLifecycleMixin,
-        FilterApplyMixin,
-        FilterBoundsMixin,
-        FilterPanelMixin,
         TableUIMixin,
     }
 )
@@ -278,6 +275,9 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
         TableEditMixin,
         FilterCardsMixin,
         FilterSubstructureMixin,
+        FilterApplyMixin,
+        FilterBoundsMixin,
+        FilterPanelMixin,
     )
     for cls in off_mro:
         assert cls not in mro
@@ -303,6 +303,8 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
     assert hasattr(w, "show_table_menu")
     assert hasattr(w, "edit_copy")
     assert hasattr(w, "add_filter_card")
+    assert hasattr(w, "apply_filters")
+    assert hasattr(w, "calculate_global_bounds")
     assert hasattr(w, "_cancel_substructure_filter_job")
     assert w._search_col_combo is not None
     assert w.plot_dock is w.plot_dock

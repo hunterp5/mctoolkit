@@ -220,6 +220,12 @@ class WorkspaceTools:
                 "molmanager.ui.filters.filter_substructure_mixin", "FilterSubstructureMixin"
             ),
         )
+        self.filter_apply = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.filters.filter_apply_mixin", "FilterApplyMixin")
+        )
+        self.filter_bounds = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.filters.filter_bounds_mixin", "FilterBoundsMixin")
+        )
 
 
 def _load(module: str, name: str):

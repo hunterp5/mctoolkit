@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Table chrome file-split for ``ChemistryWorkspaceWindow`` (filters)."""
+"""Table chrome file-split for ``ChemistryWorkspaceWindow``."""
 
 from __future__ import annotations
 
@@ -41,12 +41,10 @@ from ...chem.molecule_conversion import (
 )
 from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
 
-from ..filters import FilterPanelMixin
-
 logger = logging.getLogger(__name__)
 
 
-class TableUIMixin(FilterPanelMixin):
+class TableUIMixin:
     def _open_column_color_dialog(self, col: int) -> None:
         if col < 2 or col >= len(self.headers):
             return
