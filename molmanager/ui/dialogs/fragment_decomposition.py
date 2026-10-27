@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QGroupBox,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -39,7 +40,7 @@ from ...chem.fragment_recomposition_filters import (
     recomposition_filter_property_help,
 )
 from ..qt_widget_utils import boxed_form, make_window_minimizable
-from ..strings import TOOL_CORE_DECOMP
+from ..strings import TOOL_CENTRAL_RING_DECOMP, TOOL_CORE_DECOMP
 from .scope import selection_scope_checked
 
 
@@ -353,4 +354,78 @@ class CoreBasedDecompositionDialog(QDialog):
             only_match_at_r_groups=bool(self.only_rg_cb.isChecked()),
             remove_hydrogens_post_match=bool(self.remove_h_cb.isChecked()),
             matching="exhaustive" if strat.startswith("exhaustive") else "greedy",
+        )
+
+
+@dataclass(frozen=True)
+class CentralRingDecompDialogParams:
+    """Arguments from :class:`CentralRingDecompositionDialog` for the worker."""
+
+    structure_source: str
+    column_prefix: str
+
+
+class CentralRingDecompositionDialog(QDialog):
+    """Structure source and column prefix for most-central-ring decomposition."""
+
+    def __init__(self, structure_sources: list[str], selected_row_count: int, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(TOOL_CENTRAL_RING_DECOMP)
+        self.setMinimumWidth(420)
+        self.resize(520, 0)
+        self._have_selection = selected_row_count > 0
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 8)
+        root.setSpacing(8)
+
+        note = QLabel(
+            "Each row is split around the ring nearest the rest of the molecule by bond "
+            "distance. If that ring is fused, bridged, or spiro, the whole ring system is "
+            "the core. Other substituents are written as R groups."
+        )
+        note.setWordWrap(True)
+        root.addWidget(note)
+
+        structures, struct_form = boxed_form("Structures")
+        self.src_combo = QComboBox()
+        self.src_combo.addItems(structure_sources)
+        struct_form.addRow("Molecules from:", self.src_combo)
+
+        self.only_selected_cb = QCheckBox("Selected Rows Only")
+        self._only_selected_scope_prefix = "Selected Rows Only"
+        if self._have_selection:
+            self.only_selected_cb.setText(
+                f"{self._only_selected_scope_prefix} ({selected_row_count} row(s))"
+            )
+        else:
+            self.only_selected_cb.setEnabled(False)
+        struct_form.addRow("", self.only_selected_cb)
+        root.addWidget(structures)
+
+        output, out_form = boxed_form("Output")
+        self.prefix_edit = QLineEdit()
+        self.prefix_edit.setText("MCR")
+        self.prefix_edit.setToolTip("New columns are named PREFIX_Core, PREFIX_R1, PREFIX_R2, …")
+        out_form.addRow("Column name prefix:", self.prefix_edit)
+        root.addWidget(output)
+
+        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        box.accepted.connect(self._on_accept)
+        box.rejected.connect(self.reject)
+        root.addWidget(box)
+        make_window_minimizable(self)
+
+    def _on_accept(self) -> None:
+        if not (self.prefix_edit.text() or "").strip():
+            QMessageBox.warning(self, TOOL_CENTRAL_RING_DECOMP, "Enter a column name prefix.")
+            return
+        self.accept()
+
+    def only_selected_rows(self) -> bool:
+        return selection_scope_checked(self)
+
+    def params(self) -> CentralRingDecompDialogParams:
+        return CentralRingDecompDialogParams(
+            structure_source=self.src_combo.currentText(),
+            column_prefix=(self.prefix_edit.text() or "").strip() or "MCR",
         )

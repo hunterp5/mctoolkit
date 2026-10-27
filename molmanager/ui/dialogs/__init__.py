@@ -41,6 +41,8 @@ _EXPORTS: dict[str, str] = {
     "CommonCoreDialog": ".substructure",
     "CommonCoreDialogParams": ".substructure",
     "ConforgeConformationsDialog": ".conforge_conformations",
+    "CentralRingDecompDialogParams": ".fragment_decomposition",
+    "CentralRingDecompositionDialog": ".fragment_decomposition",
     "CoreBasedDecompDialogParams": ".fragment_decomposition",
     "CoreBasedDecompositionDialog": ".fragment_decomposition",
     "DataAnalysisDialog": ".data_analysis",

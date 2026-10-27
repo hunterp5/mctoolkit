@@ -518,6 +518,15 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 tooltip="Decompose structures against a labeled core scaffold (substituent columns).",
             ),
             action(
+                "Most Central Ring…",
+                "open_central_ring_decomposition",
+                tooltip=(
+                    "Split each structure around its most central ring and write the substituents "
+                    "as R groups. Fused, bridged, and spiro rings that share atoms with that ring "
+                    "stay in the core."
+                ),
+            ),
+            action(
                 "BRICS…",
                 "open_brics_decomposition",
                 tooltip="Split structures into BRICS retrosynthetic fragments (new SMILES columns).",

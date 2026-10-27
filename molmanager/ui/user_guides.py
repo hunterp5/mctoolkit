@@ -367,7 +367,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_rgroup",
                 "Structure Decomposition",
                 "Structure Decomposition",
-                "Match a core and extract R-group columns.",
+                "Match a drawn core or each row's most central ring, and write R-group columns.",
             ),
             _e(
                 "tools_rgroup_enum",

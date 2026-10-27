@@ -1,6 +1,6 @@
 # R-Group Decomposition
 
-R-Group Decomposition matches a core (SMARTS/SMILES) across molecules and writes R-group columns for the variable substituents.
+R-group decomposition writes a core column and substituent columns. Core-Based matches a core you draw. Most Central Ring chooses the core on each row.
 
 ## Goal
 
@@ -40,3 +40,13 @@ Molecules from the chosen structure source; core SMARTS/SMILES must match. Optio
 ## Tips and limits
 
 Poor cores yield missing R columns - iterate on SMARTS. Exhaustive matching is slower. Molecules that do not match the core are skipped or incomplete.
+
+## Most central ring
+
+Use **Chemistry → Structure Decomposition → Most Central Ring** when the rows do not share one drawn core, or when the core you want is the ring system in the middle of each structure.
+
+The core is the ring with the smallest mean bond distance to the rest of the molecule. If that ring is fused, bridged, or spiro to other rings, those rings stay in the core. A ring attached only by a bond, and every chain, becomes an R group.
+
+Columns are named `PREFIX_Core`, `PREFIX_R1`, `PREFIX_R2`, … The default prefix is `MCR`. Attachment labels are `[*:1]`, `[*:2]`, … in the same form core-based decomposition writes, so the columns can feed the SAR matrix and design studio. R numbers follow the core's canonical attachment order. A row with no ring is left as `N/A`.
+
+Acyclic structures have no core. Symmetric positions on a symmetric core can trade R numbers. Bond distance ignores 3D coordinates, so a conformer does not move the core.

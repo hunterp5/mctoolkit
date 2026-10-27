@@ -161,9 +161,12 @@ def test_reaction_menu_outline():
     decomp = find_submenu(tools.items, "Structure Decomposition")
     assert menu_outline(decomp.items) == [
         "Core-Based…",
+        "Most Central Ring…",
         "BRICS…",
         "RECAP…",
     ]
+    central = next(item for item in decomp.items if item.title == "Most Central Ring…")
+    assert central.slot == "open_central_ring_decomposition"
     enum = find_submenu(tools.items, "Structure Enumeration")
     assert menu_outline(enum.items) == [
         "R-Group…",

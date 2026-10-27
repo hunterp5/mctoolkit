@@ -1487,6 +1487,7 @@ def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
     decomp_labels = [a.text().replace("&", "") for a in decomp.actions()]
     assert decomp_labels == [
         "Core-Based…",
+        "Most Central Ring…",
         "BRICS…",
         "RECAP…",
     ]

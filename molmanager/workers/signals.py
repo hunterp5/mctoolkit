@@ -81,7 +81,7 @@ class WorkerSignals(QObject):
     # BRICS / RECAP recomposition: product SMILES list, tool_title
     fragment_recomp_finished = pyqtSignal(list, str, int)
     fragment_recomp_failed = pyqtSignal(str, str)
-    # BRICS / RECAP: (rows, headers, tool_title)
+    # BRICS / RECAP / most central ring: (rows, headers, tool_title)
     fragment_decomp_finished = pyqtSignal(list, list, str)
     fragment_decomp_failed = pyqtSignal(str, str)
     # Reaction-based enumeration: ReactionEnumerationJobResult

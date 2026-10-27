@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import (
 from ..strings import (
     TOOL_BRICS_DECOMP,
     TOOL_BRICS_RECOMP,
+    TOOL_CENTRAL_RING_DECOMP,
     TOOL_CORE_DECOMP,
     TOOL_RECAP_DECOMP,
     TOOL_RECAP_RECOMP,
@@ -96,6 +97,69 @@ class FragmentToolsMixin:
                 progress_state=ps,
             ),
             queue_label=f"Core-based decomposition ({len(payloads)} rows)",
+        )
+
+    def open_central_ring_decomposition(self) -> None:
+        if not self.headers or self._table_model.rowCount() == 0:
+            QMessageBox.information(
+                self,
+                TOOL_CENTRAL_RING_DECOMP,
+                "Load a table with at least one row first.",
+            )
+            return
+        from ..dialogs import CentralRingDecompositionDialog
+
+        dialog = CentralRingDecompositionDialog(
+            self.chemistry_tool_structure_sources(),
+            len(self._selected_logical_rows()),
+            self,
+        )
+        self._prepare_tool_dialog(dialog)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        dialog.accepted.connect(
+            lambda *_, dlg=dialog: self._on_central_ring_decomposition_dialog_accepted(dlg)
+        )
+        dialog.show()
+
+    def _on_central_ring_decomposition_dialog_accepted(self, dialog) -> None:
+        params = dialog.params()
+        only_selected = dialog.only_selected_rows()
+        if self._abort_if_only_selected_but_empty(
+            only_selected, self._selected_oids_set(), TOOL_CENTRAL_RING_DECOMP
+        ):
+            return
+        payloads = self.collect_scoped_table_structure_payloads(
+            params.structure_source, only_selected=only_selected
+        )
+        prefix = (params.column_prefix or "").strip() or "MCR"
+        prefix_cols = [
+            header for header in self.headers if prefix and header.startswith(f"{prefix}_")
+        ]
+        if prefix_cols:
+            payloads = self._filter_rows_for_resume(payloads, prefix_cols)
+        if not payloads:
+            QMessageBox.information(
+                self,
+                TOOL_CENTRAL_RING_DECOMP,
+                "No valid structures were found for the selected source and scope.",
+            )
+            self.status_label.setText("Ready.")
+            return
+        enqueue_process_queue_job(
+            self,
+            TOOL_CENTRAL_RING_DECOMP,
+            len(payloads),
+            lambda ev, ps, dt=payloads, pref=prefix, title=TOOL_CENTRAL_RING_DECOMP, sigs=self.signals: (
+                workers.CentralRingDecompositionWorker(
+                    oid_mol_rows_from_payloads(dt),
+                    pref,
+                    title,
+                    sigs,
+                    cancel_event=ev,
+                    progress_state=ps,
+                )
+            ),
+            queue_label=f"{TOOL_CENTRAL_RING_DECOMP} ({len(payloads)} rows)",
         )
 
     def on_rgroup_decomp_finished(self, res, col_headers: list) -> None:
