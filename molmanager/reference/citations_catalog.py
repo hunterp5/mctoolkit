@@ -649,7 +649,8 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "openmm",
                 "OpenMM",
-                "Optional docking extra: PDBFixer backend and Protein Viewer restrained minimization.",
+                "Optional docking extra and Protein → Simulation: PDBFixer, restrained minimization, "
+                "and staged molecular dynamics.",
                 (
                     (
                         "Eastman, P.; et al. OpenMM 7: Rapid development of high performance algorithms "
@@ -666,9 +667,42 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 LIC_MIT,
                 homepage="https://openmm.org",
                 notes=(
-                    "Protein Viewer Prepare minimization defaults to GBn2 GBSA with 0.15 M salt "
+                    "Protein → Simulation runs user-defined stages (minimize, dynamics, custom integrator) "
+                    "on this OpenMM build. Prepare minimization defaults to GBn2 GBSA with 0.15 M salt "
                     "and backbone restraints (Cα, vacuum, or GAFF/GAFF2 holo min optional). "
                     "OpenMM also includes LGPL components; see the OpenMM license files in that package."
+                ),
+            ),
+            _t(
+                "openff",
+                "OpenFF",
+                "Protein → Simulation ligand force field when OpenFF Sage is selected.",
+                (
+                    (
+                        "Boothroyd, S.; et al. Development and Benchmarking of Open Force Field 2.0.0: "
+                        "The Sage Small Molecule Force Field. J. Chem. Theory Comput. 2023, 19, 3251–3275.",
+                        "https://doi.org/10.1021/acs.jctc.3c00039",
+                    ),
+                ),
+                LIC_MIT,
+                homepage="https://openforcefield.org",
+                notes="Installed with the optional fep extra (openff-toolkit and openmmforcefields).",
+            ),
+            _t(
+                "openfe",
+                "OpenFE",
+                "Protein → Simulation alchemical mode: relative binding free energy.",
+                (
+                    (
+                        "Open Free Energy Consortium. OpenFE: open source alchemical free energy calculations.",
+                        "https://github.com/OpenFreeEnergy/openfe",
+                    ),
+                ),
+                LIC_MIT,
+                homepage="https://openfree.energy",
+                notes=(
+                    "Optional fep extra. A star of equal-charge ligand pairs. "
+                    "The reported ΔΔG is an MBAR estimate and is separate from MM/GBSA."
                 ),
             ),
             _t(

@@ -421,6 +421,7 @@ class SessionRestoreMixin:
         self._restore_floating_plots(doc.get("floating_plots"))
         self._restore_protein_viewer(doc.get("protein_viewer"))
         self._restore_gnina_dock(doc.get("gnina_dock"))
+        self._restore_simulation(doc.get("simulation"))
         self._hide_session_workspace_until_ready()
         self._restore_pending_workspace_layout()
         co = self._pending_session_column_order

@@ -1208,6 +1208,20 @@ class ProteinViewerIoMixin:
     def _on_pdb2pqr_dialog_destroyed(self) -> None:
         self._pdb2pqr_dialog = None
 
+    def open_simulation_window(self) -> None:
+        """Open the simulation workspace for the structure loaded in this viewer."""
+        host = self.parent()
+        opener = getattr(host, "open_simulation", None)
+        if callable(opener):
+            opener()
+            return
+        from .simulation.window import SimulationWindow
+
+        window = SimulationWindow(None, viewer=self, parent=self)
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
     def open_minimize_dialog(self) -> None:
         """Open the Minimize dialog for a Manager structure or file."""
         dlg = self._minimize_dialog

@@ -293,6 +293,11 @@ class ProteinViewerDialog(
         act_pharma_open = QAction("&Open…", self, triggered=self.open_pharmacophore_file)
         act_pharma_open.setToolTip("Load a saved pharmacophore JSON onto the canvas.")
         pharma_menu.addAction(act_pharma_open)
+        act_simulation = QAction("&Simulation…", self, triggered=self.open_simulation_window)
+        act_simulation.setToolTip(
+            "Open the simulation workspace for this structure: stages, solvent, and playback."
+        )
+        tools_menu.addAction(act_simulation)
         render_menu = menubar.addMenu("&Render")
         select_menu = menubar.addMenu("&Select")
         protein_menu = render_menu.addMenu("&Protein")

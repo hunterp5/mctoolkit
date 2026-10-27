@@ -459,10 +459,20 @@ def build_gaff_prmtop(
     ligand_ff: str,
     solvent: str,
     work_dir: Path,
+    box_shape: str = "",
+    box_padding_a: float = 0.0,
+    ion_mode: str = "",
+    cation: str = "Na+",
+    anion: str = "Cl-",
+    ion_conc_m: float = 0.0,
+    write_split: bool = False,
+    explicit_solvent: str = "",
 ) -> tuple[Path, Path, str]:
     """Parameterize ligands with AmberTools and build a holo prmtop/inpcrd.
 
-    Returns ``(prmtop, inpcrd, charge_method_tag)``.
+    Returns ``(prmtop, inpcrd, charge_method_tag)``. ``explicit_solvent`` and
+    ``write_split`` select the simulation tleap script, which also writes
+    receptor, ligand, and dry-complex topologies.
     """
     from .protein_prepare_ligand import ligand_residue_blocks, write_ligand_mol2
 
@@ -512,8 +522,26 @@ def build_gaff_prmtop(
     leap_in = work_dir / "leap.in"
     prmtop = work_dir / "complex.prmtop"
     inpcrd = work_dir / "complex.inpcrd"
-    leap_in.write_text(
-        leap_input(
+    if write_split or explicit_solvent:
+        from ..sim.system_build import leap_script
+
+        script = leap_script(
+            protein_pdb=protein_pdb.name,
+            ligands=leap_ligands,
+            protein_ff=protein_ff,
+            ligand_ff=ff,
+            solvent=explicit_solvent or solvent,
+            box_shape=box_shape or "cubic",
+            padding_a=box_padding_a or 10.0,
+            cation=cation,
+            anion=anion,
+            ion_mode=ion_mode or "neutralize",
+            ion_conc_m=ion_conc_m,
+            prmtop=prmtop.name,
+            inpcrd=inpcrd.name,
+        )
+    else:
+        script = leap_input(
             protein_pdb=protein_pdb.name,
             ligands=leap_ligands,
             protein_ff=protein_ff,
@@ -522,10 +550,8 @@ def build_gaff_prmtop(
             solvent=solvent,
             prmtop=prmtop.name,
             inpcrd=inpcrd.name,
-        ),
-        encoding="utf-8",
-        newline="\n",
-    )
+        )
+    leap_in.write_text(script, encoding="utf-8", newline="\n")
     log_prepare("AmberTools: tleap building protein–ligand topology…")
     from ..platform_support.wsl_launcher import run_linux_tool
 

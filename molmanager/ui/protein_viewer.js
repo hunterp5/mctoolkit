@@ -1593,6 +1593,25 @@ function molmanagerInitView() {
       try { v.zoom(0.85); } catch (eZoom) {}
       v.render();
     };
+    window.molmanagerSetTrajectoryFrames = function (b64) {
+      var v = window.molmanagerViewer;
+      if (!v || !b64) return;
+      var text = "";
+      try { text = atob(b64); } catch (eDec) { return; }
+      if (window.molmanagerTrajModel != null) {
+        try { v.removeModel(window.molmanagerTrajModel); } catch (eRm) {}
+        window.molmanagerTrajModel = null;
+      }
+      var added = null;
+      try { added = v.addModelsAsFrames(text, "pdb"); } catch (eAdd) { return; }
+      window.molmanagerTrajModel = added && added.length ? added[0] : null;
+      try { v.setFrame(0); v.render(); } catch (eFrame) {}
+    };
+    window.molmanagerSetTrajectoryFrame = function (index) {
+      var v = window.molmanagerViewer;
+      if (!v) return;
+      try { v.setFrame(index); v.render(); } catch (eSet) {}
+    };
   } catch (e) {
     document.body.innerHTML = "<pre style='padding:12px;font-family:monospace'>3Dmol error: " + e + "</pre>";
   }

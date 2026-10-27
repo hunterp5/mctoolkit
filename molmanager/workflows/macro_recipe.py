@@ -51,6 +51,7 @@ STEP_EXPLICIT_H = "explicit_hydrogens"
 STEP_REMOVE_H = "remove_explicit_hydrogens"
 STEP_NEUTRALIZE = "neutralize"
 STEP_FAST_PREPARE = "fast_prepare"
+STEP_SIMULATION = "simulation"
 
 STEP_KINDS: tuple[str, ...] = (
     STEP_DESCRIPTORS,
@@ -58,6 +59,7 @@ STEP_KINDS: tuple[str, ...] = (
     STEP_PROTONATE,
     STEP_FILTER,
     STEP_REACTION,
+    STEP_SIMULATION,
 )
 
 STEP_LABELS: dict[str, str] = {
@@ -75,6 +77,7 @@ STEP_LABELS: dict[str, str] = {
     STEP_REMOVE_H: "Remove explicit hydrogens",
     STEP_NEUTRALIZE: "Neutralize",
     STEP_FAST_PREPARE: "Fast prepare",
+    STEP_SIMULATION: "Simulation",
 }
 
 ROW_SCOPE_TABLE = "table"
@@ -110,6 +113,7 @@ _KIND_PREFIX = {
     STEP_REMOVE_H: "hrem",
     STEP_NEUTRALIZE: "neut",
     STEP_FAST_PREPARE: "prep",
+    STEP_SIMULATION: "sim",
 }
 
 # Two-reactant amide coupling. Used when a new reaction step needs a valid SMARTS.
@@ -223,6 +227,8 @@ def output_keys(kind: str, params: Mapping[str, Any]) -> tuple[str, ...]:
         return ("output",)
     if kind == STEP_FAST_PREPARE:
         return ("output", "fragments")
+    if kind == STEP_SIMULATION:
+        return ("status", "summary")
     return ()
 
 
@@ -492,6 +498,12 @@ def _default_params(kind: str) -> dict[str, Any]:
             "fragments_column": "Fragments",
             "neutralize": False,
         }
+    if kind == STEP_SIMULATION:
+        return {
+            "document_path": "",
+            "preset": "gb_relax",
+            "row_scope": ROW_SCOPE_SELECTION,
+        }
     return {
         "reaction_name": "Amide coupling",
         "smarts": _DEFAULT_REACTION_SMARTS,
@@ -556,6 +568,8 @@ def _validate_step(step: MacroStep, descriptor_keys: set[str] | None) -> list[Ma
         return _validate_structure_edit(step, params)
     if step.kind == STEP_FAST_PREPARE:
         return _validate_fast_prepare(step, params)
+    if step.kind == STEP_SIMULATION:
+        return _validate_simulation(step, params)
     return _validate_reaction(step, params)
 
 
@@ -654,6 +668,19 @@ def _validate_fast_prepare(step: MacroStep, params: Mapping[str, Any]) -> list[M
         if not isinstance(largest, str) or not largest.strip():
             issues.append(MacroIssue("Name the column for the largest fragment.", step.id))
     return issues
+
+
+def _validate_simulation(step: MacroStep, params: Mapping[str, Any]) -> list[MacroIssue]:
+    """A simulation step names a saved document or one of the shipped presets."""
+    from ..sim.presets import PRESETS
+
+    path = params.get("document_path") or ""
+    preset = params.get("preset") or ""
+    if isinstance(path, str) and path.strip():
+        return []
+    if preset in PRESETS:
+        return []
+    return [MacroIssue("Choose a saved simulation document or a preset.", step.id)]
 
 
 def _validate_descriptors(

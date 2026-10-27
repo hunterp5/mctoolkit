@@ -268,6 +268,40 @@ class AppMenuMixin:
         )
         return self._protein_msa_dialog
 
+    def open_simulation(self):
+        """Open the simulation workspace for the current protein viewer structure."""
+        from ..simulation.window import SimulationWindow
+        from ..singleton_modeless_dialog import reuse_or_show_modeless_singleton
+
+        viewer = self._ensure_protein_viewer(show=False)
+        window = reuse_or_show_modeless_singleton(
+            self,
+            "_simulation_window",
+            lambda: SimulationWindow(self, viewer=viewer),
+            show=True,
+        )
+        pending = getattr(self, "_simulation_session", None)
+        if isinstance(pending, dict) and not getattr(window, "_session_applied", False):
+            from ...sim.document import SimulationDocumentError, document_from_dict
+
+            try:
+                window.document = document_from_dict(pending)
+                window._reload_stages()
+                window._session_applied = True
+            except (SimulationDocumentError, TypeError, ValueError):
+                window._session_applied = True
+        return window
+
+    def start_simulation_macro(self, path: str, preset: str, row_scope: str, on_done) -> None:
+        """Load a saved document or preset and start it from a macro step."""
+        window = self.open_simulation()
+        if path:
+            window.load_path(path)
+        elif preset:
+            window.load_preset(preset)
+        window.run_finished.connect(lambda result, done=on_done: _finish_simulation_macro(result, done))
+        window.start_run(row_scope=row_scope or "structure")
+
     def open_workspace_layout_picker(self) -> None:
         """Show the graphic layout picker and apply the chosen preset."""
         from ..dialogs.workspace_layout_picker import WorkspaceLayoutPickerDialog
@@ -311,3 +345,11 @@ class AppMenuMixin:
         self._processes_dialog = w
         w.destroyed.connect(self._on_processes_dialog_destroyed)
         w.show()
+
+
+def _finish_simulation_macro(result, on_done) -> None:
+    """Tell the macro runner whether the simulation finished."""
+    if isinstance(result, dict) and result.get("status") == "failed":
+        on_done(str(result.get("message") or "Simulation failed."))
+        return
+    on_done(None)

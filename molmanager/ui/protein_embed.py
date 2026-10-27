@@ -99,6 +99,7 @@ class ProteinEmbedView(QWidget):
         self._pending_docking_box: dict | None = None
         self._pending_dock_pose: dict | None = None
         self._pending_pharmacophore: dict | None = None
+        self._pending_trajectory: str | None = None
         self._web = None
         self._bootstrapped = False
         self._bridge = _ProteinViewerBridge(self)
@@ -269,6 +270,10 @@ class ProteinEmbedView(QWidget):
             pharma = self._pending_pharmacophore
             self._pending_pharmacophore = None
             self._run_js("molmanagerSetPharmacophore", pharma)
+        if self._web_ready and self._pending_trajectory and self._pending_payload is None:
+            frames = self._pending_trajectory
+            self._pending_trajectory = None
+            self._run_js("molmanagerSetTrajectoryFrames", frames)
         if self._web_ready:
             self.schedule_resize_keep_view()
             QTimer.singleShot(200, self.resize_keep_view)
@@ -348,6 +353,8 @@ class ProteinEmbedView(QWidget):
                 self._pending_pharmacophore = payload
                 if self._pending_payload is not None:
                     self._pending_payload["pharmacophore"] = payload
+            elif fn_name == "molmanagerSetTrajectoryFrames":
+                self._pending_trajectory = payload
             elif fn_name == "molmanagerSetView" and self._pending_payload is not None:
                 self._pending_payload["camera"] = payload
             return
@@ -409,6 +416,17 @@ class ProteinEmbedView(QWidget):
 
     def set_pharmacophore(self, spec: dict | None) -> None:
         self._run_js("molmanagerSetPharmacophore", spec or {"active": False})
+
+    def set_trajectory_frames(self, pdb_text: str) -> None:
+        """Load a multi-model solute PDB as 3Dmol frames."""
+        import base64
+
+        encoded = base64.b64encode((pdb_text or "").encode("utf-8")).decode("ascii")
+        self._run_js("molmanagerSetTrajectoryFrames", encoded)
+
+    def set_trajectory_frame(self, index: int) -> None:
+        """Show one frame of the trajectory loaded by :meth:`set_trajectory_frames`."""
+        self._run_js("molmanagerSetTrajectoryFrame", int(index))
 
     def set_camera(self, view) -> None:
         if view is None:

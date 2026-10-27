@@ -330,7 +330,7 @@ def test_command_catalog_lists_the_recipe_steps_without_qt():
 
     if not qt_already_loaded:
         assert "PyQt5.QtWidgets" not in sys.modules
-    assert len(COMMANDS) == 14
+    assert len(COMMANDS) == 15
     descriptors = command_for_step_kind("descriptors")
     assert descriptors is not None
     assert descriptors.command_id == "chemistry.descriptors"

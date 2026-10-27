@@ -65,6 +65,24 @@ class SessionPlotsMixin:
             logger.exception("Skipping Protein Viewer restore with invalid session state")
             self._protein_viewer_session = None
 
+    def _restore_simulation(self, payload: object) -> None:
+        """Keep a saved simulation document for the next time the workspace opens."""
+        from ...sim.document import SimulationDocumentError, document_from_dict
+
+        window = getattr(self, "_simulation_window", None)
+        if not isinstance(payload, dict):
+            self._simulation_session = None
+            return
+        try:
+            document = document_from_dict(payload)
+        except (SimulationDocumentError, TypeError, ValueError):
+            self._simulation_session = None
+            return
+        self._simulation_session = payload
+        if window is not None:
+            window.document = document
+            window._reload_stages()
+
     def _apply_committed_protein_viewer_session(self, dlg) -> None:
         payload = getattr(self, "_protein_viewer_session", None)
         if not isinstance(payload, dict) or not payload.get("structures"):

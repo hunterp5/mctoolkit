@@ -157,6 +157,11 @@ def _step_summary_text(kind: str, params: dict[str, Any]) -> str:
         return (
             f"Fast prepare {source}. Later steps use ${{stepId.output}} and ${{stepId.fragments}}."
         )
+    if kind == "simulation":
+        preset = params.get("preset") or "a saved document"
+        path = params.get("document_path") or ""
+        target = path or preset
+        return f"Run the {target} simulation. Later steps use ${{stepId.status}}."
     if kind == STEP_RGROUP:
         core = params.get("core_id") or "the core"
         return f"Enumerate R-groups on {core} and add the products to the table."

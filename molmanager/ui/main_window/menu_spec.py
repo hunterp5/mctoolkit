@@ -619,6 +619,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltip="Load a PDB, mmCIF, or other crystallographic file and inspect chains in 3D.",
         ),
         action(
+            "&Simulation…",
+            "open_simulation",
+            tooltip=(
+                "Edit a simulation document: stages, solvent, restraints, observables, "
+                "and an optional alchemical schedule."
+            ),
+        ),
+        action(
             "&Sequence…",
             "open_protein_sequence",
             tooltip="Align amino-acid sequences with MAFFT (FASTA, paste, or Protein Viewer chains).",

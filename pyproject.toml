@@ -50,6 +50,14 @@ docking = [
     "pdb2pqr>=3.6.1",
     "prolif>=2.1",
 ]
+# Relative binding free energy. Imported only from Protein → Simulation alchemical mode.
+fep = [
+    "openfe>=1.4",
+    "openmmtools",
+    "pymbar",
+    "openff-toolkit",
+    "openmmforcefields",
+]
 # Linux/macOS wheels exist for Python 3.11. Windows wheels are cp310/cp312/cp314 only, so
 # `pip install cdpkit` on Windows 3.11 builds from source and fails without Boost. Prefer the
 # CDPKit MSVC installer + confgen.exe: https://github.com/molinfo-vienna/CDPKit/releases

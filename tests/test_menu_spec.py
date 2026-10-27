@@ -38,6 +38,14 @@ def test_menu_spec_source_does_not_import_qt():
     assert "QtWidgets" not in text
 
 
+def test_protein_menu_includes_simulation():
+    protein = find_submenu(MAIN_WINDOW_MENUS, "Protein")
+    labels = menu_outline(protein.items)
+    assert "Simulation…" in labels
+    simulation = next(item for item in protein.items if item.slot == "open_simulation")
+    assert simulation.tooltip.startswith("Edit a simulation document")
+
+
 def test_top_level_menu_order():
     labels = []
     for item in MAIN_WINDOW_MENUS:

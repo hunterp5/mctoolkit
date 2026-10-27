@@ -52,6 +52,7 @@ from ..workflows.macro_recipe import (
     STEP_REACTION,
     STEP_REMOVE_H,
     STEP_RGROUP,
+    STEP_SIMULATION,
     MacroReferenceError,
     MacroStep,
     substitute_column_refs,
@@ -102,6 +103,8 @@ def dispatch_step(
             _structure_edit(app, step, bindings, _done)
         elif step.kind == STEP_FAST_PREPARE:
             _fast_prepare(app, step, bindings, _done)
+        elif step.kind == STEP_SIMULATION:
+            _simulation(app, step, _done)
         else:
             _done(f"Unknown step kind {step.kind!r}.")
     except MacroReferenceError as exc:
@@ -278,6 +281,21 @@ def _fast_prepare(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]]
         str(params.get("structure_source") or ""), bindings
     ).strip()
     app.start_fast_prepare_job(params, allowed=allowed, on_done=done)
+
+
+def _simulation(app: Any, step: MacroStep, done) -> None:
+    """Run a saved simulation document, or a shipped preset, from a macro."""
+    starter = getattr(app, "start_simulation_macro", None)
+    if not callable(starter):
+        done("Simulation is not available in this window.")
+        return
+    params = step.params
+    starter(
+        str(params.get("document_path") or ""),
+        str(params.get("preset") or ""),
+        str(params.get("row_scope") or "selection"),
+        done,
+    )
 
 
 def _plot(app: Any, step: MacroStep, bindings: dict[str, dict[str, str]], done) -> None:

@@ -421,6 +421,9 @@ class SessionSaveMixin:
             "protein_viewer": self._collect_protein_viewer(),
             "gnina_dock": self._collect_gnina_dock(),
         }
+        simulation = self._collect_simulation()
+        if simulation:
+            doc["simulation"] = simulation
         collect_search = getattr(self, "collect_table_search_session", None)
         if callable(collect_search):
             search_payload = collect_search()
@@ -518,6 +521,21 @@ class SessionSaveMixin:
         mark = getattr(self, "_mark_session_dirty", None)
         if callable(mark):
             mark()
+
+    def _collect_simulation(self) -> dict | None:
+        """The open simulation document, without trajectory bytes."""
+        from ...sim.document import document_to_dict
+
+        window = getattr(self, "_simulation_window", None)
+        if window is not None:
+            reader = getattr(window, "_read_all", None)
+            if callable(reader):
+                reader()
+            document = getattr(window, "document", None)
+            if document is not None:
+                return document_to_dict(document)
+        payload = getattr(self, "_simulation_session", None)
+        return payload if isinstance(payload, dict) else None
 
     def save_session_as(self) -> bool:
         """Prompt for a path and save the session. Returns True if a write was started."""

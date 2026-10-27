@@ -25,9 +25,7 @@ from pathlib import Path
 
 from .protein_prepare_amber import (
     _ligand_ff_is_gaff,
-    _ligand_ff_tag,
     _normalize_ligand_ff,
-    build_gaff_prmtop,
 )
 from .protein_prepare_constants import (
     _GB_SALT_M,
@@ -49,7 +47,6 @@ from .protein_prepare_io import (
     _ca_residue_keys,
     _is_cif_fmt,
     _ligand_residue_names,
-    _open_openmm_structure,
     _residue_key,
     _write_openmm_structure,
     log_prepare,
@@ -435,43 +432,25 @@ def _restrained_minimize_pdb(
     ligand_keys = ligand_keys or set()
     ligand_ff = _normalize_ligand_ff(ligand_ff)
     use_gaff = _ligand_ff_is_gaff(ligand_ff) and bool(ligand_mols) and bool(ligand_keys)
-    if use_gaff:
-        scratch = Path(work_dir) if work_dir is not None else input_pdb.parent
-        log_prepare("AmberTools: parameterizing ligand for OpenMM…")
-        prmtop, inpcrd, charge_tag = build_gaff_prmtop(
-            input_pdb,
-            ligand_mols=list(ligand_mols or []),
-            ligand_keys=ligand_keys,
-            keep_water=keep_water,
-            protein_ff=protein_ff,
-            ligand_ff=ligand_ff,
-            solvent=solvent,
-            work_dir=scratch,
-        )
-        system, topology, positions0, solvent_lbl = _amber_holo_system(
-            prmtop, inpcrd, solvent=solvent, salt_m=salt_m
-        )
+    from ..sim.system_build import build_for_legacy_minimize
 
-        class _AmberStruct:
-            pass
-
-        pdb = _AmberStruct()
-        pdb.topology = topology
-        pdb.positions = positions0
-        lig_tag = _ligand_ff_tag(ligand_ff)
-        min_tag = f"{protein_ff.upper()} {lig_tag} {charge_tag} {solvent_lbl}"
-        remarks.append(f"4B AMBERTOOLS {lig_tag} {charge_tag}")
-    else:
-        pdb = _open_openmm_structure(input_pdb)
-        log_prepare("OpenMM: assigning protein force field…")
-        system, solvent_lbl = _protein_only_system(
-            pdb,
-            keep_water=keep_water,
-            protein_ff=protein_ff,
-            solvent=solvent,
-            salt_m=salt_m,
-        )
-        min_tag = f"{protein_ff.upper()} {solvent_lbl}"
+    built = build_for_legacy_minimize(
+        input_pdb=input_pdb,
+        use_gaff=use_gaff,
+        ligand_mols=ligand_mols,
+        ligand_keys=ligand_keys,
+        keep_water=keep_water,
+        protein_ff=protein_ff,
+        ligand_ff=ligand_ff,
+        solvent=solvent,
+        salt_m=salt_m,
+        work_dir=work_dir,
+    )
+    system = built.system
+    pdb = built.structure
+    min_tag = built.min_tag
+    if built.ligand_tag:
+        remarks.append(f"4B AMBERTOOLS {built.ligand_tag} {built.charge_tag}")
     scheme_tag = {
         _RESTRAINT_CA: "CA-RESTRAINED",
         _RESTRAINT_BACKBONE_LIGAND: "BACKBONE+LIGAND-RESTRAINED",

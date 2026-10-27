@@ -335,6 +335,12 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Load PDB/mmCIF structures, manage chains in 3D, prepare docking-ready receptors, and minimize complexes.",
             ),
             _e(
+                "tools_simulation",
+                "Simulation",
+                "Simulation",
+                "Protein → Simulation. Staged OpenMM dynamics, playback, pose queues, and relative binding free energy.",
+            ),
+            _e(
                 "protein_pharmacophore",
                 "Pharmacophore",
                 "Pharmacophore",

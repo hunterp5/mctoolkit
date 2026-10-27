@@ -41,6 +41,7 @@ from .macro_recipe import (
     STEP_REACTION,
     STEP_REMOVE_H,
     STEP_RGROUP,
+    STEP_SIMULATION,
 )
 
 COMPLETION_PROCESS_QUEUE = "process_queue"
@@ -63,6 +64,7 @@ COMMAND_EXPLICIT_H = "chemistry.explicit_hydrogens.add"
 COMMAND_REMOVE_H = "chemistry.explicit_hydrogens.remove"
 COMMAND_NEUTRALIZE = "chemistry.neutralize"
 COMMAND_FAST_PREPARE = "chemistry.fast_prepare"
+COMMAND_SIMULATION = "protein.simulation"
 
 
 @dataclass(frozen=True)
@@ -173,6 +175,13 @@ COMMANDS: tuple[CommandSpec, ...] = (
         STEP_FAST_PREPARE,
         "Fast prepare",
         "Chemistry → Prepare Structures → Fast Prepare",
+        COMPLETION_PROCESS_QUEUE,
+    ),
+    CommandSpec(
+        COMMAND_SIMULATION,
+        STEP_SIMULATION,
+        "Simulation",
+        "Protein → Simulation",
         COMPLETION_PROCESS_QUEUE,
     ),
 )
