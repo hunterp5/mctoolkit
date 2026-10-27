@@ -18,14 +18,28 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import QEvent, QPoint, Qt, QTimer
-from PyQt5.QtGui import QBrush, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen, QPixmap
+from PyQt5.QtCore import QEvent, QPoint, QRectF, Qt, QTimer
+from PyQt5.QtGui import (
+    QBrush,
+    QColor,
+    QCursor,
+    QFont,
+    QImage,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
     QDialog,
     QFrame,
+    QGraphicsItem,
+    QGraphicsScene,
+    QGraphicsView,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -67,38 +81,64 @@ _STEP_BUTTON_QSS = (
     "QPushButton:checked { background: palette(midlight); }"
 )
 _ROUTE_COLUMNS = ("#", "Status", "Score", "Steps", "In stock")
+_SCENE_SPAN = 100000
+_ZOOM_MIN = 0.25
+_ZOOM_MAX = 4.0
+_ZOOM_STEP = 1.1
+_CHEMICAL_FIELDS = frozenset({"reaction", "template", "smiles", "smarts", "inchi", "inchikey"})
 
 
-class _RouteCanvas(QFrame):
-    """Route drawing. Center-click and drag to move it past any edge."""
+def _is_chemical_field(field: str, value: str) -> bool:
+    """Reaction SMILES, templates, and other structure strings can be copied."""
+    name = field.strip().lower().replace(" ", "_")
+    if name in _CHEMICAL_FIELDS or name.endswith(("_smiles", "_smarts", "_inchi")):
+        return bool(value.strip())
+    return ">>" in value
+
+
+class _RouteCanvas(QGraphicsView):
+    """Route drawing. Center-click to pan, and scroll to zoom around the pointer."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        scene = QGraphicsScene(self)
+        scene.setSceneRect(QRectF(-_SCENE_SPAN, -_SCENE_SPAN, 2 * _SCENE_SPAN, 2 * _SCENE_SPAN))
+        self.setScene(scene)
         self._content: QWidget | None = None
-        self._pan: tuple[QPoint, QPoint] | None = None
+        self._proxy = None
+        self._zoom = 1.0
+        self._pan: tuple[QPoint, int, int] | None = None
         self._app_filter = False
         self._pan_cursor = False
         self.setFrameShape(QFrame.NoFrame)
-        self.setAutoFillBackground(True)
-        self.setBackgroundRole(QPalette.Base)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setTransformationAnchor(QGraphicsView.NoAnchor)
+        self.setResizeAnchor(QGraphicsView.NoAnchor)
+        self.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        self.setBackgroundBrush(self.palette().brush(QPalette.Base))
         self.setMinimumSize(120, 120)
+        self.viewport().installEventFilter(self)
         self.installEventFilter(self)
 
     def set_content(self, widget: QWidget) -> None:
-        widget.setParent(self)
         self._content = widget
+        self._proxy = self.scene().addWidget(widget)
+        self._proxy.setCacheMode(QGraphicsItem.NoCache)
         self.watch(widget)
 
     def place_content(self) -> None:
         """Park the drawing with its right side in view. It may extend past every edge."""
         content = self._content
-        if content is None or self.width() < 2 or self.height() < 2:
+        proxy = self._proxy
+        view = self.viewport().size()
+        if content is None or proxy is None or view.width() < 2 or view.height() < 2:
             return
+        self.resetTransform()
+        self._zoom = 1.0
+        bounds = proxy.sceneBoundingRect()
         margin = 12
-        content.move(
-            self.width() - content.width() - margin,
-            (self.height() - content.height()) // 2,
-        )
+        self.centerOn(bounds.right() - view.width() / 2 + margin, bounds.center().y())
 
     def watch(self, root: QWidget) -> None:
         """Listen for center-clicks on *root* and the cards added under it."""
@@ -108,8 +148,8 @@ class _RouteCanvas(QFrame):
 
     def end_pan(self) -> None:
         self._pan = None
-        if QWidget.mouseGrabber() is self:
-            self.releaseMouse()
+        if QWidget.mouseGrabber() is self.viewport():
+            self.viewport().releaseMouse()
         if self._app_filter:
             app = QApplication.instance()
             if app is not None:
@@ -121,6 +161,10 @@ class _RouteCanvas(QFrame):
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         kind = event.type()
+        if kind == QEvent.Wheel and self._on_canvas(obj):
+            if event.spontaneous():
+                self._zoom_at(self._wheel_steps(event), self._wheel_anchor(obj, event))
+            return True
         if kind == QEvent.MouseButtonPress and event.button() == Qt.MiddleButton:
             if not self._on_canvas(obj):
                 return super().eventFilter(obj, event)
@@ -133,10 +177,10 @@ class _RouteCanvas(QFrame):
             if buttons and not (buttons & Qt.MiddleButton):
                 self.end_pan()
                 return False
-            origin, start = self._pan
+            origin, horizontal, vertical = self._pan
             delta = QCursor.pos() - origin
-            if self._content is not None:
-                self._content.move(start + delta)
+            self.horizontalScrollBar().setValue(horizontal - delta.x())
+            self.verticalScrollBar().setValue(vertical - delta.y())
             return True
         if self._pan is not None and kind == QEvent.WindowDeactivate:
             self.end_pan()
@@ -151,8 +195,11 @@ class _RouteCanvas(QFrame):
         return super().eventFilter(obj, event)
 
     def _begin_pan(self, origin: QPoint) -> None:
-        start = self._content.pos() if self._content is not None else QPoint(0, 0)
-        self._pan = (origin, start)
+        self._pan = (
+            origin,
+            self.horizontalScrollBar().value(),
+            self.verticalScrollBar().value(),
+        )
         app = QApplication.instance()
         if app is not None and not self._app_filter:
             app.installEventFilter(self)
@@ -166,11 +213,48 @@ class _RouteCanvas(QFrame):
         """Take the mouse after the press, so the drag is not dropped."""
         if self._pan is None:
             return
-        if QWidget.mouseGrabber() is not self:
-            self.grabMouse()
+        viewport = self.viewport()
+        if QWidget.mouseGrabber() is not viewport:
+            viewport.grabMouse()
+
+    def _zoom_at(self, steps: float, anchor: QPoint) -> None:
+        if not steps:
+            return
+        new_zoom = min(_ZOOM_MAX, max(_ZOOM_MIN, self._zoom * (_ZOOM_STEP**steps)))
+        applied = new_zoom / self._zoom
+        if abs(applied - 1.0) < 1e-4:
+            return
+        before = self.mapToScene(anchor)
+        self._zoom = new_zoom
+        self.scale(applied, applied)
+        shifted = self.mapFromScene(before)
+        self.horizontalScrollBar().setValue(
+            self.horizontalScrollBar().value() + shifted.x() - anchor.x()
+        )
+        self.verticalScrollBar().setValue(
+            self.verticalScrollBar().value() + shifted.y() - anchor.y()
+        )
+
+    def _wheel_steps(self, event) -> float:
+        angle = event.angleDelta().y()
+        if angle:
+            return angle / 120.0
+        pixel = event.pixelDelta().y()
+        if pixel:
+            return pixel / 40.0
+        return 0.0
+
+    def _wheel_anchor(self, obj, event) -> QPoint:
+        point = event.pos()
+        local = QPoint(int(point.x()), int(point.y()))
+        if obj is self.viewport() or obj is self:
+            return local
+        if isinstance(obj, QWidget):
+            return obj.mapTo(self.viewport(), local)
+        return local
 
     def _on_canvas(self, obj) -> bool:
-        if obj is self:
+        if obj is self or obj is self.viewport():
             return True
         content = self._content
         if content is None:
@@ -230,6 +314,7 @@ class RouteBrowserDialog(QDialog):
 
         self._steps_host = QWidget()
         self._steps_host.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._steps_host._route_dialog = self
         self._steps_layout = QVBoxLayout(self._steps_host)
         self._steps_layout.setContentsMargins(4, 4, 4, 4)
         self._steps_layout.setSpacing(12)
@@ -286,7 +371,7 @@ class RouteBrowserDialog(QDialog):
 
     def molecule_cards(self) -> list[QFrame]:
         """Structure cards currently in the route tree."""
-        return self.findChildren(QFrame, _CARD_NAME)
+        return self._steps_host.findChildren(QFrame, _CARD_NAME)
 
     def _on_target_changed(self, index: int) -> None:
         target = self._target_at(index)
@@ -397,10 +482,14 @@ class RouteBrowserDialog(QDialog):
             field_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
             value_item = QTableWidgetItem(value)
             value_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-            value_item.setToolTip(value)
+            if _is_chemical_field(field, value):
+                value_item.setToolTip(f"{value}\nRight-click to copy")
+            else:
+                value_item.setToolTip(value)
             table.setItem(index, 0, field_item)
             table.setItem(index, 1, value_item)
         table.resizeColumnsToContents()
+        table.resizeRowsToContents()
 
     def _clear_step_table(self) -> None:
         self.step_table.setRowCount(0)
@@ -536,14 +625,61 @@ class _VBranch(QWidget):
         painter.drawLine(0, mid, self.width(), mid)
 
 
+class _StepTable(QTableWidget):
+    """Reaction details. Chemical values copy with Ctrl+C or the context menu."""
+
+    def copy_selected_chemical(self) -> bool:
+        row = self.currentRow()
+        if row < 0:
+            return False
+        field_item = self.item(row, 0)
+        value_item = self.item(row, 1)
+        if field_item is None or value_item is None:
+            return False
+        value = value_item.text()
+        if not _is_chemical_field(field_item.text(), value):
+            return False
+        clipboard = QApplication.clipboard()
+        if clipboard is None:
+            return False
+        clipboard.setText(value)
+        return True
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.matches(QKeySequence.Copy) and self.copy_selected_chemical():
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802
+        row = self.rowAt(event.pos().y())
+        if row < 0:
+            return
+        field_item = self.item(row, 0)
+        value_item = self.item(row, 1)
+        if field_item is None or value_item is None:
+            return
+        if not _is_chemical_field(field_item.text(), value_item.text()):
+            return
+        menu = QMenu(self)
+        action = menu.addAction("Copy")
+        if menu.exec_(event.globalPos()) is action:
+            self.setCurrentCell(row, 1)
+            self.copy_selected_chemical()
+        event.accept()
+
+
 def _step_table() -> QTableWidget:
-    table = QTableWidget(0, 2)
+    table = _StepTable(0, 2)
     table.setHorizontalHeaderLabels(["Field", "Value"])
     table.setEditTriggers(QAbstractItemView.NoEditTriggers)
     table.setSelectionBehavior(QAbstractItemView.SelectRows)
     table.setSelectionMode(QAbstractItemView.SingleSelection)
+    table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+    table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
     table.setWordWrap(True)
     table.setMinimumWidth(220)
+    table.setFocusPolicy(Qt.StrongFocus)
     table.verticalHeader().setVisible(False)
     header = table.horizontalHeader()
     header.setStretchLastSection(True)
@@ -701,6 +837,11 @@ class _StepBranch(QWidget):
         parent = self.parentWidget()
         while parent is not None:
             show = getattr(parent, "_show_step_rows", None)
+            if callable(show):
+                show(self._button)
+                return
+            owner = getattr(parent, "_route_dialog", None)
+            show = getattr(owner, "_show_step_rows", None)
             if callable(show):
                 show(self._button)
                 return

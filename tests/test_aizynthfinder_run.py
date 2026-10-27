@@ -360,7 +360,9 @@ def test_route_browser_lists_one_step(qapp, monkeypatch) -> None:  # noqa: ARG00
     dialog.route_table.selectRow(1)
     assert dialog.molecule_cards() == []
     step_titles = [
-        label.text() for label in dialog.findChildren(QLabel) if label.text().startswith("Step ")
+        label.text()
+        for label in dialog._steps_host.findChildren(QLabel)
+        if label.text().startswith("Step ")
     ]
     assert step_titles == ["Step 1"]
     _assert_canvas_pans(dialog)
@@ -369,11 +371,15 @@ def test_route_browser_lists_one_step(qapp, monkeypatch) -> None:  # noqa: ARG00
 
 def _assert_step_details_toggle(dialog) -> None:
     from PyQt5.QtCore import QPoint
-    from PyQt5.QtWidgets import QApplication, QPushButton, QSplitter
+    from PyQt5.QtWidgets import QAbstractItemView, QApplication, QPushButton, QSplitter
 
     dialog.show()
     QApplication.processEvents()
-    buttons = [button for button in dialog.findChildren(QPushButton) if button.text() == "Step 1"]
+    buttons = [
+        button
+        for button in dialog._steps_host.findChildren(QPushButton)
+        if button.text() == "Step 1"
+    ]
     assert len(buttons) == 1
     cards = dialog.molecule_cards()
     assert cards
@@ -386,6 +392,14 @@ def _assert_step_details_toggle(dialog) -> None:
     assert "policy_name" in fields
     assert "uspto" in values
     assert "[C:1]>>[C:1]" in values
+    assert dialog.step_table.verticalScrollMode() == QAbstractItemView.ScrollPerPixel
+    assert dialog.step_table.horizontalScrollMode() == QAbstractItemView.ScrollPerPixel
+    dialog.step_table.selectRow(fields.index("template"))
+    assert dialog.step_table.copy_selected_chemical()
+    assert QApplication.clipboard().text() == "[C:1]>>[C:1]"
+    dialog.step_table.selectRow(fields.index("policy_name"))
+    assert dialog.step_table.copy_selected_chemical() is False
+    assert QApplication.clipboard().text() == "[C:1]>>[C:1]"
     splitter = dialog.step_table.parentWidget()
     assert isinstance(splitter, QSplitter)
     assert splitter.widget(0) is dialog.route_table
@@ -407,9 +421,13 @@ def _assert_tree_overflows(dialog) -> None:
     QApplication.processEvents()
     host = dialog._steps_host
     canvas = dialog._route_scroll
-    assert host.width() > canvas.width()
-    assert host.x() < 0
-    assert host.x() + host.width() < canvas.width()
+    bounds = canvas._proxy.sceneBoundingRect()
+    left = canvas.mapFromScene(bounds.topLeft()).x()
+    right = canvas.mapFromScene(bounds.topRight()).x()
+    view_width = canvas.viewport().width()
+    assert host.width() > view_width
+    assert left < 0
+    assert 0 < right <= view_width
 
 
 def _assert_canvas_pans(dialog) -> None:
@@ -424,9 +442,7 @@ def _assert_canvas_pans(dialog) -> None:
             return True
 
     canvas = dialog._route_scroll
-    host = dialog._steps_host
-    start = host.pos()
-    viewport = canvas
+    viewport = canvas.viewport()
     origin = viewport.mapToGlobal(QPoint(20, 20))
     held = {"at": QPoint(origin)}
 
@@ -471,12 +487,21 @@ def _assert_canvas_pans(dialog) -> None:
         Qt.NoModifier,
     )
     try:
+        across = canvas.horizontalScrollBar()
+        down = canvas.verticalScrollBar()
+        start_h, start_v = across.value(), down.value()
+        watched = canvas.mapToScene(QPoint(40, 40))
         QApplication.sendEvent(viewport, press)
         held["at"] = origin + shift
         QApplication.sendEvent(viewport, move)
-        assert host.pos() == start + shift
+        assert across.value() == start_h - shift.x()
+        assert down.value() == start_v - shift.y()
+        moved = canvas.mapFromScene(watched)
+        assert moved.x() == 40 + shift.x()
+        assert moved.y() == 40 + shift.y()
         QApplication.sendEvent(viewport, drift)
-        assert host.pos() == start + shift
+        assert across.value() == start_h - shift.x()
+        assert down.value() == start_v - shift.y()
         far = QPoint(2500, -1800)
         held["at"] = origin + far
         QApplication.sendEvent(
@@ -490,14 +515,45 @@ def _assert_canvas_pans(dialog) -> None:
                 Qt.NoModifier,
             ),
         )
-        assert host.pos() == start + far
-        assert host.x() > canvas.width()
-        assert host.y() < 0
+        assert across.value() == start_h - far.x()
+        assert down.value() == start_v - far.y()
+        flung = canvas.mapFromScene(watched)
+        assert flung.x() == 40 + far.x()
+        assert flung.y() == 40 + far.y()
     finally:
         QApplication.sendEvent(viewport, release)
         canvas.end_pan()
         route_browser.QCursor = previous
     assert canvas._pan is None
+    _assert_canvas_zooms(canvas, viewport, origin)
+
+
+def _assert_canvas_zooms(canvas, viewport, origin) -> None:
+    from PyQt5.QtCore import QPoint, QPointF, Qt
+    from PyQt5.QtGui import QWheelEvent
+    from PyQt5.QtWidgets import QApplication
+
+    class _SpontaneousWheel(QWheelEvent):
+        def spontaneous(self) -> bool:  # noqa: N802
+            return True
+
+    anchor = QPoint(30, 30)
+    watched = canvas.mapToScene(anchor)
+    wheel = _SpontaneousWheel(
+        QPointF(anchor),
+        QPointF(origin),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.NoButton,
+        Qt.NoModifier,
+        Qt.NoScrollPhase,
+        False,
+    )
+    QApplication.sendEvent(viewport, wheel)
+    assert abs(canvas._zoom - 1.1) < 1e-6
+    back = canvas.mapFromScene(watched)
+    assert abs(back.x() - anchor.x()) <= 2
+    assert abs(back.y() - anchor.y()) <= 2
 
 
 def test_branch_lines_reach_reagent_cards(qapp) -> None:  # noqa: ARG001
@@ -570,8 +626,8 @@ def test_branch_lines_reach_reagent_cards(qapp) -> None:  # noqa: ARG001
     dialog._place_tree()
     host = dialog._steps_host
     canvas = dialog._route_scroll
-    right = host.x() + host.width()
-    assert 0 < right <= canvas.width()
+    right = canvas.mapFromScene(canvas._proxy.sceneBoundingRect().topRight()).x()
+    assert 0 < right <= canvas.viewport().width()
     gaps: list[int] = []
     for branch in host.findChildren(_VBranch):
         left = branch.mapTo(host, QPoint(0, 0)).x()
@@ -589,7 +645,7 @@ def test_branch_lines_reach_reagent_cards(qapp) -> None:  # noqa: ARG001
     buttons = sorted(
         (
             button
-            for button in dialog.findChildren(QPushButton)
+            for button in dialog._steps_host.findChildren(QPushButton)
             if button.objectName() == "route-step"
         ),
         key=lambda button: button.mapToGlobal(QPoint(0, 0)).x(),
