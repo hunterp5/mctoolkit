@@ -182,15 +182,12 @@ class _FilterCardsScrollArea(QScrollArea):
 class ChemistryWorkspaceWindow(
     QMainWindow,
     AppLifecycleMixin,
-    TableUIMixin,
 ):
     """Main window facade: table workspace, tools, and kernel-backed collaborators.
 
     ``AppLifecycleMixin`` stays a base because Qt delivers ``closeEvent`` through
-    this class. ``TableUIMixin`` stays because its own methods are the table
-    chrome that is not a separate tool. Filter apply, numeric bounds, and the
-    other tools are ``WorkspaceTools`` hosts plus a window forward.
-    Do not add more bases.
+    this class. Table chrome and the other tools are ``WorkspaceTools`` hosts
+    plus a window forward. Do not add more bases.
     True multi-class mixins live on filter-card chrome and protein source pickers.
 
     Each row stores **one explicit structure** (connectivity + stereo as encoded). Isomerism scope
@@ -861,6 +858,7 @@ install_window_forwards(
 install_window_forwards(
     ChemistryWorkspaceWindow, "workspace_tools.filter_bounds", (FilterBoundsMixin,)
 )
+install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.table_ui", (TableUIMixin,))
 install_window_forwards(
     ChemistryWorkspaceWindow,
     "workspace_tools.structure_prep",

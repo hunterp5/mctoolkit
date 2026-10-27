@@ -226,6 +226,9 @@ class WorkspaceTools:
         self.filter_bounds = _LazyMixinHost(
             app, lambda: _load("molmanager.ui.filters.filter_bounds_mixin", "FilterBoundsMixin")
         )
+        self.table_ui = _LazyMixinHost(
+            app, lambda: _load("molmanager.ui.main_window.table_ui_mixin", "TableUIMixin")
+        )
 
 
 def _load(module: str, name: str):
