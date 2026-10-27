@@ -45,6 +45,7 @@ from PyQt5.QtWidgets import (
 
 from rdkit import Chem
 
+from ..app_kernel import install_window_forwards
 from .alkene_stereo import infer_alkene_ez_for_sketch_mol
 from .bonds import (
     BOND_STEREO_HASH,
@@ -101,9 +102,7 @@ def _count_label(count: int, singular: str) -> str:
     return f"{count} {noun}"
 
 
-class SketchWidget(
-    SketchWidgetEventsMixin, SketchWidgetPaintMixin, SketchWidgetRdkitMixin, QWidget
-):
+class SketchWidget(SketchWidgetEventsMixin, QWidget):
     """
     Chemical sketch widget: place atoms, draw bonds by dragging, adjust bond order,
     erase, select/move, templates, undo/redo, and export SMILES via RDKit.
@@ -132,6 +131,8 @@ class SketchWidget(
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        self._sketch_rdkit = _bind_sketch_mixin(self, SketchWidgetRdkitMixin)
+        self._sketch_paint = _bind_sketch_mixin(self, SketchWidgetPaintMixin)
         self.setMinimumSize(500, 400)
 
         self.nodes: list[
@@ -3645,3 +3646,16 @@ class SketchWidget(
         self.bonds.append(bond)
         self._push_undo("add_bonded_node", (node, bond))
         self._after_sketch_edit()
+
+
+def _bind_sketch_mixin(widget: SketchWidget, mixin: type):
+    """Bind one sketch mixin so ``self`` inside it stays the widget."""
+    from ..app_kernel import bind_mixin_methods
+
+    host = type(f"{mixin.__name__}Adapter", (), {})()
+    bind_mixin_methods(host, widget, mixin)
+    return host
+
+
+install_window_forwards(SketchWidget, "_sketch_rdkit", (SketchWidgetRdkitMixin,))
+install_window_forwards(SketchWidget, "_sketch_paint", (SketchWidgetPaintMixin,))
