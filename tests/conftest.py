@@ -134,6 +134,12 @@ def _isolate_recent_paths(tmp_path, monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_session_key(tmp_path, monkeypatch) -> None:
+    """Keep encrypted-session keys out of the developer profile."""
+    monkeypatch.setenv("MOLMANAGER_SESSION_KEY_DIR", str(tmp_path / "session-key"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_tool_paths(tmp_path, monkeypatch) -> None:
     """Keep Settings → Configure paths off the developer QSettings profile."""
     from PyQt5.QtCore import QSettings

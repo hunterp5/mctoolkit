@@ -130,12 +130,17 @@ def _loads(raw: bytes) -> Any:
 
 
 def is_session_v4(path: str | os.PathLike[str]) -> bool:
-    """True when *path* starts with the SQLite file header."""
+    """True for a plaintext SQLite session or an encrypted ``MMC1`` session."""
     try:
         with open(path, "rb") as fh:
-            return fh.read(len(SQLITE_HEADER)) == SQLITE_HEADER
+            head = fh.read(len(SQLITE_HEADER))
     except OSError:
         return False
+    if head == SQLITE_HEADER:
+        return True
+    from .session_seal import SESSION_SEAL_MAGIC
+
+    return head.startswith(SESSION_SEAL_MAGIC)
 
 
 def is_legacy_session(path: str | os.PathLike[str]) -> bool:
@@ -349,13 +354,26 @@ def write_session_v4(
         conn.commit()
         conn.close()
         conn = None
-        os.replace(tmp, dest)
+        _publish_session_file(tmp, dest)
         replaced = True
     finally:
         if conn is not None:
             conn.close()
         if not replaced:
             remove_sqlite_file(tmp)
+
+
+def _publish_session_file(tmp: Path, dest: Path) -> None:
+    """Replace *dest* with *tmp*, encrypting first unless plaintext sessions are set."""
+    from ..platform_support.session_runtime import session_files_encrypted
+
+    if not session_files_encrypted():
+        os.replace(tmp, dest)
+        return
+    from .session_seal import seal_sqlite_file
+
+    seal_sqlite_file(tmp, dest)
+    remove_sqlite_file(tmp)
 
 
 def _new_store_file(prefix: str, table: str, source: str, where: str = "") -> tuple[Path, int]:
@@ -398,9 +416,24 @@ def read_session_v4(
     Depictions are copied only when the file's scene revision equals
     *want_scene_revision* (``None`` accepts any revision).
     """
-    src = str(Path(path))
+    src_path = Path(path)
+    sealed_plain: Path | None = None
+    from .session_seal import is_sealed_session
+
+    if is_sealed_session(src_path):
+        from .session_seal import unseal_session_sqlite
+
+        sealed_plain = unseal_session_sqlite(src_path)
+        src = str(sealed_plain)
+    else:
+        src = str(src_path)
     uri = Path(src).resolve().as_uri() + "?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    try:
+        conn = sqlite3.connect(uri, uri=True)
+    except BaseException:
+        if sealed_plain is not None:
+            remove_sqlite_file(sealed_plain)
+        raise
     try:
         meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
         if bytes(meta.get("format") or b"").decode() != SESSION_FORMAT:
@@ -432,7 +465,12 @@ def read_session_v4(
             table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
             for table in ("mols", "pngs", "ensembles")
         }
-    finally:
+    except BaseException:
+        conn.close()
+        if sealed_plain is not None:
+            remove_sqlite_file(sealed_plain)
+        raise
+    else:
         conn.close()
     n = rows.n
     result = SessionOpenResult(
@@ -441,6 +479,8 @@ def read_session_v4(
         max_oid=int(rows.oids[:n].max()) if n else -1,
         scene_revision=scene_rev,
     )
+    if sealed_plain is not None:
+        result.temp_files.append(sealed_plain)
     try:
         if counts["mols"]:
             result.mol_db, _ = _new_store_file("molmanager_mols_", "mols", src)

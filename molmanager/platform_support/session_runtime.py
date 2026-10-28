@@ -19,7 +19,9 @@
 One runtime exists per process. Table caches, plot shells, and scratch
 sessions live under its directory and are removed when the process exits.
 ``MOLMANAGER_OFFLINE=1`` refuses network lookups. ``MOLMANAGER_SQL_WRITES=0``
-refuses SQL that modifies a database. ``MOLMANAGER_TOOL_ALLOWLIST`` limits which
+refuses SQL that modifies a database. ``MOLMANAGER_SESSION_PLAINTEXT=1`` writes a
+``.cms`` as a plain SQLite file; otherwise the file is encrypted for this user.
+``MOLMANAGER_TOOL_ALLOWLIST`` limits which
 external programs may start, and ``MOLMANAGER_TOOL_DIGESTS`` pins their SHA-256.
 A machine policy file can set the same names and wins over the process environment.
 With no policy file and the variables unset, behavior matches a normal desktop launch.
@@ -169,6 +171,27 @@ def network_allowed() -> bool:
 def sql_writes_allowed() -> bool:
     """False when SQL writes are disabled. The machine policy wins over the environment."""
     return _flag(_configured("MOLMANAGER_SQL_WRITES"), True)
+
+
+def session_files_encrypted() -> bool:
+    """False when ``MOLMANAGER_SESSION_PLAINTEXT`` is set. The machine policy wins.
+
+    Unset writes an encrypted ``.cms``. Existing plaintext sessions still open.
+    """
+    return not _truthy(_configured("MOLMANAGER_SESSION_PLAINTEXT"))
+
+
+def session_key_directory() -> Path:
+    """Directory of the per-user key that encrypts ``.cms`` files."""
+    override = _configured("MOLMANAGER_SESSION_KEY_DIR")
+    if override:
+        return Path(override).expanduser()
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / "MolManager"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "MolManager"
+    return Path.home() / ".local" / "share" / "MolManager"
 
 
 def require_tool(executable: str, purpose: str) -> None:

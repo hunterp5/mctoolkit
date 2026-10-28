@@ -23,6 +23,8 @@ pandas>=2.0
 openpyxl>=3.1
 scipy>=1.10
 sqlalchemy>=2.0
+# AES-GCM for .cms sessions. The per-user key is separate from the file.
+cryptography>=44
 pubchempy>=1.0.4
 chembl_webresource_client>=0.10.9
 # Official PyPI name is `rdkit`. Do not install `rdkit-pypi` (last release 2022.9.5);

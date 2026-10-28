@@ -34,6 +34,7 @@ from molmanager.platform_support.session_runtime import (
     network_allowed,
     require_network,
     require_tool,
+    session_files_encrypted,
     sql_writes_allowed,
 )
 from molmanager.storage.sqlite_table_store import SqliteTableStore
@@ -62,6 +63,13 @@ def test_sql_writes_can_be_disabled(monkeypatch) -> None:
     assert sql_writes_allowed() is True
     monkeypatch.setenv("MOLMANAGER_SQL_WRITES", "0")
     assert sql_writes_allowed() is False
+
+
+def test_session_files_are_encrypted_unless_plaintext_is_set(monkeypatch) -> None:
+    monkeypatch.delenv("MOLMANAGER_SESSION_PLAINTEXT", raising=False)
+    assert session_files_encrypted() is True
+    monkeypatch.setenv("MOLMANAGER_SESSION_PLAINTEXT", "1")
+    assert session_files_encrypted() is False
 
 
 def test_table_cache_is_private_and_removed_on_close() -> None:
