@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""QSAR and AutoQSAR tool windows (Data menu)."""
+"""QSAR and Quick QSAR tool windows (Data menu)."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ class QsarMixin:
         if not self.headers or self._table_model.rowCount() == 0:
             QMessageBox.information(
                 self,
-                "AutoQSAR",
+                "Quick QSAR",
                 "Open a file or add rows with activity data first.",
             )
             return

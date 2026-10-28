@@ -14,10 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""AutoQSAR — search features and models for an activity column (Data menu)."""
+"""Quick QSAR — search features and models for an activity column (Data menu)."""
 
 from __future__ import annotations
 
+import pickle
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,7 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -47,7 +49,13 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from ...analysis.auto_qsar import output_headers, table_write_rows
+from ...analysis.auto_qsar import (
+    format_model_details,
+    load_auto_qsar_model,
+    output_headers,
+    save_auto_qsar_model,
+    table_write_rows,
+)
 from ...workers.auto_qsar_worker import (
     AutoQSARJobResult,
     AutoQSARPredictWorker,
@@ -62,13 +70,14 @@ from .scope import selection_scope_checked
 
 # Enough checked-column rows to scan a typical descriptor set; longer lists scroll inside the box.
 _COLUMN_LIST_ROWS = 8
+_MODEL_FILE_FILTER = "Quick QSAR model (*.mmqsar)"
 
 if TYPE_CHECKING:
     from ..main_window import ChemistryWorkspaceWindow
 
 
 class AutoQSARDialog(QDialog):
-    """Pick an activity column and task. AutoQSAR chooses the features and model."""
+    """Pick an activity column and task. Quick QSAR chooses the features and model."""
 
     def __init__(self, parent: ChemistryWorkspaceWindow | None = None):
         super().__init__(parent)
@@ -79,7 +88,7 @@ class AutoQSARDialog(QDialog):
         self._reload_columns()
 
     def _init_state(self, parent: ChemistryWorkspaceWindow | None) -> None:
-        self.setWindowTitle("AutoQSAR")
+        self.setWindowTitle("Quick QSAR")
         self.setMinimumSize(760, 560)
         self.resize(960, 680)
         make_window_minimizable(self)
@@ -89,7 +98,7 @@ class AutoQSARDialog(QDialog):
         self._job: AutoQSARJobResult | None = None
         self._structure_source = ""
         self._job_running = False
-        self._active_progress_label = "AutoQSAR"
+        self._active_progress_label = "Quick QSAR"
         self._active_job_id: str | None = None
         self._auto_pred_name = ""
         self._signals = AutoQSARSignals(self)
@@ -156,7 +165,7 @@ class AutoQSARDialog(QDialog):
         out_grp = QGroupBox("Output")
         out_form = QFormLayout(out_grp)
         self.pred_column_edit = QLineEdit()
-        self.pred_column_edit.setPlaceholderText("AutoQSAR_<activity column>")
+        self.pred_column_edit.setPlaceholderText("Quick QSAR_<activity column>")
         out_form.addRow("Prediction column:", self.pred_column_edit)
         self.chk_consensus = QCheckBox("Consensus of retained models")
         self.chk_consensus.setChecked(True)
@@ -167,7 +176,7 @@ class AutoQSARDialog(QDialog):
         left_lyt.addWidget(out_grp)
 
         btn_row = QHBoxLayout()
-        self.run_btn = QPushButton("Run AutoQSAR")
+        self.run_btn = QPushButton("Run Quick QSAR")
         btn_row.addWidget(self.run_btn)
         self.predict_btn = QPushButton("Add predictions to table")
         self.predict_btn.setEnabled(False)
@@ -186,16 +195,33 @@ class AutoQSARDialog(QDialog):
         right = QWidget()
         right_lyt = QVBoxLayout(right)
         right_lyt.setContentsMargins(0, 0, 0, 0)
-        right_lyt.addWidget(QLabel("Leaderboard"))
+        board_row = QHBoxLayout()
+        board_row.addWidget(QLabel("Leaderboard"))
+        board_row.addStretch()
+        self.load_btn = QPushButton("Load model…")
+        self.load_btn.setToolTip(
+            "Load a saved model, then use Add predictions to score this table."
+        )
+        board_row.addWidget(self.load_btn)
+        self.save_btn = QPushButton("Save model…")
+        self.save_btn.setEnabled(False)
+        self.save_btn.setToolTip(
+            "Save the selected leaderboard model to a file that can be applied to a dataset later."
+        )
+        board_row.addWidget(self.save_btn)
+        right_lyt.addLayout(board_row)
         self.leaderboard = QTableWidget(0, 6)
         self.leaderboard.setHorizontalHeaderLabels(
             ["Score", "Test accuracy", "Train accuracy", "Method", "Features", "Split"]
         )
+        features_header = self.leaderboard.horizontalHeaderItem(4)
+        if features_header is not None:
+            features_header.setToolTip("Number of features in the model.")
         self.leaderboard.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.leaderboard.setSelectionMode(QAbstractItemView.SingleSelection)
         self.leaderboard.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.leaderboard.verticalHeader().setVisible(False)
-        self.leaderboard.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.leaderboard.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.leaderboard.setMinimumHeight(160)
         right_lyt.addWidget(self.leaderboard)
         right_lyt.addWidget(QLabel("Results"))
@@ -203,10 +229,11 @@ class AutoQSARDialog(QDialog):
         self.results_text.setReadOnly(True)
         apply_monospace_to_text_edit(self.results_text)
         self.results_text.setPlaceholderText(
-            "Choose an activity column and task, then click Run AutoQSAR.\n\n"
-            "Each split is 75% training and 25% test. The score rewards test accuracy and "
-            "penalizes a gap between the two splits. Add predictions writes the consensus, "
-            "a 90% interval or class probability, and an in/out domain flag."
+            "Choose an activity column and task, then click Run Quick QSAR.\n\n"
+            "Click a leaderboard row to see that model's score and the features it uses. "
+            "Save model writes the selected model to a file you can load and apply later.\n\n"
+            "Add predictions writes the prediction, a 90% interval or class probability, "
+            "and an in/out domain flag. Calculated descriptors stay out of the table."
         )
         right_lyt.addWidget(self.results_text, 1)
         splitter.addWidget(right)
@@ -222,6 +249,9 @@ class AutoQSARDialog(QDialog):
         self.activity_combo.currentIndexChanged.connect(self._on_activity_changed)
         self.run_btn.clicked.connect(self._on_run)
         self.predict_btn.clicked.connect(self._on_predict)
+        self.save_btn.clicked.connect(self._on_save_model)
+        self.load_btn.clicked.connect(self._on_load_model)
+        self.leaderboard.itemSelectionChanged.connect(self._on_leaderboard_selection)
 
     def _scoped_dataframe_and_oids(self) -> tuple:
         app = self.parent_app
@@ -298,7 +328,7 @@ class AutoQSARDialog(QDialog):
         activity = self.activity_combo.currentText().strip()
         if not activity:
             return
-        suggested = f"AutoQSAR_{activity}"
+        suggested = f"Quick QSAR_{activity}"
         current = self.pred_column_edit.text().strip()
         if not current or current == self._auto_pred_name:
             self.pred_column_edit.setText(suggested)
@@ -311,20 +341,23 @@ class AutoQSARDialog(QDialog):
     def _set_job_running(self, running: bool) -> None:
         self._job_running = running
         self.run_btn.setEnabled(not running)
-        self.predict_btn.setEnabled(not running and self._job is not None)
+        self.load_btn.setEnabled(not running)
+        ready = not running and self._job is not None and bool(self._job.search.models)
+        self.predict_btn.setEnabled(ready)
+        self.save_btn.setEnabled(ready and self.leaderboard.currentRow() >= 0)
 
     def _on_run(self) -> None:
         if self._job_running or self.parent_app is None:
             return
         activity = self.activity_combo.currentText().strip()
         if not activity:
-            QMessageBox.warning(self, "AutoQSAR", "Select an activity column (Y).")
+            QMessageBox.warning(self, "Quick QSAR", "Select an activity column (Y).")
             return
         df, oids = self._scoped_dataframe_and_oids()
         if len(oids) < 8:
             QMessageBox.information(
                 self,
-                "AutoQSAR",
+                "Quick QSAR",
                 "Need at least 8 rows in the current scope.",
             )
             return
@@ -336,7 +369,7 @@ class AutoQSARDialog(QDialog):
                 only_selected=selection_scope_checked(self),
                 only_visible=self.chk_visible.isChecked(),
             )
-        pred_col = self.pred_column_edit.text().strip() or f"AutoQSAR_{activity}"
+        pred_col = self.pred_column_edit.text().strip() or f"Quick QSAR_{activity}"
         self.pred_column_edit.setText(pred_col)
         params = {
             "dataframe": df,
@@ -352,17 +385,17 @@ class AutoQSARDialog(QDialog):
         self._job = None
         self.leaderboard.setRowCount(0)
         self.results_text.setPlainText("Searching…")
-        self._active_progress_label = "AutoQSAR"
+        self._active_progress_label = "Quick QSAR"
         self._set_job_running(True)
         self._disconnect_thread_finished()
         self._active_job_id = enqueue_process_queue_job(
             self.parent_app,
-            "AutoQSAR",
+            "Quick QSAR",
             len(oids),
             lambda ev, ps, p=params, sigs=self._signals: AutoQSARSearchWorker(
                 p, sigs, cancel_event=ev, progress_state=ps
             ),
-            queue_label=f"AutoQSAR ({len(oids)} rows)",
+            queue_label=f"Quick QSAR ({len(oids)} rows)",
         )
         self.parent_app.process_queue.thread_finished.connect(self._on_thread_finished)
 
@@ -390,10 +423,17 @@ class AutoQSARDialog(QDialog):
         if self._job_running or self._job is None or self.parent_app is None:
             return
         out_col = (
-            self.pred_column_edit.text().strip() or f"AutoQSAR_{self._job.search.activity_column}"
+            self.pred_column_edit.text().strip() or f"Quick QSAR_{self._job.search.activity_column}"
         )
+        if self._prediction_needs_structure() and not self._structure_source:
+            QMessageBox.warning(
+                self,
+                "Quick QSAR",
+                "Choose a structure source. This model uses calculated descriptors or fingerprints.",
+            )
+            return
         df, oids = self._prediction_dataframe_and_oids()
-        headers = output_headers(out_col, self._job.search.task, self._job.search.write_columns)
+        headers = output_headers(out_col, self._job.search.task)
         payloads = None
         if self._structure_source:
             payloads = self.parent_app.collect_scoped_table_structure_payloads(
@@ -408,7 +448,7 @@ class AutoQSARDialog(QDialog):
             df = df.iloc[mask].reset_index(drop=True)
             oids = [oids[i] for i in mask]
         if not oids:
-            QMessageBox.information(self, "AutoQSAR", "No visible rows to score.")
+            QMessageBox.information(self, "Quick QSAR", "No visible rows to score.")
             return
         params = {
             "search": self._job.search,
@@ -418,17 +458,17 @@ class AutoQSARDialog(QDialog):
             "output_column": out_col,
             "model_index": self._selected_model_index(),
         }
-        self._active_progress_label = "AutoQSAR predictions"
+        self._active_progress_label = "Quick QSAR predictions"
         self._set_job_running(True)
         self._disconnect_thread_finished()
         self._active_job_id = enqueue_process_queue_job(
             self.parent_app,
-            "AutoQSAR predictions",
+            "Quick QSAR predictions",
             len(oids),
             lambda ev, ps, p=params, sigs=self._signals: AutoQSARPredictWorker(
                 p, sigs, cancel_event=ev, progress_state=ps
             ),
-            queue_label=f"AutoQSAR predict ({len(oids)} rows)",
+            queue_label=f"Quick QSAR predict ({len(oids)} rows)",
         )
         self.parent_app.process_queue.thread_finished.connect(self._on_thread_finished)
 
@@ -457,26 +497,26 @@ class AutoQSARDialog(QDialog):
         if message and message != "Cancelled.":
             self.results_text.append(f"\n\nError: {message}")
         if message:
-            QMessageBox.warning(self, "AutoQSAR", message)
+            QMessageBox.warning(self, "Quick QSAR", message)
 
     def _on_search_finished(self, result: object) -> None:
         self._active_job_id = None
         self._disconnect_thread_finished()
         if self.parent_app is not None:
-            self.parent_app._finish_tool_progress("AutoQSAR", status_message=None)
+            self.parent_app._finish_tool_progress("Quick QSAR", status_message=None)
         if not isinstance(result, AutoQSARJobResult):
             self._set_job_running(False)
             return
         self._job = result
         self._fill_leaderboard(result)
-        self.results_text.setPlainText(result.search.report_text)
         self._set_job_running(False)
         best = result.search.models[0] if result.search.models else None
         if self.parent_app is not None and best is not None:
             count = len(result.search.models)
             self.parent_app.status_label.setText(
-                f"AutoQSAR: consensus of {count} models. "
-                f"Best score {best.score:.3f} ({best.method_label}, {best.feature_set})."
+                f"Quick QSAR: consensus of {count} models. "
+                f"Best score {best.score:.3f} "
+                f"({best.method_label}, {best.feature_set}, {best.n_features} features)."
             )
 
     def _fill_leaderboard(self, result: AutoQSARJobResult) -> None:
@@ -488,51 +528,133 @@ class AutoQSARDialog(QDialog):
                 f"{model.test_accuracy:.4f}",
                 f"{model.train_accuracy:.4f}",
                 model.method_label,
-                model.feature_set,
+                str(len(model.feature_names)),
                 str(model.split_index + 1),
             )
             for col, text in enumerate(values):
                 item = QTableWidgetItem(text)
-                if col in {0, 1, 2, 5}:
+                if col in {0, 1, 2, 4, 5}:
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.leaderboard.setItem(row, col, item)
         if models:
             self.leaderboard.selectRow(0)
         self.leaderboard.resizeColumnsToContents()
-        self.leaderboard.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.leaderboard.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self._show_selected_model()
+
+    def _on_leaderboard_selection(self) -> None:
+        self._show_selected_model()
+        if not self._job_running:
+            ready = self._job is not None and bool(self._job.search.models)
+            self.save_btn.setEnabled(ready and self.leaderboard.currentRow() >= 0)
+
+    def _show_selected_model(self) -> None:
+        job = self._job
+        if job is None or not job.search.models:
+            return
+        row = self.leaderboard.currentRow()
+        if row < 0 or row >= len(job.search.models):
+            return
+        self.results_text.setPlainText(format_model_details(job.search, row))
+
+    def _prediction_needs_structure(self) -> bool:
+        job = self._job
+        if job is None or not job.search.models:
+            return False
+        index = self._selected_model_index()
+        if index is None:
+            models = job.search.models
+        elif 0 <= index < len(job.search.models):
+            models = (job.search.models[index],)
+        else:
+            return False
+        for model in models:
+            block = job.search.blocks.get(model.feature_set)
+            if block is not None and block.requires_structure:
+                return True
+        return False
+
+    def _on_save_model(self) -> None:
+        if self._job_running or self._job is None or not self._job.search.models:
+            return
+        row = self.leaderboard.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Quick QSAR", "Select a leaderboard model to save.")
+            return
+        path, _selected = QFileDialog.getSaveFileName(
+            self,
+            "Save Quick QSAR model",
+            "",
+            _MODEL_FILE_FILTER,
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".mmqsar"):
+            path = f"{path}.mmqsar"
+        try:
+            save_auto_qsar_model(path, self._job.search, row)
+        except (OSError, ValueError, TypeError, pickle.PicklingError) as exc:
+            QMessageBox.warning(self, "Quick QSAR", str(exc) or "Could not save the model.")
+            return
+        if self.parent_app is not None:
+            self.parent_app.status_label.setText(f"Quick QSAR: saved model to {path}.")
+
+    def _on_load_model(self) -> None:
+        if self._job_running:
+            return
+        path, _selected = QFileDialog.getOpenFileName(
+            self,
+            "Load Quick QSAR model",
+            "",
+            _MODEL_FILE_FILTER,
+        )
+        if not path:
+            return
+        try:
+            loaded = load_auto_qsar_model(path)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Quick QSAR", str(exc) or "Could not load the model.")
+            return
+        self._job = AutoQSARJobResult(search=loaded, dataframe=None, oids=[])
+        self._structure_source = self.struct_src_combo.currentText()
+        self._fill_leaderboard(self._job)
+        self._set_job_running(False)
+        if self.parent_app is not None and loaded.models:
+            model = loaded.models[0]
+            self.parent_app.status_label.setText(
+                f"Quick QSAR: loaded {model.method_label} ({model.n_features} features)."
+            )
 
     def _on_predict_finished(self, rows: list) -> None:
         self._active_job_id = None
         self._disconnect_thread_finished()
         if self.parent_app is not None:
-            self.parent_app._finish_tool_progress("AutoQSAR predictions", status_message=None)
+            self.parent_app._finish_tool_progress("Quick QSAR predictions", status_message=None)
         self._set_job_running(False)
         job = self._job
         if job is None or self.parent_app is None:
             return
-        pred_col = self.pred_column_edit.text().strip() or f"AutoQSAR_{job.search.activity_column}"
-        headers = output_headers(pred_col, job.search.task, job.search.write_columns)
+        pred_col = (
+            self.pred_column_edit.text().strip() or f"Quick QSAR_{job.search.activity_column}"
+        )
+        headers = output_headers(pred_col, job.search.task)
         headers, merged = table_write_rows(rows or [], headers)
         if not merged:
             QMessageBox.information(
                 self,
-                "AutoQSAR",
+                "Quick QSAR",
                 "No rows received predictions (missing features or structures).",
             )
             return
-        self.parent_app.on_calc_finished(merged, headers, progress_label="AutoQSAR")
+        self.parent_app.on_calc_finished(merged, headers, progress_label="Quick QSAR")
         n_pred = len(rows or [])
-        extra = ""
-        if job.search.write_columns:
-            written = ", ".join(job.search.write_columns)
-            extra = f" Wrote descriptors: {written}."
         how = "consensus" if self.chk_consensus.isChecked() else "selected-model"
         QMessageBox.information(
             self,
-            "AutoQSAR",
-            f"Added {how} predictions for {n_pred:,} row(s) in “{pred_col}”.{extra}",
+            "Quick QSAR",
+            f"Added {how} predictions for {n_pred:,} row(s) in “{pred_col}”.",
         )
 
     def _on_failed(self, message: str) -> None:
         self._active_job_id = None
-        self._reset_after_failure(message or "AutoQSAR failed.")
+        self._reset_after_failure(message or "Quick QSAR failed.")

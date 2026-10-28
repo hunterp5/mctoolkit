@@ -57,6 +57,7 @@ def test_catalog_includes_key_dois() -> None:
         "10.1093/molbev/mst010",
         "10.1186/s13321-018-0324-5",
         "10.1186/s13321-021-00548-6",
+        "10.4155/fmc-2016-0093",
     ):
         assert doi in html_all
     cf = tool_citation("conforge")

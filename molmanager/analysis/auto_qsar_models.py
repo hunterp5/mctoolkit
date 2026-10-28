@@ -14,12 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Dixon AutoQSAR estimators, score, and prediction geometry.
+"""Quick QSAR estimators, ranking score, and prediction geometry.
 
 Continuous models are MLR, PLS, PCR, and kernel PLS. Categorical models are
 naive Bayes and an ensemble of trees. Latent-factor models stop before the
-training R² exceeds 0.9. The score is Equation 1 of Dixon et al., Future Med.
-Chem. 2016.
+training R² exceeds 0.9. The ranking score is the one described by Dixon et
+al., Future Med. Chem. 2016 (10.4155/fmc-2016-0093).
 """
 
 from __future__ import annotations
@@ -81,11 +81,12 @@ def categorical_accuracy(y_true: np.ndarray, y_pred: np.ndarray, classes: Sequen
     return float(np.mean(recalls))
 
 
-def dixon_score(train_accuracy: float, test_accuracy: float) -> float:
+def split_score(train_accuracy: float, test_accuracy: float) -> float:
     """Reward accuracy on both splits and penalize a gap between them.
 
     A negative test accuracy is returned unchanged so the product cannot turn
-    a very poor test into a large positive score.
+    a very poor test into a large positive score. Dixon et al. describe this
+    ranking in Future Med. Chem. 2016 (10.4155/fmc-2016-0093).
     """
     if test_accuracy < 0.0:
         return float(test_accuracy)
@@ -567,7 +568,7 @@ def fit_split_model(
     task: str,
     split_index: int,
 ):
-    """Fit one Dixon model. Returns ``(estimator, train_pred, test_pred, n_features)``."""
+    """Fit one model. Returns ``(estimator, train_pred, test_pred, n_features)``."""
     train = np.asarray(values[train_index], dtype=float)
     test = np.asarray(values[test_index], dtype=float)
     y_train = np.asarray(y)[train_index]
@@ -631,7 +632,7 @@ def fit_split_model(
         train_pred = estimator.predict(train)
         test_pred = estimator.predict(test)
         return estimator, train_pred, test_pred, int(train.shape[1])
-    raise ValueError(f"Unknown AutoQSAR method: {method}")
+    raise ValueError(f"Unknown Quick QSAR method: {method}")
 
 
 def _looks_binary(values: np.ndarray) -> bool:
@@ -659,7 +660,7 @@ def score_predictions(
     else:
         train_accuracy = categorical_accuracy(y_train, train_pred, classes)
         test_accuracy = categorical_accuracy(y_test, test_pred, classes)
-    return dixon_score(train_accuracy, test_accuracy), train_accuracy, test_accuracy
+    return split_score(train_accuracy, test_accuracy), train_accuracy, test_accuracy
 
 
 def fit_errors() -> tuple[type[BaseException], ...]:

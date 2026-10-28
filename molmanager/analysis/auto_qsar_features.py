@@ -14,12 +14,13 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""RDKit 2D descriptors, unfolded fingerprints, and the Dixon descriptor filter.
+"""RDKit 2D descriptors, unfolded fingerprints, and the descriptor filter.
 
-The filter follows Dixon et al., Future Med. Chem. 2016 (10.4155/fmc-2016-0093):
-drop a column when 90% of the learning set shares one value or its variance is
+Drop a column when 90% of the learning set shares one value or its variance is
 below ``1e-12 * (sum x^2) / N``, then keep one representative from each
 single-linkage cluster whose absolute Pearson correlation is at least 0.8.
+Dixon et al. describe this filter in Future Med. Chem. 2016
+(10.4155/fmc-2016-0093).
 """
 
 from __future__ import annotations
@@ -78,7 +79,7 @@ _fp_generators: dict | None = None
 
 
 def rdkit_descriptor_names() -> tuple[str, ...]:
-    """Scalar RDKit descriptors AutoQSAR calculates, in column order.
+    """Scalar RDKit descriptors Quick QSAR calculates, in column order.
 
     Autocorrelation and MQN lengths are appended when a molecule is calculated,
     because those vectors are not in ``Descriptors.descList``.
@@ -292,7 +293,7 @@ def _cluster_representatives(block: np.ndarray) -> list[int]:
 def select_descriptor_columns(
     values: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, str | None]:
-    """Return ``(row_indices, column_indices, note)`` for the Dixon descriptor pool.
+    """Return ``(row_indices, column_indices, note)`` for the descriptor pool.
 
     Rows still missing a kept column are dropped. When those holes sit on
     different columns, the sparsest remaining column is removed until the

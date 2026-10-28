@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Background AutoQSAR search and prediction."""
+"""Background Quick QSAR search and prediction."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ _JOB_ERRORS = (
 
 @dataclass
 class AutoQSARJobResult:
-    """Search outcome plus the frame predictions and descriptor writes should use."""
+    """Search outcome plus the frame the search was scored on."""
 
     search: AutoQSARResult
     dataframe: object
@@ -63,14 +63,14 @@ def _emit_cancelled(signals: AutoQSARSignals) -> None:
     try:
         signals.failed.emit("Cancelled.")
     except RuntimeError:
-        log_swallowed_exception(logger, "AutoQSAR cancel signal emit failed")
+        log_swallowed_exception(logger, "Quick QSAR cancel signal emit failed")
 
 
 def _emit_failed(signals: AutoQSARSignals, message: str) -> None:
     try:
         signals.failed.emit(message)
     except RuntimeError:
-        log_swallowed_exception(logger, "AutoQSAR failed-signal emit failed")
+        log_swallowed_exception(logger, "Quick QSAR failed-signal emit failed")
 
 
 class AutoQSARSignals(QObject):
@@ -108,7 +108,7 @@ class AutoQSARSearchWorker(QRunnable):
         except AutoQSARCancelled:
             _emit_cancelled(self.signals)
         except _JOB_ERRORS as exc:
-            logger.exception("AutoQSAR search failed")
+            logger.exception("Quick QSAR search failed")
             _emit_failed(self.signals, str(exc) or exc.__class__.__name__)
 
     def _search(self) -> AutoQSARJobResult:
@@ -175,7 +175,7 @@ class AutoQSARPredictWorker(QRunnable):
             oids = list(self.params["oids"])
             n = max(1, len(oids))
             report_tool_progress(
-                message="AutoQSAR predictions: scoring…",
+                message="Quick QSAR predictions: scoring…",
                 done=0,
                 total=n,
                 progress_state=self.progress_state,
@@ -193,7 +193,7 @@ class AutoQSARPredictWorker(QRunnable):
                 _emit_cancelled(self.signals)
                 return
             report_tool_progress(
-                message="AutoQSAR predictions: done",
+                message="Quick QSAR predictions: done",
                 done=n,
                 total=n,
                 progress_state=self.progress_state,
@@ -202,5 +202,5 @@ class AutoQSARPredictWorker(QRunnable):
         except AutoQSARCancelled:
             _emit_cancelled(self.signals)
         except _JOB_ERRORS as exc:
-            logger.exception("AutoQSAR prediction failed")
+            logger.exception("Quick QSAR prediction failed")
             _emit_failed(self.signals, str(exc) or exc.__class__.__name__)

@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Dixon AutoQSAR score, descriptor filter, consensus, and dialog wiring."""
+"""Quick QSAR score, descriptor filter, consensus, and dialog wiring."""
 
 from __future__ import annotations
 
@@ -33,9 +33,12 @@ from molmanager.analysis.auto_qsar import (
     FeatureBlock,
     _consensus_class,
     effort_settings,
+    format_model_details,
+    load_auto_qsar_model,
     methods_for,
     output_headers,
     predict_auto_qsar,
+    save_auto_qsar_model,
     search_auto_qsar,
     table_write_rows,
 )
@@ -47,7 +50,7 @@ from molmanager.analysis.auto_qsar_features import (
 )
 from molmanager.analysis.auto_qsar_models import (
     conformal_half_width,
-    dixon_score,
+    split_score,
     latent_factors_before_r2_cap,
     subset_size_limit,
 )
@@ -110,6 +113,9 @@ def test_selected_table_columns_join_the_descriptor_pool():
         table_columns=["Width"],
     )
     assert "Width" in included.blocks[DESCRIPTOR_SET].columns
+    assert included.models
+    assert all(model.feature_names == ("Width",) for model in included.models)
+    assert all(model.n_features == 1 for model in included.models)
     with pytest.raises(ValueError, match="selected table column"):
         search_auto_qsar(
             df=frame,
@@ -122,7 +128,7 @@ def test_selected_table_columns_join_the_descriptor_pool():
         )
 
 
-def test_correlation_clusters_follow_the_dixon_cutoff():
+def test_correlation_clusters_use_the_correlation_cutoff():
     perfect = np.column_stack([np.linspace(0.0, 1.0, 30), np.linspace(2.0, 4.0, 30)])
     assert _cluster_representatives(perfect) == [0] or _cluster_representatives(perfect) == [1]
     assert len(_cluster_representatives(perfect)) == 1
@@ -135,9 +141,9 @@ def test_correlation_clusters_follow_the_dixon_cutoff():
     assert len(_cluster_representatives(below)) == 2
 
 
-def test_dixon_score_latent_cap_and_subset_limit():
-    assert dixon_score(0.95, -0.4) == pytest.approx(-0.4)
-    assert dixon_score(0.9, 0.7) == pytest.approx(0.56)
+def test_split_score_latent_cap_and_subset_limit():
+    assert split_score(0.95, -0.4) == pytest.approx(-0.4)
+    assert split_score(0.9, 0.7) == pytest.approx(0.56)
     assert latent_factors_before_r2_cap([0.5, 0.8, 0.95]) == 2
     assert latent_factors_before_r2_cap([0.95, 0.99]) == 1
     assert latent_factors_before_r2_cap([0.2, 0.4, 0.6]) == 3
@@ -193,6 +199,7 @@ def test_consensus_mean_and_majority_vote():
             test_accuracy=0.5,
             split_index=0,
             n_features=1,
+            feature_names=("X",),
             train_index=np.arange(6),
             estimator=_Constant(),
             half_width=half,
@@ -208,7 +215,6 @@ def test_consensus_mean_and_majority_vote():
         blocks={DESCRIPTOR_SET: block},
         class_labels=None,
         learning_oids=tuple(range(8)),
-        write_columns=(),
         report_text="",
         notes=(),
     )
@@ -288,17 +294,18 @@ def test_quick_regression_scores_a_row_outside_the_learning_set():
         df=frame,
         oids=oids,
         mol_rows=mol_rows,
-        output_column="AutoQSAR_pIC50",
+        output_column="Quick QSAR_pIC50",
     )
     by_oid = dict(preds)
     assert 8 in by_oid
-    assert np.isfinite(float(by_oid[8]["AutoQSAR_pIC50"]))
-    assert by_oid[8]["AutoQSAR_pIC50 domain"] in {"in", "out"}
-    assert "AutoQSAR_pIC50 interval" in by_oid[8]
-    headers = output_headers("AutoQSAR_pIC50", "regression", result.write_columns)
+    assert np.isfinite(float(by_oid[8]["Quick QSAR_pIC50"]))
+    assert by_oid[8]["Quick QSAR_pIC50 domain"] in {"in", "out"}
+    assert "Quick QSAR_pIC50 interval" in by_oid[8]
+    headers = output_headers("Quick QSAR_pIC50", "regression")
     written, rows = table_write_rows(preds, headers)
-    assert written[-3:] == ["AutoQSAR_pIC50", "AutoQSAR_pIC50 interval", "AutoQSAR_pIC50 domain"]
-    assert dict(rows)[8]["AutoQSAR_pIC50 domain"] in {"in", "out"}
+    assert written == ["Quick QSAR_pIC50", "Quick QSAR_pIC50 interval", "Quick QSAR_pIC50 domain"]
+    assert set(by_oid[8]) == set(written)
+    assert dict(rows)[8]["Quick QSAR_pIC50 domain"] in {"in", "out"}
 
 
 def test_cancel_before_and_between_models(monkeypatch: pytest.MonkeyPatch):
@@ -339,13 +346,115 @@ def test_cancel_before_and_between_models(monkeypatch: pytest.MonkeyPatch):
     assert calls["n"] == 1
 
 
+def test_saved_model_scores_the_same_rows(tmp_path):
+    frame, oids = _regression_frame()
+    result = search_auto_qsar(
+        df=frame,
+        oids=oids,
+        activity_column="pIC50",
+        task_mode="regression",
+        effort="quick",
+        mol_rows=None,
+        table_columns=["Width"],
+    )
+    path = tmp_path / "width.mmqsar"
+    save_auto_qsar_model(path, result, 0)
+    loaded = load_auto_qsar_model(path)
+    assert loaded.models[0].feature_names == result.models[0].feature_names
+    assert "\n  Width" in format_model_details(result, 0)
+    direct = predict_auto_qsar(
+        result,
+        df=frame,
+        oids=oids,
+        mol_rows=None,
+        output_column="Pred",
+        model_index=0,
+    )
+    again = predict_auto_qsar(
+        loaded,
+        df=frame,
+        oids=oids,
+        mol_rows=None,
+        output_column="Pred",
+    )
+    assert again[0][1]["Pred"] == direct[0][1]["Pred"]
+    assert set(again[0][1]) == {"Pred", "Pred interval", "Pred domain"}
+    junk = tmp_path / "nope.mmqsar"
+    junk.write_bytes(b"not a model")
+    with pytest.raises(ValueError, match="not a Quick QSAR model"):
+        load_auto_qsar_model(junk)
+
+
+def test_leaderboard_selection_lists_that_models_features(qapp) -> None:  # noqa: ARG001
+    from molmanager.ui.dialogs.auto_qsar import AutoQSARDialog
+    from molmanager.workers.auto_qsar_worker import AutoQSARJobResult
+
+    dialog = AutoQSARDialog(None)
+
+    def model(feature_names: tuple[str, ...], split: int) -> AutoQSARModel:
+        class _Constant:
+            def predict(self, values, train=None):
+                return np.zeros(values.shape[0])
+
+            def domain_mask(self, values, train=None):
+                return np.ones(values.shape[0], dtype=bool)
+
+        return AutoQSARModel(
+            method="pls",
+            method_label="PLS",
+            feature_set=DESCRIPTOR_SET,
+            score=0.4 + split,
+            train_accuracy=0.6,
+            test_accuracy=0.5,
+            split_index=split,
+            n_features=len(feature_names),
+            feature_names=feature_names,
+            train_index=np.arange(4),
+            estimator=_Constant(),
+            half_width=0.2,
+        )
+
+    result = AutoQSARResult(
+        task="regression",
+        effort="quick",
+        activity_column="pIC50",
+        n_built=2,
+        n_attempted=2,
+        models=(model(("Width",), 0), model(("TPSA", "MolWt"), 1)),
+        blocks={},
+        class_labels=None,
+        learning_oids=(0, 1, 2, 3),
+        report_text="",
+        notes=(),
+    )
+    dialog._job = AutoQSARJobResult(search=result, dataframe=None, oids=[])
+    try:
+        dialog._fill_leaderboard(dialog._job)
+        assert dialog.leaderboard.item(0, 4).text() == "1"
+        assert dialog.leaderboard.item(1, 4).text() == "2"
+        first = dialog.results_text.toPlainText()
+        assert "\n  Width" in first
+        assert "TPSA" not in first
+        dialog.leaderboard.selectRow(1)
+        second = dialog.results_text.toPlainText()
+        assert "\n  TPSA" in second
+        assert "\n  MolWt" in second
+        assert "Width" not in second
+        dialog.leaderboard.selectRow(0)
+        restored = dialog.results_text.toPlainText()
+        assert "\n  Width" in restored
+        assert "TPSA" not in restored
+    finally:
+        dialog.close()
+
+
 def test_menu_and_help_topic_are_registered():
     from molmanager.reference.help_markdown import load_help_markdown
     from molmanager.ui.main_window.menu_spec import MAIN_WINDOW_MENUS, find_submenu
 
     data = find_submenu(MAIN_WINDOW_MENUS, "Data")
     qsar = find_submenu(data.items, "QSAR")
-    assert [item.title for item in qsar.items] == ["Generate Model…", "AutoQSAR…", "CoMSIA…"]
+    assert [item.title for item in qsar.items] == ["Generate Model…", "Quick QSAR…", "CoMSIA…"]
     assert qsar.items[0].slot == "open_qsar_dialog"
     assert qsar.items[1].slot == "open_auto_qsar_dialog"
     text = load_help_markdown("data_auto_qsar")
@@ -354,6 +463,10 @@ def test_menu_and_help_topic_are_registered():
     assert "consensus" in lowered
     assert "score" in lowered
     assert "domain" in lowered
+    assert "save model" in lowered
+    assert "not written" in lowered
+    assert "10.4155/fmc-2016-0093" in text
+    assert "dixon" in lowered
 
 
 def test_auto_qsar_dialog_opens(qapp) -> None:  # noqa: ARG001
@@ -368,11 +481,13 @@ def test_auto_qsar_dialog_opens(qapp) -> None:  # noqa: ARG001
         window.open_auto_qsar_dialog(False)
         dialog = window._auto_qsar_dialog
         assert dialog is not None
-        assert dialog.windowTitle() == "AutoQSAR"
+        assert dialog.windowTitle() == "Quick QSAR"
         labels = [dialog.activity_combo.itemText(i) for i in range(dialog.activity_combo.count())]
         assert "pIC50" in labels
-        assert dialog.pred_column_edit.text() == "AutoQSAR_pIC50"
+        assert dialog.pred_column_edit.text() == "Quick QSAR_pIC50"
         assert dialog.chk_consensus.isChecked()
+        assert dialog.save_btn.isEnabled() is False
+        assert dialog.load_btn.isEnabled()
         from PyQt5.QtCore import Qt
 
         names = [dialog.column_list.item(i).text() for i in range(dialog.column_list.count())]

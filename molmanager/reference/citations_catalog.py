@@ -167,34 +167,6 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 homepage="https://openbabel.org",
             ),
             _t(
-                "xtb",
-                "xtb",
-                "Calculate Descriptors: HOMO, LUMO, and HOMO–LUMO gap (GFN2-xTB).",
-                (
-                    (
-                        "Bannwarth, C.; Ehlert, S.; Grimme, S. GFN2-xTB—An Accurate and Broadly "
-                        "Parametrized Self-Consistent Tight-Binding Quantum Chemical Method with "
-                        "Multipole Electrostatics and Density-Dependent Dispersion Contributions. "
-                        "J. Chem. Theory Comput. 2019, 15, 1652–1671.",
-                        "https://doi.org/10.1021/acs.jctc.8b01176",
-                    ),
-                    (
-                        "Bannwarth, C.; et al. Extended tight-binding quantum chemistry methods. "
-                        "WIREs Comput. Mol. Sci. 2021, 11, e1493.",
-                        "https://doi.org/10.1002/wcms.1493",
-                    ),
-                ),
-                LIC_LGPL3,
-                homepage="https://github.com/grimme-lab/xtb",
-                notes=(
-                    "Gas-phase closed-shell singlet single point on the lowest-energy packed "
-                    "conformer (MMFF94, UFF fallback). A 2D structure with no conformers is "
-                    "embedded once with ETKDG and minimized the same way; xTB does not reoptimize. "
-                    "The xtb binary is preferred; the tblite package (also LGPL-3.0) is used when "
-                    "xtb is not installed."
-                ),
-            ),
-            _t(
                 "conforge",
                 "CONFORGE (CDPKit)",
                 "Knowledge-based conformer ensembles (Chemistry → Conformations → Generate → CONFORGE).",
@@ -259,7 +231,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "aizynthfinder",
                 "AiZynthFinder",
-                "Chemistry → Retrosynthesis → Search. Local Monte Carlo tree search "
+                "Chemistry → Reaction → Retrosynthesis → Search. Local Monte Carlo tree search "
                 "in a separate Python environment.",
                 (
                     (
@@ -274,39 +246,10 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                 notes=(
                     "MIT license. Not installed into the MolManager environment: version 4.4.1 "
                     "requires RDKit 2023.x. Point Settings → Configure → AiZynthFinder at that "
-                    "environment's Python and a local config.yml from download_public_data. "
-                    "The public USPTO models and ZINC stock are read from disk. Configs that "
+                    "environment's Python and a local config.yml. Download… on that page "
+                    "fetches the public USPTO models and ZINC stock from Zenodo. "
+                    "Configs that "
                     "set use_remote_models or a non-local MongoDB stock are refused."
-                ),
-            ),
-        ),
-    ),
-    CitationSection(
-        "Generative design",
-        (
-            _t(
-                "reinvent4",
-                "REINVENT 4",
-                "Chemistry → REINVENT → Sampling and Learning. "
-                "De novo, LibInvent, LinkInvent, and Mol2Mol.",
-                (
-                    (
-                        "Loeffler, H. H.; He, J.; Tibo, A.; Janet, J. P.; Voronov, A.; "
-                        "Mervin, L. H.; Engkvist, O. Reinvent 4: Modern AI-driven generative "
-                        "molecule design. J. Cheminformatics 2024, 16, 20.",
-                        "https://doi.org/10.1186/s13321-024-00812-5",
-                    ),
-                ),
-                LIC_APACHE2,
-                homepage="https://github.com/MolecularAI/REINVENT4",
-                notes=(
-                    "Apache-2.0. Not installed into the MolManager environment: REINVENT 4 "
-                    "pins NumPy 2, pandas 3, and its own PyTorch build. Settings → Configure → "
-                    "REINVENT points at that environment's reinvent command. Sampling draws from a "
-                    "fixed model. Learning runs one staged-learning stage scored with RDKit "
-                    "properties (QED, molecular weight, SlogP, SA score, Tanimoto similarity, "
-                    "and SMARTS alerts). Public priors are files in that install's priors folder "
-                    "(Zenodo 10.5281/zenodo.15641296)."
                 ),
             ),
         ),
@@ -477,7 +420,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "murcko",
                 "Bemis–Murcko scaffolds",
-                "Murcko scaffold, framework, ring systems, and scaffold count "
+                "Murcko scaffold, framework, ring systems, and scaffold ID "
                 "(Chemistry → Substructure → Bemis–Murcko).",
                 (
                     (
@@ -922,7 +865,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "cheng_prusoff",
                 "Cheng–Prusoff",
-                "Tools → Potency Standardization (IC50 to Ki).",
+                "Tools → Utilities → Potency Standardization (IC50 to Ki).",
                 (
                     (
                         "Yung-Chi, C.; Prusoff, W. H. Relationship between the Inhibition Constant "
@@ -1006,6 +949,27 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
                     "saved PLS model is fit on every training row."
                 ),
             ),
+            _t(
+                "quick_qsar",
+                "Quick QSAR",
+                "Data → QSAR → Quick QSAR (descriptor and model search for one activity column).",
+                (
+                    (
+                        "Dixon, S. L.; Duan, J.; Smith, E.; Von Bargen, C. D.; Sherman, W.; "
+                        "Repasky, M. P. AutoQSAR: An Automated Machine Learning Tool for "
+                        "Best-Practice Quantitative Structure–Activity Relationship Modeling. "
+                        "Future Med. Chem. 2016, 8, 1825–1839.",
+                        "https://doi.org/10.4155/fmc-2016-0093",
+                    ),
+                ),
+                LIC_GPL3,
+                notes=(
+                    "Implemented in MolManager. The descriptor filter, 75/25 split score, "
+                    "latent-factor limit, and retained model pool follow the method in that paper. "
+                    "Predictions are an unweighted consensus with a nearest-neighbor "
+                    "applicability domain."
+                ),
+            ),
         ),
     ),
     CitationSection(
@@ -1014,7 +978,10 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "pubchem",
                 "PubChem / PubChemPy",
-                ("Tools → Query Database → PubChem and Vendors; Tools → Random → Molecule."),
+                (
+                    "Tools → Query Database → PubChem and Vendors; "
+                    "Tools → Utilities → Random → Molecule."
+                ),
                 (
                     (
                         "Kim, S.; et al. PubChem 2023 update. Nucleic Acids Res. 2023, 51, D1373–D1380.",
@@ -1028,7 +995,10 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "chembl",
                 "ChEMBL",
-                "Tools → Query Database → ChEMBL (`chembl_webresource_client`); Tools → Random → Molecule.",
+                (
+                    "Tools → Query Database → ChEMBL (`chembl_webresource_client`); "
+                    "Tools → Utilities → Random → Molecule."
+                ),
                 (
                     (
                         "Zdrazil, B.; et al. The ChEMBL Database in 2023. Nucleic Acids Res. 2024, 52, D1180–D1192.",
@@ -1042,7 +1012,7 @@ CITATION_SECTIONS: tuple[CitationSection, ...] = (
             _t(
                 "zinc",
                 "ZINC",
-                "Tools → Random → Molecule (ZINC source).",
+                "Tools → Utilities → Random → Molecule (ZINC source).",
                 (
                     (
                         "Tingle, B. I.; Tang, K. G.; Castanon, M.; et al. ZINC-22—A Free Multi-Billion-Scale "

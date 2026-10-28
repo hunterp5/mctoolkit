@@ -14,20 +14,24 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Dixon-style AutoQSAR: repeated 75/25 splits, a train/test score, and a consensus.
+"""Quick QSAR: repeated 75/25 splits, a train/test score, and a consensus.
 
 The learning set is every scoped row with a numeric activity and, when
 structures are available, a structure. Descriptors are filtered once.
 Fingerprints are modeled on their own. Quick keeps 5 models from 10 splits.
-Standard keeps 10 models from 50 splits.
+Standard keeps 10 models from 50 splits. The descriptor filter, ranking
+score, and model pool follow Dixon et al., Future Med. Chem. 2016
+(10.4155/fmc-2016-0093).
 """
 
 from __future__ import annotations
 
+import pickle
 import threading
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -43,6 +47,7 @@ from .auto_qsar_features import (
     select_descriptor_columns,
 )
 from .auto_qsar_models import (
+    MLREnsemble,
     conformal_half_width,
     fit_errors,
     fit_split_model,
@@ -73,14 +78,14 @@ _METHOD_LABEL = {
 
 
 def methods_for(task: str, feature_kind: str) -> tuple[str, ...]:
-    """Dixon methods for one feature kind. Fingerprints are never mixed with descriptors."""
+    """Model types for one feature kind. Fingerprints are never mixed with descriptors."""
     key = str(task or "").strip().lower()
     kind = str(feature_kind or "").strip().lower()
     if kind == "descriptors":
         return _DESCRIPTOR_METHODS[key]
     if kind == "fingerprints":
         return _FINGERPRINT_METHODS[key]
-    raise ValueError(f"Unknown AutoQSAR feature kind: {feature_kind}")
+    raise ValueError(f"Unknown Quick QSAR feature kind: {feature_kind}")
 
 
 @dataclass(frozen=True)
@@ -117,6 +122,7 @@ class AutoQSARModel:
     test_accuracy: float
     split_index: int
     n_features: int
+    feature_names: tuple[str, ...]
     train_index: np.ndarray
     estimator: Any
     half_width: float
@@ -135,7 +141,6 @@ class AutoQSARResult:
     blocks: dict[str, FeatureBlock]
     class_labels: tuple[Any, ...] | None
     learning_oids: tuple[int, ...]
-    write_columns: tuple[str, ...]
     report_text: str
     notes: tuple[str, ...]
 
@@ -147,18 +152,17 @@ def effort_settings(effort: str) -> EffortSettings:
         return EffortSettings("quick", 10, 5)
     if key == "standard":
         return EffortSettings("standard", 50, 10)
-    raise ValueError(f"Unknown AutoQSAR effort: {effort}")
+    raise ValueError(f"Unknown Quick QSAR effort: {effort}")
 
 
-def output_headers(
-    output_column: str,
-    task: str,
-    write_columns: Sequence[str],
-) -> list[str]:
-    """Table headers for descriptor write-back, the prediction, and its qualifiers."""
-    headers = [str(column) for column in write_columns]
-    name = (output_column or "").strip() or "AutoQSAR"
-    headers.append(name)
+_MODEL_MAGIC = b"MM-QUICKQSAR-1\n"
+_MODEL_VERSION = 1
+
+
+def output_headers(output_column: str, task: str) -> list[str]:
+    """Table headers for the prediction and its qualifiers."""
+    name = (output_column or "").strip() or "Quick QSAR"
+    headers = [name]
     if task == "regression":
         headers.append(f"{name} interval")
     else:
@@ -217,7 +221,7 @@ def search_auto_qsar(
     cancel_event: threading.Event | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> AutoQSARResult:
-    """Build, score, and retain the Dixon model pool for one activity column."""
+    """Build, score, and retain the model pool for one activity column."""
     _check_cancel(cancel_event)
     if activity_column not in df.columns:
         raise ValueError(f"Activity column not found: {activity_column}")
@@ -252,7 +256,7 @@ def search_auto_qsar(
         )
     max_methods = len(_DESCRIPTOR_METHODS[task]) + 4 * len(_FINGERPRINT_METHODS[task])
     progress_total = int(candidate.size) + settings.splits * max_methods
-    _emit(on_progress, 0, progress_total, "AutoQSAR: calculating descriptors")
+    _emit(on_progress, 0, progress_total, "Quick QSAR: calculating descriptors")
     names, combined, calculated = _learning_matrix(
         df,
         oids,
@@ -302,10 +306,10 @@ def search_auto_qsar(
     else:
         notes.append("No structures; fingerprints were not calculated.")
     if not blocks:
-        raise ValueError("AutoQSAR found no descriptor or fingerprint features.")
+        raise ValueError("Quick QSAR found no descriptor or fingerprint features.")
     jobs = _jobs_for_blocks(task, blocks)
     if not jobs:
-        raise ValueError("AutoQSAR found no model to fit for this task.")
+        raise ValueError("Quick QSAR found no model to fit for this task.")
     fit_total = int(candidate.size) + settings.splits * len(jobs)
     built: list[AutoQSARModel] = []
     attempted = 0
@@ -331,7 +335,7 @@ def search_auto_qsar(
                 on_progress,
                 int(candidate.size) + done,
                 fit_total,
-                f"AutoQSAR: {_METHOD_LABEL[method]} / {feature_name} "
+                f"Quick QSAR: {_METHOD_LABEL[method]} / {feature_name} "
                 f"(split {split_index + 1}/{settings.splits})",
             )
             model, error = _try_model(
@@ -352,11 +356,10 @@ def search_auto_qsar(
                 last_error = error
     if not built:
         detail = last_error or " ".join(notes)
-        raise ValueError(detail or "AutoQSAR could not fit a model on this scope.")
+        raise ValueError(detail or "Quick QSAR could not fit a model on this scope.")
     retained = tuple(sorted(built, key=_rank_key)[: settings.retain])
     for model in retained:
         prepare_domain(model.estimator, blocks[model.feature_set].values[model.train_index])
-    write_columns = _write_columns(df, retained, blocks.get(DESCRIPTOR_SET), calculated)
     report = _format_report(
         settings,
         task,
@@ -366,7 +369,7 @@ def search_auto_qsar(
         retained,
         notes,
     )
-    _emit(on_progress, fit_total, fit_total, "AutoQSAR: done")
+    _emit(on_progress, fit_total, fit_total, "Quick QSAR: done")
     return AutoQSARResult(
         task=task,
         effort=settings.key,
@@ -377,7 +380,6 @@ def search_auto_qsar(
         blocks=blocks,
         class_labels=class_labels,
         learning_oids=learning_oids,
-        write_columns=write_columns,
         report_text=report,
         notes=tuple(notes),
     )
@@ -403,15 +405,13 @@ def predict_auto_qsar(
         chosen = result.models
     else:
         if model_index < 0 or model_index >= len(result.models):
-            raise ValueError("Selected AutoQSAR model is no longer available.")
+            raise ValueError("Selected Quick QSAR model is no longer available.")
         chosen = (result.models[model_index],)
-    headers = output_headers(output_column, result.task, result.write_columns)
-    pred_name, qualifier_name, domain_name = headers[-3:]
+    pred_name, qualifier_name, domain_name = output_headers(output_column, result.task)
     mol_by_oid = _mol_by_oid(mol_rows)
     mols = [mol_by_oid.get(int(oid)) for oid in oids]
     query_blocks = _query_blocks(result, df, oids, mols, cancel_event)
     rows: list[tuple[int, dict[str, str]]] = []
-    write_block = result.blocks.get(DESCRIPTOR_SET)
     for row_index, oid in enumerate(oids):
         _check_cancel(cancel_event)
         if not all(_row_is_ready(model, query_blocks, row_index) for model in chosen):
@@ -428,7 +428,6 @@ def predict_auto_qsar(
             domains.append(bool(np.asarray(model.estimator.domain_mask(row, train)).ravel()[0]))
             probabilities.append(_probability_map(model.estimator, row))
         payload: dict[str, str] = {}
-        _fill_descriptor_cells(payload, result.write_columns, write_block, query_blocks, row_index)
         if result.task == "regression":
             value = float(np.mean(predictions))
             half = float(np.mean([model.half_width for model in chosen]))
@@ -446,6 +445,128 @@ def predict_auto_qsar(
         payload[domain_name] = "in" if in_domain else "out"
         rows.append((int(oid), payload))
     return rows
+
+
+def format_model_details(result: AutoQSARResult, model_index: int) -> str:
+    """Text for one retained model, including every feature it uses."""
+    if model_index < 0 or model_index >= len(result.models):
+        raise ValueError("Selected Quick QSAR model is no longer available.")
+    model = result.models[model_index]
+    names = tuple(model.feature_names)
+    lines = [
+        f"{model.method_label}  {model.feature_set}",
+        f"Activity: {result.activity_column}",
+        f"Task: {result.task}",
+        f"Split: {model.split_index + 1}",
+        f"Score: {model.score:.4f}",
+        f"Test accuracy: {model.test_accuracy:.4f}",
+        f"Train accuracy: {model.train_accuracy:.4f}",
+        "Score = test accuracy × (1 − |train accuracy − test accuracy|).",
+        f"Training rows: {int(np.asarray(model.train_index).size)}",
+        f"Features: {len(names)}",
+    ]
+    if result.learning_oids:
+        lines.insert(3, f"Learning rows: {len(result.learning_oids)}")
+    if result.task == "regression":
+        lines.append(f"90% interval half-width: {model.half_width:.4g}")
+    estimator = model.estimator
+    if model.method == "mlr" and isinstance(estimator, MLREnsemble) and estimator.subsets:
+        width = int(estimator.subsets[0].size)
+        lines.append(f"MLR subsets: {len(estimator.subsets)} of size {width}")
+    lines.append("")
+    lines.append("Features:")
+    if names:
+        lines.extend(f"  {name}" for name in names)
+    else:
+        lines.append("  (none)")
+    if result.notes:
+        lines.append("")
+        lines.append("Notes:")
+        lines.extend(f"  {note}" for note in result.notes)
+    return "\n".join(lines)
+
+
+def save_auto_qsar_model(path: str | Path, result: AutoQSARResult, model_index: int) -> None:
+    """Write one retained model so a later session can score another table with it."""
+    payload = {
+        "version": _MODEL_VERSION,
+        "result": _result_for_saved_model(result, model_index),
+    }
+    data = _MODEL_MAGIC + pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+    Path(path).write_bytes(data)
+
+
+def load_auto_qsar_model(path: str | Path) -> AutoQSARResult:
+    """Read a model written by :func:`save_auto_qsar_model`."""
+    raw = Path(path).read_bytes()
+    prefix = len(_MODEL_MAGIC)
+    if len(raw) <= prefix or not raw.startswith(_MODEL_MAGIC):
+        raise ValueError("This file is not a Quick QSAR model.")
+    try:
+        payload = pickle.loads(raw[prefix:])
+    except (
+        pickle.UnpicklingError,
+        EOFError,
+        AttributeError,
+        ImportError,
+        ModuleNotFoundError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise ValueError("Could not read this Quick QSAR model.") from exc
+    if not isinstance(payload, dict) or payload.get("version") != _MODEL_VERSION:
+        raise ValueError("This Quick QSAR model was written by a different MolManager version.")
+    loaded = payload.get("result")
+    if not isinstance(loaded, AutoQSARResult) or not loaded.models:
+        raise ValueError("This Quick QSAR model file has no model.")
+    model = loaded.models[0]
+    block = loaded.blocks.get(model.feature_set)
+    if block is None:
+        raise ValueError("This Quick QSAR model file is missing its features.")
+    if block.values.shape[0] != int(np.asarray(model.train_index).size):
+        raise ValueError("This Quick QSAR model file is missing its training rows.")
+    return loaded
+
+
+def _result_for_saved_model(result: AutoQSARResult, model_index: int) -> AutoQSARResult:
+    """Copy one model and the training rows it needs to score new structures."""
+    if model_index < 0 or model_index >= len(result.models):
+        raise ValueError("Selected Quick QSAR model is no longer available.")
+    model = result.models[model_index]
+    block = result.blocks.get(model.feature_set)
+    if block is None:
+        raise ValueError("Selected Quick QSAR model is missing its features.")
+    train_index = np.asarray(model.train_index, dtype=int)
+    train = np.array(block.values[train_index], dtype=float, copy=True)
+    saved_block = FeatureBlock(
+        name=block.name,
+        kind=block.kind,
+        columns=tuple(block.columns),
+        bit_ids=np.array(block.bit_ids, dtype=np.int64, copy=True),
+        fingerprint_kind=block.fingerprint_kind,
+        values=train,
+        requires_structure=bool(block.requires_structure),
+    )
+    saved_model = replace(
+        model,
+        train_index=np.arange(train.shape[0], dtype=int),
+        feature_names=tuple(model.feature_names),
+    )
+    saved = AutoQSARResult(
+        task=result.task,
+        effort=result.effort,
+        activity_column=result.activity_column,
+        n_built=1,
+        n_attempted=1,
+        models=(saved_model,),
+        blocks={saved_block.name: saved_block},
+        class_labels=result.class_labels,
+        learning_oids=(),
+        report_text="",
+        notes=tuple(result.notes),
+    )
+    saved.report_text = format_model_details(saved, 0)
+    return saved
 
 
 def _fingerprint_onbit_headers() -> frozenset[str]:
@@ -474,7 +595,7 @@ def _resolve_task(df: pd.DataFrame, activity_column: str, task_mode: str) -> Tas
     if mode == "classification":
         return "classification"
     if mode != "auto":
-        raise ValueError(f"Unknown AutoQSAR task: {task_mode}")
+        raise ValueError(f"Unknown Quick QSAR task: {task_mode}")
     y = pd.to_numeric(df[activity_column], errors="coerce").to_numpy(dtype=float)
     return infer_task_type(y[np.isfinite(y)])
 
@@ -526,7 +647,7 @@ def _learning_matrix(
 
         def on_row(done: int, total: int) -> None:
             overall = progress_total if progress_total else total
-            _emit(on_progress, done, max(1, overall), "AutoQSAR: calculating descriptors")
+            _emit(on_progress, done, max(1, overall), "Quick QSAR: calculating descriptors")
 
         rdkit_names, rdkit_values = descriptor_matrix(
             mols, cancel_event=cancel_event, on_row=on_row
@@ -544,7 +665,7 @@ def _learning_matrix(
         parts.append(values.reshape(-1, 1))
     if not parts:
         raise ValueError(
-            "AutoQSAR needs structures to calculate descriptors, or at least one selected table column."
+            "Quick QSAR needs structures to calculate descriptors, or at least one selected table column."
         )
     combined = parts[0] if len(parts) == 1 else np.column_stack(parts)
     return names, np.asarray(combined, dtype=float), calculated
@@ -627,7 +748,7 @@ def _try_model(
     if block.values.shape[1] == 0:
         return None, f"{feature_name} has no columns."
     try:
-        estimator, train_pred, test_pred, n_features = fit_split_model(
+        estimator, train_pred, test_pred, _width = fit_split_model(
             method,
             block.values,
             y,
@@ -636,6 +757,7 @@ def _try_model(
             task=task,
             split_index=split_index,
         )
+        names = _feature_names(method, block, estimator)
         score, train_accuracy, test_accuracy = score_predictions(
             y,
             train_index,
@@ -661,7 +783,8 @@ def _try_model(
         train_accuracy=float(train_accuracy),
         test_accuracy=float(test_accuracy),
         split_index=int(split_index),
-        n_features=int(n_features),
+        n_features=len(names),
+        feature_names=names,
         train_index=np.asarray(train_index, dtype=int),
         estimator=estimator,
         half_width=float(half_width),
@@ -679,36 +802,17 @@ def _rank_key(model: AutoQSARModel) -> tuple:
     )
 
 
-def _write_columns(
-    df: pd.DataFrame,
-    models: Sequence[AutoQSARModel],
-    block: FeatureBlock | None,
-    calculated: set[str],
-) -> tuple[str, ...]:
-    if block is None:
-        return ()
-    from .auto_qsar_models import MLREnsemble
-
-    used: set[str] = set()
-    for model in models:
-        if model.feature_set != block.name:
-            continue
-        if isinstance(model.estimator, MLREnsemble):
-            for subset in model.estimator.subsets:
-                used.update(block.columns[int(index)] for index in subset)
-        else:
-            used.update(block.columns)
-    ordered = []
-    for name in block.columns:
-        if name not in used or name not in calculated:
-            continue
-        if name not in df.columns:
-            ordered.append(name)
-            continue
-        numeric = pd.to_numeric(df[name], errors="coerce")
-        if not bool(numeric.notna().all()):
-            ordered.append(name)
-    return tuple(ordered)
+def _feature_names(method: str, block: FeatureBlock, estimator: Any) -> tuple[str, ...]:
+    """Descriptors or fingerprint bits the fitted model actually uses."""
+    if block.kind == "fingerprints":
+        return tuple(f"bit {int(bit)}" for bit in np.asarray(block.bit_ids).ravel())
+    if method == "mlr" and isinstance(estimator, MLREnsemble):
+        used: set[int] = set()
+        for subset in estimator.subsets:
+            used.update(int(index) for index in np.asarray(subset).ravel())
+        ordered = [index for index in range(len(block.columns)) if index in used]
+        return tuple(block.columns[index] for index in ordered)
+    return tuple(block.columns)
 
 
 def _jobs_for_blocks(task: TaskKind, blocks: Mapping[str, FeatureBlock]) -> list[tuple[str, str]]:
@@ -736,7 +840,7 @@ def _format_report(
     else:
         built_line = f"Built {n_built} of {attempted} models and retained {len(models)}."
     lines = [
-        "AutoQSAR",
+        "Quick QSAR",
         f"Task: {task}",
         f"Learning rows: {len(learning_oids)}",
         f"Split: random 75/25, repeated {settings.splits} times.",
@@ -926,24 +1030,3 @@ def _class_label(labels: tuple[Any, ...] | None, code: Any) -> str:
         return str(labels[int(code)])
     except (TypeError, ValueError, IndexError):
         return str(code)
-
-
-def _fill_descriptor_cells(
-    payload: dict[str, str],
-    columns: Sequence[str],
-    block: FeatureBlock | None,
-    queries: Mapping[str, _QueryBlock],
-    row: int,
-) -> None:
-    if block is None or not columns:
-        return
-    query = queries.get(block.name)
-    if query is None:
-        return
-    position = {name: index for index, name in enumerate(block.columns)}
-    for name in columns:
-        index = position.get(name)
-        if index is None or not np.isfinite(query.values[row, index]):
-            payload[name] = "N/A"
-            continue
-        payload[name] = f"{float(query.values[row, index]):.6g}"
