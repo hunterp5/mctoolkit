@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from ..chem.rdkit_fingerprints import descriptor_fingerprint_categories
 from .descriptors_3d import DESCRIPTOR_3D_ITEMS
-from .orbitals import ORBITAL_ITEMS
 
 # Tab titles in the Calculate Descriptors dialog (left to right).
 DESCRIPTOR_TAB_ORDER: tuple[str, ...] = (
@@ -105,7 +104,6 @@ DESCRIPTOR_TAB_ITEMS: dict[str, tuple[tuple[str, str], ...]] = {
         ("Min Abs Partial Charge", "MinAbsPartialCharge"),
         ("Min Partial Charge", "MinPartialCharge"),
         ("Net Formal Charge", "NET_FORMAL_CHARGE"),
-        *ORBITAL_ITEMS,
     ),
 }
 

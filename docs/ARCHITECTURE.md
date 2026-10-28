@@ -59,7 +59,7 @@ subpackage reads as its table of contents.
 | `platform_support/` | Process, config, and runtime concerns: `config.py`, `app_logging.py`, `session_runtime.py` (per-process temp directory, offline switch, SQL-write switch, session encryption switch, tool allowlist and digests, audit log), `bundled_paths.py`, `wsl_launcher.py`, `qt_webengine_flags.py`, `rdkit_runtime_setup.py`, `memory_guards.py`, `memory_usage.py`, `performance_tracking.py`, `exception_policy.py`, `tool_progress.py` |
 | `reference/` | In-app reference content: `help_markdown.py`, `citations_catalog.py`, `method_citations.py`, `descriptor_tooltips.py` |
 | `chem/` | Core molecule handling: `molecule_conversion.py`, `smarts_macropatterns.py`, `rdkit_fingerprints.py`, `fingerprint_cache.py`, `fragment_*.py`, `reaction_*.py`, `structure_2d_depiction.py`, `structure_hydrogens.py`, `structure_neutralize.py`, `structure_source_headers.py` |
-| `descriptors/` | `catalog.py`, `descriptors_3d.py`, `orbitals.py`, `medchem_descriptors.py`, `descriptor_cache_reuse.py`, `ml_feature_matrix.py` |
+| `descriptors/` | `catalog.py`, `descriptors_3d.py`, `medchem_descriptors.py`, `descriptor_cache_reuse.py`, `ml_feature_matrix.py` |
 | `conformers/` | Generation and encoding: `conforge_generation.py`, `openbabel_confab.py`, `conformer_column_codec.py`, `ensemble_binary_codec.py`, `conformer_output.py` |
 | `ionization/` | `unipka_ensembles.py`, `unipka_enumerator.py`, `microstate_cache.py` |
 | `protein/` | Crystallographic structures and overlays: `structure_cif.py`, `structure_atoms.py`, `structure_inventory.py`, `structure_component_types.py`, `hydrogen_bonds.py`, `protein_interactions.py`, `protein_msa.py`, `pharmacophore*.py` |

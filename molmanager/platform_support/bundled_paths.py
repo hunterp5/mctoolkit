@@ -34,7 +34,6 @@ _TOOL_BINARIES: dict[str, tuple[str, ...]] = {
     "smina": ("smina.exe", "smina"),
     "gnina": ("gnina.exe", "gnina"),
     "obabel": ("obabel.exe", "obabel"),
-    "xtb": ("xtb.exe", "xtb"),
     "confgen": ("confgen.exe", "confgen"),
     "mafft": ("mafft.bat", "mafft.exe", "mafft"),
 }

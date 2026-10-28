@@ -28,8 +28,8 @@ def test_descriptor_checkbox_tooltip_covers_common_keys() -> None:
     assert "pH 7.4" in descriptor_checkbox_tooltip("LOGD74")
     assert "canonical" in descriptor_checkbox_tooltip("SMILES").lower()
     assert "3D" in descriptor_checkbox_tooltip("PMI1")
-    assert "GFN2" in descriptor_checkbox_tooltip("HOMO")
-    assert "LUMO" in descriptor_checkbox_tooltip("HOMO_LUMO_GAP")
+    assert "Gasteiger" in descriptor_checkbox_tooltip("MaxPartialCharge")
+    assert "formal" in descriptor_checkbox_tooltip("NET_FORMAL_CHARGE").lower()
     assert "carbon" in descriptor_checkbox_tooltip("Count_C")
     assert descriptor_checkbox_tooltip("") == ""
     assert descriptor_checkbox_tooltip("not_a_real_descriptor") == ""

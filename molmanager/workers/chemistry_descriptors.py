@@ -54,14 +54,6 @@ else:
 
 from ..platform_support.config import load_config
 from ..descriptors.descriptors_3d import DESCRIPTOR_3D_FNS, int_fns_need_3d, mol_for_3d_descriptors
-from ..descriptors.orbitals import (
-    MISSING_XTB_MSG,
-    ORBITAL_KEYS,
-    gfn2_available,
-    int_fns_need_orbitals,
-    mol_for_orbital_single_point,
-    orbital_energies_ev,
-)
 from ..descriptors.medchem_descriptors import (
     ab_mps_score,
     bbb_score,
@@ -100,17 +92,15 @@ def _descriptor_int_fns_include_pharm2d(int_fns) -> bool:
 
 def _descriptor_process_pool_min_rows(cfg, int_fns) -> int:
     """Row-count threshold for child-process descriptor calculation."""
-    if int_fns_need_orbitals(int_fns) or _descriptor_int_fns_include_pharm2d(int_fns):
+    if _descriptor_int_fns_include_pharm2d(int_fns):
         return 2
     if int_fns_include_fingerprints(int_fns):
         return int(cfg.descriptor_fp_process_pool_min_rows)
     return int(cfg.descriptor_process_pool_min_rows)
 
 
-def _descriptor_process_pool_batch_size(cfg, int_fns) -> int:
-    """Rows per child-process task. Orbital single points stay one molecule per task."""
-    if int_fns_need_orbitals(int_fns):
-        return 1
+def _descriptor_process_pool_batch_size(cfg) -> int:
+    """Rows per child-process task."""
     return int(cfg.descriptor_process_pool_batch_size)
 
 
@@ -152,15 +142,9 @@ def _calc_descriptor_row_values(
     packed_confs: str | None = None,
 ) -> tuple[int, dict[str, str]]:
     row_ctx: dict = {"oid": int(idx)}
-    needs_coords = int_fns_need_3d(int_fns) or int_fns_need_orbitals(int_fns)
-    if mol_3d is None and needs_coords:
+    if mol_3d is None and int_fns_need_3d(int_fns):
         mol_3d = mol_for_3d_descriptors(mol, packed_cell=packed_confs)
     row_ctx["mol_3d"] = mol_3d
-    if int_fns_need_orbitals(int_fns):
-        orbital_mol = mol_for_orbital_single_point(
-            mol, packed_cell=packed_confs, prepared_3d=mol_3d
-        )
-        row_ctx["orbitals"] = orbital_energies_ev(orbital_mol) if orbital_mol is not None else None
     if mol is not None and int_fns_need_ionization(int_fns):
         if pka_cache_used:
             row_ctx["ionization_states"] = pka_states
@@ -231,16 +215,6 @@ def descriptor_callable_for_int_fn(i_f, smarts_cache, row_ctx=None):
             return f(work)
 
         return _calc_3d
-    if isinstance(i_f, str) and i_f in ORBITAL_KEYS:
-        key = i_f
-
-        def _calc_orbital(_m, c=ctx, orbital_key=key):
-            pack = c.get("orbitals")
-            if not isinstance(pack, dict) or orbital_key not in pack:
-                raise ValueError("no orbital energies")
-            return float(pack[orbital_key])
-
-        return _calc_orbital
     if i_f == "NET_FORMAL_CHARGE":
         return lambda m: mol_net_formal_charge(m) if m is not None else 0
     if i_f.startswith("Count_"):
@@ -284,11 +258,6 @@ def _mp_calc_descriptor_row(args: tuple):
 def _mp_calc_descriptor_batch(args: tuple) -> list[tuple[int, dict[str, str]]]:
     """Several rows per child process — less IPC overhead on large fingerprint jobs."""
     items, disp_headers, int_fns, pka_cache_used = args
-    if int_fns_need_orbitals(int_fns):
-        # Each child runs its own xtb/tblite. One thread per child avoids oversubscription.
-        os.environ["OMP_NUM_THREADS"] = "1"
-        os.environ["MKL_NUM_THREADS"] = "1"
-        os.environ["OPENBLAS_NUM_THREADS"] = "1"
     smarts_cache: dict = {}
     out: list[tuple[int, dict[str, str]]] = []
     headers = list(disp_headers)
@@ -467,14 +436,6 @@ class CalcWorker(QRunnable):
         self.ensemble_db = request.ensemble_db
         self.progress_label = request.progress_label or "Calculate descriptors"
 
-    def _note_missing_orbital_engine(self) -> None:
-        """Warn once per job when HOMO/LUMO were requested and no GFN2 engine exists."""
-        if not int_fns_need_orbitals(self.int_fns) or gfn2_available():
-            return
-        logger.warning("%s", MISSING_XTB_MSG)
-        if "xtb not found" not in self.progress_label:
-            self.progress_label = f"{self.progress_label} (xtb not found)"
-
     def _prep_progress_message(self) -> str:
         if self.progress_label == "Calculate descriptors":
             return "Preparing descriptors…"
@@ -504,8 +465,7 @@ class CalcWorker(QRunnable):
                     force_signal=force,
                 )
 
-        self._note_missing_orbital_engine()
-        need_3d = int_fns_need_3d(self.int_fns) or int_fns_need_orbitals(self.int_fns)
+        need_3d = int_fns_need_3d(self.int_fns)
         mol3_by_idx: dict[int, Chem.Mol | None] = {}
         from ..storage import ensemble_mol_for
 
@@ -647,7 +607,7 @@ class CalcWorker(QRunnable):
                     pka_by_idx=pka_by_idx,
                     pka_cache_used=pka_cache_used,
                     max_workers=max_workers,
-                    batch_size=_descriptor_process_pool_batch_size(cfg, self.int_fns),
+                    batch_size=_descriptor_process_pool_batch_size(cfg),
                     cancel_event=cancel_ev,
                     emit_progress=_emit_progress,
                     mol3_by_idx=mol3_by_idx,
@@ -732,9 +692,9 @@ class CalcWorker(QRunnable):
         pka_cache_used,
         tot,
     ) -> None:
-        from ..chem.murcko import apply_murcko_scaffold_counts
+        from ..chem.murcko import apply_murcko_scaffold_ids
 
-        results = apply_murcko_scaffold_counts(results, prepared, self.disp_headers, self.int_fns)
+        results = apply_murcko_scaffold_ids(results, prepared, self.disp_headers, self.int_fns)
         emit_partial_results_if_cancelled(
             self.signals, self.progress_label, len(results), tot, cancelled
         )
