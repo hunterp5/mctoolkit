@@ -265,6 +265,80 @@ def _assert_card_copy_menu(cards, monkeypatch) -> None:
     assert QApplication.clipboard().text() == "CC"
 
 
+def test_backing_ratio_keeps_zoomed_out_screen_scale() -> None:
+    from molmanager.ui.browsers.route_browser import _RATIO_CAP, _backing_ratio
+
+    assert _backing_ratio(800, 400, 0.25) == 0.25
+    assert _backing_ratio(100, 100, 9) == _RATIO_CAP
+    # Pixel budget would drop a 2× bitmap below 1×; stay at 1× so it is scaled up.
+    assert _backing_ratio(8000, 8000, 2.0) == 1.0
+    fitted = _backing_ratio(10000, 10000, 0.5)
+    assert fitted < 0.5
+    assert abs(fitted - 0.4) < 1e-6
+
+
+def test_zoomed_out_structures_match_screen_pixels(qapp) -> None:  # noqa: ARG001
+    """A fitted route draws each structure at its on-screen pixel size."""
+    from PyQt5.QtWidgets import QApplication, QLabel
+
+    from molmanager.ui.browsers.route_browser import RouteBrowserDialog, _device_ratio
+
+    def leaf(smiles: str) -> dict:
+        return {"smiles": smiles, "in_stock": False, "reactions": []}
+
+    def chain(smiles: str, depth: int) -> dict:
+        node = {"smiles": smiles, "in_stock": False, "reactions": []}
+        if depth:
+            node["reactions"] = [
+                {
+                    "smiles": f"C.{smiles}>>{smiles}",
+                    "metadata": {},
+                    "reactants": [leaf("C"), chain("CCO" if depth % 2 else "c1ccccc1", depth - 1)],
+                }
+            ]
+        return node
+
+    dialog = RouteBrowserDialog()
+    dialog.set_targets(
+        [
+            {
+                "smiles": "CCO",
+                "routes": [
+                    {
+                        "score": "0.5",
+                        "solved": True,
+                        "steps": [],
+                        "tree": chain("CC(=O)Oc1ccccc1C(=O)O", 6),
+                    }
+                ],
+            }
+        ]
+    )
+    dialog.resize(900, 600)
+    dialog.show()
+    QApplication.processEvents()
+    dialog._place_tree()
+    QApplication.processEvents()
+    canvas = dialog._route_scroll
+    ratio = canvas.depict_ratio()
+    assert canvas._zoom < 0.9
+    assert abs(ratio - canvas._zoom * _device_ratio()) < 0.02
+    assert ratio < 1.0
+    label = dialog.molecule_cards()[0].findChild(QLabel)
+    pixmap = label.pixmap()
+    assert pixmap is not None and not pixmap.isNull()
+    assert abs(pixmap.devicePixelRatio() - ratio) < 0.05
+    assert pixmap.width() < label.width()
+    assert abs(pixmap.width() - round(label.width() * ratio)) <= 2
+    canvas.grab()
+    cache = canvas._proxy._cache
+    host = dialog._steps_host
+    assert cache is not None and not cache.isNull()
+    assert abs(cache.devicePixelRatio() - ratio) < 0.05
+    assert abs(cache.width() - round(host.width() * ratio)) <= 2
+    dialog.close()
+
+
 def test_route_browser_lists_one_step(qapp, monkeypatch) -> None:  # noqa: ARG001
     from PyQt5.QtWidgets import QLabel
 

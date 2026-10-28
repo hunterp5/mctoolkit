@@ -92,6 +92,7 @@ _ZOOM_MIN = 0.25
 _ZOOM_MAX = 4.0
 _ZOOM_STEP = 1.1
 _PAN_SLOP = 4
+_RATIO_MIN = 0.05
 _RATIO_CAP = 4.0
 _BACKING_PIXELS = 16_000_000
 _CHEMICAL_FIELDS = frozenset({"reaction", "template", "smiles", "smarts", "inchi", "inchikey"})
@@ -162,12 +163,23 @@ def _device_ratio() -> float:
 
 
 def _backing_ratio(width: int, height: int, ratio: float) -> float:
-    """Pixel ratio for a tree of *width* × *height*, capped so the bitmap stays bounded."""
-    ratio = min(_RATIO_CAP, max(1.0, ratio))
-    pixels = max(1, width) * max(1, height) * ratio * ratio
-    if pixels > _BACKING_PIXELS:
-        ratio *= (_BACKING_PIXELS / pixels) ** 0.5
-    return max(1.0, ratio)
+    """Pixels per logical pixel for a tree of *width* × *height*.
+
+    *ratio* is how large one logical pixel is on screen at the current zoom.
+    Zoomed-out values stay below 1 so each structure is rasterized at the size
+    it is shown. A 1× bitmap scaled down by the view is blurry and pixelated.
+    The bitmap is still capped so a large tree stays within a fixed pixel budget.
+    """
+    requested = min(_RATIO_CAP, max(_RATIO_MIN, ratio))
+    pixels = max(1, width) * max(1, height) * requested * requested
+    if pixels <= _BACKING_PIXELS:
+        return requested
+    fitted = requested * (_BACKING_PIXELS / pixels) ** 0.5
+    # A tree shown at 1× or larger keeps at least a 1× bitmap when the budget
+    # cuts the ratio. A zoomed-out tree keeps the smaller fitted ratio.
+    if requested >= 1.0:
+        return max(1.0, fitted)
+    return max(_RATIO_MIN, fitted)
 
 
 def _render_widget(widget: QWidget, ratio: float) -> QPixmap:
@@ -600,7 +612,7 @@ class RouteBrowserDialog(QDialog):
         self._hide_step_table()
         root.addWidget(splitter, 1)
 
-        self._empty = QLabel("Run Retrosynthesis → Search to collect routes.")
+        self._empty = QLabel("Run Reaction → Retrosynthesis → Search to collect routes.")
         self._empty.setWordWrap(True)
         self._steps_layout.insertWidget(0, self._empty)
 
