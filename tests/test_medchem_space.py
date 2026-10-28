@@ -29,7 +29,13 @@ from molmanager.analysis.medchem_space import (
     build_medchem_space_from_snapshots,
     classify_boiled_egg,
     in_golden_triangle,
+    MEDCHEM_NEED_ACTIVITY,
+    MEDCHEM_NO_ROWS,
+    MEDCHEM_SELECTED_EMPTY,
     medchem_plot_max_points,
+    medchem_snapshot_from_cells,
+    medchem_structure_text,
+    plan_medchem_plot_start,
     oids_in_egg_gia,
     oids_in_egg_yolk,
     oids_in_golden_triangle_region,
@@ -477,3 +483,79 @@ def test_lipe_opens_activity_settings_before_the_plot(qapp):
         dlg.close()
         dlg.deleteLater()
         qapp.processEvents()
+
+
+def test_plan_medchem_plot_start_blocks_empty_selection_and_missing_activity():
+    empty = plan_medchem_plot_start(
+        plot_kind="boiled_egg",
+        headers=["Structure", "TPSA", "LogP", "MW"],
+        row_count=3,
+        only_selected=True,
+        selection_empty=True,
+        selected_rows=[],
+        activity_column=None,
+    )
+    assert empty.warning
+    assert empty.message == MEDCHEM_SELECTED_EMPTY
+
+    no_rows = plan_medchem_plot_start(
+        plot_kind="golden_triangle",
+        headers=["LogP", "MW"],
+        row_count=0,
+        only_selected=False,
+        selection_empty=False,
+        selected_rows=None,
+        activity_column=None,
+    )
+    assert no_rows.message == MEDCHEM_NO_ROWS
+    assert not no_rows.warning
+
+    lipe = plan_medchem_plot_start(
+        plot_kind="lipe",
+        headers=["Name", "LogP", "pIC50"],
+        row_count=2,
+        only_selected=False,
+        selection_empty=False,
+        selected_rows=None,
+        activity_column="  ",
+    )
+    assert lipe.message == MEDCHEM_NEED_ACTIVITY
+
+    ready = plan_medchem_plot_start(
+        plot_kind="lipe",
+        headers=["Name", "LogP", "pIC50"],
+        row_count=2,
+        only_selected=True,
+        selection_empty=False,
+        selected_rows=[1],
+        activity_column="pIC50",
+    )
+    assert ready.message == ""
+    assert ready.scope_rows == [1]
+    assert ready.id_col == "Name"
+    assert ready.logp_col == "LogP"
+    assert ready.activity_col == "pIC50"
+    assert ready.use_table_columns
+
+
+def test_medchem_snapshot_uses_backing_text_for_the_structure_column():
+    assert (
+        medchem_structure_text(source="Structure", display="", backing="CCO", pixmap=False) == "CCO"
+    )
+    assert medchem_structure_text(source="Depict", display="", backing="CCC", pixmap=True) == "CCC"
+    snap = medchem_snapshot_from_cells(
+        7,
+        {"Name": "cmpd", "LogP": "1.2"},
+        id_col="Name",
+        tpsa_col=None,
+        logp_col="LogP",
+        mw_col=None,
+        wlogp_col=None,
+        activity_col=None,
+        src="Structure",
+        structure_text="CCO",
+    )
+    assert snap.oid == 7
+    assert snap.label == "cmpd"
+    assert snap.structure_text == "CCO"
+    assert snap.logp_text == "1.2"

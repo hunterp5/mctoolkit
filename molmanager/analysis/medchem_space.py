@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -548,6 +549,166 @@ def _collect_table_updates_for_snap(
     elif plot_kind == "boiled_egg" and _parse_float_cell(snap.wlogp_text) is None:
         out[plan.wlogp] = _format_descriptor_for_table("logp", wlogp)
     return out
+
+
+MEDCHEM_SELECTED_EMPTY = "\u201cSelected Rows Only\u201d is checked but nothing is selected."
+MEDCHEM_NO_ROWS = "No rows in the current scope."
+MEDCHEM_NEED_ACTIVITY = "Choose a pActivity column (pIC50, pKi, or pEC50)."
+
+
+@dataclass(frozen=True)
+class MedChemPlotStart:
+    """Rows and columns for a medchem plot, or a message that blocks the run."""
+
+    message: str = ""
+    warning: bool = False
+    scope_rows: list[int] | None = None
+    id_col: str | None = None
+    tpsa_col: str | None = None
+    logp_col: str | None = None
+    mw_col: str | None = None
+    wlogp_col: str | None = None
+    activity_col: str | None = None
+    use_table_columns: bool = False
+
+
+def medchem_descriptor_columns(
+    headers: Sequence[str], plot_kind: str
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """TPSA, LogP, MolWt, and WLogP headers for ``plot_kind``."""
+    names = list(headers)
+    logp_col = resolve_descriptor_column(names, ("logp", "clogp", "mollogp", "wlogp"))
+    tpsa_col = resolve_descriptor_column(names, ("tpsa", "psa"))
+    mw_col = resolve_descriptor_column(names, ("mw", "molwt", "molecular weight"))
+    wlogp_col = (
+        logp_col if plot_kind == "boiled_egg" else resolve_descriptor_column(names, ("wlogp",))
+    )
+    return tpsa_col, logp_col, mw_col, wlogp_col
+
+
+def medchem_activity_column_problem(plot_kind: str, activity_column: str | None) -> str:
+    """Message when a LipE plot has no pActivity column. Empty when the plot can run."""
+    if plot_kind == "lipe" and not (activity_column or "").strip():
+        return MEDCHEM_NEED_ACTIVITY
+    return ""
+
+
+def plan_medchem_plot_start(
+    *,
+    plot_kind: str,
+    headers: Sequence[str],
+    row_count: int,
+    only_selected: bool,
+    selection_empty: bool,
+    selected_rows: Sequence[int] | None,
+    activity_column: str | None,
+) -> MedChemPlotStart:
+    """Decide whether a medchem plot can run, and which rows and columns it reads."""
+    if only_selected and selection_empty:
+        return MedChemPlotStart(message=MEDCHEM_SELECTED_EMPTY, warning=True)
+    only_rows = list(selected_rows) if only_selected else None
+    scope_rows = snapshot_scope_row_indices(
+        row_count,
+        only_selected_rows=only_rows,
+        visible_row_indices=None,
+    )
+    if scope_rows is not None and not scope_rows:
+        return MedChemPlotStart(message=MEDCHEM_NO_ROWS)
+    if scope_rows is None and row_count == 0:
+        return MedChemPlotStart(message=MEDCHEM_NO_ROWS)
+    activity_problem = medchem_activity_column_problem(plot_kind, activity_column)
+    names = list(headers)
+    tpsa_col, logp_col, mw_col, wlogp_col = medchem_descriptor_columns(names, plot_kind)
+    id_col = resolve_descriptor_column(names, ("id", "name", "compound", "compound name"))
+    if activity_problem:
+        return MedChemPlotStart(message=activity_problem)
+    return MedChemPlotStart(
+        scope_rows=scope_rows,
+        id_col=id_col,
+        tpsa_col=tpsa_col,
+        logp_col=logp_col,
+        mw_col=mw_col,
+        wlogp_col=wlogp_col,
+        activity_col=(activity_column or "").strip() or None,
+        use_table_columns=required_descriptor_columns_ok(
+            plot_kind,
+            tpsa_col=tpsa_col,
+            logp_col=logp_col,
+            mw_col=mw_col,
+            wlogp_col=wlogp_col,
+        ),
+    )
+
+
+def medchem_export_headers(
+    *,
+    id_col: str | None,
+    tpsa_col: str | None,
+    logp_col: str | None,
+    mw_col: str | None,
+    wlogp_col: str | None,
+    activity_col: str | None,
+    src: str,
+    include_structure: bool,
+) -> list[str]:
+    """Column headers read while snapshotting a medchem plot."""
+    headers: list[str] = []
+    for header in (id_col, tpsa_col, logp_col, mw_col, wlogp_col, activity_col):
+        if header and header not in headers:
+            headers.append(header)
+    if include_structure and src and src not in headers:
+        headers.append(src)
+    return headers
+
+
+def medchem_structure_text(
+    *,
+    source: str,
+    display: str,
+    backing: str,
+    pixmap: bool,
+) -> str:
+    """Structure cell for one medchem row. The Structure column stores text in backing."""
+    if source == "Structure":
+        return (backing or "").strip()
+    raw = (display or "").strip()
+    if raw:
+        return raw
+    if pixmap:
+        return (backing or "").strip()
+    return raw
+
+
+def medchem_snapshot_from_cells(
+    oid: int,
+    cells: Mapping[str, str],
+    *,
+    id_col: str | None,
+    tpsa_col: str | None,
+    logp_col: str | None,
+    mw_col: str | None,
+    wlogp_col: str | None,
+    activity_col: str | None,
+    src: str,
+    structure_text: str | None = None,
+) -> MedChemRowSnapshot:
+    """One worker record from already-read cell text."""
+
+    def cell(header: str | None) -> str:
+        return cells.get(header, "") if header else ""
+
+    label = cell(id_col) if id_col else f"OID {oid}"
+    stored = cell(src) if structure_text is None else structure_text
+    return MedChemRowSnapshot(
+        oid=int(oid),
+        label=label,
+        structure_text=(stored or "").strip(),
+        tpsa_text=cell(tpsa_col),
+        wlogp_text=cell(wlogp_col),
+        mw_text=cell(mw_col),
+        logp_text=cell(logp_col),
+        activity_text=cell(activity_col),
+    )
 
 
 def required_descriptor_columns_ok(

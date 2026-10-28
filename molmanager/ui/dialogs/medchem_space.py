@@ -61,10 +61,14 @@ from ...analysis.medchem_space import (
     oids_in_egg_yolk,
     oids_in_golden_triangle_region,
     oids_with_lipe_at_least,
+    medchem_activity_column_problem,
+    medchem_descriptor_columns,
+    medchem_export_headers,
+    medchem_snapshot_from_cells,
+    medchem_structure_text,
+    plan_medchem_plot_start,
     prefer_pactivity_column,
     required_descriptor_columns_ok,
-    resolve_descriptor_column,
-    snapshot_scope_row_indices,
 )
 from ...workers.medchem_space_worker import MedChemSpaceSignals, MedChemSpaceWorker
 from ..table_dataframe import numeric_subset, table_to_dataframe
@@ -514,12 +518,9 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self._open_setup_dialog()
 
     def _on_lipe_run(self) -> None:
-        if not self._activity_column_name():
-            QMessageBox.information(
-                self._ui_parent(),
-                self._window_title,
-                "Choose a pActivity column (pIC50, pKi, or pEC50).",
-            )
+        problem = medchem_activity_column_problem(self._plot_kind, self._activity_column_name())
+        if problem:
+            QMessageBox.information(self._ui_parent(), self._window_title, problem)
             return
         self._close_options_for_run()
         self._on_refresh()
@@ -544,16 +545,7 @@ class MedChemPlotPanel(DockableResultPlotPanel):
 
     def _descriptor_column_names(self) -> tuple[str | None, str | None, str | None, str | None]:
         assert self.parent_app is not None
-        headers = list(self.parent_app.headers)
-        logp_col = resolve_descriptor_column(headers, ("logp", "clogp", "mollogp", "wlogp"))
-        tpsa_col = resolve_descriptor_column(headers, ("tpsa", "psa"))
-        mw_col = resolve_descriptor_column(headers, ("mw", "molwt", "molecular weight"))
-        wlogp_col = (
-            logp_col
-            if self._plot_kind == "boiled_egg"
-            else resolve_descriptor_column(headers, ("wlogp",))
-        )
-        return tpsa_col, logp_col, mw_col, wlogp_col
+        return medchem_descriptor_columns(self.parent_app.headers, self._plot_kind)
 
     def _set_medchem_status(self, message: str) -> None:
         """Show short progress on the main-window status line."""
@@ -593,14 +585,10 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         """Read stored cell text only (no RDKit parsing on the UI thread)."""
         assert self.parent_app is not None
         model = self.parent_app._table_model
-        if src == "Structure":
-            return (model.backing_value_for_row_header(row, "Structure") or "").strip()
-        raw = (model.value_for_header(row, src) or "").strip()
-        if raw:
-            return raw
-        if model.is_pixmap_data_column(src):
-            return (model.backing_value_for_row_header(row, src) or "").strip()
-        return raw
+        display = model.value_for_header(row, src) or ""
+        backing = model.backing_value_for_row_header(row, src) or ""
+        pixmap = src != "Structure" and bool(model.is_pixmap_data_column(src))
+        return medchem_structure_text(source=src, display=display, backing=backing, pixmap=pixmap)
 
     def _oid_smiles_from_cache(self, snapshots: list[MedChemRowSnapshot]) -> dict[int, str]:
         """SMILES from in-memory mols for rows without structure cell text."""
@@ -633,20 +621,6 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         self._snapshot_collect_gen += 1
         self._snapshot_collect_ctx = None
 
-    def _snapshot_scope_rows(self) -> list[int] | None:
-        """Rows to snapshot for Run: full table (Selected Rows Only still applies)."""
-        app = self.parent_app
-        assert app is not None
-        only_sel = selection_scope_checked(self)
-        if only_sel and not app._selected_oids_set():
-            raise ValueError("\u201cSelected Rows Only\u201d is checked but nothing is selected.")
-        only_rows = app._selected_logical_rows() if only_sel else None
-        return snapshot_scope_row_indices(
-            app._table_model.rowCount(),
-            only_selected_rows=only_rows,
-            visible_row_indices=None,
-        )
-
     def _snapshot_export_headers(
         self,
         *,
@@ -659,13 +633,16 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         src: str,
         include_structure: bool,
     ) -> list[str]:
-        headers: list[str] = []
-        for h in (id_col, tpsa_col, logp_col, mw_col, wlogp_col, activity_col):
-            if h and h not in headers:
-                headers.append(h)
-        if include_structure and src and src not in headers:
-            headers.append(src)
-        return headers
+        return medchem_export_headers(
+            id_col=id_col,
+            tpsa_col=tpsa_col,
+            logp_col=logp_col,
+            mw_col=mw_col,
+            wlogp_col=wlogp_col,
+            activity_col=activity_col,
+            src=src,
+            include_structure=include_structure,
+        )
 
     def _snapshot_from_cells(
         self,
@@ -680,20 +657,16 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         activity_col: str | None,
         src: str,
     ) -> MedChemRowSnapshot:
-        def cell(header: str | None) -> str:
-            return cells.get(header, "") if header else ""
-
-        label = cell(id_col) if id_col else f"OID {oid}"
-        structure_text = cell(src) if src == "Structure" else cell(src)
-        return MedChemRowSnapshot(
-            oid=int(oid),
-            label=label,
-            structure_text=(structure_text or "").strip(),
-            tpsa_text=cell(tpsa_col),
-            wlogp_text=cell(wlogp_col),
-            mw_text=cell(mw_col),
-            logp_text=cell(logp_col),
-            activity_text=cell(activity_col),
+        return medchem_snapshot_from_cells(
+            oid,
+            cells,
+            id_col=id_col,
+            tpsa_col=tpsa_col,
+            logp_col=logp_col,
+            mw_col=mw_col,
+            wlogp_col=wlogp_col,
+            activity_col=activity_col,
+            src=src,
         )
 
     def _snapshot_from_row(
@@ -710,66 +683,51 @@ class MedChemPlotPanel(DockableResultPlotPanel):
         activity_col: str | None,
     ) -> MedChemRowSnapshot:
         oid = int(model.row_oid(row))
-
-        def cell(header: str | None) -> str:
-            return model.value_for_header(row, header) if header else ""
-
-        label = cell(id_col) if id_col else f"OID {oid}"
-        return MedChemRowSnapshot(
-            oid=oid,
-            label=label,
+        cells = {
+            header: model.value_for_header(row, header)
+            for header in (id_col, tpsa_col, logp_col, mw_col, wlogp_col, activity_col)
+            if header
+        }
+        return medchem_snapshot_from_cells(
+            oid,
+            cells,
+            id_col=id_col,
+            tpsa_col=tpsa_col,
+            logp_col=logp_col,
+            mw_col=mw_col,
+            wlogp_col=wlogp_col,
+            activity_col=activity_col,
+            src=src,
             structure_text=self._structure_text_for_row(row, src),
-            tpsa_text=cell(tpsa_col),
-            wlogp_text=cell(wlogp_col),
-            mw_text=cell(mw_col),
-            logp_text=cell(logp_col),
-            activity_text=cell(activity_col),
         )
 
     def _begin_snapshot_collect(self) -> None:
         if self.parent_app is None:
             return
-        try:
-            scope_rows = self._snapshot_scope_rows()
-        except ValueError as exc:
-            self._reopen_setup_if_plot_hidden()
-            QMessageBox.warning(self._ui_parent(), self._window_title, str(exc))
-            return
-        if scope_rows is not None and not scope_rows:
-            self._reopen_setup_if_plot_hidden()
-            QMessageBox.information(
-                self._ui_parent(),
-                self._window_title,
-                "No rows in the current scope.",
-            )
-            return
-        if scope_rows is None and self.parent_app._table_model.rowCount() == 0:
-            self._reopen_setup_if_plot_hidden()
-            QMessageBox.information(
-                self._ui_parent(),
-                self._window_title,
-                "No rows in the current scope.",
-            )
-            return
-        tpsa_col, logp_col, mw_col, wlogp_col = self._descriptor_column_names()
-        activity_col = self._activity_column_name()
-        if self._plot_kind == "lipe" and not activity_col:
-            self._reopen_setup_if_plot_hidden()
-            QMessageBox.information(
-                self._ui_parent(),
-                self._window_title,
-                "Choose a pActivity column (pIC50, pKi, or pEC50).",
-            )
-            return
-        use_table = required_descriptor_columns_ok(
-            self._plot_kind,
-            tpsa_col=tpsa_col,
-            logp_col=logp_col,
-            mw_col=mw_col,
-            wlogp_col=wlogp_col,
-        )
         app = self.parent_app
-        id_col = resolve_descriptor_column(app.headers, ("id", "name", "compound", "compound name"))
+        only_sel = selection_scope_checked(self)
+        start = plan_medchem_plot_start(
+            plot_kind=self._plot_kind,
+            headers=app.headers,
+            row_count=app._table_model.rowCount(),
+            only_selected=only_sel,
+            selection_empty=only_sel and not app._selected_oids_set(),
+            selected_rows=app._selected_logical_rows() if only_sel else None,
+            activity_column=self._activity_column_name(),
+        )
+        if start.message:
+            self._reopen_setup_if_plot_hidden()
+            box = QMessageBox.warning if start.warning else QMessageBox.information
+            box(self._ui_parent(), self._window_title, start.message)
+            return
+        scope_rows = start.scope_rows
+        tpsa_col = start.tpsa_col
+        logp_col = start.logp_col
+        mw_col = start.mw_col
+        wlogp_col = start.wlogp_col
+        activity_col = start.activity_col
+        use_table = start.use_table_columns
+        id_col = start.id_col
         src = self.struct_src_combo.currentText()
         self._cancel_snapshot_collect()
         gen = self._snapshot_collect_gen
