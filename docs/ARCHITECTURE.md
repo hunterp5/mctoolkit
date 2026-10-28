@@ -56,7 +56,7 @@ subpackage reads as its table of contents.
 
 | Package | Contents |
 |---------|----------|
-| `platform_support/` | Process, config, and runtime concerns: `config.py`, `app_logging.py`, `bundled_paths.py`, `wsl_launcher.py`, `qt_webengine_flags.py`, `rdkit_runtime_setup.py`, `memory_guards.py`, `memory_usage.py`, `performance_tracking.py`, `exception_policy.py`, `tool_progress.py` |
+| `platform_support/` | Process, config, and runtime concerns: `config.py`, `app_logging.py`, `session_runtime.py` (per-process temp directory, offline switch, SQL-write switch, session encryption switch, tool allowlist and digests, audit log), `bundled_paths.py`, `wsl_launcher.py`, `qt_webengine_flags.py`, `rdkit_runtime_setup.py`, `memory_guards.py`, `memory_usage.py`, `performance_tracking.py`, `exception_policy.py`, `tool_progress.py` |
 | `reference/` | In-app reference content: `help_markdown.py`, `citations_catalog.py`, `method_citations.py`, `descriptor_tooltips.py` |
 | `chem/` | Core molecule handling: `molecule_conversion.py`, `smarts_macropatterns.py`, `rdkit_fingerprints.py`, `fingerprint_cache.py`, `fragment_*.py`, `reaction_*.py`, `structure_2d_depiction.py`, `structure_hydrogens.py`, `structure_neutralize.py`, `structure_source_headers.py` |
 | `descriptors/` | `catalog.py`, `descriptors_3d.py`, `orbitals.py`, `medchem_descriptors.py`, `descriptor_cache_reuse.py`, `ml_feature_matrix.py` |
@@ -68,7 +68,7 @@ subpackage reads as its table of contents.
 | `sources/` | External compound providers: `chembl_random_compounds.py`, `pubchem_names.py`, `surechembl_api.py`, `random_molecule_sources.py` |
 | `analysis/` | `mmp_analysis.py` (pair/transform core), `mmp_session.py`, `mmp_table.py`, `mmp_depict.py`, `mmp_neighborhood_analysis.py`, `activity_cliff_analysis.py`, `sali_analysis.py`, `qsar_models.py`, `mpo_scoring.py`, `medchem_space.py`, `dimensionality_reduction.py`, `table_statistics.py` |
 | `plotting/` | Chart computation, no Qt widgets: `plot_axes.py`, `plot_series_collect.py`, `plot_marker_color.py`, `plot_heatmap.py`, `plot_labels.py`, `plot_radar.py`, `plot_statistics_fits.py`, `plotly_legend.py` |
-| `table/` | Table data operations and documents: `column_*.py`, `calculator_expressions.py`, `filter_compute.py`, `random_number_columns.py`, `text_file_ingest.py`, `table_file_formats.py`, `session_v4.py`, `session_codec.py`, `structure_depiction_layout.py` |
+| `table/` | Table data operations and documents: `column_*.py`, `calculator_expressions.py`, `filter_compute.py`, `random_number_columns.py`, `text_file_ingest.py`, `table_file_formats.py`, `session_v4.py`, `session_seal.py`, `session_codec.py`, `structure_depiction_layout.py` |
 | `storage/` | `MolStore`, `SqliteTableStore`, `extra_pixmap_store.py`, `structure_render_store.py` |
 | `services/` | Pure helpers shared by UI and workers (no Qt, no `molmanager.ui` imports) |
 | `workflows/` | What the app should do next, decided without the UI (see *Workflow layer*) |
@@ -135,8 +135,14 @@ mixins. The target:
 Two rules make that real. **Per-capability protocols
 instead of one kernel:** anything accepting all 31 kernel members can reach the whole window, so
 collaborators should take the roles in `ui/app_roles.py` instead (see "Kernel roles" below).
-**One table-reader interface:** domain code must not loop `app._table_cell_text`, which is what
-currently forces row-walking logic to stay in `ui/`.
+**One table-reader interface:** `services/table_reader.py` (`TableReader`, `StoreTableReader`)
+reads headers, row count, cell text, and structure by oid with no Qt. A structure source
+loads the molecule store once (`structure_rows`), then walks the table so the rows stay
+in order. Domain code uses that reader instead of looping `app._table_cell_text`. The open
+window adapts itself in `ui/table_reader_view.py` without copying rows. Scoped structure
+and activity jobs decide their record list in `workflows/scoped_records.py`.
+`ui/analysis_job_support.py` only maps a blocker onto a dialog.
+`collect_scoped_table_structure_payloads` is that same walk, including the visible-row filter.
 
 ## Main window (`molmanager/ui/main_window/`)
 
@@ -204,16 +210,15 @@ A mixin is shared behavior used by **more than one** class. Almost all MolManage
 - File-split large Qt classes when one file would be unwieldy.
 - Extract a collaborator when there is a stable boundary (progress, column writeback, session IO, ingest/render).
 - Put new tools on `WorkspaceTools` (lazy) or as module functions plus `install_window_forwards`.
-- Write **new** collaborator methods on the collaborator using `self._app` (`AppKernel`). Do not call `bind_mixin_methods` for new code.
+- Write **new** collaborator methods on the collaborator. The constructor takes the role in `ui/app_roles.py` that the method reads, or a host protocol that extends that role (`ToolScopeHost` is the reference). Do not type it as `AppKernel`, and do not call `bind_mixin_methods`.
 - Keep public names on the window so dialogs/tests keep calling `app.on_calc_finished`.
 
 **Do not**
 
-- Add mixin bases to `ChemistryWorkspaceWindow` (`tests/test_app_kernel.py` freezes the MRO).
+- Put a project class on the `ChemistryWorkspaceWindow` MRO (`tests/test_app_kernel.py` freezes it). The class inherits only `QMainWindow`. `closeEvent` stays on the window and calls `AppLifecycleMixin.closeEvent`, because Qt delivers that event on the `QMainWindow`. A method that needs the C++ base calls `QMainWindow.closeEvent` explicitly rather than `super()`.
 - Add empty composite mixins (`ChemistryMixin`-style).
-- Treat mixin MRO order as architecture. `QMainWindow` precedes remaining mixins, so Qt virtuals such as `closeEvent` must be declared on the shell (delegating into `AppLifecycleMixin`). Mixin implementations that need the C++ base should call `QMainWindow.closeEvent` explicitly rather than `super()`.
 
-`bind_mixin_methods` is a **legacy bridge**: it copies mixin functions onto a collaborator but still invokes them with the window as `self`. Six collaborators still use it; convert bodies to `self._app` when touching that code.
+`bind_mixin_methods` is a **legacy bridge**: it copies mixin functions onto a collaborator but still invokes them with the window as `self`. Six collaborators still use it. Convert one when you are already editing it, using the four steps below. The collaborator's constructor takes a role or a host protocol, not `AppKernel`. Rewriting `self` to `self._app` while `_app` is still the whole window does not change what the method can reach.
 
 `ToolDialogScope` shows the conversion, and it is four steps: move the mixin bodies onto the
 collaborator rewriting window `self` to `self._app`, move mixin-owned state out of the window
@@ -232,12 +237,12 @@ halves answer on the window, so callers never see the seam.
 New tools go through `ui/analysis_job_support.py` (which uses `tool_dialog_scope`) and kernel
 methods — do not add mixin bases to `ChemistryWorkspaceWindow`.
 
-Remaining mixins on the window MRO are UI adapters that still talk to widgets directly
-(`AppMenuMixin`, `TableUIMixin` edit/search/filters, MMP/SALI, dock,
-predict, `GuiSettingsMixin`). Empty composition roots (`ChemistryMixin`, `SessionMixin`,
+No project class is on the window MRO. `ChemistryWorkspaceWindow` inherits only
+`QMainWindow`. Menus, table chrome, filters, MMP/SALI, dock, predict, and settings
+are `WorkspaceTools` hosts or other collaborators, reached through
+`install_window_forwards`. Empty composition roots (`ChemistryMixin`, `SessionMixin`,
 `IngestRenderMixin`, `PrepareStructuresMixin`, `ConformersDescriptorsMixin`,
-`ToolsSqlPredictMixin`) are optional groupings only; they are **not** bases of
-`ChemistryWorkspaceWindow`.
+`ToolsSqlPredictMixin`) are optional groupings only; they are not bases of the window.
 
 **Processes Cancel:** `BackgroundActivityHub.try_cancel_row` handles `background` jobs via `cancel_background_job()` when a cancel callable was registered with `register_background_job(..., cancel=…)`. Filter apply, substructure filter, dimred, and MedChem Space register cancel callables.
 
@@ -307,7 +312,7 @@ Progress: `WorkerSignals.tool_progress` + `ToolProgressState` polling → bottom
    Protein Prepare, Gnina dock, and Data Analysis live there; shims remain at the old `ui/`
    paths. Package `__init__` loads exports lazily so submodule imports do not pull Qt WebEngine.
 2. Worker under `molmanager/workers/` if work is heavy.
-3. Wire the menu action on `ChemistryWorkspaceWindow` as a **thin forward** to `WorkspaceTools` or an existing collaborator (`install_window_forwards`). Do **not** add a new mixin base to the window class. New collaborator methods use `self._app`, not `bind_mixin_methods`.
+3. Wire the menu action on `ChemistryWorkspaceWindow` as a **thin forward** to `WorkspaceTools` or an existing collaborator (`install_window_forwards`). Do **not** add a new mixin base to the window class. New collaborator methods live on the collaborator and take a role or a host protocol, not `AppKernel` or `bind_mixin_methods`.
 4. Long jobs: `process_queue.enqueue` + `_begin_tool_progress` / `report_tool_progress`.
 5. Short threadpool jobs: `register_background_job` / `unregister_background_job`.
 6. Tests under `tests/` (unit tests avoid full GUI where possible).
@@ -404,14 +409,23 @@ stored, not when the workspace appears.
 
 ### Session files (`.cms`, version 4)
 
-A session is one SQLite database (`table/session_v4.py`). `meta` holds the
-format, version, zlib-compressed JSON manifest (headers, layout, filters, plots),
-the row oids as `<i8`, and the depiction `scene_revision`. `columns` holds one
-row per data column: float64 values plus a missing-value mask for numeric
-columns, JSON text otherwise. `sidecars` holds zlib-compressed JSON for large
-tool payloads (ionization, MMP, docking, notepad). `mols`, `pngs`, and
-`ensembles` use the same schemas as `MolStore`, `StructureRenderStore`, and
-`EnsembleStore`.
+A session document is one SQLite database (`table/session_v4.py`). On disk, a new
+`.cms` is an AES-GCM envelope around that database (`table/session_seal.py`,
+magic `MMC1`). The 32-byte key lives in the user profile: DPAPI on Windows
+(`%LOCALAPPDATA%\MolManager\session.key`), mode `0600` elsewhere.
+`MOLMANAGER_SESSION_PLAINTEXT=1`, including when that name is set in the machine
+policy file, writes the SQLite file directly. Plaintext sessions still open. Open unwraps an
+envelope into the process temp directory from `platform_support/session_runtime.py`,
+then reads the database below. A copy of an encrypted file without that key does
+not contain the chemistry.
+
+Inside the database, `meta` holds the format, version, zlib-compressed JSON
+manifest (headers, layout, filters, plots), the row oids as `<i8`, and the
+depiction `scene_revision`. `columns` holds one row per data column: float64
+values plus a missing-value mask for numeric columns, JSON text otherwise.
+`sidecars` holds zlib-compressed JSON for large tool payloads (ionization, MMP,
+docking, notepad). `mols`, `pngs`, and `ensembles` use the same schemas as
+`MolStore`, `StructureRenderStore`, and `EnsembleStore`.
 
 Save (`workers/session_save.py`): the GUI thread captures a
 `SessionSaveSnapshot` (column blobs, manifest, store file paths after a flush).
