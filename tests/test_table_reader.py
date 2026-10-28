@@ -24,8 +24,10 @@ from molmanager.services.table_reader import (
     StoreTableReader,
     activity_for_oid,
     backing_then_cell,
+    calculator_variable_rows,
     cell_then_backing,
     collect_structure_payloads,
+    texts_for_oids,
 )
 from molmanager.ui.table_reader_view import WindowTableReader
 from molmanager.storage.mol_store import MolStore
@@ -114,6 +116,15 @@ def test_structure_source_reads_the_molecule_store_once() -> None:
         assert mols.blob_calls == 0
     finally:
         mols.close()
+
+
+def test_calculator_rows_turn_a_blank_cell_into_zero() -> None:
+    rows = ColumnStore()
+    rows.append_columns([1, 2], {"IC50": ["1.5", ""], "MW": ["46", "78"]})
+    reader = StoreTableReader(("ID_HIDDEN", "Structure", "IC50", "MW"), rows)
+    assert calculator_variable_rows(reader, ["IC50", "MW"], {2}) == [(2, {"IC50": "0", "MW": "78"})]
+    assert texts_for_oids(reader, "IC50", [1, 2]) == ["1.5", ""]
+    assert texts_for_oids(reader, "Missing", [1]) == [""]
 
 
 def test_plain_molecule_map_is_pickled_without_a_batch_query() -> None:

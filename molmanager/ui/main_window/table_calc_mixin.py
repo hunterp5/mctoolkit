@@ -89,22 +89,15 @@ class TableCalcMixin:
             else:
                 QMessageBox.warning(self, TOOL_CALCULATOR, message)
             return
+        from ...services.table_reader import calculator_variable_rows
+        from ..table_reader_view import WindowTableReader
+
         self.new_c = self._unique_table_column_names([name])[0]
-        numeric_vars = list(self.global_bounds.keys())
-        h_map = {h: i for i, h in enumerate(self.headers)}
-        oids_list = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids_list = [oid for oid in oids_list if oid in allowed]
-        row_data = [
-            (
-                oid,
-                {
-                    var: (self._table_cell_text(self.logical_row_for_oid(oid), h_map[var]) or "0")
-                    for var in numeric_vars
-                },
-            )
-            for oid in oids_list
-        ]
+        row_data = calculator_variable_rows(
+            WindowTableReader(self),
+            list(self.global_bounds.keys()),
+            allowed,
+        )
         if not row_data:
             message = "No rows to process for this scope."
             self.status_label.setText("Ready.")
@@ -342,29 +335,29 @@ class TableCalcMixin:
             on_done(message, {})
             report_unless_replaying(self, TOOL_POTENCY, message)
             return
-        oids = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids = [oid for oid in oids if oid in allowed]
+        from ...services.table_reader import scoped_oids, texts_for_oids
+        from ..table_reader_view import WindowTableReader
+
+        reader = WindowTableReader(self)
+        oids = scoped_oids(reader, allowed)
         if not oids:
             message = "No rows to process for this scope."
             self.status_label.setText("Ready.")
             on_done(message, {})
             report_unless_replaying(self, TOOL_POTENCY, message, warning=False)
             return
-        activity_col = self.headers.index(request.column)
-        unit_col = self.headers.index(request.unit_column)
+        activities = texts_for_oids(reader, request.column, oids, stored_first=False)
+        units = texts_for_oids(reader, request.unit_column, oids, stored_first=False)
         headers = output_headers(
             request.measure,
             desired_unit=request.desired_unit,
             write_p=request.write_p,
             write_ki=request.write_ki,
         )
-        prepared: list[tuple[int, str, str]] = []
-        for oid in oids:
-            row = self.logical_row_for_oid(oid)
-            activity = "" if row < 0 else self._table_cell_text(row, activity_col)
-            unit_text = "" if row < 0 else self._table_cell_text(row, unit_col)
-            prepared.append((int(oid), activity, unit_text))
+        prepared = [
+            (int(oid), activity, unit_text)
+            for oid, activity, unit_text in zip(oids, activities, units, strict=True)
+        ]
         structure_mw: dict[int, float] = {}
         if request.mw_column is None and any(
             needs_molecular_weight(unit_text) for _oid, _activity, unit_text in prepared
@@ -505,27 +498,15 @@ class TableCalcMixin:
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, TOOL_SPLIT_COLUMN):
             return
-        oids = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids = [o for o in oids if o in allowed]
+        from ...services.table_reader import scoped_oids, texts_for_oids
+        from ..table_reader_view import WindowTableReader
+
+        reader = WindowTableReader(self)
+        oids = scoped_oids(reader, allowed)
         if not oids:
             QMessageBox.information(self, TOOL_SPLIT_COLUMN, "No rows to process for this scope.")
             return
-        try:
-            ci = self.headers.index(source)
-        except ValueError:
-            QMessageBox.warning(self, TOOL_SPLIT_COLUMN, "Choose a column to split.")
-            return
-        texts: list[str] = []
-        for oid in oids:
-            row = self._table_model.logical_row_for_oid(int(oid))
-            if row < 0:
-                texts.append("")
-                continue
-            raw = self._table_model.backing_value_for_row_header(row, source) or ""
-            if not raw:
-                raw = self._table_cell_text(row, ci) or ""
-            texts.append(raw)
+        texts = texts_for_oids(reader, source, oids)
         try:
             _delim, parts = split_column_values(texts, p.mode, custom=p.custom)
         except ValueError as exc:
@@ -602,9 +583,11 @@ class TableCalcMixin:
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, TOOL_JOIN_COLUMNS):
             return
-        oids = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids = [o for o in oids if o in allowed]
+        from ...services.table_reader import scoped_oids, texts_for_oids
+        from ..table_reader_view import WindowTableReader
+
+        reader = WindowTableReader(self)
+        oids = scoped_oids(reader, allowed)
         if not oids:
             QMessageBox.information(self, TOOL_JOIN_COLUMNS, "No rows to process for this scope.")
             return
@@ -613,36 +596,22 @@ class TableCalcMixin:
         except ValueError as exc:
             QMessageBox.warning(self, TOOL_JOIN_COLUMNS, str(exc) or "Could not join the columns.")
             return
-        try:
-            li = self.headers.index(left)
-            ri = self.headers.index(right)
-        except ValueError:
-            QMessageBox.warning(self, TOOL_JOIN_COLUMNS, "Choose two columns to join.")
-            return
         out_name = (p.output_column or "").strip() or f"{left}_{right}"
-
-        def _cell(oid: int, header: str, col_idx: int) -> str:
-            row = self._table_model.logical_row_for_oid(int(oid))
-            if row < 0:
-                return ""
-            raw = self._table_model.backing_value_for_row_header(row, header) or ""
-            if not raw:
-                raw = self._table_cell_text(row, col_idx) or ""
-            return raw
-
+        left_texts = texts_for_oids(reader, left, oids)
+        right_texts = texts_for_oids(reader, right, oids)
         rows = [
             (
                 int(oid),
                 {
                     out_name: join_two_values(
-                        _cell(oid, left, li),
-                        _cell(oid, right, ri),
+                        left_text,
+                        right_text,
                         delim,
                         skip_empty=bool(p.skip_empty),
                     )
                 },
             )
-            for oid in oids
+            for oid, left_text, right_text in zip(oids, left_texts, right_texts, strict=True)
         ]
         written = self.on_calc_finished(rows, [out_name], progress_label=TOOL_JOIN_COLUMNS)
         final_col = written[0] if written else out_name
@@ -691,27 +660,15 @@ class TableCalcMixin:
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, TOOL_BINNING):
             return
-        oids = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids = [o for o in oids if o in allowed]
+        from ...services.table_reader import scoped_oids, texts_for_oids
+        from ..table_reader_view import WindowTableReader
+
+        reader = WindowTableReader(self)
+        oids = scoped_oids(reader, allowed)
         if not oids:
             QMessageBox.information(self, TOOL_BINNING, "No rows to process for this scope.")
             return
-        try:
-            ci = self.headers.index(source)
-        except ValueError:
-            QMessageBox.warning(self, TOOL_BINNING, "Choose a column to bin.")
-            return
-        texts: list[str] = []
-        for oid in oids:
-            row = self._table_model.logical_row_for_oid(int(oid))
-            if row < 0:
-                texts.append("")
-                continue
-            raw = self._table_model.backing_value_for_row_header(row, source) or ""
-            if not raw:
-                raw = self._table_cell_text(row, ci) or ""
-            texts.append(str(raw))
+        texts = texts_for_oids(reader, source, oids)
         try:
             binned = bin_column_texts(texts, p)
         except ValueError as exc:
@@ -787,9 +744,11 @@ class TableCalcMixin:
         allowed = self._selected_oids_set() if only_selected else None
         if self._abort_if_only_selected_but_empty(only_selected, allowed, TOOL_SELECTIVITY_RATIO):
             return
-        oids = self._all_oids_in_table_order()
-        if allowed is not None:
-            oids = [oid for oid in oids if oid in allowed]
+        from ...services.table_reader import scoped_oids, texts_for_oids
+        from ..table_reader_view import WindowTableReader
+
+        reader = WindowTableReader(self)
+        oids = scoped_oids(reader, allowed)
         if not oids:
             QMessageBox.information(
                 self,
@@ -798,29 +757,23 @@ class TableCalcMixin:
             )
             return
         columns = (params.primary_column, *params.secondary_columns)
-        if any(name not in self.headers for name in columns):
+        if any(name not in reader.headers for name in columns):
             QMessageBox.warning(
                 self,
                 TOOL_SELECTIVITY_RATIO,
                 "Choose assay columns that are still in the table.",
             )
             return
-        indexes = {name: self.headers.index(name) for name in columns}
+        column_texts = {name: texts_for_oids(reader, name, oids) for name in columns}
 
-        def cell(oid: int, header: str) -> float | None:
-            row = self._table_model.logical_row_for_oid(int(oid))
-            if row < 0:
-                return None
-            raw = self._table_model.backing_value_for_row_header(row, header) or ""
-            if not raw:
-                raw = self._table_cell_text(row, indexes[header]) or ""
-            return safe_float(str(raw))
+        def cell(index: int, header: str) -> float | None:
+            return safe_float(column_texts[header][index])
 
         rows = []
         narrow = 0
-        for oid in oids:
-            primary = cell(oid, params.primary_column)
-            off_targets = [(name, cell(oid, name)) for name in params.secondary_columns]
+        for index, oid in enumerate(oids):
+            primary = cell(index, params.primary_column)
+            off_targets = [(name, cell(index, name)) for name in params.secondary_columns]
             values = selectivity_cells(
                 primary,
                 off_targets,

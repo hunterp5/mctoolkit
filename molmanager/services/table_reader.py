@@ -171,6 +171,67 @@ def activity_for_oid(
     return parse_activity_float(raw)
 
 
+def scoped_oids(reader: TableReader, allowed_oids: set[int] | None = None) -> list[int]:
+    """Oids in table order, optionally limited to *allowed_oids*."""
+    oids: list[int] = []
+    for row in range(reader.row_count()):
+        oid = reader.oid_at(row)
+        if oid < 0:
+            continue
+        if allowed_oids is not None and oid not in allowed_oids:
+            continue
+        oids.append(oid)
+    return oids
+
+
+def texts_for_oids(
+    reader: TableReader,
+    header: str,
+    oids: Sequence[int],
+    *,
+    stored_first: bool = True,
+) -> list[str]:
+    """One string per oid, ``""`` when the row or column is missing.
+
+    ``stored_first`` reads the stored cell before the display text. Calculator
+    and potency pass ``False`` so a blank display stays blank instead of
+    falling through to a hidden value.
+    """
+    if header not in reader.headers:
+        return [""] * len(oids)
+    column = reader.headers.index(header)
+    texts: list[str] = []
+    for oid in oids:
+        row = reader.row_for_oid(int(oid))
+        if row < 0:
+            texts.append("")
+            continue
+        if stored_first:
+            texts.append(backing_then_cell(reader, row, header))
+        else:
+            texts.append(reader.cell_text(row, column) or "")
+    return texts
+
+
+def calculator_variable_rows(
+    reader: TableReader,
+    variables: Sequence[str],
+    allowed_oids: set[int] | None = None,
+) -> list[tuple[int, dict[str, str]]]:
+    """``(oid, {variable: display text})`` for a calculator expression.
+
+    A blank cell is ``"0"`` so the expression evaluator sees a number. A
+    variable that is not a header raises ``ValueError``.
+    """
+    indexes = {name: reader.headers.index(name) for name in variables}
+    rows: list[tuple[int, dict[str, str]]] = []
+    for oid in scoped_oids(reader, allowed_oids):
+        row = reader.row_for_oid(oid)
+        values = {name: (reader.cell_text(row, indexes[name]) or "0") for name in variables}
+        rows.append((oid, values))
+    return rows
+
+
 def cell_then_backing(reader: TableReader, row: int, header: str) -> str:
     """Display text for *header*, or the stored text when the display is blank."""
     if header not in reader.headers or row < 0:
