@@ -35,6 +35,7 @@ from .table_undo_commands import (
     UndoPasteBlockCommand,
     UndoPasteCellCommand,
     UndoUpdateRowStructureCommand,
+    collect_delete_row_snapshots,
     restore_depiction_blob,
 )
 
@@ -577,11 +578,9 @@ class TableEditMixin:
         self._table_delete_job_gen = int(getattr(self, "_table_delete_job_gen", 0)) + 1
         gen = self._table_delete_job_gen
         total = len(oids)
-        light = total >= load_config().table_delete_batch_min
         self._table_delete_ctx = {
             "gen": gen,
             "oids": frozenset(int(x) for x in oids),
-            "light": light,
             "snapshots": [],
             "row_idx": 0,
             "total_rows": self._table_model.rowCount(),
@@ -594,45 +593,15 @@ class TableEditMixin:
         if not ctx or ctx.get("gen") != getattr(self, "_table_delete_job_gen", -1):
             return
         kill: frozenset[int] = ctx["oids"]
-        light = bool(ctx["light"])
-        data_headers = [h for h in self.headers[2:] if h != "Structure"]
         model = self._table_model
-        rows = model._rows  # noqa: SLF001
-        total_rows = len(rows)
+        total_rows = model.rowCount()
         total_delete = len(kill)
         idx = int(ctx["row_idx"])
         chunk = max(2000, load_config().table_delete_chunk_rows)
         end = min(idx + chunk, total_rows)
         snapshots: list[DeleteRowSnapshot] = ctx["snapshots"]
-        found_before = len(snapshots)
-        for j in range(idx, end):
-            row = rows[j]
-            oid = int(row.oid)
-            if oid not in kill:
-                continue
-            cells = {h: str(row.values.get(h, "") or "") for h in data_headers}
-            if light:
-                snapshots.append(DeleteRowSnapshot(orig_row=j, oid=oid, cells=cells, light=True))
-            else:
-                pm = self.mols.get(oid)
-                mol_copy = Chem.Mol(pm) if pm is not None else None
-                png = model.structure_png_bytes(oid)
-                spm = None if png else model.structure_pixmap_copy(oid)
-                extra = model.extra_column_pixmaps_copy(oid) if total_delete <= 1 else {}
-                snapshots.append(
-                    DeleteRowSnapshot(
-                        orig_row=j,
-                        oid=oid,
-                        cells=cells,
-                        mol_copy=mol_copy,
-                        structure_pixmap=spm,
-                        structure_png=png,
-                        extra_pixmaps=extra,
-                        light=False,
-                    )
-                )
+        snapshots.extend(collect_delete_row_snapshots(self, kill, start=idx, end=end))
         ctx["row_idx"] = end
-        found = len(snapshots) - found_before
         done_delete = len(snapshots)
         self._set_selection_status(
             f"Preparing delete… ({done_delete:,}/{total_delete:,} rows, scanned {end:,}/{total_rows:,})"
@@ -645,9 +614,6 @@ class TableEditMixin:
             QMessageBox.information(self, "Delete Selection", "No valid rows to delete.")
             self._set_selection_status("Delete cancelled — no matching rows.", pump=True)
             return
-        if found < total_delete:
-            # Rows may have been removed while preparing; keep only snapshots we collected.
-            pass
         cmd = UndoDeleteRowsCommand(self, snapshots=snapshots)
         self._undo_stack.push(cmd)
 

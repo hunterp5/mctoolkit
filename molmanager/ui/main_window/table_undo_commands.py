@@ -105,17 +105,26 @@ def collect_delete_row_snapshots(
     app: AppKernel,
     oids: frozenset[int],
     *,
-    light: bool,
+    start: int = 0,
+    end: int | None = None,
 ) -> list[DeleteRowSnapshot]:
-    """One table scan — avoids per-OID ``logical_row_for_oid`` when deleting large selections."""
+    """Light cell snapshots for *oids* in source rows ``[start, end)``.
+
+    One scan of that slice, so a large delete can prepare undo in chunks without
+    a per-OID row lookup. Undo reparses SMILES from the captured cells.
+    """
     if not oids:
         return []
     kill = {int(x) for x in oids}
     data_headers = [h for h in app.headers[2:] if h != "Structure"]
-    out: list[DeleteRowSnapshot] = []
     model = app._table_model
-    _ = light
-    for r, row in enumerate(model._rows):  # noqa: SLF001 — bulk path; model owns rows
+    rows = model._rows  # noqa: SLF001 — bulk path; model owns rows
+    n = len(rows)
+    lo = max(0, int(start))
+    hi = n if end is None else min(n, int(end))
+    out: list[DeleteRowSnapshot] = []
+    for r in range(lo, hi):
+        row = rows[r]
         oid = int(row.oid)
         if oid not in kill:
             continue
@@ -138,12 +147,10 @@ class UndoDeleteRowsCommand(QUndoCommand):
         if snapshots is not None:
             self._snapshots = list(snapshots)
         elif oids is not None:
-            light = len(oids) >= load_config().table_delete_batch_min
-            self._snapshots = collect_delete_row_snapshots(app, oids, light=light)
+            self._snapshots = collect_delete_row_snapshots(app, oids)
         else:
             oid_set = app._oids_for_row_indices(rows or [])
-            light = len(oid_set) >= load_config().table_delete_batch_min
-            self._snapshots = collect_delete_row_snapshots(app, oid_set, light=light)
+            self._snapshots = collect_delete_row_snapshots(app, oid_set)
         n = len(self._snapshots)
         super().__init__(f"Delete {n} row(s)" if n != 1 else "Delete row")
         self._app = app

@@ -34,9 +34,17 @@ def test_collect_delete_row_snapshots_light(qapp):  # noqa: ARG001
         _table_model=model,
         mols={},
     )
-    snaps = collect_delete_row_snapshots(app, frozenset({1, 3}), light=True)
+    snaps = collect_delete_row_snapshots(app, frozenset({1, 3}))
     assert len(snaps) == 2
     assert {s.oid for s in snaps} == {1, 3}
     assert all(s.light for s in snaps)
     assert snaps[0].cells["SMILES"] == "C"
     assert snaps[1].cells["MW"] == "44"
+    assert snaps[0].mol_copy is None
+    assert snaps[0].structure_png is None
+
+    chunk = collect_delete_row_snapshots(app, frozenset({1, 3}), start=1, end=3)
+    assert [s.oid for s in chunk] == [3]
+    assert chunk[0].orig_row == 2
+    assert chunk[0].light
+    assert chunk[0].cells["SMILES"] == "CCC"
