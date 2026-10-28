@@ -143,6 +143,14 @@ window adapts itself in `ui/table_reader_view.py` without copying rows. Scoped s
 and activity jobs decide their record list in `workflows/scoped_records.py`.
 `ui/analysis_job_support.py` only maps a blocker onto a dialog.
 `collect_scoped_table_structure_payloads` is that same walk, including the visible-row filter.
+Calculator, potency, split, join, binning, and selectivity read their column values from the reader
+(`calculator_variable_rows`, `texts_for_oids`) and the window only writes the result columns.
+Gnina's receptor, output, ligand, and selected-row checks live in `docking/gnina_job.py`
+(`gnina_receptor_problem`, `plan_gnina_run`, `table_row_dock_problem`). The dock dialog reads
+the form and shows the message. Medchem plots decide their rows, columns, and row records in
+`plan_medchem_plot_start` (`analysis/medchem_space.py`). Fast Prepare does the same in
+`workers/protein_prepare_plan.py` (`plan_protein_prepare_start`, `build_protein_prepare_request`).
+Each dialog reads the form and shows the message.
 
 ## Main window (`molmanager/ui/main_window/`)
 
@@ -381,7 +389,10 @@ Structure-prep tools (protonate, Fast Prepare, disconnect/neutralize/explicit H)
 Protein Prepare runtime: `workers/protein_prepare_runtime.py` orchestrates;
 IO/residue maps are `protein_prepare_io.py`, pdb2pqr is `protein_prepare_pdb2pqr.py`,
 AmberTools GAFF/GAFF2 (WSL on Windows) is `protein_prepare_amber.py`,
-OpenMM min is `protein_prepare_minimize.py`. Complex-only Minimize (viewer **Minimize…**) is `protein_complex_minimize.py` with dialog `ui/dialogs/protein_minimize.py`. Tests patch names on the runtime module.
+OpenMM min is `protein_prepare_minimize.py`. `protein_prepare_plan.py` decides whether Fast
+Prepare can start and builds `ProteinPrepareRequest`; the dialog reads widgets and shows
+the message. Complex-only Minimize (viewer **Minimize…**) is `protein_complex_minimize.py`
+with dialog `ui/dialogs/protein_minimize.py`. Tests patch names on the runtime module.
 
 Gnina dock: `ui/dialogs/gnina_dock.py` is the widget. Argv, ligand files, and pose
 I/O live in `gnina_job.py` (no Qt). `workers/gnina_dock_worker.py` owns the
@@ -397,7 +408,10 @@ thread only bulk-inserts them (`MolStore.ingest_jobs`, `EnsembleStore.ingest_pac
 `ColumnStore` column appends). Smaller and gzipped files are parsed on the load thread
 into the same records.
 
-Auto Render 2D after ingest/session has no row limit. `Render2DBatchProcessWorker`
+Auto Render 2D after ingest/session has no row limit. A queued batch is the record
+from `render2d_batch_payload`. `Render2DBatchHeldJob` gives that record to
+`Render2DQueueBridge` and waits for the flush; it does not hold the window.
+`Render2DBatchProcessWorker`
 draws from a `PriorityRenderPlan` (`workers/render2d_plan.py`): the window polls the
 viewport every 150 ms and moves the rows on screen, plus one screen below and above,
 to the front in small tasks; the remaining rows follow in table order. The scene store
