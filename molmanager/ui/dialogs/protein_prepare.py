@@ -44,9 +44,14 @@ from PyQt5.QtWidgets import (
 )
 
 from ...workers.protein_prepare import (
-    ProteinPrepareRequest,
     ProteinPrepareSignals,
     ProteinPrepareWorker,
+)
+from ...workers.protein_prepare_plan import (
+    build_protein_prepare_request,
+    plan_protein_prepare_start,
+    source_has_cif_ligand_bonds,
+    source_has_ligand,
 )
 from ..qt_widget_utils import append_viewer_log, make_window_minimizable
 from .protein_fixer_options import (
@@ -462,28 +467,16 @@ class ProteinPrepareDialog(ProteinStructureSourceMixin, QDialog):
             self.chk_keep_selected_waters.setText("Keep Manager-selected waters")
 
     def _source_has_ligand(self, text: str, fmt: str) -> bool:
-        from ...protein.structure_components import parse_structure_components
-
         try:
-            comps = parse_structure_components(text or "", fmt or "pdb")
+            return source_has_ligand(text, fmt)
         except Exception:
             return False
-        return any(c.kind == "ligand" for c in comps)
 
     def _source_has_cif_ligand_bonds(self, text: str, fmt: str) -> bool:
-        from ...protein.structure_components import (
-            cif_has_component_bonds,
-            parse_structure_components,
-        )
-
-        if (fmt or "").lower() not in {"cif", "mmcif"}:
-            return False
         try:
-            comps = parse_structure_components(text or "", fmt)
+            return source_has_cif_ligand_bonds(text, fmt)
         except Exception:
             return False
-        resns = {c.resn for c in comps if c.kind == "ligand"}
-        return cif_has_component_bonds(text or "", resns)
 
     def _sync_repair_options(self) -> None:
         on = self.chk_repair.isChecked()
@@ -677,107 +670,43 @@ class ProteinPrepareDialog(ProteinStructureSourceMixin, QDialog):
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "Fast Prepare", str(exc))
             return
-        if not (text or "").strip():
-            QMessageBox.information(self, "Fast Prepare", self._source_empty_message)
-            return
         fmt = fmt or "pdb"
-        if fmt not in _PREPARE_FMTS:
-            QMessageBox.warning(
-                self,
-                "Fast Prepare",
-                "Fast Prepare supports PDB and mmCIF. Convert or reload as PDB first.",
-            )
-            return
-        out_path = (self.edit_out.text() or "").strip()
-        if not out_path:
-            QMessageBox.information(self, "Fast Prepare", "Set an output path.")
-            return
-        out_rec = Path(out_path)
-        out_fmt = self.combo_out_fmt.currentData() or "cif"
-        if out_fmt == "pdb":
-            if out_rec.suffix.lower() != ".pdb":
-                out_rec = out_rec.with_suffix(".pdb")
-        elif out_rec.suffix.lower() not in {".cif", ".mmcif", ".mcif"}:
-            out_rec = out_rec.with_suffix(".cif")
-        out_path = str(out_rec)
-        self.edit_out.setText(out_path)
         run_repair = self.chk_repair.isChecked()
         run_protonate = self.chk_protonate.isChecked()
-        if (
-            not run_repair
-            and not run_protonate
-            and not self.chk_minimize.isChecked()
-            and not self.chk_write_smina.isChecked()
-        ):
-            QMessageBox.information(
-                self,
-                "Fast Prepare",
-                "Check Clean up, Protonate, Restrained minimization, or Write Gnina "
-                "files so there is a step to run.",
-            )
-            return
         keep_water_keys: tuple[tuple[str, str, str], ...] = ()
         if self.chk_keep_selected_waters.isChecked():
             keep_water_keys = self.chosen_water_keys()
-            if not keep_water_keys:
-                QMessageBox.information(
-                    self,
-                    "Fast Prepare",
-                    "Select water groups in the Manager (a Chain row or its Water row), "
-                    "then try again — or uncheck Keep Manager-selected waters.",
-                )
-                return
-        if (
-            self.chk_include_ligand.isChecked()
-            and self.chk_minimize.isChecked()
-            and (self.combo_ligand_ff.currentData() or "none") in {"gaff", "gaff2"}
-            and not self.edit_ligand_smiles.text().strip()
-            and not self.edit_ligand_ref.text().strip()
-            and self._source_has_ligand(text, fmt)
-            and not self._source_has_cif_ligand_bonds(text, fmt)
-        ):
-            QMessageBox.information(
-                self,
-                "Fast Prepare",
-                "GAFF/GAFF2 minimization needs SMILES, an SDF/MOL2, or mmCIF "
-                "_chem_comp_bond so AmberTools can assign ligand atom types. Add one, "
-                "or set Ligand force field to Protein only.",
-            )
+        box_from_file = self.chk_write_smina.isChecked() and self.radio_box_file.isChecked()
+        out_fmt = self.combo_out_fmt.currentData() or "cif"
+        start = plan_protein_prepare_start(
+            source_text=text,
+            source_fmt=fmt,
+            supported_formats=_PREPARE_FMTS,
+            output_path=(self.edit_out.text() or "").strip(),
+            output_format=out_fmt,
+            repair=run_repair,
+            protonate=run_protonate,
+            minimize=self.chk_minimize.isChecked(),
+            write_smina=self.chk_write_smina.isChecked(),
+            keep_selected_waters=self.chk_keep_selected_waters.isChecked(),
+            keep_water_keys=keep_water_keys,
+            include_ligand=self.chk_include_ligand.isChecked(),
+            ligand_ff=self.combo_ligand_ff.currentData() or "none",
+            ligand_smiles=self.edit_ligand_smiles.text(),
+            ligand_ref=self.edit_ligand_ref.text(),
+            protonate_ligand=self.chk_protonate_ligand.isChecked(),
+            box_from_file=box_from_file,
+            box_ligand_path=self._box_ligand_path() if box_from_file else "",
+            ligand_present=lambda: self._source_has_ligand(text, fmt),
+            cif_ligand_bonds=lambda: self._source_has_cif_ligand_bonds(text, fmt),
+            empty_source_message=self._source_empty_message,
+        )
+        if start.output_path:
+            self.edit_out.setText(start.output_path)
+        if start.message:
+            box = QMessageBox.warning if start.warning else QMessageBox.information
+            box(self, "Fast Prepare", start.message)
             return
-        if (
-            run_protonate
-            and self.chk_include_ligand.isChecked()
-            and self.chk_protonate_ligand.isChecked()
-            and not self.edit_ligand_smiles.text().strip()
-            and not self.edit_ligand_ref.text().strip()
-            and self._source_has_ligand(text, fmt)
-            and not self._source_has_cif_ligand_bonds(text, fmt)
-        ):
-            QMessageBox.information(
-                self,
-                "Fast Prepare",
-                "Ligand protonation needs SMILES, an SDF/MOL2, or mmCIF _chem_comp_bond "
-                "so Uni-pKa can pick the protomer at this pH. Add one, or uncheck "
-                "Protonate ligand (Uni-pKa).",
-            )
-            return
-        if self.chk_write_smina.isChecked() and self.radio_box_file.isChecked():
-            lig_file = self._box_ligand_path()
-            if not lig_file:
-                QMessageBox.information(
-                    self,
-                    "Fast Prepare",
-                    "Choose a ligand file for the docking box, or switch Box from "
-                    "to Loaded structure.",
-                )
-                return
-            if not Path(lig_file).expanduser().is_file():
-                QMessageBox.warning(
-                    self,
-                    "Fast Prepare",
-                    f"Ligand file not found:\n{lig_file}",
-                )
-                return
         try:
             in_path = self._write_input_snapshot()
         except (OSError, ValueError) as exc:
@@ -785,12 +714,10 @@ class ProteinPrepareDialog(ProteinStructureSourceMixin, QDialog):
             return
 
         box_source_text, box_source_fmt = self._box_source_payload()
-        extra = fixer_extra_request_kwargs(self)
-        if not run_repair:
-            extra["keep_highest_occupancy_altlocs"] = False
-        req = ProteinPrepareRequest(
+        req = build_protein_prepare_request(
             input_path=str(in_path),
-            output_pdb_path=out_path,
+            output_path=start.output_path,
+            output_format=out_fmt,
             ph=float(self.spin_ph.value()),
             rebuild_missing_loops=self.chk_rebuild_loops.isChecked(),
             include_ligand=self.chk_include_ligand.isChecked(),
@@ -800,31 +727,26 @@ class ProteinPrepareDialog(ProteinStructureSourceMixin, QDialog):
             repair=run_repair,
             protonate=run_protonate,
             minimize=self.chk_minimize.isChecked(),
-            ligand_smiles=self.edit_ligand_smiles.text().strip(),
-            ligand_ref_path=self.edit_ligand_ref.text().strip(),
-            protonate_ligand=run_protonate and self.chk_protonate_ligand.isChecked(),
-            pocket_ligand_protonation=run_protonate and self.chk_pocket_ligand.isChecked(),
+            ligand_smiles=self.edit_ligand_smiles.text(),
+            ligand_ref_path=self.edit_ligand_ref.text(),
+            protonate_ligand=self.chk_protonate_ligand.isChecked(),
+            pocket_ligand=self.chk_pocket_ligand.isChecked(),
             restraint_k_kcal_per_ang2=float(self.spin_k.value()),
             max_minimize_iterations=int(self.spin_iters.value()),
             protein_ff=self.combo_protein_ff.currentData() or "amber14",
-            ligand_ff=(
-                (self.combo_ligand_ff.currentData() or "none")
-                if self.chk_include_ligand.isChecked()
-                else "none"
-            ),
+            ligand_ff=self.combo_ligand_ff.currentData() or "none",
             solvent=self.combo_solvent.currentData() or "gbn2",
             openmm_platform=self.combo_openmm_platform.currentData() or "auto",
             salt_m=float(self.spin_salt.value()),
             restraint_set=self.combo_restraint.currentData() or "backbone",
             skip_pocket_loops=self.chk_skip_pocket_loops.isChecked(),
-            output_format=out_fmt,
             write_smina=self.chk_write_smina.isChecked(),
             box_padding=float(self.spin_box_padding.value()),
             box_ligand_keys=self._box_ligand_keys(),
             box_ligand_path=self._box_ligand_path(),
             box_source_text=box_source_text,
             box_source_fmt=box_source_fmt,
-            **extra,
+            extra=fixer_extra_request_kwargs(self),
         )
         self.btn_run.setEnabled(False)
         self.btn_open_smina.setEnabled(False)
