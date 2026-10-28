@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Tests for Chemistry → Prepare Structures → Align to Substructure."""
+"""Tests for Chemistry → Substructure → Align to Substructure."""
 
 from __future__ import annotations
 

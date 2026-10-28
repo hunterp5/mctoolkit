@@ -57,9 +57,11 @@ def _document_format(panel):
 
 def test_utilities_menu_opens_floating_notepad(qapp):  # noqa: ARG001
     window = ChemistryWorkspaceWindow()
-    action = next(
-        act for act in _tools_menu(window).actions() if act.text().replace("&", "") == "Notepad"
+    tools = _tools_menu(window)
+    utilities = next(
+        act.menu() for act in tools.actions() if act.text().replace("&", "") == "Utilities"
     )
+    action = next(act for act in utilities.actions() if act.text().replace("&", "") == "Notepad")
     action.trigger()
     host = window.session_notepad
     dialog = host.dialog

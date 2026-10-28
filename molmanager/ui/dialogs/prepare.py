@@ -14,7 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Chemistry → Prepare. Each box is optional; a run includes only the checked ones."""
+"""Chemistry → Structure Preparation → Preparation Menu.
+
+Each box starts off; a run includes only the checked ones.
+"""
 
 from __future__ import annotations
 
@@ -79,8 +82,8 @@ class PrepareDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("Prepare")
-        self.setMinimumWidth(460)
-        self.resize(480, 640)
+        self.setMinimumWidth(480)
+        self.resize(500, 680)
         self._existing = list(existing_headers)
         self._have_selection = selected_row_count > 0
         self._selected_row_count = selected_row_count
@@ -148,15 +151,11 @@ class PrepareDialog(QDialog):
         body.addWidget(output)
 
     def _build_options(self, body: QVBoxLayout) -> None:
-        options = QGroupBox("Options")
-        layout = QVBoxLayout(options)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(4)
-
+        options, layout = self._section("Options")
         self.standardize_cb = self._check(
             layout,
             "Standardize",
-            True,
+            False,
             "Remove explicit hydrogens, disconnect metal–organic bonds, normalize "
             "functional groups, and reionize. Reionize moves a proton between equivalent "
             "sites. It does not set a pH 7.4 form.",
@@ -164,14 +163,14 @@ class PrepareDialog(QDialog):
         self.fragment_cb = self._check(
             layout,
             "Largest organic fragment",
-            True,
+            False,
             "Keep the largest organic piece. Salts and other pieces are written to the "
             "fragments column.",
         )
         self.tautomer_cb = self._check(
             layout,
             "Canonical tautomer",
-            True,
+            False,
             "Map equivalent tautomers onto one representation. The search stops after "
             "100 transforms, so a very large molecule may differ from an exhaustive "
             "tautomer. RDKit drops tetrahedral and double-bond stereo while doing this.",
@@ -179,32 +178,35 @@ class PrepareDialog(QDialog):
         self.render_cb = self._check(
             layout,
             "Render 2D",
-            True,
+            False,
             "Redraw the prepared structures. The current orientation is kept when "
             "the atom count does not change.",
         )
+        body.addWidget(options)
+
+        charge, charge_layout = self._section("Protonation and neutralization")
         self.neutralize_cb = self._check(
-            layout,
+            charge_layout,
             "Neutralize",
             False,
             "Zero the net formal charge with RDKit Uncharger. This does not set a "
             "physiological protonation state.",
         )
         self.protonate_cb = self._check(
-            layout,
+            charge_layout,
             "Protonate",
             False,
             "Write the dominant protomer at the chosen pH. This replaces Neutralize.",
         )
-        self.protonate_ph = self._ph_row(layout, "Protonate pH:")
+        self.protonate_ph = self._ph_row(charge_layout, "Protonate pH:")
         self.protomers_cb = self._check(
-            layout,
+            charge_layout,
             "Generate protomers",
             False,
             "Enumerate protomers at the chosen pH and show them so you can add rows. "
             "An output file is optional.",
         )
-        self.protomer_ph = self._ph_row(layout, "Protomer pH:")
+        self.protomer_ph = self._ph_row(charge_layout, "Protomer pH:")
         file_row = QHBoxLayout()
         self.protomer_file = QLineEdit()
         self.protomer_file.setPlaceholderText("Optional SDF or CSV")
@@ -216,26 +218,30 @@ class PrepareDialog(QDialog):
         self.protomer_browse.clicked.connect(self._browse_protomer_file)
         file_row.addWidget(self.protomer_file, 1)
         file_row.addWidget(self.protomer_browse)
-        layout.addLayout(file_row)
+        charge_layout.addLayout(file_row)
+        body.addWidget(charge)
+
+        hydrogens, hydrogen_layout = self._section("Explicit hydrogens and isotope labels")
         self.add_h_cb = self._check(
-            layout,
+            hydrogen_layout,
             "Add explicit hydrogens",
             False,
             "Draw valence hydrogens as atoms. Formal charge and protonation stay the same.",
         )
         self.remove_h_cb = self._check(
-            layout,
+            hydrogen_layout,
             "Remove explicit hydrogens",
             False,
             "Hide explicit valence hydrogens. Formal charge and protonation stay the same.",
         )
         self.isotope_cb = self._check(
-            layout,
+            hydrogen_layout,
             "Remove isotope labels",
             False,
             "Clear mass numbers such as deuterium. A labeled analog is left unchanged "
             "while this is off.",
         )
+        body.addWidget(hydrogens)
 
         self.neutralize_cb.toggled.connect(self._on_neutralize)
         self.protonate_cb.toggled.connect(self._on_protonate)
@@ -247,7 +253,13 @@ class PrepareDialog(QDialog):
             self.protomers_cb,
         ):
             box.toggled.connect(self._sync_enabled_fields)
-        body.addWidget(options)
+
+    def _section(self, title: str) -> tuple[QGroupBox, QVBoxLayout]:
+        box = QGroupBox(title)
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+        return box, layout
 
     def _check(self, layout: QVBoxLayout, text: str, checked: bool, tip: str) -> QCheckBox:
         box = QCheckBox(text)

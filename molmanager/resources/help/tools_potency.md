@@ -24,7 +24,7 @@ A numeric data column and a unit column. The unit column holds the unit for each
 
 ## Workflow
 
-1. Open **Tools → Potency Standardization**.
+1. Open **Tools → Utilities → Potency Standardization**.
 2. Choose the data column and the column that stores each row's unit.
 3. Leave molecular weight on **From structure**, or pick a g/mol column when the table already has one.
 4. Choose nM or uM, leave pActivity checked when you want it, and turn on Cheng–Prusoff only when the assay concentrations are known.

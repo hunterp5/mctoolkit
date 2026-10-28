@@ -1,6 +1,6 @@
 # Align to Substructure
 
-Align to Substructure redraws matching rows so a substructure you supply sits in one shared orientation. Rows that do not contain the query are left as they are.
+**Chemistry → Substructure → Align to Substructure** redraws matching rows so a substructure you supply sits in one shared orientation. Rows that do not contain the query are left as they are.
 
 ## Goal
 

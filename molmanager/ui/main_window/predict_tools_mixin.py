@@ -502,7 +502,7 @@ class PredictToolsMixin:
             QMessageBox.information(
                 self,
                 TOOL_RETROSYNTHESIS,
-                "Run Retrosynthesis → Search first. Routes from that search stay available "
+                "Run Reaction → Retrosynthesis → Search first. Routes from that search stay available "
                 "until you close MolManager.",
             )
             return

@@ -44,13 +44,28 @@ def test_prepare_dialog_defaults_and_exclusions(qapp):  # noqa: ARG001
     from molmanager.ui.dialogs.prepare import PrepareDialog
 
     dialog = PrepareDialog(["Structure", "SMILES"], ["Structure", "SMILES"], 2)
-    assert dialog.standardize_cb.isChecked()
-    assert dialog.fragment_cb.isChecked()
-    assert dialog.tautomer_cb.isChecked()
-    assert dialog.render_cb.isChecked()
-    assert dialog.neutralize_cb.isChecked() is False
-    assert dialog.protonate_cb.isChecked() is False
+    boxes = (
+        dialog.standardize_cb,
+        dialog.fragment_cb,
+        dialog.tautomer_cb,
+        dialog.render_cb,
+        dialog.neutralize_cb,
+        dialog.protonate_cb,
+        dialog.protomers_cb,
+        dialog.add_h_cb,
+        dialog.remove_h_cb,
+        dialog.isotope_cb,
+    )
+    assert all(box.isChecked() is False for box in boxes)
     assert dialog.protomer_file.text() == ""
+    assert dialog.standardize_cb.parent().title() == "Options"
+    assert dialog.neutralize_cb.parent().title() == "Protonation and neutralization"
+    assert dialog.protonate_cb.parent() is dialog.neutralize_cb.parent()
+    assert dialog.protomers_cb.parent() is dialog.neutralize_cb.parent()
+    assert dialog.protonate_ph.parent() is dialog.neutralize_cb.parent()
+    assert dialog.add_h_cb.parent().title() == "Explicit hydrogens and isotope labels"
+    assert dialog.remove_h_cb.parent() is dialog.add_h_cb.parent()
+    assert dialog.isotope_cb.parent() is dialog.add_h_cb.parent()
     dialog.neutralize_cb.setChecked(True)
     dialog.protonate_cb.setChecked(True)
     assert dialog.neutralize_cb.isChecked() is False
@@ -58,10 +73,10 @@ def test_prepare_dialog_defaults_and_exclusions(qapp):  # noqa: ARG001
     dialog.remove_h_cb.setChecked(True)
     assert dialog.add_h_cb.isChecked() is False
     cfg = dialog.config()
-    assert cfg.standardize is True
-    assert cfg.largest_fragment is True
-    assert cfg.canonical_tautomer is True
-    assert cfg.render_2d is True
+    assert cfg.standardize is False
+    assert cfg.largest_fragment is False
+    assert cfg.canonical_tautomer is False
+    assert cfg.render_2d is False
     assert cfg.protonate is True
     assert cfg.explicit_hydrogens == "remove"
 

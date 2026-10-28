@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Fast Prepare adapter bound on ``WorkspaceTools.structure_prep`` (not a window base)."""
+"""Prepare and Fast Prepare, bound on ``WorkspaceTools.structure_prep``."""
 
 from __future__ import annotations
 
@@ -25,26 +25,44 @@ from ..analysis_job_support import enqueue_process_queue_job
 
 
 class FastPrepareToolsMixin:
-    def run_fast_prepare(self) -> None:
-        if not self.headers or not self.mols:
-            return
+    def run_prepare(self) -> None:
+        """Open Chemistry → Structure Preparation → Preparation Menu.
+
+        Every standardization step starts unchecked.
+        """
         from ..dialogs.prepare import PrepareDialog
 
+        self._open_prepare_dialog(PrepareDialog, "Prepare")
+
+    def run_fast_prepare(self) -> None:
+        """Open Chemistry → Structure Preparation → Fast Prepare.
+
+        Largest fragment, optional neutralize, and redraw.
+        """
+        from ..dialogs.fast_prepare import FastPrepareDialog
+
+        self._open_prepare_dialog(FastPrepareDialog, "Fast Prepare")
+
+    def _open_prepare_dialog(self, dialog_cls, tool_name: str) -> None:
+        if not self.headers or not self.mols:
+            return
         candidates = self.chemistry_tool_structure_sources()
         n_sel = len(self._selected_logical_rows())
-        dlg = PrepareDialog(candidates, self.headers, n_sel, self)
+        dlg = dialog_cls(candidates, self.headers, n_sel, self)
         self._prepare_tool_dialog(dlg)
         dlg.setAttribute(Qt.WA_DeleteOnClose, True)
-        dlg.accepted.connect(lambda *_, d=dlg: self._on_fast_prepare_dialog_accepted(d))
+        dlg.accepted.connect(
+            lambda *_, d=dlg, name=tool_name: self._on_fast_prepare_dialog_accepted(d, name)
+        )
         dlg.show()
 
-    def _on_fast_prepare_dialog_accepted(self, dlg) -> None:
+    def _on_fast_prepare_dialog_accepted(self, dlg, tool_name: str = "Prepare") -> None:
         from ...workflows.macro_record import fast_prepare_step
         from ..command_dispatch import dispatch_step
 
         cfg = dlg.config()
         allowed = self._selected_oids_set() if cfg.only_selected else None
-        if self._abort_if_only_selected_but_empty(cfg.only_selected, allowed, "Prepare"):
+        if self._abort_if_only_selected_but_empty(cfg.only_selected, allowed, tool_name):
             return
         dispatch_step(self, fast_prepare_step(cfg), {})
 
@@ -88,6 +106,10 @@ class FastPrepareToolsMixin:
         from ..job_signals import FastPrepareJobSignals, release_job_signals, retain_job_signals
         from ..macro_recorder import report_unless_replaying
 
+        options = options_from_prepare_params(params)
+        legacy = options is None
+        tool_name = "Fast Prepare" if legacy else "Prepare"
+        progress_name = "Fast prepare" if legacy else "Prepare"
         source = str(params.get("structure_source") or "").strip()
         update_target = bool(params.get("update_target", True))
         largest = params.get("largest_column")
@@ -98,7 +120,7 @@ class FastPrepareToolsMixin:
             self.status_label.setText("Ready.")
             if on_done is not None:
                 on_done(message, {})
-            report_unless_replaying(self, "Prepare", message)
+            report_unless_replaying(self, tool_name, message)
             return
         data = self._collect_fast_prepare_items(source, allowed)
         if not data:
@@ -106,9 +128,8 @@ class FastPrepareToolsMixin:
             self.status_label.setText("Ready.")
             if on_done is not None:
                 on_done(message, {})
-            report_unless_replaying(self, "Prepare", message, warning=False)
+            report_unless_replaying(self, tool_name, message, warning=False)
             return
-        options = options_from_prepare_params(params)
         render = (
             prepare_col == "Structure"
             if "render_2d" not in params
@@ -141,15 +162,21 @@ class FastPrepareToolsMixin:
             process_pool_min_rows=int(cfg.fast_prepare_process_pool_min_rows),
             want_scene=want_scene,
         )
+        renders = (
+            True
+            if legacy
+            else bool(want_scene or (render and after is None and prepare_col != "Structure"))
+        )
         job = _FastPrepareJob(
             prepare_col,
             fragments,
             update_target,
             on_done,
             write_fragments=True
-            if options is None
+            if legacy
             else bool(molecule_options and molecule_options.largest_fragment),
-            render_2d=want_scene or (render and after is None and prepare_col != "Structure"),
+            render_2d=renders,
+            progress_name=progress_name,
         )
         sig = FastPrepareJobSignals(self)
         retain_job_signals(self, sig)
@@ -180,12 +207,12 @@ class FastPrepareToolsMixin:
         job.on_done = _chained
         enqueue_process_queue_job(
             self,
-            "Fast prepare",
+            progress_name,
             len(data),
             lambda ev, ps, d=data, p=worker_params, s=sig: FastPrepareWorker(
                 d, p, s, cancel_event=ev, progress_state=ps
             ),
-            queue_label="Prepare: structures",
+            queue_label=("Fast prepare: prepare structures" if legacy else "Prepare: structures"),
         )
 
     def _enqueue_fast_prepare(
@@ -286,9 +313,9 @@ class FastPrepareToolsMixin:
         )
         job.written_oids.extend(oids)
         if fragments_col in self.headers:
-            self._table_model.set_column_text_by_oids(
-                fragments_col, [(oid, fragments) for oid, _blob, fragments, _smiles in prepared]
-            )
+            pairs = [(oid, fragments) for oid, _blob, fragments, _smiles in prepared]
+            self._table_model.set_column_text_by_oids(fragments_col, pairs)
+            job.fragment_pairs.extend(pairs)
         depiction = getattr(self, "_depiction_coords", None)
         if depiction is not None and coords:
             # Writeback drops the previous orientation. These are the coordinates the scene used,
@@ -349,14 +376,32 @@ class FastPrepareToolsMixin:
         # Scenes already cover the Structure rows. Only the builder's leftovers are redrawn,
         # and they still have the coordinates just stored, so that redraw keeps the layout.
         redraw = fallbacks if structure_scenes else written
-        if (
+        label = job.progress_name
+        rendered_dest = bool(
             job.render_2d
             and redraw
-            and self._render_tool_structures(prepare_col, redraw, queue_title_prefix="Prepare: ")
+            and self._render_tool_structures(
+                prepare_col, redraw, queue_title_prefix=f"{label}: ", serial=True
+            )
+        )
+        fragments_col = job.fragments_col
+        if (
+            job.write_fragments
+            and fragments_col
+            and fragments_col != prepare_col
+            and job.fragment_pairs
         ):
-            self.status_label.setText("Prepare: rendering 2D…")
+            depict = getattr(self, "_queue_generated_structure_renders", None)
+            if callable(depict):
+                depict(
+                    [fragments_col],
+                    {oid for oid, _text in job.fragment_pairs},
+                    [(oid, {fragments_col: text}) for oid, text in job.fragment_pairs],
+                )
+        if rendered_dest:
+            self.status_label.setText(f"{label}: rendering 2D…")
             return
-        self.status_label.setText(self._consume_partial_results_notice() or "Prepare done.")
+        self.status_label.setText(self._consume_partial_results_notice() or f"{label} done.")
 
     def _after_prepare_write(self, params, allowed, column, after, on_done, outputs) -> None:
         """Run protonation, the edits that follow it, then the optional side tools."""
@@ -451,6 +496,7 @@ class _FastPrepareJob:
         *,
         write_fragments: bool = True,
         render_2d: bool = True,
+        progress_name: str = "Fast prepare",
     ):
         self.prepare_col = prepare_col
         self.fragments_col = fragments_col
@@ -458,6 +504,7 @@ class _FastPrepareJob:
         self.on_done = on_done
         self.write_fragments = bool(write_fragments)
         self.render_2d = bool(render_2d)
+        self.progress_name = progress_name
         self.applying = False
         self.settled = False
         self.apply_col = prepare_col
@@ -465,3 +512,4 @@ class _FastPrepareJob:
         self.apply_update = bool(update_target)
         self.fallback_oids: list[int] = []
         self.written_oids: list[int] = []
+        self.fragment_pairs: list[tuple[int, str]] = []

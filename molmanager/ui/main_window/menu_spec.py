@@ -234,6 +234,55 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
     submenu(
         "&Tools",
         submenu(
+            "&Utilities",
+            submenu(
+                "&Random",
+                action(
+                    "Number…",
+                    "open_random_number_dialog",
+                    tooltip=(
+                        "Fill a column with random numbers (uniform, integer, or normal) "
+                        "for all or selected rows."
+                    ),
+                ),
+                action(
+                    "Molecule…",
+                    "open_random_molecule_dialog",
+                    tooltip=(
+                        "Fetch random small molecules from ChEMBL, PubChem, or ZINC and add them "
+                        "to the table."
+                    ),
+                ),
+                tooltips_visible=True,
+            ),
+            action(
+                "Calculator…",
+                "open_calculator",
+                hotkey="tools.calculator",
+                attr="_act_custom_calc",
+                tooltip="Add a numeric column from a math expression using existing column names (e.g. sqrt, log10, exp).",
+            ),
+            action(
+                "Potency Standardization…",
+                "open_potency_standardization",
+                tooltip=(
+                    "Convert an activity column to nM or uM, with optional pActivity. "
+                    "Mass/volume units use molecular weight. "
+                    "IC50 can become Ki with Cheng–Prusoff when assay concentrations are known."
+                ),
+            ),
+            action(
+                "&Notepad",
+                "open_notepad",
+                tooltip=(
+                    "Open a floating notepad for session notes. Dock it like a plot or browser. "
+                    "Size, color, and style stay independent of Settings → GUI → Font."
+                ),
+            ),
+            tooltips_visible=True,
+        ),
+        SEPARATOR,
+        submenu(
             "Query &Database",
             action("PubChem…", "open_pubchem"),
             action("ChEMBL…", "open_chembl"),
@@ -251,33 +300,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltips_visible=True,
         ),
         SEPARATOR,
-        submenu(
-            "&Random",
-            action(
-                "Number…",
-                "open_random_number_dialog",
-                tooltip=(
-                    "Fill a column with random numbers (uniform, integer, or normal) "
-                    "for all or selected rows."
-                ),
-            ),
-            action(
-                "Molecule…",
-                "open_random_molecule_dialog",
-                tooltip=(
-                    "Fetch random small molecules from ChEMBL, PubChem, or ZINC and add them "
-                    "to the table."
-                ),
-            ),
-            tooltips_visible=True,
-        ),
-        action(
-            "Calculator…",
-            "open_calculator",
-            hotkey="tools.calculator",
-            attr="_act_custom_calc",
-            tooltip="Add a numeric column from a math expression using existing column names (e.g. sqrt, log10, exp).",
-        ),
         action(
             "Macros…",
             "open_macros",
@@ -285,23 +307,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltip=(
                 "Run or record a sequence of table tools: descriptors, calculator, "
                 "filters, structure preparation, enumeration, potency, and plots."
-            ),
-        ),
-        action(
-            "Potency Standardization…",
-            "open_potency_standardization",
-            tooltip=(
-                "Convert an activity column to nM or uM, with optional pActivity. "
-                "Mass/volume units use molecular weight. "
-                "IC50 can become Ki with Cheng–Prusoff when assay concentrations are known."
-            ),
-        ),
-        action(
-            "&Notepad",
-            "open_notepad",
-            tooltip=(
-                "Open a floating notepad for session notes. Dock it like a plot or browser. "
-                "Size, color, and style stay independent of Settings → GUI → Font."
             ),
         ),
         SEPARATOR,
@@ -333,23 +338,29 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             ),
         ),
         SEPARATOR,
-        action(
-            "&Prepare…",
-            "run_fast_prepare",
-            hotkey="tools.render_2d",
-            tooltip=(
-                "Choose which standardization steps to apply: cleanup, the organic parent, "
-                "tautomers, charge, hydrogens, protomers, and 2D rendering."
+        submenu(
+            "Structure Preparation",
+            action(
+                "&Preparation Menu…",
+                "run_prepare",
+                hotkey="tools.render_2d",
+                tooltip=(
+                    "Choose which standardization steps to apply. Every step starts off: "
+                    "cleanup, the organic parent, tautomers, charge, hydrogens, protomers, "
+                    "and 2D rendering."
+                ),
             ),
-        ),
-        action(
-            "Align to Substructure…",
-            "run_align_substructure",
-            tooltip=(
-                "Redraw matching rows so a substructure you supply sits in one "
-                "shared orientation. Rows that do not match are left unchanged."
+            action(
+                "Fast Prepare…",
+                "run_fast_prepare",
+                tooltip=(
+                    "Disconnect largest fragment, optionally neutralize, and redraw 2D "
+                    "images in one background job."
+                ),
             ),
+            tooltips_visible=True,
         ),
+        SEPARATOR,
         submenu(
             "&Conformations",
             submenu(
@@ -403,7 +414,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "open_bemis_murcko",
                 tooltip=(
                     "Write the Bemis–Murcko scaffold, framework, ring systems, "
-                    "and how many rows share each scaffold."
+                    "and a scaffold ID shared by matching rows."
                 ),
             ),
             action(
@@ -412,6 +423,14 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 tooltip=(
                     "Find a maximum common substructure over the rows, "
                     "and mark the structures that do not contain it."
+                ),
+            ),
+            action(
+                "Align to Substructure…",
+                "run_align_substructure",
+                tooltip=(
+                    "Redraw matching rows so a substructure you supply sits in one "
+                    "shared orientation. Rows that do not match are left unchanged."
                 ),
             ),
             tooltips_visible=True,
@@ -455,13 +474,13 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             action(
                 "Core-Based…",
                 "open_core_based_decomposition",
-                tooltip="Decompose structures against a labeled core scaffold (substituent columns).",
+                tooltip="Decompose structures against a labeled core and draw the substituent columns.",
             ),
             action(
                 "Most Central Ring…",
                 "open_central_ring_decomposition",
                 tooltip=(
-                    "Split each structure around its most central ring and write the substituents "
+                    "Split each structure around its most central ring and draw the substituents "
                     "as R groups. Fused, bridged, and spiro rings that share atoms with that ring "
                     "stay in the core."
                 ),
@@ -469,12 +488,12 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             action(
                 "BRICS…",
                 "open_brics_decomposition",
-                tooltip="Split structures into BRICS retrosynthetic fragments (new SMILES columns).",
+                tooltip="Split structures into BRICS fragments and draw each new column.",
             ),
             action(
                 "RECAP…",
                 "open_recap_decomposition",
-                tooltip="Split structures into RECAP retrosynthetic fragments (new SMILES columns).",
+                tooltip="Split structures into RECAP fragments and draw each new column.",
             ),
             tooltips_visible=True,
         ),
@@ -510,53 +529,36 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltips_visible=True,
         ),
         submenu(
-            "REINVENT",
+            "&Reaction",
             action(
-                "Sampling…",
-                "open_reinvent_sampling",
+                "Extract Reaction Info…",
+                "open_reaction_extract",
                 tooltip=(
-                    "Sample molecules with a local REINVENT 4 install "
-                    "(de novo, R-groups, linkers, or similar molecules) "
-                    "and open them in a results browser."
+                    "Split a reaction SMARTS / SMIRKS column into reactant and product columns "
+                    "and draw each one."
                 ),
             ),
-            action(
-                "Learning…",
-                "open_reinvent_learning",
-                tooltip=(
-                    "Run one REINVENT 4 reinforcement-learning stage against RDKit scores "
-                    "and open the best molecules in a results browser."
+            submenu(
+                "&Retrosynthesis",
+                action(
+                    "Search…",
+                    "open_aizynthfinder",
+                    tooltip=(
+                        "Plan routes with a local AiZynthFinder install "
+                        "(Settings → Configure → AiZynthFinder)."
+                    ),
                 ),
+                action(
+                    "Routes…",
+                    "open_aizynth_routes",
+                    tooltip="Browse routes from the latest AiZynthFinder search.",
+                    attr="_act_aizynth_routes",
+                    enabled=False,
+                ),
+                tooltips_visible=True,
+                about_to_show="_sync_retrosynthesis_actions",
             ),
             tooltips_visible=True,
-        ),
-        action(
-            "Extract Reaction Info…",
-            "open_reaction_extract",
-            tooltip=(
-                "Split a reaction SMARTS / SMIRKS column into individual reactant and/or "
-                "product columns."
-            ),
-        ),
-        submenu(
-            "&Retrosynthesis",
-            action(
-                "Search…",
-                "open_aizynthfinder",
-                tooltip=(
-                    "Plan routes with a local AiZynthFinder install "
-                    "(Settings → Configure → AiZynthFinder)."
-                ),
-            ),
-            action(
-                "Routes…",
-                "open_aizynth_routes",
-                tooltip="Browse routes from the latest AiZynthFinder search.",
-                attr="_act_aizynth_routes",
-                enabled=False,
-            ),
-            tooltips_visible=True,
-            about_to_show="_sync_retrosynthesis_actions",
         ),
         tooltips_visible=True,
     ),
@@ -698,7 +700,7 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 tooltip="Train regression or classification models on activity vs descriptors or fingerprints.",
             ),
             action(
-                "AutoQSAR…",
+                "Quick QSAR…",
                 "open_auto_qsar_dialog",
                 tooltip=(
                     "Search descriptors and models for an activity column, then write predictions."

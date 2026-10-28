@@ -307,6 +307,7 @@ def test_chemistry_workspace_window_collaborators_and_mro(qapp) -> None:  # noqa
     assert w.plot_dock is w.plot_dock
     assert hasattr(w, "_open_dimension_reduction_dialog")
     assert hasattr(w, "run_protonate")
+    assert hasattr(w, "run_prepare")
     assert hasattr(w, "run_fast_prepare")
     assert hasattr(w, "run_disconnect_fragments")
     assert hasattr(w, "run_neutralize")

@@ -759,7 +759,7 @@ def test_cell_click_clears_entries_but_right_click_in_selection_keeps_them(qapp)
 def test_select_all_selects_shown_entries(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     _seed_rows(w, 4)
-    w.table.setRowHidden(3, True)
+    w._filter_proxy_model.set_visible_oids(frozenset({0, 1, 2}))
     w.table.selectAll()
     assert w._selected_oids_set() == {0, 1, 2}
     assert not w.table.selectionModel().hasSelection()
@@ -1435,18 +1435,31 @@ def test_tools_menu_nests_superpose_under_conformations(qapp):  # noqa: ARG001
     w.close()
 
 
-def test_prepare_is_one_chemistry_command(qapp):  # noqa: ARG001
+def test_prepare_and_fast_prepare_are_chemistry_commands(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     mb = w.menuBar()
     tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Chemistry")
     labels = [a.text().replace("&", "") for a in tools.actions()]
-    assert "Prepare…" in labels
-    assert "Prepare Structures" not in labels
+    assert "Prepare…" not in labels
     assert "Fast Prepare…" not in labels
+    assert "Prepare Structures" not in labels
+    prep_at = labels.index("Structure Preparation")
+    assert labels[prep_at + 1] == ""
+    assert labels[prep_at + 2] == "Conformations"
+    prep = next(
+        a.menu() for a in tools.actions() if a.text().replace("&", "") == "Structure Preparation"
+    )
+    assert [a.text().replace("&", "") for a in prep.actions()] == [
+        "Preparation Menu…",
+        "Fast Prepare…",
+    ]
     predict = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "Predict")
     predict_labels = [a.text().replace("&", "") for a in predict.actions()]
     assert "pKa…" in predict_labels
-    assert "Align to Substructure…" in labels
+    assert "Align to Substructure…" not in labels
+    sub = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "Substructure")
+    sub_labels = [a.text().replace("&", "") for a in sub.actions()]
+    assert sub_labels == ["Bemis–Murcko…", "Common Core…", "Align to Substructure…"]
     w.close()
 
 
@@ -1455,20 +1468,24 @@ def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
     mb = w.menuBar()
     tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Chemistry")
     labels = [a.text().replace("&", "") for a in tools.actions()]
-    assert "Reaction" not in labels
     assert "Extract Info…" not in labels
+    assert "Extract Reaction Info…" not in labels
+    assert "Retrosynthesis" not in labels
     assert "Reaction Based…" not in labels
     assert labels.index("Structure Decomposition") == labels.index("Predict") + 1
     assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
-    assert labels.index("REINVENT") == labels.index("Structure Enumeration") + 1
-    assert labels.index("Extract Reaction Info…") == labels.index("REINVENT") + 1
-    reinvent = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "REINVENT")
-    reinvent_labels = [a.text().replace("&", "") for a in reinvent.actions()]
-    assert reinvent_labels == ["Sampling…", "Learning…"]
+    assert labels.index("Reaction") == labels.index("Structure Enumeration") + 1
+    reaction = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "Reaction")
+    reaction_labels = [a.text().replace("&", "") for a in reaction.actions()]
+    assert reaction_labels == ["Extract Reaction Info…", "Retrosynthesis"]
     extract = next(
-        a for a in tools.actions() if a.text().replace("&", "") == "Extract Reaction Info…"
+        a for a in reaction.actions() if a.text().replace("&", "") == "Extract Reaction Info…"
     )
     assert extract.menu() is None
+    retrosynthesis = next(
+        a.menu() for a in reaction.actions() if a.text().replace("&", "") == "Retrosynthesis"
+    )
+    assert [a.text().replace("&", "") for a in retrosynthesis.actions()] == ["Search…", "Routes…"]
     decomp = next(
         a.menu() for a in tools.actions() if a.text().replace("&", "") == "Structure Decomposition"
     )

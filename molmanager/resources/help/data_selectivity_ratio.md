@@ -24,7 +24,7 @@ Log selectivity is primary pActivity minus off-target pActivity. A value of 1 is
 
 ## Workflow
 
-1. Standardize assays to a p-scale with **Tools → Potency Standardization** when the source values are still IC50 or Ki.
+1. Standardize assays to a p-scale with **Tools → Utilities → Potency Standardization** when the source values are still IC50 or Ki.
 2. Open **Data → Selectivity Ratio** and choose the primary column and the off-targets.
 3. Read `logSel vs …` for each off-target. Positive means more potent on the primary assay.
 4. Filter **Narrow window** for `yes` to find potent rows that are not yet selective.

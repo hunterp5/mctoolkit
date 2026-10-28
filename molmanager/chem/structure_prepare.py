@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Optional structure-preparation edits used by Chemistry → Prepare.
+"""Optional structure-preparation edits used by the Preparation Menu.
 
 Each flag is independent. When several are on, they run in an order that keeps
 each one meaningful: standardize, largest organic fragment, neutralize,

@@ -302,17 +302,15 @@ The table, sketcher, RDKit descriptors, and stochastic conformers do not need an
 |------|---------|----------------|---------------------------|
 | WSL | Windows host for Gnina and AmberTools | WSL | `MOLMANAGER_TOOL_WSL` |
 | AmberTools | GAFF / GAFF2 minimization | AmberTools | `MOLMANAGER_TOOL_AMBER` |
-| AiZynthFinder | Chemistry → Retrosynthesis | AiZynthFinder | `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG` |
+| AiZynthFinder | Chemistry → Reaction → Retrosynthesis | AiZynthFinder | `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG` |
 | Java | BioTransformer | Java | `MOLMANAGER_TOOL_JAVA` |
 | BioTransformer | Chemistry → Predict → Metabolites | BioTransformer | `MOLMANAGER_BIOTRANSFORMER_JAR` (environment variable; checked before the saved path) |
 | CONFORGE | Conformations → Generate → CONFORGE | CONFORGE | `MOLMANAGER_TOOL_CONFGEN` |
 | Gnina | Protein → Dock Ligand | Gnina | `MOLMANAGER_TOOL_GNINA` |
 | MAFFT | Protein → Sequence | MAFFT | `MOLMANAGER_TOOL_MAFFT` |
 | Open Babel | Conformations → Generate → Systematic | Open Babel | `MOLMANAGER_TOOL_OBABEL` |
-| REINVENT | Chemistry → REINVENT → Sampling and Learning | REINVENT | `MOLMANAGER_TOOL_REINVENT` |
-| xtb | Calculate Descriptors → Electronic | xtb | `MOLMANAGER_TOOL_XTB` |
 
-AiZynthFinder and REINVENT must stay in their own conda environments. Installing either into `.venv` breaks MolManager’s NumPy and RDKit pins.
+AiZynthFinder must stay in its own conda environment. Installing it into `.venv` breaks MolManager’s NumPy and RDKit pins.
 
 ### WSL (Windows)
 
@@ -348,16 +346,16 @@ OpenMM stays in the MolManager environment (`pip install "openmm>=8.2,<8.3"`, al
 
 ### AiZynthFinder
 
-**Chemistry → Retrosynthesis → Search**. Release 4.4.1 needs RDKit 2023.x, so it cannot use MolManager’s interpreter (RDKit 2025.9 or newer).
+**Chemistry → Reaction → Retrosynthesis → Search**. Release 4.4.1 needs RDKit 2023.x, so it cannot use MolManager’s interpreter (RDKit 2025.9 or newer).
 
 ```bash
 conda create -n aizynth python=3.11
 conda activate aizynth
 python -m pip install aizynthfinder "pyarrow>=19,<26"
-download_public_data ~/aizynth-data
+python scripts/bootstrap_aizynth_data.py ~/aizynth-data
 ```
 
-`download_public_data` writes `config.yml` plus the public USPTO models, templates, and `zinc_stock.hdf5` (about 1.8 GB). Python must be 3.10, 3.11, or 3.12. AiZynthFinder 4.4.1 stays on NumPy 1.26, and PyArrow 26 will not import on that NumPy.
+`bootstrap_aizynth_data.py` writes `config.yml` plus the public USPTO models, templates, and `zinc_stock.hdf5` from Zenodo (about 1.5 GB). **Settings → Configure → AiZynthFinder → Download…** does the same thing. AiZynthFinder's `download_public_data` fetches the ZINC stock from a Figshare link that expires after 10 seconds, so the stock download fails and `config.yml` is never written. Python must be 3.10, 3.11, or 3.12. AiZynthFinder 4.4.1 stays on NumPy 1.26, and PyArrow 26 will not import on that NumPy.
 
 **Settings → Configure → AiZynthFinder:**
 
@@ -454,43 +452,6 @@ Open Babel is already a project dependency (`openbabel` in `requirements-core.tx
 
 MolManager sets `BABEL_LIBDIR` and `BABEL_DATADIR` from that executable. The pip wheel’s import would otherwise point those variables at folders that do not contain `UFF.prm` on Windows, and Confab then fails.
 
-### REINVENT 4
-
-**Chemistry → REINVENT → Sampling** and **Learning**. REINVENT pins its own NumPy, pandas, and PyTorch, so it cannot share the MolManager environment. **Test** refuses MolManager’s Python.
-
-Processor names below are PyTorch index names: `cpu`, a CUDA tag such as `cu126` when the driver matches, or `mac` on Apple silicon.
-
-```bash
-git clone --depth 1 https://github.com/MolecularAI/REINVENT4.git
-conda create --name reinvent4 python=3.11
-conda activate reinvent4
-cd REINVENT4
-python install.py cpu
-reinvent -V
-```
-
-The installer puts `reinvent` on that environment’s `PATH` (`Scripts\reinvent.exe` on Windows, `bin/reinvent` on Linux and macOS).
-
-Public priors are a separate download ([doi:10.5281/zenodo.15641296](https://doi.org/10.5281/zenodo.15641296)). Place them in that install’s `priors` folder. The preset ids MolManager offers are `.reinvent`, `.libinvent`, `.linkinvent`, and `.m2m_similarity`. Those names resolve to files in that folder. A full path to a `.prior` file also works.
-
-**Settings → Configure → REINVENT** — browse to that environment’s `reinvent` command. A blank field uses `reinvent` on the `PATH` MolManager inherited, which is empty unless the environment was already active. Prefer the full path. **Test** runs `reinvent -V`. In the sampling and learning dialogs, **Device** is `cpu` or `cuda:0`. `cuda:0` needs a CUDA install (`python install.py cu126`, or the tag that matches the driver).
-
-### xtb
-
-**Calculate Descriptors → Electronic** writes **HOMO (eV)**, **LUMO (eV)**, and **HOMO-LUMO gap (eV)**. The single point uses the lowest-energy conformer in **confs** when that column exists. A 2D structure is embedded once (ETKDG) and minimized with MMFF94 (UFF fallback) for the single point only. xtb does not reoptimize that geometry.
-
-Install the binary from [GitHub](https://github.com/grimme-lab/xtb) or conda:
-
-```bash
-conda install -c conda-forge xtb
-```
-
-On Windows, use the release `xtb.exe`. You can copy `xtb` or `xtb.exe` into `molmanager/resources/bin/<platform>/`.
-
-When no binary is configured, MolManager uses the `tblite` package in the MolManager environment (`pip install tblite`). The binary is preferred when both are present.
-
-**Settings → Configure → xtb** — a full path, or blank to use `PATH` and then a bundled copy. **Test** expects a version line from the binary. With the field blank and only `tblite` installed, **Test** reports the Python package.
-
 ### Packages in the MolManager environment
 
 These are not Configure pages.
@@ -509,7 +470,7 @@ Override the file with `MOLMANAGER_GNN_MTL_MODEL`.
 
 ### Guided setup script
 
-The script installs the Python stack. It does not install Gnina, AmberTools, AiZynthFinder, REINVENT, MAFFT, xtb, or CONFORGE.
+The script installs the Python stack. It does not install Gnina, AmberTools, AiZynthFinder, MAFFT, or CONFORGE.
 
 **Windows:**
 
@@ -679,7 +640,7 @@ Optional settings for power users and IT deployments:
 | `MOLMANAGER_BUNDLE_DIR` | Folder containing optional `gnina` / `vina` binaries |
 | `MOLMANAGER_BIOTRANSFORMER_JAR` | Path to the BioTransformer JAR (`btkb/` or `database/`, and `supportfiles/`, must be siblings of the JAR) |
 
-`MOLMANAGER_OFFLINE`, `MOLMANAGER_SQL_WRITES`, `MOLMANAGER_SESSION_PLAINTEXT`, `MOLMANAGER_SESSION_KEY_DIR`, `MOLMANAGER_TOOL_ALLOWLIST`, and `MOLMANAGER_TOOL_DIGESTS` can also be written in a machine policy file, one `KEY=value` per line. On Windows that file is `%ProgramData%\MolManager\policy.txt`. On macOS it is `/Library/Application Support/MolManager/policy.txt`. On Linux it is `/etc/molmanager/policy.txt`. A key in that file wins over the process environment and over Settings → Configure. Tool paths use `MOLMANAGER_TOOL_GNINA`, `MOLMANAGER_TOOL_OBABEL`, `MOLMANAGER_TOOL_JAVA`, `MOLMANAGER_TOOL_MAFFT`, `MOLMANAGER_TOOL_XTB`, `MOLMANAGER_TOOL_CONFGEN`, `MOLMANAGER_TOOL_REINVENT`, `MOLMANAGER_TOOL_AMBER`, `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG`, and `MOLMANAGER_TOOL_WSL`. Lines starting with `#` are comments. If the file is absent, only the environment and Configure dialog are used.
+`MOLMANAGER_OFFLINE`, `MOLMANAGER_SQL_WRITES`, `MOLMANAGER_SESSION_PLAINTEXT`, `MOLMANAGER_SESSION_KEY_DIR`, `MOLMANAGER_TOOL_ALLOWLIST`, and `MOLMANAGER_TOOL_DIGESTS` can also be written in a machine policy file, one `KEY=value` per line. On Windows that file is `%ProgramData%\MolManager\policy.txt`. On macOS it is `/Library/Application Support/MolManager/policy.txt`. On Linux it is `/etc/molmanager/policy.txt`. A key in that file wins over the process environment and over Settings → Configure. Tool paths use `MOLMANAGER_TOOL_GNINA`, `MOLMANAGER_TOOL_OBABEL`, `MOLMANAGER_TOOL_JAVA`, `MOLMANAGER_TOOL_MAFFT`, `MOLMANAGER_TOOL_CONFGEN`, `MOLMANAGER_TOOL_AMBER`, `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG`, and `MOLMANAGER_TOOL_WSL`. Lines starting with `#` are comments. If the file is absent, only the environment and Configure dialog are used.
 
 **Custom calculator:** expressions always use a restricted AST interpreter (`calculator_expressions`). Treat them as trusted input only. `MOLMANAGER_CUSTOM_CALC_LEGACY_EVAL` is retired and ignored if set.
 

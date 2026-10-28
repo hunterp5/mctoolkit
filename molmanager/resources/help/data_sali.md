@@ -14,7 +14,7 @@ Use on a series with a meaningful activity column when you want a fingerprint-ba
 
 Structures from **Molecules from**. **Activity** uses one numeric column. **Selectivity** uses an on-target column and an off-target column; selectivity is on-target minus off-target, and rows missing either value are dropped. Scope via **Selected Rows Only**.
 
-Use pIC50, pKi, or another higher-is-more-potent scale. **Treat Logarithmically**, beside the activity column, uses −log10 of each positive value so the map sees pActivity differences. In selectivity mode that box applies to both columns. Values at or below 0 are skipped. One shared concentration unit is enough, because the unit offset cancels in the differences. **Tools → Potency Standardization** can still write a pActivity column when the unit changes from row to row.
+Use pIC50, pKi, or another higher-is-more-potent scale. **Treat Logarithmically**, beside the activity column, uses −log10 of each positive value so the map sees pActivity differences. In selectivity mode that box applies to both columns. Values at or below 0 are skipped. One shared concentration unit is enough, because the unit offset cancels in the differences. **Tools → Utilities → Potency Standardization** can still write a pActivity column when the unit changes from row to row.
 
 ## Options
 

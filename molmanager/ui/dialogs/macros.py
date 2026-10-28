@@ -126,7 +126,7 @@ def _step_summary_text(kind: str, params: dict[str, Any]) -> str:
         distribution = params.get("distribution") or "random"
         return (
             f"Fill {column} with {distribution} numbers. "
-            "Recorded from Tools → Random → Number. "
+            "Recorded from Tools → Utilities → Random → Number. "
             "Later steps use ${stepId.output}."
         )
     if kind == STEP_EXTRACT:
@@ -134,7 +134,7 @@ def _step_summary_text(kind: str, params: dict[str, Any]) -> str:
         mode = params.get("mode") or "components"
         return (
             f"Extract {mode} from {source}. "
-            "Recorded from Chemistry → Extract Reaction Info. "
+            "Recorded from Chemistry → Reaction → Extract Reaction Info. "
             "Later steps use ${stepId.col_1}, ${stepId.col_2}, and so on."
         )
     if kind == STEP_POTENCY:
@@ -142,7 +142,7 @@ def _step_summary_text(kind: str, params: dict[str, Any]) -> str:
         unit = params.get("desired_unit") or "nM"
         return (
             f"Standardize {column} to {unit}. "
-            "Recorded from Tools → Potency Standardization. "
+            "Recorded from Tools → Utilities → Potency Standardization. "
             "Later steps use ${stepId.activity}, and ${stepId.p}, ${stepId.ki}, or ${stepId.pki} "
             "when those columns were written."
         )
@@ -154,9 +154,8 @@ def _step_summary_text(kind: str, params: dict[str, Any]) -> str:
         )
     if kind == STEP_FAST_PREPARE:
         source = params.get("structure_source") or "Structure"
-        return (
-            f"Fast prepare {source}. Later steps use ${{stepId.output}} and ${{stepId.fragments}}."
-        )
+        name = "Prepare" if "standardize" in params else "Fast prepare"
+        return f"{name} {source}. Later steps use ${{stepId.output}} and ${{stepId.fragments}}."
     if kind == "simulation":
         preset = params.get("preset") or "a saved document"
         path = params.get("document_path") or ""

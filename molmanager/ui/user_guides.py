@@ -98,7 +98,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "external_tools",
                 "External tools",
                 "External tools",
-                "Install and configure WSL, Gnina, AmberTools, AiZynthFinder, REINVENT, "
+                "Install and configure WSL, Gnina, AmberTools, AiZynthFinder, "
                 "and the other local programs.",
             ),
         ),
@@ -177,10 +177,16 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "RDKit descriptors, structural alerts, and 3D shape when confs exist.",
             ),
             _e(
+                "tools_prepare",
+                "Preparation Menu",
+                "Preparation Menu",
+                "Choose standardization steps. Nothing is checked until you turn it on.",
+            ),
+            _e(
                 "tools_fast_prepare",
-                "Prepare",
-                "Prepare",
-                "Choose standardization steps, then run only the ones that are checked.",
+                "Fast Prepare",
+                "Fast Prepare",
+                "Largest fragment, optional neutralize, and redraw in one job.",
             ),
             _e(
                 "tools_disconnect_fragments",
@@ -192,13 +198,19 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_add_explicit_h",
                 "Explicit Hydrogens — Add",
                 "Add Explicit Hydrogens",
-                "Show valence hydrogens from Chemistry → Prepare. Charge stays the same.",
+                (
+                    "Show valence hydrogens from Chemistry → Structure Preparation → "
+                    "Preparation Menu. Charge stays the same."
+                ),
             ),
             _e(
                 "tools_remove_explicit_h",
                 "Explicit Hydrogens — Remove",
                 "Remove Explicit Hydrogens",
-                "Hide explicit valence hydrogens from Chemistry → Prepare. Charge stays the same.",
+                (
+                    "Hide explicit valence hydrogens from Chemistry → Structure Preparation → "
+                    "Preparation Menu. Charge stays the same."
+                ),
             ),
             _e(
                 "tools_render_2d",
@@ -207,28 +219,28 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Regenerate 2D depictions as a background batch.",
             ),
             _e(
-                "tools_align_substructure",
-                "Align to Substructure",
-                "Align to Substructure",
-                "Redraw matching rows from Chemistry → Align to Substructure.",
-            ),
-            _e(
                 "tools_protonate",
                 "Protonate",
                 "Protonate",
-                "Dominant protomer at a chosen pH from Chemistry → Prepare.",
+                (
+                    "Dominant protomer at a chosen pH from Chemistry → Structure Preparation → "
+                    "Preparation Menu."
+                ),
             ),
             _e(
                 "tools_generate_protomers",
                 "Generate Protomers",
                 "Generate Protomers",
-                "Enumerate protomers from Chemistry → Prepare.",
+                ("Enumerate protomers from Chemistry → Structure Preparation → Preparation Menu."),
             ),
             _e(
                 "tools_neutralize",
                 "Neutralize",
                 "Neutralize",
-                "Zero net formal charge from Chemistry → Prepare.",
+                (
+                    "Zero net formal charge from Chemistry → Structure Preparation → "
+                    "Preparation Menu."
+                ),
             ),
             _e(
                 "tools_calculator",
@@ -299,13 +311,19 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_bemis_murcko",
                 "Bemis–Murcko",
                 "Bemis–Murcko",
-                "Scaffold, framework, ring systems, and scaffold count.",
+                "Scaffold, framework, ring systems, and scaffold ID.",
             ),
             _e(
                 "tools_common_core",
                 "Common Core",
                 "Common Core",
                 "Maximum common substructure over the chosen rows.",
+            ),
+            _e(
+                "tools_align_substructure",
+                "Align to Substructure",
+                "Align to Substructure",
+                "Redraw matching rows from Chemistry → Substructure → Align to Substructure.",
             ),
         ),
     ),
@@ -383,18 +401,6 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Attach building-block lists to a numbered core and append the products.",
             ),
             _e(
-                "tools_reinvent",
-                "REINVENT Sampling",
-                "REINVENT Sampling",
-                "Sample molecules with a local REINVENT 4 install and open them in a browser.",
-            ),
-            _e(
-                "tools_reinvent_learning",
-                "REINVENT Learning",
-                "REINVENT Learning",
-                "Train a REINVENT 4 agent for one stage. Results open in a browser.",
-            ),
-            _e(
                 "tools_activity_cliff",
                 "MMP Activity Cliffs",
                 "Activity Cliffs",
@@ -422,7 +428,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_aizynthfinder",
                 "Retrosynthesis",
                 "Retrosynthesis",
-                "Local AiZynthFinder search and the route browser (Chemistry → Retrosynthesis).",
+                "Local AiZynthFinder search and the route browser (Chemistry → Reaction → Retrosynthesis).",
             ),
             _e(
                 "tools_predict_metabolites",
@@ -444,8 +450,8 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
             ),
             _e(
                 "data_auto_qsar",
-                "AutoQSAR",
-                "AutoQSAR",
+                "Quick QSAR",
+                "Quick QSAR",
                 "Search descriptors and models for an activity column (Data → QSAR).",
             ),
             _e(

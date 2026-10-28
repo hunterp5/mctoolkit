@@ -19,22 +19,19 @@ Global UI preferences for this installation/session; they do not alter table che
 - **GUI**
   - **Theme** - **Light Mode** / **Dark Mode** / **Groovy Mode**, plus named custom themes.
   - **Custom Colors...** (under **Theme**) - edit named custom themes (palette roles, save/delete).
-  - **2D Render...** - pixel size of 2D structure drawings in the Structure column. The same size can be changed by dragging the dark triangle at the bottom-right of a structure cell.
   - **Font...** - **Application font size**, **Table font size**, **Table text alignment** (3×3: top/center/bottom × left/center/right), **Reset to Default**.
 - **Hotkeys...** - category/command/shortcut table with OK/Cancel, **Clear Selected**, and **Reset to Default**.
 - **Status Bar** - show or hide the bottom bar (status messages and memory use).
 - **Configure** - paths for optional external programs. Each page has **Browse...**, **Test**, and **OK**. Install steps, what **Test** checks, and the search order when a path is blank are in **External tools**.
   - **WSL...** - path to ``wsl.exe`` so Windows can run Linux-only tools (Gnina, AmberTools / GAFF, and similar). **Test** runs ``uname -s`` inside WSL.
   - **AmberTools...** - ``antechamber`` command, bin folder, or executable. ``parmchk2`` and ``tleap`` are taken from the same folder. On Windows the command runs in WSL.
-  - **AiZynthFinder...** - Python from a separate environment, plus the local ``config.yml`` from ``download_public_data``. **Test** imports ``aizynthfinder`` and refuses a remote policy server or a non-local MongoDB stock.
+  - **AiZynthFinder...** - Python from a separate environment, plus the local ``config.yml``. **Download...** fetches the public models and ZINC stock from Zenodo and writes that file. **Test** imports ``aizynthfinder`` and refuses a remote policy server or a non-local MongoDB stock.
   - **BioTransformer...** - JAR for Predict Metabolites (**Browse JAR...** / **Install...**). ``supportfiles/`` and ``btkb/`` (or ``database/``) must sit next to the JAR.
   - **CONFORGE...** - CDPKit ``confgen`` executable.
   - **Gnina...** - docking binary. On Windows this is the Linux command used through WSL (``gnina`` or a path such as ``/usr/local/bin/gnina``).
   - **Java...** - ``java`` for BioTransformer. Blank uses ``java`` on PATH.
   - **MAFFT...** - executable or install folder for Protein → Sequence.
   - **Open Babel...** - ``obabel`` for systematic conformers.
-  - **REINVENT...** - ``reinvent`` from a separate REINVENT 4 environment (Chemistry → REINVENT → Sampling and Learning). Blank uses ``reinvent`` on PATH. Do not install REINVENT into the MolManager environment.
-  - **xtb...** - ``xtb`` for GFN2-xTB HOMO and LUMO descriptors.
 
 ## Workflow
 

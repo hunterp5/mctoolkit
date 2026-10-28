@@ -26,15 +26,13 @@ If `MOLMANAGER_TOOL_ALLOWLIST` is set, the program name or path must be on that 
 |------|------|----------------|------------|
 | WSL | Windows host for Gnina and AmberTools | WSL | `MOLMANAGER_TOOL_WSL` |
 | AmberTools | GAFF minimization | AmberTools | `MOLMANAGER_TOOL_AMBER` |
-| AiZynthFinder | Chemistry → Retrosynthesis | AiZynthFinder | `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG` |
+| AiZynthFinder | Chemistry → Reaction → Retrosynthesis | AiZynthFinder | `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG` |
 | BioTransformer | Chemistry → Predict → Metabolites | BioTransformer | `MOLMANAGER_BIOTRANSFORMER_JAR` (environment variable) |
 | Java | BioTransformer | Java | `MOLMANAGER_TOOL_JAVA` |
 | CONFORGE | Conformations → Generate → CONFORGE | CONFORGE | `MOLMANAGER_TOOL_CONFGEN` |
 | Gnina | Protein → Dock Ligand | Gnina | `MOLMANAGER_TOOL_GNINA` |
 | MAFFT | Protein → Sequence | MAFFT | `MOLMANAGER_TOOL_MAFFT` |
 | Open Babel | Conformations → Generate → Systematic | Open Babel | `MOLMANAGER_TOOL_OBABEL` |
-| REINVENT | Chemistry → REINVENT | REINVENT | `MOLMANAGER_TOOL_REINVENT` |
-| xtb | Calculate Descriptors → Electronic | xtb | `MOLMANAGER_TOOL_XTB` |
 
 ## WSL
 
@@ -86,7 +84,7 @@ pip install "openmm>=8.2,<8.3"
 
 ## AiZynthFinder
 
-Local retrosynthesis for **Chemistry → Retrosynthesis → Search**. It cannot share MolManager's environment: release 4.4.1 needs RDKit 2023.x, and MolManager uses RDKit 2025.9 or newer.
+Local retrosynthesis for **Chemistry → Reaction → Retrosynthesis → Search**. It cannot share MolManager's environment: release 4.4.1 needs RDKit 2023.x, and MolManager uses RDKit 2025.9 or newer.
 
 ### Install
 
@@ -94,17 +92,17 @@ Local retrosynthesis for **Chemistry → Retrosynthesis → Search**. It cannot 
 conda create -n aizynth python=3.11
 conda activate aizynth
 python -m pip install aizynthfinder "pyarrow>=19,<26"
-download_public_data ~/aizynth-data
+python scripts/bootstrap_aizynth_data.py ~/aizynth-data
 ```
 
-`download_public_data` writes `config.yml` plus the public USPTO ONNX models, templates, and `zinc_stock.hdf5` (about 1.8 GB). AiZynthFinder 4.4.1 stays on NumPy 1.26. PyArrow 26 will not import on that NumPy, which is why the pin is `<26`. Python must be 3.10, 3.11, or 3.12.
+`bootstrap_aizynth_data.py` writes `config.yml` plus the public USPTO ONNX models, templates, and `zinc_stock.hdf5` from Zenodo (about 1.5 GB). **Settings → Configure → AiZynthFinder → Download…** does the same thing. AiZynthFinder's `download_public_data` fetches the ZINC stock from a Figshare link that expires after 10 seconds, so the stock download fails and `config.yml` is never written. AiZynthFinder 4.4.1 stays on NumPy 1.26. PyArrow 26 will not import on that NumPy, which is why the pin is `<26`. Python must be 3.10, 3.11, or 3.12.
 
 ### Configure
 
 **Settings → Configure → AiZynthFinder** has two fields:
 
 - **Python** — `python.exe` (Windows) or `python` from the `aizynth` environment. A typical Windows path is `C:\Users\you\miniconda3\envs\aizynth\python.exe`. A typical Linux path is `~/miniconda3/envs/aizynth/bin/python`. Do not pick MolManager's `.venv` interpreter.
-- **config.yml** — the file `download_public_data` wrote, next to the model files.
+- **config.yml** — the file written next to the model files.
 
 **Test** imports `aizynthfinder` in that interpreter and reads the config. A config with `use_remote_models: true`, or a MongoDB stock on a host other than localhost, is refused. The search reads the model and stock files from disk.
 
@@ -243,59 +241,6 @@ A separate system install is optional. If you use one, keep its format plugins n
 
 **Settings → Configure → Open Babel**. Leave the field blank to use, in order, a copy under `resources/bin/<platform>/` or `MOLMANAGER_BUNDLE_DIR`, the pip wheel's `openbabel/bin/obabel`, then `obabel` on `PATH`. Set a full path only when you want a specific executable. **Test** reports the file it resolved.
 
-## REINVENT
-
-De novo sampling and staged learning under **Chemistry → REINVENT**. REINVENT 4 pins its own NumPy, pandas, and PyTorch build, so it cannot be installed into the MolManager environment. **Test** refuses MolManager's own Python.
-
-### Install
-
-Use a separate conda environment and the upstream installer. Processor names are PyTorch index names: `cpu`, a CUDA tag such as `cu126` when the driver matches, or `mac` on Apple silicon.
-
-```bash
-git clone --depth 1 https://github.com/MolecularAI/REINVENT4.git
-conda create --name reinvent4 python=3.11
-conda activate reinvent4
-cd REINVENT4
-python install.py cpu
-reinvent -V
-```
-
-The `reinvent` command is added to that environment (`Scripts\reinvent.exe` on Windows, `bin/reinvent` on Linux and macOS).
-
-Public priors are a separate download (doi:10.5281/zenodo.15641296). Place them in that install's `priors` folder. MolManager's preset ids are `.reinvent`, `.libinvent`, `.linkinvent`, and `.m2m_similarity`. Those names resolve to files in that folder. A full path to a `.prior` file also works.
-
-### Configure
-
-**Settings → Configure → REINVENT**. Browse to the `reinvent` command in the REINVENT environment. A blank field uses `reinvent` on `PATH`, which only works when that environment is already active in the process MolManager inherited. Prefer the full path. **Test** runs `reinvent -V`.
-
-Sampling and Learning both use this path. In either dialog, **Device** is `cpu` or `cuda:0`. `cuda:0` needs the CUDA install (`python install.py cu126` or the tag that matches the driver), not the CPU install.
-
-## xtb
-
-GFN2-xTB single points for **Calculate Descriptors → Electronic** (HOMO, LUMO, and the gap). The geometry is the lowest-energy packed conformer, or one MMFF94 pose built for the single point. xtb does not reoptimize.
-
-### Install
-
-Install the `xtb` binary from [GitHub](https://github.com/grimme-lab/xtb) or conda:
-
-```bash
-conda install -c conda-forge xtb
-```
-
-On Windows, use the release `xtb.exe`. You can copy `xtb` or `xtb.exe` into `molmanager/resources/bin/<platform>/`.
-
-When no binary is configured, MolManager uses the `tblite` package in the MolManager environment:
-
-```bash
-pip install tblite
-```
-
-The binary is preferred when both are present.
-
-### Configure
-
-**Settings → Configure → xtb**. A full path, or blank to use `PATH` and then a bundled copy. **Test** runs the binary and expects a version line. With the field blank and only `tblite` installed, **Test** reports the Python package.
-
 ## Packages in the MolManager environment
 
 These are not Configure pages. They install into the same virtual environment as MolManager.
@@ -304,8 +249,8 @@ These are not Configure pages. They install into the same virtual environment as
 - **Permeability** needs the Chemprop packages from `requirements.txt` and a weights file that is not in git: `python scripts/bootstrap_gnn_mtl_model.py`. Override the file with `MOLMANAGER_GNN_MTL_MODEL`.
 - **Docking helpers** (Meeko, PDBFixer, PDB2PQR, ProLIF, OpenMM) come from `pip install -e ".[docking]"` or `requirements.txt`.
 
-`scripts\bootstrap_optional_tools.ps1` and `scripts/bootstrap_optional_tools.sh` install `requirements.txt`, the editable package, the PyTorch step, and can download the permeability weights and the BioTransformer package. They do not install Gnina, AmberTools, AiZynthFinder, REINVENT, MAFFT, xtb, or CONFORGE.
+`scripts\bootstrap_optional_tools.ps1` and `scripts/bootstrap_optional_tools.sh` install `requirements.txt`, the editable package, the PyTorch step, and can download the permeability weights and the BioTransformer package. They do not install Gnina, AmberTools, AiZynthFinder, MAFFT, or CONFORGE.
 
 ## Tips and limits
 
-Install AiZynthFinder and REINVENT in their own conda environments. Installing either into `.venv` breaks MolManager's NumPy and RDKit pins. On Windows, confirm **WSL** before **Gnina** or **AmberTools**. **Test** on each Configure page is the check that the path is the one MolManager will launch.
+Install AiZynthFinder in its own conda environment. Installing it into `.venv` breaks MolManager's NumPy and RDKit pins. On Windows, confirm **WSL** before **Gnina** or **AmberTools**. **Test** on each Configure page is the check that the path is the one MolManager will launch.
