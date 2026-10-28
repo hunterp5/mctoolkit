@@ -32,6 +32,11 @@ jobs:
       - name: GPL copyright headers
         run: python scripts/check_gpl_headers.py
 
+      - name: Typecheck SQL load and session encryption
+        run: |
+          pip install "mypy>=1.13" "cryptography>=44"
+          python -m mypy
+
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -54,6 +59,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install -r requirements-core.lock
           pip install -r requirements.txt
           pip install -e .
 
@@ -115,3 +121,42 @@ jobs:
           name: molmanager-sbom
           path: sbom.cdx.json
           if-no-files-found: error
+
+  core-lock:
+    name: core lock
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-core.lock
+
+      - name: Install the hashed core set
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-core.lock
+          pip install --no-deps -e .
+          pip install "pytest>=7.4,<9" "pytest-cov>=5"
+
+      - name: Safety tests on the locked core
+        run: |
+          python -m pytest \
+            tests/test_sql_load_policy.py \
+            tests/test_session_seal.py \
+            tests/test_session_v4.py \
+            tests/test_session_runtime.py \
+            tests/test_session_save_worker.py \
+            --cov=molmanager.services.sql_load_policy \
+            --cov=molmanager.table.session_seal \
+            --cov-fail-under=70 \
+            --cov-report=term-missing \
+            -q --tb=short
+
+      - name: Performance gate (100k core model)
+        run: python scripts/perf_gate.py
