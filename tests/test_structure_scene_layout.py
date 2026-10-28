@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Zoom, resize and session reopen paint stored scenes without starting workers."""
+"""Resize and session reopen paint stored scenes without starting workers."""
 
 from __future__ import annotations
 
@@ -61,19 +61,6 @@ def window(qapp):  # noqa: ARG001
     w.close()
 
 
-def test_zoom_paints_the_scene_at_twice_the_size(window, monkeypatch) -> None:
-    _no_workers(window, monkeypatch)
-    w, h = layout.structure_depict_width(), layout.structure_depict_height()
-    window.on_cell_double_click(0, 1)
-    zoomed = window._table_model.structure_pixmap_for_oid(0)
-    assert 0 in window.zoomed_ids
-    assert (zoomed.width(), zoomed.height()) == (2 * w, 2 * h)
-    window.on_cell_double_click(0, 1)
-    restored = window._table_model.structure_pixmap_for_oid(0)
-    assert 0 not in window.zoomed_ids
-    assert (restored.width(), restored.height()) == (w, h)
-
-
 def test_resize_repaints_scenes_without_rendering(window, monkeypatch) -> None:
     _no_workers(window, monkeypatch)
     window._table_model.structure_pixmap_for_oid(1)
@@ -97,6 +84,66 @@ def test_resize_renders_only_rows_without_a_scene(window, monkeypatch) -> None:
     assert window._table_model._structure_png_store.scene_oids() == {0}
 
 
+def test_resize_repaints_pixmap_scenes_and_queues_rasters(window, monkeypatch) -> None:
+    from PyQt5.QtGui import QPixmap
+
+    queued: list[tuple[list[str], bool]] = []
+
+    def record(headers, _allowed, written_rows=None, *, force=False):
+        queued.append((list(headers), bool(force)))
+
+    monkeypatch.setattr(window, "_queue_generated_structure_renders", record)
+    headers = ["ID_HIDDEN", "Structure", "SMILES", "Scaffold", "Scheme"]
+    window.headers = headers
+    window._table_model.set_headers(headers)
+    model = window._table_model
+    model.register_pixmap_column("Scaffold")
+    model.register_pixmap_column("Scheme")
+    model.set_cell_text(0, "Scaffold", "CCO")
+    model.set_cell_text(0, "Scheme", "C>>O")
+    model.set_cell_png_bytes(0, "Scaffold", _scene("CCO"))
+    scheme = QPixmap(layout.structure_depict_width(), layout.structure_depict_height())
+    scheme.fill()
+    model.set_column_pixmap(0, "Scheme", scheme)
+    old = model.column_pixmap_copy(0, "Scaffold")
+    assert old is not None
+    assert (old.width(), old.height()) == (
+        layout.structure_depict_width(),
+        layout.structure_depict_height(),
+    )
+    width = layout.structure_depict_width() + 48
+    height = layout.structure_depict_height() + 36
+    layout.set_structure_depict_size(width, height, persist=False)
+    window.rerender_structure_column_for_new_size()
+    painted = model.column_pixmap_copy(0, "Scaffold")
+    assert painted is not None
+    assert (painted.width(), painted.height()) == (width, height)
+    assert queued == [(["Scheme"], True)]
+    assert model.pixmap_column_source_size("Scaffold") == (width, height)
+    assert model.pixmap_column_source_size("Scheme") == (width, height)
+
+
+def test_pixmap_already_at_the_depiction_size_is_not_scaled(qapp) -> None:  # noqa: ARG001
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtGui import QPixmap
+
+    from molmanager.ui.compound_table_model import CompoundTableModel
+    from molmanager.ui.compound_table_view import StructureDelegate
+
+    width, height = layout.structure_depict_width(), layout.structure_depict_height()
+    model = CompoundTableModel(["ID_HIDDEN", "Structure", "Scaffold"])
+    model.append_row(1, {"Scaffold": "CCO"})
+    model.register_pixmap_column("Scaffold")
+    model.note_pixmap_column_source_size("Scaffold", max(1, width - 40), max(1, height - 30))
+    picture = QPixmap(width, height)
+    picture.fill()
+    model.set_column_pixmap(1, "Scaffold", picture)
+    delegate = StructureDelegate(None, model)
+    index = model.index(0, 2)
+    shown = delegate._pixmap_for_cell(model.data(index, Qt.DecorationRole), index)
+    assert (shown.width(), shown.height()) == (width, height)
+
+
 def test_reopen_paints_saved_scenes_at_another_size(window, monkeypatch) -> None:
     from session_roundtrip import save_session_file
 
@@ -113,7 +160,9 @@ def test_reopen_paints_saved_scenes_at_another_size(window, monkeypatch) -> None
         assert reopened.apply_saved_session_from_file(str(session))
         loaded = reopened._table_model._structure_png_store
         assert sorted(loaded.png_oids()) == [0, 1]
-        zoomed = reopened._table_model.structure_pixmap_for_oid(1)
-        assert zoomed.width() == 2 * layout.structure_depict_width()
+        assert reopened.zoomed_ids == set()
+        painted = reopened._table_model.structure_pixmap_for_oid(1)
+        assert painted.width() == layout.structure_depict_width()
+        assert painted.height() == layout.structure_depict_height()
     finally:
         reopened.close()

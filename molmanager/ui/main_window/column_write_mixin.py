@@ -245,6 +245,8 @@ class ColumnWriteMixin:
         new_h: list[str],
         *,
         on_complete: Callable[[list[str]], None] | None = None,
+        depict_structures: bool = False,
+        written_rows=None,
     ) -> None:
         if self._table_model.rowCount() >= 5000:
             dirty = {h for h in calc_h if h in self._table_model._bounds_data_headers()}
@@ -263,6 +265,11 @@ class ColumnWriteMixin:
         self.status_label.setText(self._consume_partial_results_notice() or "Done.")
         if on_complete is not None:
             on_complete(list(calc_h))
+        if depict_structures and written_rows:
+            depict = getattr(self, "_queue_generated_structure_renders", None)
+            if callable(depict):
+                oids = {int(oid) for oid, _row in written_rows}
+                depict(list(calc_h), oids, written_rows)
 
     def _start_calc_writeback(
         self,
@@ -271,6 +278,7 @@ class ColumnWriteMixin:
         bulk_rows: list[tuple[int, dict[str, str]]],
         *,
         on_complete: Callable[[list[str]], None] | None = None,
+        depict_structures: bool = False,
     ) -> None:
         """Apply result rows in GUI-budgeted chunks, yielding between each one."""
 
@@ -289,7 +297,13 @@ class ColumnWriteMixin:
             finish = getattr(self, "_finish_tool_progress", None)
             if callable(finish):
                 finish("Writing results", status_message=None)
-            self._finalize_calc_writeback(calc_h, new_h, on_complete=on_complete)
+            self._finalize_calc_writeback(
+                calc_h,
+                new_h,
+                on_complete=on_complete,
+                depict_structures=depict_structures,
+                written_rows=bulk_rows,
+            )
 
         writer = getattr(self, "_calc_writer", None)
         if writer is not None:
@@ -312,6 +326,7 @@ class ColumnWriteMixin:
         finish_progress: bool = True,
         progress_label: str | None = None,
         on_complete: Callable[[list[str]], None] | None = None,
+        depict_structures: bool = True,
     ) -> list[str]:
         """Write tool results into the table, adding columns as needed.
 
@@ -373,7 +388,11 @@ class ColumnWriteMixin:
             except Exception:
                 pass
             self._start_calc_writeback(
-                list(calc_h), list(new_h), bulk_rows, on_complete=on_complete
+                list(calc_h),
+                list(new_h),
+                bulk_rows,
+                on_complete=on_complete,
+                depict_structures=depict_structures,
             )
             return list(calc_h)
 
@@ -381,7 +400,13 @@ class ColumnWriteMixin:
             self._finish_tool_progress(progress_label, status_message=None)
         try:
             self._apply_calc_bulk_rows(calc_h, bulk_rows)
-            self._finalize_calc_writeback(calc_h, new_h, on_complete=on_complete)
+            self._finalize_calc_writeback(
+                calc_h,
+                new_h,
+                on_complete=on_complete,
+                depict_structures=depict_structures,
+                written_rows=bulk_rows,
+            )
         except Exception:
             try:
                 self.table.setUpdatesEnabled(True)

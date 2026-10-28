@@ -22,17 +22,8 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
-from PyQt5.QtCore import QEvent, QItemSelectionModel, QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import (
-    QColor,
-    QFont,
-    QFontMetrics,
-    QPainter,
-    QPainterPath,
-    QPalette,
-    QPen,
-    QPixmap,
-)
+from PyQt5.QtCore import QEvent, QItemSelectionModel, QRect, QSize, Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPalette, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractButton,
     QAbstractItemView,
@@ -43,23 +34,18 @@ from PyQt5.QtWidgets import (
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QTableView,
-    QWidget,
     QWIDGETSIZE_MAX,
 )
 
 from ..table.structure_depiction_layout import (
-    STRUCTURE_COLUMN_HORIZONTAL_PADDING,
     set_structure_depict_size,
     structure_column_minimum_width,
-    structure_column_width_for_depict_scale,
     structure_depict_height,
-    structure_depict_size_for_corner_drag,
+    structure_depict_size_for_cell_resize,
     structure_depict_width,
     structure_row_default_height,
 )
 
-# Hit target at the bottom-right of a structure column. Ticks are drawn inside it.
-_STRUCTURE_CORNER_GRIP_PX = 16
 # Zoomed rows are twice the depiction height; normal rows add only a few pixels of padding.
 _ZOOMED_ROW_HEIGHT_NUMERATOR = 3
 _ZOOMED_ROW_HEIGHT_DENOMINATOR = 2
@@ -186,23 +172,6 @@ def scaled_structure_pixmap(
     return pix.scaled(target_w, target_h, Qt.IgnoreAspectRatio, Qt.FastTransformation)
 
 
-def paint_structure_corner_mark(painter: QPainter, rect: QRect) -> None:
-    """Dark resize triangle in the bottom-right of a structure cell."""
-    right = float(rect.right())
-    bottom = float(rect.bottom())
-    span = float(min(rect.width(), rect.height()) - 3)
-    if span < 6:
-        return
-    path = QPainterPath()
-    path.moveTo(right - span, bottom)
-    path.lineTo(right, bottom)
-    path.lineTo(right, bottom - span)
-    path.closeSubpath()
-    painter.setPen(QPen(QColor(255, 255, 255), 1.75))
-    painter.setBrush(QColor(32, 32, 32))
-    painter.drawPath(path)
-
-
 class StructureDelegate(QStyledItemDelegate):
     """Paints cached structure pixmap or a neutral placeholder."""
 
@@ -217,21 +186,55 @@ class StructureDelegate(QStyledItemDelegate):
     def set_depiction_preview(
         self, active: bool, origin_width: int = 0, origin_height: int = 0
     ) -> None:
-        """While a corner drag is active, draw cached pictures at the live depiction size."""
+        """While a border drag is active, draw cached pictures at the live depiction size."""
         self._preview_active = bool(active)
         self._preview_origin_w = int(origin_width)
         self._preview_origin_h = int(origin_height)
 
-    def _pixmap_for_cell(self, pix: QPixmap) -> QPixmap:
+    def _pixmap_column_source_size(self, index) -> tuple[int, int] | None:
+        """Depiction size a rendered data column was drawn at, or None for Structure."""
+        if index is None or self._compound_model is None:
+            return None
+        col = int(index.column())
+        headers = getattr(self._compound_model, "_headers", ())
+        if col < 0 or col >= len(headers):
+            return None
+        lookup = getattr(self._compound_model, "pixmap_column_source_size", None)
+        if not callable(lookup):
+            return None
+        return lookup(str(headers[col]))
+
+    def _pixmap_for_cell(self, pix: QPixmap, index=None) -> QPixmap:
+        """Draw *pix* at the current depiction size.
+
+        A picture already painted at that height, such as a depiction scene, is
+        left as it is. Scaling it would blur the drawing. A raster from another
+        size is scaled for the live drag, then replaced when the drag ends.
+        """
+        current_w = structure_depict_width()
+        current_h = structure_depict_height()
+        if not pix.isNull() and pix.height() == current_h:
+            return pix
+        source = self._pixmap_column_source_size(index)
+        if source is not None:
+            return scaled_structure_pixmap(pix, source[0], source[1], current_w, current_h)
         if not self._preview_active:
             return pix
         return scaled_structure_pixmap(
             pix,
             self._preview_origin_w,
             self._preview_origin_h,
-            structure_depict_width(),
-            structure_depict_height(),
+            current_w,
+            current_h,
         )
+
+    def _pixmap_inside_cell(self, pix: QPixmap, rect: QRect) -> QPixmap:
+        """Shrink *pix* so it stays inside *rect* without changing its shape."""
+        avail_w = max(1, int(rect.width()) - 4)
+        avail_h = max(1, int(rect.height()) - 4)
+        if pix.width() <= avail_w and pix.height() <= avail_h:
+            return pix
+        return pix.scaled(avail_w, avail_h, Qt.KeepAspectRatio, Qt.FastTransformation)
 
     def set_compound_model(self, compound_model) -> None:
         self._compound_model = compound_model
@@ -279,7 +282,7 @@ class StructureDelegate(QStyledItemDelegate):
         self._fill_cell_background(painter, opt, index, has_rendered_structure=has_pix)
         pix = index.data(Qt.DecorationRole) if has_pix else None
         if has_pix:
-            pix = self._pixmap_for_cell(pix)
+            pix = self._pixmap_inside_cell(self._pixmap_for_cell(pix, index), opt.rect)
             r = opt.rect
             x = r.x() + (r.width() - pix.width()) // 2
             y = r.y() + (r.height() - pix.height()) // 2
@@ -330,20 +333,23 @@ class StructureDelegate(QStyledItemDelegate):
         sh = super().sizeHint(option, index)
         pix = index.data(Qt.DecorationRole)
         if isinstance(pix, QPixmap) and not pix.isNull():
-            pix = self._pixmap_for_cell(pix)
+            pix = self._pixmap_for_cell(pix, index)
             return QSize(max(sh.width(), pix.width()), max(sh.height(), pix.height()))
         return QSize(structure_depict_width(), max(sh.height(), structure_depict_height()))
 
 
+def _header_grip_margin(header: QHeaderView) -> int:
+    """Qt's own section-border hit width, in pixels."""
+    style = header.style()
+    if style is None:
+        return 4
+    raw = int(style.pixelMetric(QStyle.PM_HeaderGripMargin, None, header))
+    return raw if raw > 0 else 4
+
+
 def _header_grip_px(header: QHeaderView) -> int:
     """Pixel slop for a column resize grip, floored so the viewport edge stays hittable."""
-    style = header.style()
-    pm = 4
-    if style is not None:
-        raw = int(style.pixelMetric(QStyle.PM_HeaderGripMargin, None, header))
-        if raw > 0:
-            pm = raw
-    return max(12, pm)
+    return max(12, _header_grip_margin(header))
 
 
 class CompoundTableHeaderView(QHeaderView):
@@ -365,6 +371,7 @@ class CompoundTableHeaderView(QHeaderView):
         self._edge_resize_logical = -1
         self._edge_resize_origin_x = 0
         self._edge_resize_origin_size = 0
+        self._native_section_resize = False
         self._section_drag_press_x = -1
         self._section_drag_active = False
         self._section_drag_x = 0
@@ -445,6 +452,20 @@ class CompoundTableHeaderView(QHeaderView):
         self._section_drag_press_x = -1
         self._section_drag_timer.stop()
 
+    def _pointer_on_section_resize_handle(self, x: int) -> bool:
+        """True when *x* is on a section border that Qt resizes."""
+        if self.section_for_viewport_right_grip(int(x)) >= 0:
+            return True
+        logical = int(self.logicalIndexAt(int(x)))
+        if logical < 0 or self.isSectionHidden(logical):
+            return False
+        if self.sectionResizeMode(logical) != QHeaderView.Interactive:
+            return False
+        grip = _header_grip_margin(self)
+        pos = int(self.sectionViewportPosition(logical))
+        size = int(self.sectionSize(logical))
+        return int(x) - pos < grip or pos + size - int(x) < grip
+
     def section_for_viewport_right_grip(self, x: int) -> int:
         """Logical section resized by a click at ``x`` on the viewport's right edge, or -1."""
         vp = self.viewport()
@@ -469,12 +490,25 @@ class CompoundTableHeaderView(QHeaderView):
             logical = self.section_for_viewport_right_grip(event.pos().x())
             if logical >= 0:
                 self._stop_section_drag_scroll()
+                self._native_section_resize = False
                 self._edge_resize_logical = logical
                 self._edge_resize_origin_x = int(event.pos().x())
                 self._edge_resize_origin_size = int(self.sectionSize(logical))
                 self.setCursor(Qt.SplitHCursor)
+                self._note_parent_structure_resize()
                 event.accept()
                 return
+            # A resize that leaves the header clears the split cursor. Remember the
+            # gesture here so that departure is not treated as a column move.
+            split = self.cursor().shape() == Qt.SplitHCursor
+            header_vp = self.viewport()
+            if header_vp is not None and header_vp.cursor().shape() == Qt.SplitHCursor:
+                split = True
+            self._native_section_resize = split or self._pointer_on_section_resize_handle(
+                event.pos().x()
+            )
+            if self._native_section_resize:
+                self._note_parent_structure_resize()
             self._section_drag_press_x = int(event.pos().x())
             self._section_drag_active = False
         super().mousePressEvent(event)
@@ -488,6 +522,8 @@ class CompoundTableHeaderView(QHeaderView):
             event.accept()
             return
         super().mouseMoveEvent(event)
+        if self._native_section_resize:
+            return
         if (
             event.buttons() & Qt.LeftButton
             and self.sectionsMovable()
@@ -512,16 +548,32 @@ class CompoundTableHeaderView(QHeaderView):
             self.setCursor(Qt.SplitHCursor)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        was_resize = self._native_section_resize or self._edge_resize_logical >= 0
+        self._native_section_resize = False
         self._stop_section_drag_scroll()
         if self._edge_resize_logical >= 0:
             self._edge_resize_logical = -1
             self.unsetCursor()
             event.accept()
-            return
-        super().mouseReleaseEvent(event)
+        else:
+            super().mouseReleaseEvent(event)
+        if was_resize:
+            self._finish_parent_structure_resize()
+
+    def _note_parent_structure_resize(self) -> None:
+        parent = self.parentWidget()
+        note = getattr(parent, "note_structure_resize_anchor", None)
+        if callable(note):
+            note()
+
+    def _finish_parent_structure_resize(self) -> None:
+        parent = self.parentWidget()
+        finish = getattr(parent, "finish_user_structure_resize", None)
+        if callable(finish):
+            finish()
 
     def leaveEvent(self, event) -> None:  # noqa: N802
-        if self._edge_resize_logical < 0:
+        if self._edge_resize_logical < 0 and not self._native_section_resize:
             self.unsetCursor()
         super().leaveEvent(event)
 
@@ -539,6 +591,45 @@ class CompoundTableRowHeaderView(QHeaderView):
         self.setSectionsClickable(True)
         self.setHighlightSections(True)
         self.is_row_selected: Callable[[int], bool] | None = None
+        self._row_resize = False
+
+    def _pointer_on_row_resize_handle(self, y: int) -> bool:
+        """True when *y* is on a row border that Qt resizes."""
+        logical = int(self.logicalIndexAt(int(y)))
+        if logical < 0 or self.isSectionHidden(logical):
+            return False
+        grip = _header_grip_margin(self)
+        pos = int(self.sectionViewportPosition(logical))
+        size = int(self.sectionSize(logical))
+        if int(y) - pos < grip:
+            return int(self.visualIndex(logical)) > 0
+        return pos + size - int(y) < grip
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        split = self.cursor().shape() == Qt.SplitVCursor
+        header_vp = self.viewport()
+        if header_vp is not None and header_vp.cursor().shape() == Qt.SplitVCursor:
+            split = True
+        self._row_resize = bool(
+            event.button() == Qt.LeftButton
+            and (split or self._pointer_on_row_resize_handle(event.pos().y()))
+        )
+        if self._row_resize:
+            parent = self.parentWidget()
+            note = getattr(parent, "note_structure_resize_anchor", None)
+            if callable(note):
+                note()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        was_resize = self._row_resize
+        self._row_resize = False
+        super().mouseReleaseEvent(event)
+        if was_resize:
+            parent = self.parentWidget()
+            finish = getattr(parent, "finish_user_structure_resize", None)
+            if callable(finish):
+                finish()
 
     def paintSection(self, painter, rect, logical_index) -> None:  # noqa: N802
         super().paintSection(painter, rect, logical_index)
@@ -570,13 +661,14 @@ class CompoundTableView(QTableView):
         self._row_number_width_model = None
         self._compound_model = None
         self._structure_column_min_width = structure_column_minimum_width()
-        self._depict_resize: dict | None = None
-        self._corner_cursor = False
+        self._axis_resize: dict | None = None
+        self._pending_resize_anchor: dict[str, int] | None = None
+        self._applying_structure_scale = False
         self.setVerticalHeader(CompoundTableRowHeaderView(self))
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableView.SelectItems)
         self.setSelectionMode(QTableView.ExtendedSelection)
-        # F2 or typing edits a Structure cell. Double-click stays a depiction zoom.
+        # F2 or typing edits a Structure cell. Double-click does not.
         self.setEditTriggers(QAbstractItemView.EditKeyPressed | QAbstractItemView.AnyKeyPressed)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
@@ -592,10 +684,7 @@ class CompoundTableView(QTableView):
             hh.sectionPressed.disconnect()
         self.setSortingEnabled(False)
         hh.sectionResized.connect(self._on_horizontal_section_resized)
-        viewport = self.viewport()
-        if viewport is not None:
-            viewport.setMouseTracking(True)
-            viewport.setAttribute(Qt.WA_Hover, True)
+        self.verticalHeader().sectionResized.connect(self._on_vertical_section_resized)
 
     def set_row_selection_controller(self, controller: TableRowSelectionController) -> None:
         """Route row-header, select-all, and cell-clear input to *controller*."""
@@ -646,10 +735,6 @@ class CompoundTableView(QTableView):
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         """Type into a Structure cell, but let Delete and Backspace stay table shortcuts."""
-        if event.key() == Qt.Key_Escape and self._depict_resize is not None:
-            self.cancel_structure_depict_resize()
-            event.accept()
-            return
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             triggers = self.editTriggers()
             self.setEditTriggers(triggers & ~QAbstractItemView.AnyKeyPressed)
@@ -696,17 +781,6 @@ class CompoundTableView(QTableView):
     def updateGeometries(self) -> None:  # noqa: N802
         super().updateGeometries()
         self._extend_horizontal_scroll_for_resize_grip()
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        super().paintEvent(event)
-        # Construction paints once before the corner-drag state exists.
-        if hasattr(self, "_depict_resize"):
-            self._paint_structure_corner_marks()
-
-    def viewportEvent(self, event) -> bool:  # noqa: N802
-        if hasattr(self, "_depict_resize") and self._handle_structure_corner_event(event):
-            return True
-        return bool(super().viewportEvent(event))
 
     def _extend_horizontal_scroll_for_resize_grip(self) -> None:
         """Keep a few pixels of scroll past the last section so its right grip stays on-screen."""
@@ -760,9 +834,43 @@ class CompoundTableView(QTableView):
         finally:
             hh.blockSignals(False)
 
+    def note_structure_resize_anchor(self) -> None:
+        """Remember the viewport before a column or row border drag moves it."""
+        self._pending_resize_anchor = self._viewport_scroll_anchor()
+
+    def finish_user_structure_resize(self) -> None:
+        """Save a depiction size chosen by dragging a column or row border."""
+        drag = self._axis_resize
+        self._axis_resize = None
+        self._pending_resize_anchor = None
+        self._set_depiction_preview(False, 0, 0)
+        if not drag:
+            viewport = self.viewport()
+            if viewport is not None:
+                viewport.update()
+            return
+        width = structure_depict_width()
+        height = structure_depict_height()
+        anchor = drag["anchor"]
+        if width != int(drag["origin_w"]) or height != int(drag["origin_h"]):
+            self.structure_depict_resized.emit(int(width), int(height))
+            self._restore_viewport_scroll_anchor(anchor)
+        viewport = self.viewport()
+        if viewport is not None:
+            viewport.update()
+
     def _on_horizontal_section_resized(
-        self, logical_index: int, _old_size: int, new_size: int
+        self, logical_index: int, old_size: int, new_size: int
     ) -> None:
+        if self._applying_structure_scale:
+            return
+        header = self.horizontalHeader()
+        user_drag = isinstance(header, CompoundTableHeaderView) and (
+            header._native_section_resize or header._edge_resize_logical >= 0
+        )
+        if user_drag and self._column_is_structure_sized(int(logical_index)):
+            self._resize_structures_from_axis("x", int(logical_index), int(old_size), int(new_size))
+            return
         if not self._column_is_structure_sized(logical_index):
             return
         min_w = self._structure_column_min_width
@@ -774,6 +882,124 @@ class CompoundTableView(QTableView):
             self.setColumnWidth(logical_index, min_w)
         finally:
             hh.blockSignals(False)
+
+    def _on_vertical_section_resized(
+        self, logical_index: int, old_size: int, new_size: int
+    ) -> None:
+        if self._applying_structure_scale:
+            return
+        header = self.verticalHeader()
+        if not isinstance(header, CompoundTableRowHeaderView) or not header._row_resize:
+            return
+        self._resize_structures_from_axis("y", int(logical_index), int(old_size), int(new_size))
+
+    def _resize_structures_from_axis(
+        self, axis: str, logical: int, old_size: int, new_size: int
+    ) -> None:
+        """Scale every structure depiction from a column-width or row-height drag."""
+        drag = self._axis_resize
+        if drag is None or drag.get("axis") != axis or int(drag.get("logical", -1)) != int(logical):
+            self._begin_axis_resize(axis, logical, old_size)
+            drag = self._axis_resize
+        if drag is None:
+            return
+        delta = int(new_size) - int(drag["origin_span"])
+        dx, dy = (delta, 0) if axis == "x" else (0, delta)
+        width, height = structure_depict_size_for_cell_resize(
+            int(drag["origin_w"]),
+            int(drag["origin_h"]),
+            int(drag["cell_w"]),
+            int(drag["cell_h"]),
+            dx,
+            dy,
+        )
+        if width == structure_depict_width() and height == structure_depict_height():
+            return
+        self._apply_live_structure_size(
+            width,
+            height,
+            origin_w=int(drag["origin_w"]),
+            columns=drag["columns"],
+            zoomed=bool(drag["zoomed_layout"]),
+            anchor=drag["anchor"],
+            row_state=drag,
+            skip_column=int(logical) if axis == "x" else None,
+            skip_row=int(logical) if axis == "y" else None,
+        )
+
+    def _begin_axis_resize(self, axis: str, logical: int, origin_span: int) -> None:
+        columns = {col: int(self.columnWidth(col)) for col in self._structure_logical_columns()}
+        if axis == "x" and int(logical) not in columns:
+            return
+        origin_w = structure_depict_width()
+        origin_h = structure_depict_height()
+        if axis == "x":
+            cell_w = int(origin_span)
+            row = self.rowAt(0)
+            cell_h = int(self.rowHeight(row)) if row >= 0 else structure_row_default_height()
+        else:
+            cell_h = int(origin_span)
+            cell_w = int(columns.get(_STRUCTURE_COL, self.columnWidth(_STRUCTURE_COL)))
+        anchor = self._pending_resize_anchor or self._viewport_scroll_anchor()
+        self._pending_resize_anchor = None
+        self._remember_pixmap_column_source_size(origin_w, origin_h)
+        zoomed_floor = structure_column_minimum_width(zoomed=True)
+        self._axis_resize = {
+            "axis": axis,
+            "logical": int(logical),
+            "origin_span": int(origin_span),
+            "origin_w": origin_w,
+            "origin_h": origin_h,
+            "cell_w": cell_w,
+            "cell_h": cell_h,
+            "columns": columns,
+            "zoomed_layout": int(self._structure_column_min_width) >= int(zoomed_floor),
+            "zoomed_rows": set(),
+            "origin_row_heights": {},
+            "anchor": anchor,
+        }
+        self._set_depiction_preview(True, origin_w, origin_h)
+
+    def _apply_live_structure_size(
+        self,
+        width: int,
+        height: int,
+        *,
+        origin_w: int,
+        columns: dict[int, int],
+        zoomed: bool,
+        anchor: dict[str, int],
+        row_state: dict,
+        skip_column: int | None = None,
+        skip_row: int | None = None,
+    ) -> None:
+        """Apply one shared depiction scale to structure columns and row heights."""
+        self._applying_structure_scale = True
+        try:
+            set_structure_depict_size(int(width), int(height), persist=False)
+            min_w = structure_column_minimum_width(zoomed=bool(zoomed))
+            self.set_structure_column_minimum_width(min_w)
+            scale = int(width) / max(1, int(origin_w))
+            hh = self.horizontalHeader()
+            if hh is not None:
+                hh.blockSignals(True)
+            try:
+                for logical, origin in columns.items():
+                    if skip_column is not None and int(logical) == int(skip_column):
+                        continue
+                    target = max(int(min_w), int(round(int(origin) * scale)))
+                    if int(self.columnWidth(int(logical))) != target:
+                        self.setColumnWidth(int(logical), target)
+            finally:
+                if hh is not None:
+                    hh.blockSignals(False)
+            self._apply_depict_row_heights(visible_only=True, state=row_state, skip_row=skip_row)
+        finally:
+            self._applying_structure_scale = False
+        self._restore_viewport_scroll_anchor(anchor)
+        viewport = self.viewport()
+        if viewport is not None:
+            viewport.update()
 
     def setModel(self, model) -> None:  # noqa: N802
         """Keep the row-number column width tied to whichever model the view shows."""
@@ -824,152 +1050,63 @@ class CompoundTableView(QTableView):
     def compound_model(self):
         return self._compound_model
 
-    def structure_depict_resize_active(self) -> bool:
-        """True while the user is dragging a structure-column corner grip."""
-        return self._depict_resize is not None
+    def _viewport_scroll_anchor(self) -> dict[str, int]:
+        """First visible row and column, and where each sits in the viewport.
 
-    def structure_cell_corner_rect(self, row: int, logical_column: int) -> QRect | None:
-        """Viewport rectangle of the resize triangle on one structure cell."""
-        logical = int(logical_column)
-        if not self._column_is_structure_sized(logical):
-            return None
-        header = self.horizontalHeader()
-        model = self.model()
-        if header is None or model is None or header.isSectionHidden(logical):
-            return None
-        index = model.index(int(row), logical)
-        if not index.isValid():
-            return None
-        viewport = self.viewport()
-        if viewport is None:
-            return None
-        # Keep the triangle on screen when the cell runs past the viewport.
-        cell = self.visualRect(index).intersected(viewport.rect())
-        if cell.width() < _STRUCTURE_CORNER_GRIP_PX or cell.height() < _STRUCTURE_CORNER_GRIP_PX:
-            return None
-        return QRect(
-            cell.right() - _STRUCTURE_CORNER_GRIP_PX + 1,
-            cell.bottom() - _STRUCTURE_CORNER_GRIP_PX + 1,
-            _STRUCTURE_CORNER_GRIP_PX,
-            _STRUCTURE_CORNER_GRIP_PX,
-        )
+        Depiction resize changes every row height and every structure column width.
+        A pixel scroll offset then points at different cells, so the table jumps.
+        Putting these sections back at the same viewport position keeps the view still.
+        """
+        anchor: dict[str, int] = {}
+        vh = self.verticalHeader()
+        row = self.rowAt(0)
+        if vh is not None and row >= 0:
+            anchor["row"] = int(row)
+            anchor["row_y"] = int(vh.sectionViewportPosition(row))
+        hh = self.horizontalHeader()
+        if hh is None:
+            return anchor
+        for visual in range(int(hh.count())):
+            logical = int(hh.logicalIndex(visual))
+            if logical < 0 or hh.isSectionHidden(logical):
+                continue
+            left = int(hh.sectionViewportPosition(logical))
+            if left + int(hh.sectionSize(logical)) > 0:
+                anchor["col"] = logical
+                anchor["col_x"] = left
+                break
+        return anchor
 
-    def structure_column_corner_grip_rect(self, logical_column: int) -> QRect | None:
-        """Corner mark on the first visible cell of a structure column."""
-        rows = self._visible_row_range()
-        if rows is None:
-            return None
-        return self.structure_cell_corner_rect(int(rows.start), int(logical_column))
+    def _restore_viewport_scroll_anchor(self, anchor: dict[str, int]) -> None:
+        """Scroll so the sections in *anchor* sit where they did when the drag started."""
+        row = anchor.get("row")
+        vh = self.verticalHeader()
+        if row is not None and vh is not None and int(row) >= 0:
+            delta = int(vh.sectionViewportPosition(int(row))) - int(anchor["row_y"])
+            if delta:
+                bar = self.verticalScrollBar()
+                bar.setValue(int(bar.value()) + delta)
+        col = anchor.get("col")
+        hh = self.horizontalHeader()
+        if col is not None and hh is not None and not hh.isSectionHidden(int(col)):
+            delta = int(hh.sectionViewportPosition(int(col))) - int(anchor["col_x"])
+            if delta:
+                bar = self.horizontalScrollBar()
+                bar.setValue(int(bar.value()) + delta)
 
-    def begin_structure_depict_resize(self, logical_column: int, global_pos: QPoint) -> None:
-        """Start a corner drag that resizes every structure depiction."""
-        if self._depict_resize is not None:
-            return
-        logical = int(logical_column)
-        if not self._column_is_structure_sized(logical):
-            return
-        columns: dict[int, dict[str, int]] = {}
-        for col in self._structure_logical_columns():
-            content = self._structure_column_content_width(col)
-            actual = int(self.columnWidth(col))
-            fitted = max(actual, content + STRUCTURE_COLUMN_HORIZONTAL_PADDING)
-            columns[col] = {"actual": actual, "fitted": fitted, "content": content}
-        if logical not in columns:
-            return
-        origin_w = structure_depict_width()
-        origin_h = structure_depict_height()
-        zoomed_floor = structure_column_minimum_width(zoomed=True)
-        self._depict_resize = {
-            "logical": logical,
-            "origin": QPoint(global_pos),
-            "origin_w": origin_w,
-            "origin_h": origin_h,
-            "origin_min": int(self._structure_column_min_width),
-            "zoomed_layout": int(self._structure_column_min_width) >= int(zoomed_floor),
-            "columns": columns,
-            "content": columns[logical]["content"],
-            "zoomed_rows": set(),
-            "origin_row_heights": {},
-        }
-        self._set_depiction_preview(True, origin_w, origin_h)
+    def _remember_pixmap_column_source_size(self, width: int, height: int) -> None:
+        """Record the depiction size at the start of a drag when a column has none.
 
-    def update_structure_depict_resize(self, global_pos: QPoint) -> None:
-        """Move the live depiction size with the pointer."""
-        state = self._depict_resize
-        if state is None:
+        A later drag keeps that record so the preview scales from the last sharp
+        drawing. Committing the size replaces it with the size just drawn.
+        """
+        model = self._compound_model
+        note = getattr(model, "note_pixmap_column_source_size", None)
+        headers = getattr(model, "pixmap_data_column_headers", None)
+        if not callable(note) or not callable(headers):
             return
-        delta = QPoint(global_pos) - state["origin"]
-        width, height = structure_depict_size_for_corner_drag(
-            state["origin_w"],
-            state["origin_h"],
-            state["content"],
-            int(delta.x()),
-            int(delta.y()),
-        )
-        if width == structure_depict_width() and height == structure_depict_height():
-            return
-        set_structure_depict_size(width, height, persist=False)
-        min_w = structure_column_minimum_width(zoomed=bool(state["zoomed_layout"]))
-        self.set_structure_column_minimum_width(min_w)
-        for logical, col in state["columns"].items():
-            target = structure_column_width_for_depict_scale(
-                col["fitted"],
-                col["content"],
-                state["origin_w"],
-                width,
-            )
-            target = max(int(target), int(min_w))
-            if int(self.columnWidth(logical)) != target:
-                self.setColumnWidth(logical, target)
-        self._apply_depict_row_heights(visible_only=True)
-        viewport = self.viewport()
-        if viewport is not None:
-            viewport.update()
-
-    def finish_structure_depict_resize(self) -> None:
-        """Keep the dragged size and ask the window to save and redraw it."""
-        state = self._depict_resize
-        if state is None:
-            return
-        width = structure_depict_width()
-        height = structure_depict_height()
-        changed = width != int(state["origin_w"]) or height != int(state["origin_h"])
-        if changed:
-            # Rows that still use the default pick up the new height here. Rows already
-            # resized (a zoomed row, or one under the pointer) are set from the drag.
-            self._apply_depict_row_heights(visible_only=True)
-        self._depict_resize = None
-        self._release_corner_mouse()
-        self._set_depiction_preview(False, 0, 0)
-        viewport = self.viewport()
-        if viewport is not None:
-            viewport.update()
-        if changed:
-            self.structure_depict_resized.emit(int(width), int(height))
-
-    def cancel_structure_depict_resize(self) -> None:
-        """Restore the depiction size from before this corner drag."""
-        state = self._depict_resize
-        if state is None:
-            return
-        self._depict_resize = None
-        self._release_corner_mouse()
-        set_structure_depict_size(int(state["origin_w"]), int(state["origin_h"]), persist=False)
-        self._set_depiction_preview(False, 0, 0)
-        self.set_structure_column_minimum_width(int(state["origin_min"]))
-        header = self.horizontalHeader()
-        if header is not None:
-            header.blockSignals(True)
-        try:
-            for logical, col in state["columns"].items():
-                self.setColumnWidth(int(logical), int(col["actual"]))
-        finally:
-            if header is not None:
-                header.blockSignals(False)
-        self._restore_depict_row_heights(state)
-        viewport = self.viewport()
-        if viewport is not None:
-            viewport.update()
+        for header in headers():
+            note(str(header), int(width), int(height), replace=False)
 
     def _structure_logical_columns(self) -> list[int]:
         model = getattr(self, "_compound_model", None)
@@ -981,47 +1118,12 @@ class CompoundTableView(QTableView):
             count = 0
         return [col for col in range(count) if self._column_is_structure_sized(col)]
 
-    def _structure_column_content_width(self, logical: int) -> int:
-        """Picture width that a corner drag of this column should track."""
-        depict_w = int(structure_depict_width())
-        sampled = self._sampled_pixmap_width(logical)
-        zoomed = int(self._structure_column_min_width) >= int(
-            structure_column_minimum_width(zoomed=True)
-        )
-        if int(logical) == _STRUCTURE_COL and zoomed:
-            return max(depict_w * 2, sampled)
-        if sampled > 0:
-            return sampled
-        return depict_w
-
-    def _sampled_pixmap_width(self, logical: int) -> int:
-        model = self.model()
-        if model is None:
-            return 0
-        count = int(model.rowCount())
-        if count <= 0:
-            return 0
-        top = self.rowAt(0)
-        if top < 0:
-            top = 0
-        viewport = self.viewport()
-        view_h = int(viewport.height()) if viewport is not None else 0
-        bottom = self.rowAt(max(0, view_h - 1))
-        if bottom < 0:
-            bottom = min(count - 1, top + 40)
-        bottom = min(count - 1, max(top, bottom))
-        best = 0
-        for row in range(top, bottom + 1):
-            pix = model.index(row, int(logical)).data(Qt.DecorationRole)
-            if isinstance(pix, QPixmap) and not pix.isNull():
-                best = max(best, int(pix.width()))
-        return best
-
-    def _apply_depict_row_heights(self, *, visible_only: bool) -> None:
-        state = self._depict_resize
+    def _apply_depict_row_heights(
+        self, *, visible_only: bool, state: dict, skip_row: int | None = None
+    ) -> None:
         model = self.model()
         header = self.verticalHeader()
-        if state is None or model is None or header is None:
+        if model is None or header is None:
             return
         count = int(model.rowCount())
         if count <= 0:
@@ -1059,22 +1161,11 @@ class CompoundTableView(QTableView):
         try:
             header.setDefaultSectionSize(base)
             for row in pending:
+                if skip_row is not None and int(row) == int(skip_row):
+                    continue
                 target = zoom_h if row in zoomed else base
                 if int(header.sectionSize(row)) != target:
                     header.resizeSection(row, target)
-        finally:
-            header.blockSignals(False)
-
-    def _restore_depict_row_heights(self, state: dict) -> None:
-        header = self.verticalHeader()
-        if header is None:
-            return
-        header.blockSignals(True)
-        try:
-            header.setDefaultSectionSize(structure_row_default_height())
-            for row, height in state["origin_row_heights"].items():
-                if int(header.sectionSize(int(row))) != int(height):
-                    header.resizeSection(int(row), int(height))
         finally:
             header.blockSignals(False)
 
@@ -1091,95 +1182,3 @@ class CompoundTableView(QTableView):
             setter = getattr(delegate, "set_depiction_preview", None)
             if callable(setter):
                 setter(bool(active), int(origin_w), int(origin_h))
-
-    def _visible_row_range(self) -> range | None:
-        model = self.model()
-        viewport = self.viewport()
-        if model is None or viewport is None or int(model.rowCount()) <= 0:
-            return None
-        count = int(model.rowCount())
-        top = self.rowAt(0)
-        if top < 0:
-            top = 0
-        bottom = self.rowAt(max(0, int(viewport.height()) - 1))
-        if bottom < 0:
-            bottom = count - 1
-        if bottom < top:
-            return None
-        return range(int(top), min(count - 1, int(bottom)) + 1)
-
-    def _structure_corner_column_at(self, pos: QPoint) -> int:
-        rows = self._visible_row_range()
-        if rows is None:
-            return -1
-        point = QPoint(int(pos.x()), int(pos.y()))
-        for logical in self._structure_logical_columns():
-            for row in rows:
-                rect = self.structure_cell_corner_rect(row, logical)
-                if rect is not None and rect.contains(point):
-                    return logical
-        return -1
-
-    def _paint_structure_corner_marks(self) -> None:
-        viewport = self.viewport()
-        rows = self._visible_row_range()
-        if viewport is None or rows is None:
-            return
-        painter = QPainter(viewport)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        try:
-            for logical in self._structure_logical_columns():
-                for row in rows:
-                    rect = self.structure_cell_corner_rect(row, logical)
-                    if rect is not None:
-                        paint_structure_corner_mark(painter, rect)
-        finally:
-            painter.end()
-
-    def _handle_structure_corner_event(self, event) -> bool:
-        etype = event.type()
-        if etype == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-            logical = self._structure_corner_column_at(event.pos())
-            if logical < 0:
-                return False
-            self.begin_structure_depict_resize(logical, event.globalPos())
-            viewport = self.viewport()
-            if viewport is not None:
-                viewport.grabMouse()
-                viewport.setCursor(Qt.SizeFDiagCursor)
-                self._corner_cursor = True
-            return True
-        if self._depict_resize is not None and etype == QEvent.MouseMove:
-            self.update_structure_depict_resize(event.globalPos())
-            return True
-        if self._depict_resize is not None and etype == QEvent.MouseButtonRelease:
-            if event.button() == Qt.LeftButton:
-                self.finish_structure_depict_resize()
-                return True
-            return False
-        if etype in (QEvent.MouseMove, QEvent.HoverMove) and self._depict_resize is None:
-            self._update_corner_cursor(event.pos())
-        elif etype == QEvent.Leave and self._depict_resize is None:
-            self._update_corner_cursor(QPoint(-1, -1))
-        return False
-
-    def _update_corner_cursor(self, pos: QPoint) -> None:
-        viewport = self.viewport()
-        if viewport is None or self._depict_resize is not None:
-            return
-        over = self._structure_corner_column_at(pos) >= 0
-        if over:
-            viewport.setCursor(Qt.SizeFDiagCursor)
-            self._corner_cursor = True
-            return
-        if self._corner_cursor:
-            viewport.unsetCursor()
-            self._corner_cursor = False
-
-    def _release_corner_mouse(self) -> None:
-        viewport = self.viewport()
-        if viewport is not None and QWidget.mouseGrabber() is viewport:
-            viewport.releaseMouse()
-        if self._corner_cursor and self._depict_resize is None and viewport is not None:
-            viewport.unsetCursor()
-            self._corner_cursor = False

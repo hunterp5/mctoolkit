@@ -39,6 +39,7 @@ from ...chem.structure_source_headers import (
     is_murcko_structure_header,
 )
 from ...chem.render2d_mp import STRUCTURE_PAYLOAD_TAG
+from ...services.chemistry_columns import headers_with_depictable_structures
 from ...workers.load_render import (
     Render2DBatchHeldJob,
     Render2DBatchProcessWorker,
@@ -408,24 +409,51 @@ class Render2DMixin:
             )
             self.status_label.setText("No structures rendered.")
             return
+        if src != "Structure":
+            self._note_pixmap_render_source_size(src, base_w, base_h)
         self._start_render_2d_batch(
             renders, row_by_oid, src, column_pixmap_mode=(src != "Structure")
         )
 
-    def _queue_murcko_column_renders(
-        self, headers: list[str], allowed_oids: set[int] | None
+    def _queue_generated_structure_renders(
+        self,
+        headers: list[str],
+        allowed_oids: set[int] | None,
+        written_rows=None,
+        *,
+        force: bool = False,
     ) -> None:
-        """Draw generated structure columns after their text lands in the table.
+        """Draw columns a tool just filled with molecules or reactions.
 
-        Murcko scaffold, framework, and ring systems are drawn. Scaffold count stays a
-        number. The common-core SMARTS column is drawn the same way. Blank and ``N/A``
-        cells are skipped. Each column is its own queue job.
+        Murcko scaffolds and the common core are drawn by name. Any other column is
+        drawn when its cells are structures: fragments, decomposition, extracted
+        reactants and products, protonated forms. Counts, maps, and ``N/A`` stay text.
+        Blank cells are skipped. Each column is its own queue job.
+
+        *force* draws every named column. A depiction-size change uses that for columns
+        whose stored picture is a fixed bitmap.
         """
-        columns = [
-            header
-            for header in headers
-            if header in getattr(self, "headers", []) and _draws_on_write(header)
-        ]
+        table_headers = getattr(self, "headers", [])
+        if force:
+            columns = [
+                header
+                for header in headers
+                if header in table_headers and header not in ("ID_HIDDEN", "Structure")
+            ]
+        else:
+            known: list[str] = []
+            probe: list[str] = []
+            for header in headers:
+                if header not in table_headers or header in ("ID_HIDDEN", "Structure"):
+                    continue
+                if _draws_on_write(header):
+                    known.append(header)
+                else:
+                    probe.append(header)
+            found: set[str] = set()
+            if probe and written_rows:
+                found = set(headers_with_depictable_structures(probe, written_rows))
+            columns = [header for header in headers if header in known or header in found]
         if not columns:
             return
         queue = getattr(self, "process_queue", None)
@@ -433,6 +461,7 @@ class Render2DMixin:
             return
         base_w, base_h = structure_depict_width(), structure_depict_height()
         for header in columns:
+            self._note_pixmap_render_source_size(header, base_w, base_h)
             renders, row_by_oid = self._build_render2d_tasks_in_table_order(
                 header, base_w, base_h, allowed_oids
             )
@@ -452,6 +481,15 @@ class Render2DMixin:
                 ),
             )
 
+    def _note_pixmap_render_source_size(self, header: str, width: int, height: int) -> None:
+        """Remember the depiction size a 2D column's new pictures are drawn at."""
+        if not header or header == "Structure":
+            return
+        model = getattr(self, "_table_model", None)
+        note = getattr(model, "note_pixmap_column_source_size", None)
+        if callable(note):
+            note(str(header), int(width), int(height))
+
     def _start_render_2d_batch(
         self,
         renders,
@@ -461,16 +499,18 @@ class Render2DMixin:
         column_pixmap_mode: bool = True,
         queue_title_prefix: str = "",
         merge_structure_store: bool = False,
+        serial: bool = False,
     ) -> None:
         """Start a batch 2D render.
 
         When the serial process queue is idle, the job is queued (and typically starts
         immediately). When another tool is already running, the render starts off-queue
         so structures can be drawn without waiting for that tool to finish.
+        *serial* stays on that queue instead, so a later column render cannot overlap it.
         """
         if getattr(self, "_render2d_batch_active", False):
             return
-        if self._render2d_shares_ui_with_queue_job():
+        if not serial and self._render2d_shares_ui_with_queue_job():
             self._begin_render2d_batch_impl(
                 renders,
                 row_by_oid,
@@ -596,7 +636,7 @@ class Render2DMixin:
             self.signals,
             self._render2d_cancel_event,
             self._render2d_batch_session_tag,
-            want_scenes=structure_column,
+            want_scenes=True,
         )
         self._render2d_worker = worker
         self._render2d_priority_key = None
@@ -733,6 +773,8 @@ class Render2DMixin:
             self.mols[oid] = payload
         pixmap_mode = src != "Structure" and self._table_model.is_pixmap_data_column(src)
         base_w, base_h = structure_depict_width(), structure_depict_height()
+        if pixmap_mode:
+            self._note_pixmap_render_source_size(src, base_w, base_h)
         renders, row_by_oid = self._build_render2d_tasks_in_table_order(src, base_w, base_h, {oid})
         if not renders:
             QMessageBox.information(

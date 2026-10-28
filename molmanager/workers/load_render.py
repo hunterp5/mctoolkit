@@ -289,8 +289,8 @@ class Render2DBatchProcessWorker(QRunnable):
     def build_plan(self) -> PriorityRenderPlan:
         """Serialize the queued mols into a :class:`PriorityRenderPlan` of render tasks.
 
-        *want_scenes* is only set for the Structure column, whose stores can paint
-        depiction scenes.
+        *want_scenes* packs a molecule as a depiction scene so a later resize can
+        paint it sharply. Reactions and molecules the scene builder rejects stay PNGs.
         """
         ev = self.cancel_event
         rows: list[tuple[int, object, int, int]] = []

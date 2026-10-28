@@ -76,7 +76,7 @@ from molmanager.chem.depiction_text import cap_height, text_advance, text_ink_bo
 
 # Bump whenever the builder draws the same molecule differently, so cached scenes
 # (saved in session files) are rebuilt instead of showing the old picture.
-BUILDER_REVISION = 13
+BUILDER_REVISION = 14
 # LayoutOptions.token uses the low 3 bits. Bit 3 is the abbreviation toggle.
 _REVISION_STRIDE = 1 << (ABBREVIATION_REVISION_BIT + 1)
 

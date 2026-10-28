@@ -166,6 +166,8 @@ class CompoundTableModel(
         self._oid_to_row: dict[int, int] = {}
         # Optional extra columns that show a 2D pixmap (e.g. disconnected fragment) keyed by (oid, header).
         self._pixmap_columns: set[str] = set()
+        # Depiction size each pixmap column was drawn at. Cell resizes scale from here.
+        self._pixmap_column_source_size: dict[str, tuple[int, int]] = {}
         from ..platform_support.config import load_config
 
         self._extra_pixmaps = ExtraPixmapStore(
@@ -218,6 +220,11 @@ class CompoundTableModel(
     def _apply_headers(self, headers: list[str]) -> None:
         self._headers = list(headers)
         self._pixmap_columns &= set(self._headers)
+        self._pixmap_column_source_size = {
+            header: size
+            for header, size in self._pixmap_column_source_size.items()
+            if header in self._headers
+        }
         self._extra_pixmaps.keep_headers(set(self._headers))
         keep = set(self._headers)
         self._column_color_rules = {h: r for h, r in self._column_color_rules.items() if h in keep}
@@ -312,6 +319,7 @@ class CompoundTableModel(
         self._headers.clear()
         self._oid_to_row.clear()
         self._pixmap_columns.clear()
+        self._pixmap_column_source_size.clear()
         self._extra_pixmaps.clear()
         self._column_color_rules.clear()
         self._column_color_cache.clear()

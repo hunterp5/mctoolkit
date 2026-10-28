@@ -96,4 +96,3 @@ def test_brics_decomposition_dialog_params(qapp):  # noqa: ARG001
     assert p.column_prefix == "BRICS"
     assert p.method == "brics"
     assert p.tool_title == TOOL_BRICS_DECOMP
-    assert p.render_2d is False

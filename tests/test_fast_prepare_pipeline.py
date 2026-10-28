@@ -230,7 +230,8 @@ def test_fast_prepare_structure_scenes_skip_the_second_render(qapp):  # noqa: AR
         _run_fast_prepare_inline(win, "Structure", neutralize=True, want_scene=True)
 
         assert started == []
-        assert not win._render2d_batch_active
+        if win._render2d_batch_active:
+            assert win._render2d_pixmap_target == "Fragments"
         store = win._table_model._structure_png_store
         assert store is not None and len(store) == len(SALTS)
         options = current_layout_options()

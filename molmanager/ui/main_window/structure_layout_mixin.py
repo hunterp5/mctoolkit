@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 
 from ...chem.depiction_scene import is_scene_blob
@@ -71,20 +70,25 @@ class StructureLayoutMixin:
             self.rerender_structure_column_for_new_size()
 
     def commit_structure_depict_resize(self, width: int, height: int) -> None:
-        """Save a depiction size chosen by dragging a structure column corner, and redraw."""
+        """Save a depiction size chosen by dragging a column or row border, and redraw."""
         self.apply_structure_depict_size(int(width), int(height), persist=True)
 
     def rerender_structure_column_for_new_size(self) -> None:
-        """Re-draw Structure cells after depiction size changed in Settings.
+        """Re-draw structure pictures after the depiction size changes.
 
-        Stored scenes are painted at the new size with no workers. Only rows without a
-        scene (a fallback picture, or one not drawn yet) are rendered again, and that
-        render keeps the scenes already in the store.
+        The Structure column paints its stored scenes at the new size. Other depiction
+        columns do the same when they hold scenes. A column that only has a fixed-size
+        picture is drawn again so the resize does not leave a scaled bitmap.
         """
         if not hasattr(self, "_table_model") or self._table_model.rowCount() <= 0:
             if hasattr(self, "_table_model") and self._table_model is not None:
                 self._table_model.notify_structure_column_changed()
             return
+        self._rerender_structure_scenes_for_new_size()
+        self._redraw_pixmap_depiction_columns()
+
+    def _rerender_structure_scenes_for_new_size(self) -> None:
+        """Paint stored Structure scenes, and render rows that have no scene."""
         missing = self._structure_oids_without_scene()
         if not missing:
             self._repaint_stored_scenes()
@@ -115,6 +119,42 @@ class StructureLayoutMixin:
             queue_title_prefix="structure resize ",
             merge_structure_store=merge,
         )
+
+    def _redraw_pixmap_depiction_columns(self) -> None:
+        """Paint depiction-column scenes at the new size and redraw fixed bitmaps.
+
+        Scenes are resolution-independent, so dropping the decoded cache is enough.
+        A PNG was drawn for one cell size; scaling it is what makes the column blurry,
+        so those columns are rendered again at the current size.
+        """
+        model = self._table_model
+        headers_fn = getattr(model, "pixmap_data_column_headers", None)
+        if not callable(headers_fn):
+            return
+        headers = [str(header) for header in headers_fn()]
+        if not headers:
+            return
+        width, height = structure_depict_width(), structure_depict_height()
+        for header in headers:
+            note = getattr(self, "_note_pixmap_render_source_size", None)
+            if callable(note):
+                note(header, width, height)
+            else:
+                model.note_pixmap_column_source_size(header, width, height)
+        store = getattr(model, "_extra_pixmaps", None)
+        if store is not None and hasattr(store, "clear_decoded"):
+            store.clear_decoded()
+        notify = getattr(model, "notify_pixmap_columns_changed", None)
+        if callable(notify):
+            notify(headers)
+        if store is None or not hasattr(store, "headers_with_rasters"):
+            return
+        rasters = list(store.headers_with_rasters(headers))
+        if not rasters:
+            return
+        queue = getattr(self, "_queue_generated_structure_renders", None)
+        if callable(queue):
+            queue(rasters, None, written_rows=None, force=True)
 
     def _repaint_stored_scenes(self) -> None:
         """Drop decoded pixmaps so stored scenes paint at the current cell size."""
@@ -205,31 +245,6 @@ class StructureLayoutMixin:
         col = CompoundTableModel.STRUCTURE_COL
         if int(self.table.columnWidth(col)) != need:
             self.table.setColumnWidth(col, need)
-
-    def _normal_structure_pixmap_for_oid(self, oid: int) -> QPixmap | None:
-        """Best-effort 1× depiction: PNG store, else scale down the in-memory pixmap."""
-        store = self._table_model._structure_png_store
-        if store is not None and store.has_png(oid):
-            pm = store.pixmap(oid)
-            if pm is not None and not pm.isNull():
-                return pm
-        current = self._table_model.structure_pixmap_for_oid(oid)
-        if current is None or current.isNull():
-            return None
-        w, h = structure_depict_width(), structure_depict_height()
-        if current.width() <= w and current.height() <= h:
-            return current
-        return current.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-    def _try_restore_structure_zoom_out(self, oid: int, view_row: int) -> bool:
-        """Restore normal-size structure depiction without re-rendering when possible."""
-        pm = self._normal_structure_pixmap_for_oid(oid)
-        if pm is None or pm.isNull():
-            return False
-        self._table_model.set_structure_pixmap(oid, pm)
-        self.table.setRowHeight(int(view_row), structure_depict_height())
-        self._sync_structure_column_width_for_zoom_state()
-        return True
 
     def _sync_structure_column_width_for_pixmap(self, pm: QPixmap | None, fallback_w: int) -> None:
         """Grow the Structure column to fit the pixmap + padding (never shrink — avoids fighting user resizes)."""

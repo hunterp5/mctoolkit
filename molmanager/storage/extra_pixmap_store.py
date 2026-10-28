@@ -14,7 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""PNG-backed extra table-column images with a decoded QPixmap LRU."""
+"""Extra table-column images with a decoded QPixmap LRU.
+
+Scenes are painted at the current depiction size. PNGs stay at the size they were stored.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +27,35 @@ from pathlib import Path
 from PyQt5.QtCore import QBuffer, QByteArray, QIODevice
 from PyQt5.QtGui import QImage, QPixmap
 
+from ..chem.depiction_scene import SCENE_MAGIC, is_scene_blob
 from .temp_sqlite import close_owned_sqlite, open_owned_sqlite
+
+
+def _scene_display_size() -> tuple[int, int]:
+    from ..table.structure_depiction_layout import structure_depict_height, structure_depict_width
+
+    return int(structure_depict_width()), int(structure_depict_height())
+
+
+def _decode_stored_image(
+    raw: bytes, size: tuple[int, int]
+) -> tuple[QPixmap | None, tuple[int, int] | None]:
+    """Paint a scene at *size*, or decode a PNG at the size it was stored.
+
+    The second value is *size* for a scene and ``None`` for a PNG, so a later
+    depiction-size change repaints the scene and leaves the PNG cached.
+    """
+    if is_scene_blob(raw):
+        from ..table.structure_image import pixmap_from_structure_image
+
+        pm = pixmap_from_structure_image(raw, size[0], size[1])
+        if pm.isNull():
+            return None, None
+        return pm, size
+    pm = QPixmap.fromImage(QImage.fromData(raw))
+    if pm.isNull():
+        return None, None
+    return pm, None
 
 
 def pixmap_to_png_bytes(pixmap: QPixmap | None) -> bytes | None:
@@ -44,7 +75,10 @@ def pixmap_to_png_bytes(pixmap: QPixmap | None) -> bytes | None:
 
 
 class ExtraPixmapStore:
-    """Holds extra-column images as PNG bytes on disk; only a bounded LRU is decoded.
+    """Holds extra-column images on disk; only a bounded LRU is decoded.
+
+    A depiction scene is painted at the current depiction size, so a resize stays sharp.
+    A PNG is a fixed bitmap and is returned at the size it was stored.
 
     The set of stored ``(oid, header)`` keys is mirrored in memory so lookups for cells
     without an image (the common case on every table repaint) never touch SQLite.
@@ -70,7 +104,10 @@ class ExtraPixmapStore:
             "PRIMARY KEY (oid, header))"
         )
         self._conn.commit()
-        self._lru: OrderedDict[tuple[int, str], QPixmap] = OrderedDict()
+        # None means a fixed PNG. A pair is the depiction size a scene was painted at.
+        self._lru: OrderedDict[tuple[int, str], tuple[QPixmap, tuple[int, int] | None]] = (
+            OrderedDict()
+        )
         self._max_decoded = max(32, int(max_decoded_pixmaps))
         self._keys: set[tuple[int, str]] = self._load_keys()
         self._closed = False
@@ -128,19 +165,40 @@ class ExtraPixmapStore:
             return None
         return bytes(row[0])
 
+    def clear_decoded(self) -> None:
+        """Drop decoded pictures so the next paint reads the stored bytes again."""
+        self._lru.clear()
+
+    def headers_with_rasters(self, headers: list[str]) -> list[str]:
+        """Headers among *headers* that store a fixed picture rather than a scene."""
+        names = [str(header) for header in headers]
+        if not names:
+            return []
+        marks = ",".join("?" * len(names))
+        rows = self._conn.execute(
+            f"SELECT DISTINCT header FROM images WHERE header IN ({marks}) "
+            "AND hex(substr(blob, 1, 2)) != ?",
+            (*names, SCENE_MAGIC.hex().upper()),
+        ).fetchall()
+        found = {str(header) for (header,) in rows}
+        return [header for header in names if header in found]
+
     def pixmap(self, oid: int, header_name: str) -> QPixmap | None:
         key = (int(oid), str(header_name))
+        size = _scene_display_size()
         cached = self._lru.get(key)
-        if cached is not None and not cached.isNull():
-            self._lru.move_to_end(key)
-            return cached
+        if cached is not None:
+            pm, painted = cached
+            if pm is not None and not pm.isNull() and (painted is None or painted == size):
+                self._lru.move_to_end(key)
+                return pm
         raw = self._raw(*key)
         if not raw:
             return None
-        pm = QPixmap.fromImage(QImage.fromData(raw))
-        if pm.isNull():
+        pm, painted = _decode_stored_image(raw, size)
+        if pm is None:
             return None
-        self._lru[key] = pm
+        self._lru[key] = (pm, painted)
         self._lru.move_to_end(key)
         while len(self._lru) > self._max_decoded:
             self._lru.popitem(last=False)
@@ -165,8 +223,8 @@ class ExtraPixmapStore:
             self._keys.discard(kk)
         if raw is None:
             return default
-        pm = QPixmap.fromImage(QImage.fromData(raw))
-        return pm if pm is not None and not pm.isNull() else default
+        pm, _painted = _decode_stored_image(raw, _scene_display_size())
+        return pm if pm is not None else default
 
     def pixmaps_for_oid(self, oid: int) -> dict[str, QPixmap]:
         oid_i = int(oid)

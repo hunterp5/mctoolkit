@@ -174,7 +174,8 @@ class SessionRestoreMixin:
         if len(headers) < 2 or headers[0] != "ID_HIDDEN" or headers[1] != "Structure":
             raise ValueError("Invalid session headers.")
         self.headers = list(headers)
-        self.zoomed_ids = set(int(x) for x in (doc.get("zoomed_ids") or []) if x is not None)
+        # Per-row zoom was a double-click. Depiction size is the shared cell size now.
+        self.zoomed_ids = set()
         self.table.setSortingEnabled(False)
         self._table_model.clear_rows()
         self._table_model.set_headers(list(self.headers))

@@ -29,7 +29,7 @@ Molecules from the chosen structure source; core SMARTS/SMILES must match. Optio
 1. Filter to the series of interest.
 2. Enter the core SMARTS/SMILES and prefix.
 3. Choose matching strategy and options.
-4. Run and inspect R-group columns; refine the core if match rate is low.
+4. Run and inspect R-group columns. Core and substituent columns are drawn in 2D. Refine the core if the match rate is low.
 
 ## Use cases
 
@@ -47,6 +47,8 @@ Use **Chemistry → Structure Decomposition → Most Central Ring** when the row
 
 The core is the ring with the smallest mean bond distance to the rest of the molecule. If that ring is fused, bridged, or spiro to other rings, those rings stay in the core. A ring attached only by a bond, and every chain, becomes an R group.
 
-Columns are named `PREFIX_Core`, `PREFIX_R1`, `PREFIX_R2`, … The default prefix is `MCR`. Attachment labels are `[*:1]`, `[*:2]`, … in the same form core-based decomposition writes, so the columns can feed the SAR matrix and design studio. R numbers follow the core's canonical attachment order. A row with no ring is left as `N/A`.
+Columns are named `PREFIX_Core`, `PREFIX_R1`, `PREFIX_R2`, … The default prefix is `MCR`. Each structure column is drawn in 2D. Attachment labels are `[*:1]`, `[*:2]`, … in the same form core-based decomposition writes, so the columns can feed the SAR matrix and design studio. R numbers follow the core's canonical attachment order. A row with no ring is left as `N/A`.
+
+BRICS and RECAP write one column per fragment (`BRICS_1`, `RECAP_2`, …). Those columns are drawn the same way. Counts and blank cells stay text.
 
 Acyclic structures have no core. Symmetric positions on a symmetric core can trade R numbers. Bond distance ignores 3D coordinates, so a conformer does not move the core.

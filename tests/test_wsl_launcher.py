@@ -116,12 +116,10 @@ def test_settings_menu_has_configure(qapp) -> None:  # noqa: ARG001
         "Java…",
         "MAFFT…",
         "Open Babel…",
-        "REINVENT…",
-        "xtb…",
     ]
     gui = next(a.menu() for a in settings.actions() if a.text().replace("&", "") == "GUI")
     gui_labels = [a.text().replace("&", "") for a in gui.actions() if not a.isSeparator()]
-    assert gui_labels == ["Theme", "2D Render…", "Font…"]
+    assert gui_labels == ["Theme", "Font…"]
     assert "Status Bar" not in gui_labels
     theme = next(a.menu() for a in gui.actions() if a.text().replace("&", "") == "Theme")
     theme_labels = [a.text().replace("&", "") for a in theme.actions() if not a.isSeparator()]

@@ -33,6 +33,12 @@ Generated layouts get three optional improvements, each behind its own toggle:
   outside without changing any stereo configuration.
 - The layout is turned in 30° steps (so bonds stay on the hexagonal grid) when
   that lets it fill the default table cell noticeably better.
+
+Generated layouts are then rotated so one bond of the principal ring lies on the
+horizontal or vertical axis. That ring is an all-aromatic ring of 5 to 8 atoms
+when the molecule has one, otherwise the most regular ring in that size range.
+The turn is rigid, so bond lengths and stereo are unchanged. Stored coordinates
+are not turned: a file drawing or a sketcher pose stays as it arrived.
 """
 
 from __future__ import annotations
@@ -58,6 +64,11 @@ MIN_FLIP_CLEARANCE = 0.5
 # A conformer whose z range exceeds this is 3D, not a drawing.
 _FLAT_Z_EPS = 1e-3
 _MIN_XY_SPAN = 1e-4
+# Rings in this size range can sit square on the page. Larger rings are macrocycles.
+_ALIGN_RING_MIN = 5
+_ALIGN_RING_MAX = 8
+# A bond this close to an axis is already square; leave the layout alone.
+_AXIS_SNAP_TOLERANCE = math.radians(0.5)
 
 Point = tuple[float, float]
 
@@ -128,6 +139,7 @@ def layout_for_drawing(mol, options: LayoutOptions | None = None):
         layout = _first_with_true_double_bonds(base, candidates, opts, macrocycles)
     if opts.rotate_to_cell:
         _rotate_to_cell(layout)
+    _align_principal_ring(layout)
     return layout
 
 
@@ -354,3 +366,94 @@ def _rotate_to_cell(mol) -> None:
         return
     cos_a, sin_a = math.cos(best_angle), math.sin(best_angle)
     _set_positions(mol, [(x * cos_a - y * sin_a, x * sin_a + y * cos_a) for x, y in positions])
+
+
+def _align_principal_ring(mol) -> None:
+    """Turn *mol* so one bond of its principal ring is horizontal or vertical.
+
+    The depictor aligns the long axis of the molecule, which leaves a regular
+    ring a few degrees off the page axes. One rigid rotation squares the ring
+    that should read as the drawing: an all-aromatic ring when there is one,
+    otherwise the most regular ring of 5 to 8 atoms. Rings drawn on a different
+    lattice stay at their relative angle.
+    """
+    if mol.GetNumConformers() == 0 or mol.GetNumAtoms() < _ALIGN_RING_MIN:
+        return
+    positions = _positions(mol)
+    ring = _principal_ring(mol, positions)
+    if ring is None:
+        return
+    angle = _axis_alignment_angle(positions, ring)
+    if angle is None or abs(angle) < _AXIS_SNAP_TOLERANCE:
+        return
+    cos_a, sin_a = math.cos(angle), math.sin(angle)
+    _set_positions(mol, [(x * cos_a - y * sin_a, x * sin_a + y * cos_a) for x, y in positions])
+
+
+def _principal_ring(mol, positions: list[Point]) -> tuple[int, ...] | None:
+    """Ring of 5 to 8 atoms that should sit on the page axes.
+
+    An all-aromatic ring wins, then the most regular polygon, then the largest.
+    A Murcko framework has no aromatic flags, so its regular six-membered ring
+    is chosen on the later keys.
+    """
+    rings = [ring for ring in _atom_rings(mol) if _ALIGN_RING_MIN <= len(ring) <= _ALIGN_RING_MAX]
+    if not rings:
+        return None
+    return max(rings, key=lambda ring: _ring_rank(mol, positions, ring))
+
+
+def _ring_rank(mol, positions: list[Point], ring: tuple[int, ...]) -> tuple[bool, float, int]:
+    """Sort key: aromatic, then regular, then large."""
+    aromatic = all(mol.GetAtomWithIdx(index).GetIsAromatic() for index in ring)
+    variance = _turning_variance(positions, ring)
+    regularity = -variance if math.isfinite(variance) else -math.inf
+    return (aromatic, regularity, len(ring))
+
+
+def _turning_variance(positions: list[Point], ring: tuple[int, ...]) -> float:
+    """Variance of the turn at each vertex. Zero for a regular polygon."""
+    angles: list[float] = []
+    size = len(ring)
+    for index in range(size):
+        start = positions[ring[index]]
+        end = positions[ring[(index + 1) % size]]
+        if math.dist(start, end) < _MIN_XY_SPAN:
+            return math.inf
+        angles.append(math.atan2(end[1] - start[1], end[0] - start[0]))
+    turns = [
+        abs((angles[(index + 1) % size] - angles[index] + math.pi) % (2 * math.pi) - math.pi)
+        for index in range(size)
+    ]
+    mean = sum(turns) / size
+    return sum((turn - mean) ** 2 for turn in turns) / size
+
+
+def _axis_alignment_angle(positions: list[Point], ring: tuple[int, ...]) -> float | None:
+    """Smallest rotation, in radians, that puts one bond of *ring* on an axis.
+
+    ``None`` when every bond in the ring is shorter than a real bond.
+    """
+    best: float | None = None
+    size = len(ring)
+    for index in range(size):
+        start = positions[ring[index]]
+        end = positions[ring[(index + 1) % size]]
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        if dx * dx + dy * dy < _MIN_XY_SPAN * _MIN_XY_SPAN:
+            continue
+        delta = _delta_to_axis(math.atan2(dy, dx))
+        if best is None or abs(delta) < abs(best):
+            best = delta
+    return best
+
+
+def _delta_to_axis(angle: float) -> float:
+    """Smallest rotation that puts an undirected bond at *angle* on an axis."""
+    wrapped = angle % math.pi
+    to_horizontal = -wrapped if wrapped <= math.pi / 2 else math.pi - wrapped
+    to_vertical = math.pi / 2 - wrapped
+    if abs(to_horizontal) <= abs(to_vertical):
+        return to_horizontal
+    return to_vertical

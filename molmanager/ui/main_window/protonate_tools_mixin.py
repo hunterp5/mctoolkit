@@ -18,15 +18,10 @@
 
 from __future__ import annotations
 
-import logging
-
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMessageBox
 
-from ...table.structure_depiction_layout import structure_depict_height, structure_depict_width
 from ..analysis_job_support import enqueue_process_queue_job
-
-logger = logging.getLogger(__name__)
 
 
 class ProtonateToolsMixin:
@@ -156,7 +151,6 @@ class ProtonateToolsMixin:
         out_col = str(ctx.get("out_col") or "Protonated")
         pct_col = protomer_percent_column_name(float(ctx.get("ph", 7.4)))
         render_2d = bool(ctx.get("render_2d"))
-        allowed = ctx.get("allowed_oids") or None
 
         if not rows:
             self._finish_tool_progress("Protonate")
@@ -181,8 +175,7 @@ class ProtonateToolsMixin:
                 )
             )
 
-        def _after(cols: list[str], a=allowed, render=render_2d, done=on_done) -> None:
-            self._protonate_after_table_write(cols, a, render)
+        def _after(cols: list[str], done=on_done) -> None:
             self.status_label.setText(f"Protonate: wrote {out_col}, the population, and pKa.")
             self._notify_protonate_done(done, None, cols)
 
@@ -191,6 +184,7 @@ class ProtonateToolsMixin:
             [out_col, pct_col, "pKa"],
             progress_label="Protonate",
             on_complete=_after,
+            depict_structures=render_2d,
         )
 
     def _fail_protonate_job(self, msg: str, on_done) -> None:
@@ -202,28 +196,3 @@ class ProtonateToolsMixin:
             text = msg or "Computation failed."
             self.status_label.setText(f"Protonate failed: {text}")
             self._notify_protonate_done(on_done, text)
-
-    def _protonate_after_table_write(
-        self,
-        written: list[str],
-        allowed,
-        render_2d: bool,
-    ) -> None:
-        if not render_2d or not written:
-            return
-        out_col = written[0]
-        try:
-            base_w, base_h = structure_depict_width(), structure_depict_height()
-            renders, row_by_oid = self._build_render2d_tasks_in_table_order(
-                out_col, base_w, base_h, allowed
-            )
-            if renders:
-                self._start_render_2d_batch(
-                    renders,
-                    row_by_oid,
-                    out_col,
-                    column_pixmap_mode=True,
-                    queue_title_prefix="Protonate: ",
-                )
-        except Exception:
-            logger.exception("Protonate: render 2D scheduling failed")

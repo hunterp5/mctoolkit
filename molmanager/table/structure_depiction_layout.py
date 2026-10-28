@@ -87,49 +87,41 @@ def structure_column_minimum_width(*, zoomed: bool = False) -> int:
     return int(depict_w) + int(STRUCTURE_COLUMN_HORIZONTAL_PADDING)
 
 
-def structure_depict_size_for_corner_drag(
+def structure_depict_size_for_cell_resize(
     origin_width: int,
     origin_height: int,
-    content_width: int,
+    cell_width: int,
+    cell_height: int,
     delta_x: int,
     delta_y: int,
 ) -> tuple[int, int]:
-    """Depiction size after dragging a structure column's bottom-right corner.
+    """Depiction size after resizing a structure cell, one scale for both axes.
 
-    *content_width* is the picture width in that column (a reaction scheme is wider
-    than one molecule). Horizontal motion scales the shared depiction size so that
-    picture's right edge follows the pointer. Vertical motion changes height by
-    *delta_y* pixels. Both axes are clamped to the depiction limits.
+    *cell_width* and *cell_height* are the cell at the start of the drag. Horizontal
+    motion is a fraction of that width and vertical motion a fraction of that height.
+    The axis that moved farther sets the scale, and the other axis follows, so the
+    drawing keeps its shape and the same share of the cell. Extra space in a wide
+    column scales with the picture instead of staying put while the drawing shrinks.
     """
-    span = max(1, int(content_width))
-    grown = int(origin_width) * (span + int(delta_x)) / span
-    width = _clamp_structure_width(int(round(grown)))
-    height = _clamp_structure_height(int(origin_height) + int(delta_y))
-    return width, height
-
-
-def structure_column_width_for_depict_scale(
-    origin_column_width: int,
-    origin_content_width: int,
-    origin_depict_width: int,
-    new_depict_width: int,
-) -> int:
-    """Column width that keeps user slack while the depiction scales.
-
-    Slack is space beyond the picture and the usual horizontal padding. A column
-    that was already only as wide as its picture changes by the same amount as
-    the picture.
-    """
-    origin_depict = max(1, int(origin_depict_width))
-    scale = int(new_depict_width) / origin_depict
-    content = max(1, int(round(int(origin_content_width) * scale)))
-    slack = max(
-        0,
-        int(origin_column_width)
-        - int(origin_content_width)
-        - int(STRUCTURE_COLUMN_HORIZONTAL_PADDING),
+    origin_w = max(1, int(origin_width))
+    origin_h = max(1, int(origin_height))
+    span_w = max(1, int(cell_width))
+    span_h = max(1, int(cell_height))
+    scale_x = (span_w + int(delta_x)) / span_w
+    scale_y = (span_h + int(delta_y)) / span_h
+    scale = scale_x if abs(scale_x - 1.0) >= abs(scale_y - 1.0) else scale_y
+    lo = max(
+        MIN_STRUCTURE_DEPICT_WIDTH / origin_w,
+        MIN_STRUCTURE_DEPICT_HEIGHT / origin_h,
     )
-    return content + int(STRUCTURE_COLUMN_HORIZONTAL_PADDING) + slack
+    hi = min(
+        MAX_STRUCTURE_DEPICT_WIDTH / origin_w,
+        MAX_STRUCTURE_DEPICT_HEIGHT / origin_h,
+    )
+    if hi < lo:
+        hi = lo
+    scale = min(max(scale, lo), hi)
+    return int(round(origin_w * scale)), int(round(origin_h * scale))
 
 
 def reaction_depict_size(*, zoomed: bool = False) -> tuple[int, int]:
@@ -192,7 +184,7 @@ def browser_structure_preview_size() -> tuple[int, int]:
     return browser_structure_preview_width(), browser_structure_preview_height()
 
 
-# Data → Browser structure preview (tracks Settings → GUI → 2D Render; 2× table size).
+# Data → Browser structure preview (2× the table depiction size).
 BROWSER_STRUCTURE_PREVIEW_MIN_WIDTH = DEFAULT_STRUCTURE_DEPICT_WIDTH * 2
 BROWSER_STRUCTURE_PREVIEW_MIN_HEIGHT = DEFAULT_STRUCTURE_DEPICT_HEIGHT * 2
 

@@ -22,11 +22,13 @@ from molmanager.services.chemistry_columns import (
     canonical_smiles_header_for_updates,
     cell_texts_have_parseable_molecule,
     data_headers_confirmed_for_chemistry_tools,
+    headers_with_depictable_structures,
     is_smiles_named_header,
     ordered_headers_for_molecule_lookup,
     is_legacy_som_map_header,
     skip_chemistry_tool_column_dropdown,
     should_skip_chemical_scan_column,
+    text_is_depictable_structure,
 )
 from molmanager.chem.molecule_conversion import (
     canonical_structure_key_from_smiles,
@@ -123,6 +125,31 @@ def test_cell_texts_have_parseable_molecule():
     assert not cell_texts_have_parseable_molecule(
         ["http://selleckchem.com/products/Carmofur.html", '{"v":2,"h":"confs"}']
     )
+
+
+def test_text_is_depictable_structure_accepts_molecules_and_reactions():
+    assert text_is_depictable_structure("c1ccccc1")
+    assert text_is_depictable_structure("[16*]c1ccccc1")
+    assert text_is_depictable_structure("CCO . [Na+]")
+    assert text_is_depictable_structure("CCO>>CC")
+    assert text_is_depictable_structure("[#6]-[#6]")
+    assert not text_is_depictable_structure("N/A")
+    assert not text_is_depictable_structure("1")
+    assert not text_is_depictable_structure("7.40")
+    assert not text_is_depictable_structure("CCO; CC")
+    assert not text_is_depictable_structure("hello")
+
+
+def test_headers_with_depictable_structures_skips_numbers_and_lists():
+    rows = [
+        (1, {"BRICS_1": "[16*]c1ccccc1", "BRICS_2": "N/A", "Count": "2", "Notes": "ring"}),
+        (2, {"BRICS_1": "CCO . [Na+]", "BRICS_2": "*C", "Count": "1", "Notes": "salt"}),
+        (3, {"Metabolites": "CCO; CC", "Product 1": "c1ccccc1"}),
+    ]
+    assert headers_with_depictable_structures(
+        ["BRICS_1", "BRICS_2", "Count", "Notes", "Metabolites", "Product 1"],
+        rows,
+    ) == ["BRICS_1", "BRICS_2", "Product 1"]
 
 
 def test_canonical_structure_key_from_smiles():

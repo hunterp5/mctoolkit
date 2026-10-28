@@ -190,3 +190,97 @@ def test_scene_revision_follows_the_layout_options():
         scene_revision(LayoutOptions(rotate_to_cell=False)),
     }
     assert len(revisions) == 3
+
+
+# Raw RDKit depiction of this molecule leaves an aromatic ring about 12° off axis.
+_TILTED_AROMATIC = "Nc1ccccc1NC(=O)c1ccc(CNC(=O)OCc2cccnc2)cc1"
+# A phenyl on a saturated scaffold. Straightening every bond would tilt the phenyl.
+_PHENYL_ON_SATURATED = "O=C1C=CC2[C@H]3CCC4[C@@H](C(=O)Nc5ccccc5)CC[C@H]4[C@@H]3CC[C@H]2N1"
+
+
+def _bond_lengths(mol) -> list[float]:
+    positions = _positions(mol)
+    return [
+        math.dist(positions[bond.GetBeginAtomIdx()], positions[bond.GetEndAtomIdx()])
+        for bond in mol.GetBonds()
+    ]
+
+
+def _axis_gap_degrees(mol, *, aromatic: bool | None = None) -> float:
+    """Smallest degrees between a 5-8 ring bond and the horizontal or vertical axis.
+
+    *aromatic* ``True`` keeps all-aromatic rings, ``False`` keeps rings with no
+    aromatic atom, and ``None`` keeps every ring in range.
+    """
+    conformer = mol.GetConformer()
+    Chem.FastFindRings(mol)
+    best = 90.0
+    found = False
+    for ring in mol.GetRingInfo().AtomRings():
+        if not 5 <= len(ring) <= 8:
+            continue
+        flags = [mol.GetAtomWithIdx(index).GetIsAromatic() for index in ring]
+        if aromatic is True and not all(flags):
+            continue
+        if aromatic is False and any(flags):
+            continue
+        found = True
+        for begin, end in zip(ring, ring[1:] + ring[:1]):
+            start = conformer.GetAtomPosition(begin)
+            finish = conformer.GetAtomPosition(end)
+            ang = abs(math.degrees(math.atan2(finish.y - start.y, finish.x - start.x))) % 180
+            best = min(best, min(ang % 90, 90 - (ang % 90)))
+    assert found
+    return best
+
+
+def test_generated_aromatic_ring_sits_on_an_axis():
+    mol = Chem.MolFromSmiles(_TILTED_AROMATIC)
+    raw = Chem.Mol(mol)
+    rdDepictor.Compute2DCoords(raw, forceRDKit=True)
+    assert _axis_gap_degrees(raw, aromatic=True) > 8.0
+    drawn = layout_for_drawing(mol, LayoutOptions())
+    assert _axis_gap_degrees(drawn, aromatic=True) < 1.0
+    assert _bond_lengths(drawn) == pytest.approx(_bond_lengths(raw))
+
+
+def test_phenyl_on_a_saturated_scaffold_stays_on_axis():
+    mol = Chem.MolFromSmiles(_PHENYL_ON_SATURATED)
+    drawn = layout_for_drawing(mol, LayoutOptions())
+    assert _axis_gap_degrees(drawn, aromatic=True) < 1.0
+
+
+def test_framework_ring_sits_on_an_axis():
+    from rdkit.Chem.Scaffolds import MurckoScaffold
+
+    mol = Chem.MolFromSmiles("c1ccc2ccccc2c1")
+    framework = MurckoScaffold.MakeScaffoldGeneric(mol)
+    assert framework is not None
+    assert not any(atom.GetIsAromatic() for atom in framework.GetAtoms())
+    drawn = layout_for_drawing(framework, LayoutOptions())
+    assert _axis_gap_degrees(drawn, aromatic=False) < 1.0
+
+
+def test_five_membered_aromatic_ring_sits_on_an_axis():
+    mol = Chem.MolFromSmiles("c1ccoc1")
+    drawn = layout_for_drawing(mol, LayoutOptions())
+    assert _axis_gap_degrees(drawn, aromatic=True) < 1.0
+
+
+def test_stored_tilt_is_not_realigned():
+    mol = Chem.MolFromSmiles("c1ccccc1")
+    rdDepictor.Compute2DCoords(mol)
+    conformer = mol.GetConformer()
+    bond = 1.5
+    x = y = 0.0
+    heading = math.radians(12)
+    for index in range(mol.GetNumAtoms()):
+        conformer.SetAtomPosition(index, Point3D(x, y, 0.0))
+        x += bond * math.cos(heading)
+        y += bond * math.sin(heading)
+        heading += math.radians(60)
+    before = _positions(mol)
+    drawn = layout_for_drawing(mol, LayoutOptions())
+    assert drawn is mol
+    assert _positions(drawn) == pytest.approx(before)
+    assert _axis_gap_degrees(drawn, aromatic=True) == pytest.approx(12.0)

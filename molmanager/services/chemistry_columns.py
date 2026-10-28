@@ -17,8 +17,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
+from ..chem.reaction_file_io import looks_like_reaction_smarts, parse_reaction_smarts
 from ..chem.structure_source_headers import (
     header_looks_like_structure_text,
     is_tool_generated_structure_header,
@@ -28,6 +29,8 @@ from ..chem.molecule_conversion import (
     looks_like_structure_cell_text,
     parse_molecule_from_cell_text,
 )
+
+_PLACEHOLDER_CELLS = frozenset({"", "n/a", "cancelled", "cancelled."})
 
 
 def skip_chemistry_tool_column_dropdown(header: str) -> bool:
@@ -128,6 +131,67 @@ def ordered_headers_for_molecule_lookup(
         if not should_skip_chemical_scan_column(h, is_pixmap_column=is_pixmap_column):
             add(h)
     return out
+
+
+def _placeholder_cell(text: str) -> bool:
+    """Blank, ``N/A``, cancel, and error cells are not structures and not evidence against one."""
+    lowered = (text or "").strip().lower()
+    return lowered in _PLACEHOLDER_CELLS or lowered.startswith("error")
+
+
+def text_is_depictable_structure(text: str) -> bool:
+    """True when *text* is one molecule or one reaction the table can draw.
+
+    A semicolon-separated list (metabolites, several transforms) is not one picture.
+    """
+    raw = (text or "").strip()
+    if not raw or _placeholder_cell(raw) or "; " in raw:
+        return False
+    if len(raw) > 20000 and not looks_like_mol_block(raw):
+        return False
+    if parse_molecule_from_cell_text(raw) is not None:
+        return True
+    if looks_like_reaction_smarts(raw):
+        return parse_reaction_smarts(raw) is not None
+    return False
+
+
+def headers_with_depictable_structures(
+    headers: Sequence[str],
+    rows: Iterable[tuple[object, Mapping[str, str] | None]],
+    *,
+    max_samples: int = 8,
+) -> list[str]:
+    """Return *headers* whose real cells are molecules or reactions.
+
+    Sampling stops after *max_samples* non-placeholder cells per header. One cell
+    that is not a structure rejects that header, so counts and other text stay text.
+    """
+    pending = [header for header in headers if header]
+    if not pending:
+        return []
+    hits = dict.fromkeys(pending, 0)
+    checked = dict.fromkeys(pending, 0)
+    failed: set[str] = set()
+    open_headers = set(pending)
+    for _oid, row in rows:
+        if not open_headers:
+            break
+        values = row or {}
+        for header in list(open_headers):
+            text = str(values.get(header, "") or "")
+            if _placeholder_cell(text):
+                continue
+            checked[header] += 1
+            if text_is_depictable_structure(text):
+                hits[header] += 1
+            else:
+                failed.add(header)
+                open_headers.discard(header)
+                continue
+            if checked[header] >= max_samples:
+                open_headers.discard(header)
+    return [header for header in pending if hits[header] > 0 and header not in failed]
 
 
 def cell_texts_have_parseable_molecule(

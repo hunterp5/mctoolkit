@@ -93,6 +93,9 @@ class CompoundTableBulkMixin:
                 for oid, h in self._extra_pixmaps.keys():
                     if h == src_key:
                         self._extra_pixmaps.copy_png((oid, src_key), (oid, header_name))
+            source_size = self._pixmap_column_source_size.get(src_key)
+            if source_size is not None:
+                self._pixmap_column_source_size[header_name] = source_size
         self._mark_headers_added_for_bounds([header_name])
         self.endInsertColumns()
         if self._rows:
@@ -336,6 +339,7 @@ class CompoundTableBulkMixin:
         h = self._headers[col]
         if h in self._pixmap_columns:
             self._pixmap_columns.discard(h)
+            self._pixmap_column_source_size.pop(h, None)
             self._extra_pixmaps.remove_header(h)
         self._column_color_rules.pop(h, None)
         self._column_color_cache.pop(h, None)
@@ -358,6 +362,9 @@ class CompoundTableBulkMixin:
         if col >= 2 and old in self._pixmap_columns:
             self._pixmap_columns.discard(old)
             self._pixmap_columns.add(new_name)
+            source_size = self._pixmap_column_source_size.pop(old, None)
+            if source_size is not None:
+                self._pixmap_column_source_size[new_name] = source_size
             self._extra_pixmaps.rename_header(old, new_name)
         if col >= 2:
             self._rows.rename_column(old, new_name)

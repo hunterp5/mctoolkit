@@ -385,16 +385,31 @@ class StructureEditMixin:
         oids = self._write_tool_structures(
             dest, [(oid, blob, smiles) for oid, blob, _fragments, smiles in prepared]
         )
+        fragment_pairs = [(oid, fragments) for oid, _blob, fragments, _smiles in prepared]
         if fragments_col in self.headers:
-            self._table_model.set_column_text_by_oids(
-                fragments_col, [(oid, fragments) for oid, _blob, fragments, _smiles in prepared]
-            )
+            self._table_model.set_column_text_by_oids(fragments_col, fragment_pairs)
         self.schedule_calculate_global_bounds()
         self._clear_tool_progress()
 
+        rendered_dest = False
         if not no_render_2d and self._tool_target_renders_2d(dest):
-            if self._render_tool_structures(dest, oids):
-                return
+            rendered_dest = self._render_tool_structures(dest, oids, serial=True)
+        if (
+            not no_render_2d
+            and fragments_col
+            and fragments_col != dest
+            and fragments_col in self.headers
+            and fragment_pairs
+        ):
+            depict = getattr(self, "_queue_generated_structure_renders", None)
+            if callable(depict):
+                depict(
+                    [fragments_col],
+                    set(oids),
+                    [(oid, {fragments_col: text}) for oid, text in fragment_pairs],
+                )
+        if rendered_dest:
+            return
         self.status_label.setText(self._consume_partial_results_notice() or "Done.")
 
     def on_neutralize_finished(self, results) -> None:

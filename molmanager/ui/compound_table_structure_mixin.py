@@ -108,6 +108,19 @@ class CompoundTableStructureMixin:
             lo, hi = min(rows), max(rows)
             self.notify_structure_column_changed(lo, hi)
 
+    def notify_pixmap_columns_changed(self, headers: list[str]) -> None:
+        """Repaint depiction columns after their pictures were dropped or replaced."""
+        if not self._rows or not headers:
+            return
+        last = len(self._rows) - 1
+        roles = [Qt.DecorationRole, Qt.SizeHintRole, Qt.DisplayRole, Qt.ToolTipRole]
+        for header in headers:
+            try:
+                col = self._headers.index(str(header))
+            except ValueError:
+                continue
+            self.dataChanged.emit(self.index(0, col), self.index(last, col), roles)
+
     def set_structure_pixmap(self, oid: int, pixmap: QPixmap | None) -> None:
         if pixmap is not None:
             self._pixmaps[oid] = pixmap
@@ -123,6 +136,25 @@ class CompoundTableStructureMixin:
         """Mark a data column as image-only (2D pixmap via ``set_column_pixmap``)."""
         if header_name in self._headers:
             self._pixmap_columns.add(header_name)
+
+    def note_pixmap_column_source_size(
+        self, header_name: str, width: int, height: int, *, replace: bool = True
+    ) -> None:
+        """Remember the depiction size images in *header_name* were drawn at.
+
+        A later cell resize scales those pictures from this size to the current one.
+        *replace* is false when a drag only needs to fill in a column that has none yet.
+        """
+        header = str(header_name)
+        if not header or header in ("ID_HIDDEN", "Structure"):
+            return
+        if not replace and header in self._pixmap_column_source_size:
+            return
+        self._pixmap_column_source_size[header] = (max(1, int(width)), max(1, int(height)))
+
+    def pixmap_column_source_size(self, header_name: str) -> tuple[int, int] | None:
+        """Depiction size stored images in *header_name* were drawn at, if known."""
+        return self._pixmap_column_source_size.get(str(header_name))
 
     def pixmap_data_column_headers(self) -> list[str]:
         """Data-column headers currently displayed as 2D images rather than text."""

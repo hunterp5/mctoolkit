@@ -61,6 +61,9 @@ def parse_molecule_from_cell_text(raw: str):
     raw = (raw or "").strip()
     if not raw:
         return None
+    # Disconnect and prepare write the smaller pieces as ``A . B``. SMILES uses a bare dot.
+    if "\n" not in raw and " . " in raw and not looks_like_mol_block(raw):
+        raw = re.sub(r"\s+\.\s+", ".", raw)
     if len(raw) > _CELL_TEXT_MAX_PARSE_CHARS:
         return None
     if not looks_like_structure_cell_text(raw):

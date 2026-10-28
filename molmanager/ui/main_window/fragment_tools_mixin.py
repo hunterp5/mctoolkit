@@ -18,8 +18,6 @@
 
 from __future__ import annotations
 
-import logging
-
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QMessageBox,
@@ -34,11 +32,8 @@ from ..strings import (
     TOOL_RECAP_RECOMP,
 )
 from ...chem.structure_payload import oid_mol_rows_from_payloads
-from ...table.structure_depiction_layout import structure_depict_height, structure_depict_width
 from ... import workers
 from ..analysis_job_support import enqueue_process_queue_job
-
-logger = logging.getLogger(__name__)
 
 
 class FragmentToolsMixin:
@@ -238,7 +233,6 @@ class FragmentToolsMixin:
         if frag_cols:
             data = self._filter_rows_for_resume(data, frag_cols)
         method = "brics" if p.method == "brics" else "recap"
-        self._fragment_decomp_render_2d_after = bool(getattr(p, "render_2d", False))
         enqueue_process_queue_job(
             self,
             p.tool_title,
@@ -259,41 +253,10 @@ class FragmentToolsMixin:
 
     def on_fragment_decomp_finished(self, res, col_headers: list, tool_title: str) -> None:
         self._finish_tool_progress(tool_title)
-        self.on_calc_finished(
-            res,
-            col_headers,
-            finish_progress=False,
-            on_complete=lambda cols, t=tool_title: self._fragment_decomp_maybe_render(cols, t),
-        )
-
-    def _fragment_decomp_maybe_render(self, written: list[str], tool_title: str) -> None:
-        do_render = bool(getattr(self, "_fragment_decomp_render_2d_after", False))
-        self._fragment_decomp_render_2d_after = False
-        # Optionally render new fragment SMILES columns so the user can see the pieces immediately.
-        # Uses pixmap-only columns (hide SMILES text) and queues the renders so the GUI stays responsive.
-        if do_render and tool_title in (TOOL_BRICS_DECOMP, TOOL_RECAP_DECOMP) and written:
-            try:
-                base_w, base_h = structure_depict_width(), structure_depict_height()
-                for h in written:
-                    if h not in self.headers:
-                        continue
-                    renders, row_by_oid = self._build_render2d_tasks_in_table_order(
-                        h, base_w, base_h, None
-                    )
-                    if renders:
-                        self._start_render_2d_batch(
-                            renders,
-                            row_by_oid,
-                            h,
-                            column_pixmap_mode=True,
-                            queue_title_prefix=f"{tool_title}: ",
-                        )
-            except Exception:
-                logger.exception("Fragment decomposition: auto 2D render failed")
+        self.on_calc_finished(res, col_headers, finish_progress=False)
 
     def on_fragment_decomp_failed(self, message: str, tool_title: str) -> None:
         self._clear_tool_progress()
-        self._fragment_decomp_render_2d_after = False
         self.status_label.setText("Ready.")
         QMessageBox.warning(self, tool_title, message or "Fragment decomposition failed.")
 

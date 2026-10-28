@@ -98,7 +98,7 @@ def test_selected_rows_session_keeps_only_selected_oids(qapp):  # noqa: ARG001
     open_saved(w, w2, oids={1})
     assert [w2._table_model.row_oid(r) for r in range(w2._table_model.rowCount())] == [1]
     assert set(w2.mols) == {1}
-    assert w2.zoomed_ids == {1}
+    assert w2.zoomed_ids == set()
 
 
 def test_session_open_restores_row(qapp):  # noqa: ARG001

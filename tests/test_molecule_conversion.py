@@ -88,6 +88,12 @@ def test_parse_molecule_from_cell_text_skips_urls_and_json_quietly(capsys):
     assert "SMARTS Parse Error" not in err
 
 
+def test_parse_molecule_from_cell_text_joins_spaced_fragments():
+    parsed = parse_molecule_from_cell_text("CCO . [Na+]")
+    assert parsed is not None
+    assert len(Chem.GetMolFrags(parsed)) == 2
+
+
 def test_parse_molecule_from_cell_text_accepts_molblock_with_blank_title():
     block = Chem.MolToMolBlock(Chem.MolFromSmiles("CCO"))
     parsed = parse_molecule_from_cell_text(block)

@@ -28,7 +28,6 @@ from ...chem.depiction_scene import is_scene_blob
 from ...platform_support.config import load_config
 from ...table.structure_depiction_layout import (
     STRUCTURE_COLUMN_HORIZONTAL_PADDING,
-    structure_depict_height,
     structure_depict_width,
     structure_row_default_height,
 )
@@ -148,7 +147,10 @@ class Render2DResultsMixin:
                 if pix_target:
                     if getattr(self, "_render2d_column_pixmap_mode", True):
                         self._table_model.register_pixmap_column(pix_target)
-                        self._table_model.set_column_pixmap(oid, pix_target, pm)
+                        if is_scene_blob(img):
+                            self._table_model.set_cell_png_bytes(oid, pix_target, bytes(img))
+                        else:
+                            self._table_model.set_column_pixmap(oid, pix_target, pm)
                     else:
                         self._table_model.set_cell_pixmap(oid, pix_target, pm)
                 elif not self._store_structure_scene(oid, img):
@@ -594,29 +596,3 @@ class Render2DResultsMixin:
             if set_heights and self.table.rowHeight(row) != rh:
                 self.table.setRowHeight(row, rh)
         return decoded
-
-    def on_cell_double_click(self, view_row, c):
-        if c != 1:
-            return
-        src_row = self._view_row_to_source_row(view_row)
-        t0 = self._table_model.cell_text(src_row, 0)
-        if not t0.isdigit():
-            return
-        oid = int(t0)
-        mol = self._mol_for_structure_row(src_row)
-        if mol is None:
-            self.status_label.setText("No structure available for this row.")
-            return
-        if oid in self.zoomed_ids:
-            self.zoomed_ids.remove(oid)
-            if self._show_scene_zoom(oid, False):
-                return
-            if self._try_restore_structure_zoom_out(oid, view_row):
-                return
-            w, h = structure_depict_width(), structure_depict_height()
-        else:
-            self.zoomed_ids.add(oid)
-            if self._show_scene_zoom(oid, True):
-                return
-            w, h = structure_depict_width() * 2, structure_depict_height() * 2
-        self.start_render_worker(oid, mol, w, h)

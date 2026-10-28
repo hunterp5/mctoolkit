@@ -52,7 +52,6 @@ class FragmentDecompDialogParams:
     column_prefix: str
     method: str  # "brics" | "recap"
     tool_title: str
-    render_2d: bool
 
 
 class FragmentDecompositionDialog(QDialog):
@@ -103,13 +102,6 @@ class FragmentDecompositionDialog(QDialog):
             "New columns are named PREFIX_1, PREFIX_2, … (one per fragment)."
         )
         out_form.addRow("Column name prefix:", self.prefix_edit)
-
-        self.render_2d_cb = QCheckBox("Render 2D after decomposition")
-        self.render_2d_cb.setChecked(False)
-        self.render_2d_cb.setToolTip(
-            "Render the new fragment columns as 2D depictions (pixmap-only) after decomposition finishes."
-        )
-        out_form.addRow("", self.render_2d_cb)
         root.addWidget(output)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -127,7 +119,6 @@ class FragmentDecompositionDialog(QDialog):
             column_prefix=(self.prefix_edit.text() or "").strip(),
             method=self._method,
             tool_title=self._tool_title,
-            render_2d=bool(self.render_2d_cb.isChecked()),
         )
 
 

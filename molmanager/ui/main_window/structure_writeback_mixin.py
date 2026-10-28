@@ -90,13 +90,25 @@ class StructureWritebackMixin:
         )
 
     def _render_tool_structures(
-        self, dest: str, oids: list[int], *, queue_title_prefix: str = ""
+        self,
+        dest: str,
+        oids: list[int],
+        *,
+        queue_title_prefix: str = "",
+        serial: bool = False,
     ) -> bool:
-        """Queue 2D redraws of *dest* for *oids*. Return True when a batch started."""
+        """Queue 2D redraws of *dest* for *oids*. Return True when a batch started.
+
+        *serial* keeps the redraw on the process queue. Use it when another structure
+        column will be drawn next, so the two jobs cannot run at the same time.
+        """
         if not oids or getattr(self, "_render2d_batch_active", False):
             return False
+        base_w, base_h = structure_depict_width(), structure_depict_height()
+        if dest != "Structure":
+            self._note_pixmap_render_source_size(dest, base_w, base_h)
         renders, row_by_oid = self._build_render2d_tasks_in_table_order(
-            dest, structure_depict_width(), structure_depict_height(), set(oids)
+            dest, base_w, base_h, set(oids)
         )
         if not renders:
             return False
@@ -106,6 +118,7 @@ class StructureWritebackMixin:
             dest,
             column_pixmap_mode=dest != "Structure",
             queue_title_prefix=queue_title_prefix,
+            serial=serial,
         )
         return True
 

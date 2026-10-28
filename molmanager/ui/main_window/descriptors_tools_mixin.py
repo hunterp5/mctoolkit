@@ -43,12 +43,8 @@ class DescriptorsToolsMixin:
         *listener* belongs to one descriptor job. Shared signals (Murcko,
         common core, a dialog run) pass None.
         """
-        oids = {int(oid) for oid, _row in (res or []) if oid is not None}
 
         def _after_write(written: list[str]) -> None:
-            render = getattr(self, "_queue_murcko_column_renders", None)
-            if callable(render):
-                render(written, oids)
             if listener is not None:
                 listener(written)
 
@@ -177,7 +173,6 @@ class DescriptorsToolsMixin:
         the column header that was written. The dialog passes ``None``.
         """
         from ...descriptors.descriptors_3d import int_fns_need_3d
-        from ...descriptors.orbitals import int_fns_need_orbitals
         from ...workflows.macro_recipe import descriptor_display_by_key
 
         source = request.structure_source
@@ -219,7 +214,7 @@ class DescriptorsToolsMixin:
             return
         data, oids_list, is_text = rows
         calc_headers = self._result_column_names(displays, oids_list)
-        need_coords = int_fns_need_3d(clean_keys) or int_fns_need_orbitals(clean_keys)
+        need_coords = int_fns_need_3d(clean_keys)
         packed_confs, confs_cols, ensemble_db = (
             self._ensemble_inputs_for_descriptor_job(oids_list, source)
             if need_coords

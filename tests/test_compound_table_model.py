@@ -544,6 +544,118 @@ def test_header_drag_autoscrolls_quickly_at_viewport_edge(qapp):
     view.deleteLater()
 
 
+def test_structure_column_resize_past_header_does_not_scroll_the_table(qapp):
+    from PyQt5.QtCore import QEvent, QPoint, Qt
+    from PyQt5.QtGui import QMouseEvent
+    from PyQt5.QtWidgets import QApplication
+
+    from molmanager.ui.compound_table_model import CompoundTableModel, CompoundTableView
+
+    headers = ["ID_HIDDEN", "Structure"] + [f"C{i}" for i in range(8)]
+    model = CompoundTableModel(headers)
+    model.append_row(1, {f"C{i}": "x" for i in range(8)})
+    view = CompoundTableView()
+    view.set_compound_model(model)
+    view.resize(640, 320)
+    for col in range(2, model.columnCount()):
+        view.setColumnWidth(col, 160)
+    view.show()
+    QApplication.processEvents()
+    hh = view.horizontalHeader()
+    vpw = int(hh.viewport().width())
+    view.setColumnWidth(1, max(80, vpw - 36))
+    QApplication.processEvents()
+    bar = view.horizontalScrollBar()
+    assert int(bar.maximum()) > 40
+    grip = int(hh.sectionViewportPosition(1)) + int(view.columnWidth(1)) - 2
+    old_w = int(view.columnWidth(1))
+    hh.mouseMoveEvent(
+        QMouseEvent(QEvent.MouseMove, QPoint(grip, 6), Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+    )
+    hh.mousePressEvent(
+        QMouseEvent(
+            QEvent.MouseButtonPress, QPoint(grip, 6), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier
+        )
+    )
+    hh.leaveEvent(QEvent(QEvent.Leave))
+    hh.mouseMoveEvent(
+        QMouseEvent(
+            QEvent.MouseMove,
+            QPoint(vpw + 48, 6),
+            Qt.LeftButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        )
+    )
+    QApplication.processEvents()
+    assert int(bar.value()) == 0
+    assert int(view.columnWidth(1)) > old_w
+    hh.mouseReleaseEvent(
+        QMouseEvent(
+            QEvent.MouseButtonRelease,
+            QPoint(vpw + 48, 6),
+            Qt.LeftButton,
+            Qt.NoButton,
+            Qt.NoModifier,
+        )
+    )
+    view.deleteLater()
+
+
+def test_header_column_drag_still_autoscrolls_from_section_body(qapp):
+    from PyQt5.QtCore import QEvent, QPoint, Qt
+    from PyQt5.QtGui import QMouseEvent
+    from PyQt5.QtWidgets import QApplication
+
+    from molmanager.ui.compound_table_model import CompoundTableModel, CompoundTableView
+
+    headers = ["ID_HIDDEN", "Structure"] + [f"C{i}" for i in range(12)]
+    model = CompoundTableModel(headers)
+    model.append_row(1, {f"C{i}": "x" for i in range(12)})
+    view = CompoundTableView()
+    view.set_compound_model(model)
+    view.resize(480, 280)
+    for col in range(1, model.columnCount()):
+        view.setColumnWidth(col, 140)
+    view.show()
+    QApplication.processEvents()
+    hh = view.horizontalHeader()
+    vpw = int(hh.viewport().width())
+    if vpw <= 0:
+        hh.viewport().resize(440, 24)
+        vpw = 440
+    bar = view.horizontalScrollBar()
+    assert int(bar.maximum()) > 40
+    col = 2
+    mid = int(hh.sectionViewportPosition(col)) + int(view.columnWidth(col)) // 2
+    assert 0 < mid < vpw - 24
+    hh.mousePressEvent(
+        QMouseEvent(
+            QEvent.MouseButtonPress, QPoint(mid, 6), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier
+        )
+    )
+    hh.mouseMoveEvent(
+        QMouseEvent(
+            QEvent.MouseMove,
+            QPoint(vpw + 36, 6),
+            Qt.LeftButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        )
+    )
+    assert int(bar.value()) > 0
+    hh.mouseReleaseEvent(
+        QMouseEvent(
+            QEvent.MouseButtonRelease,
+            QPoint(vpw + 36, 6),
+            Qt.LeftButton,
+            Qt.NoButton,
+            Qt.NoModifier,
+        )
+    )
+    view.deleteLater()
+
+
 def test_table_header_stylesheet_uses_palette_roles(qapp):  # noqa: ARG001
     from molmanager.ui.compound_table_view import TABLE_HEADER_SECTION_QSS, CompoundTableView
 
