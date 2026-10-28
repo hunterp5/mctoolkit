@@ -31,8 +31,14 @@ from molmanager.docking.gnina_job import (
     effective_out_path,
     flex_out_path,
     ligand_cli_args,
+    gnina_output_problem,
+    gnina_receptor_problem,
     ligand_mol_from_ensemble,
+    ligands_from_row_mols,
+    no_table_ligands_message,
     normalize_flexres,
+    plan_gnina_run,
+    table_row_dock_problem,
 )
 
 
@@ -111,3 +117,42 @@ def test_ligand_mol_from_ensemble_keeps_one_start():
     assert ligand.GetProp("_Name") == "9"
     assert ligand.GetProp("Parent OID") == "9"
     assert ligand.GetNumConformers() == 1
+
+
+def test_table_row_dock_problem_and_ligand_list():
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+
+    assert table_row_dock_problem(has_window=False, selected_rows=1, column="Structure")
+    assert table_row_dock_problem(has_window=True, selected_rows=0, column="Structure")
+    assert table_row_dock_problem(has_window=True, selected_rows=1, column="")
+    assert table_row_dock_problem(has_window=True, selected_rows=2, column="Structure") is None
+    mol = Chem.AddHs(Chem.MolFromSmiles("CCO"))
+    AllChem.EmbedMolecule(mol, randomSeed=1)
+    ligands = ligands_from_row_mols([(3, mol), (4, None)])
+    assert len(ligands) == 1
+    assert ligands[0].GetProp("_Name") == "3"
+    assert "chosen column" in no_table_ligands_message("")
+
+
+def test_plan_gnina_run_checks_files_then_crystal(tmp_path: Path):
+    missing = tmp_path / "missing.pdb"
+    present = tmp_path / "rec.pdb"
+    present.write_text("ATOM\n", encoding="utf-8")
+    assert gnina_receptor_problem("", present) == "Choose a receptor PDB or PDBQT file."
+    assert "not found" in (gnina_receptor_problem("rec.pdb", missing) or "")
+    assert gnina_receptor_problem("rec.pdb", present) is None
+    assert gnina_output_problem("") == "Set an output path."
+    assert gnina_output_problem("out.sdf") is None
+    empty = plan_gnina_run(ligand_paths=[], crystal_ligand="", same_crystal_ligand=False)
+    assert empty.message == "Choose a ligand file (PDBQT or SDF)."
+    crystal = plan_gnina_run(ligand_paths=[], crystal_ligand="xtal.sdf", same_crystal_ligand=False)
+    assert crystal.ligand_paths_are_crystal
+    assert crystal.stamp_crystal_on_poses
+    other = plan_gnina_run(
+        ligand_paths=[tmp_path / "lig.sdf"],
+        crystal_ligand="xtal.sdf",
+        same_crystal_ligand=False,
+    )
+    assert other.extra_validation
+    assert other.message is None

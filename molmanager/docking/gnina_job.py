@@ -131,6 +131,87 @@ def ensemble_column_headers(app) -> list[str]:
     return names
 
 
+def table_row_dock_problem(*, has_window: bool, selected_rows: int, column: str) -> str | None:
+    """Why selected table rows cannot be docked, or ``None`` when they can."""
+    if not has_window:
+        return "Open Gnina from the main window to dock selected table rows."
+    if int(selected_rows) <= 0:
+        return "Select one or more table rows to dock."
+    if not (column or "").strip():
+        return "Choose a conformations column."
+    return None
+
+
+def no_table_ligands_message(column_label: str) -> str:
+    """Shown when the chosen column has no 3D ligand in the selected rows."""
+    col = (column_label or "").strip() or "the chosen column"
+    return f"No 3D ligands in the selected rows for “{col}”."
+
+
+def ligands_from_row_mols(pairs: Sequence[tuple[int, object]]) -> list:
+    """One Gnina ligand per ``(oid, mol)`` that has 3D coordinates."""
+    ligands = []
+    for oid, mol in pairs:
+        ligand = ligand_mol_from_ensemble(mol, int(oid))
+        if ligand is not None:
+            ligands.append(ligand)
+    return ligands
+
+
+@dataclass(frozen=True)
+class GninaRunPlan:
+    """Whether a Gnina launch has the files it needs, and how the crystal ligand is used."""
+
+    message: str | None = None
+    ligand_paths_are_crystal: bool = False
+    extra_validation: bool = False
+    stamp_crystal_on_poses: bool = False
+
+    @property
+    def is_ready(self) -> bool:
+        return self.message is None
+
+
+def gnina_receptor_problem(receptor: str, receptor_path: Path) -> str | None:
+    """Why the receptor field cannot be used, or ``None`` when the file is present."""
+    if not (receptor or "").strip():
+        return "Choose a receptor PDB or PDBQT file."
+    if not receptor_path.is_file():
+        return f"Receptor file not found:\n{receptor_path}"
+    return None
+
+
+def gnina_output_problem(output: str) -> str | None:
+    """Why the output field cannot be used, or ``None`` when it is set."""
+    if not (output or "").strip():
+        return "Set an output path."
+    return None
+
+
+def plan_gnina_run(
+    *,
+    ligand_paths: Sequence[Path],
+    crystal_ligand: str,
+    same_crystal_ligand: bool,
+) -> GninaRunPlan:
+    """Decide how a Gnina run uses the ligand and the crystal ligand.
+
+    Call this after the receptor, pharmacophore, and output path are accepted
+    and crystal validation has filled ``crystal_ligand``.
+    """
+    crystal = (crystal_ligand or "").strip()
+    paths = list(ligand_paths)
+    if not paths and not crystal:
+        return GninaRunPlan(message="Choose a ligand file (PDBQT or SDF).")
+    if not paths and crystal:
+        return GninaRunPlan(ligand_paths_are_crystal=True, stamp_crystal_on_poses=True)
+    if crystal and (len(paths) != 1 or not same_crystal_ligand):
+        return GninaRunPlan(extra_validation=True)
+    if crystal:
+        return GninaRunPlan(stamp_crystal_on_poses=True)
+    return GninaRunPlan()
+
+
 def ligand_mol_from_ensemble(mol, oid: int):
     """One 3D ligand per table row.
 

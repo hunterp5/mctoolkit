@@ -60,7 +60,13 @@ from ...docking.gnina_job import (
     ligand_arg,
     ligand_cli_args,
     ligand_mol_from_ensemble,
+    ligands_from_row_mols,
     load_ligand_template_mols,
+    gnina_output_problem,
+    gnina_receptor_problem,
+    no_table_ligands_message,
+    plan_gnina_run,
+    table_row_dock_problem,
     normalize_flexres,
     require_dock_pharmacophore,
     resolve_work_path,
@@ -1036,8 +1042,8 @@ class GninaDockDialog(QDialog):
 
         mols = self._mols_from_selected_rows()
         if not mols:
-            col = (self.combo_confs.currentText() or "").strip() or "the chosen column"
-            raise ValueError(f"No 3D ligands in the selected rows for “{col}”.")
+            col = (self.combo_confs.currentText() or "").strip()
+            raise ValueError(no_table_ligands_message(col))
         self._clear_batch()
         tmp = self._ensure_batch_tmp("gnina_table_")
         dest = tmp / "table_ligands.sdf"
@@ -1068,41 +1074,31 @@ class GninaDockDialog(QDialog):
         from ...ui.main_window.conformer_writeback import mol_for_ensemble_column
 
         app = self._main_window
-        if app is None:
-            raise ValueError("Open Gnina from the main window to dock selected table rows.")
         rows = self._selected_row_indices()
-        if not rows:
-            raise ValueError("Select one or more table rows to dock.")
         column = (self.combo_confs.currentText() or "").strip()
-        if not column:
-            raise ValueError("Choose a conformations column.")
-        out: list = []
+        problem = table_row_dock_problem(
+            has_window=app is not None,
+            selected_rows=len(rows),
+            column=column,
+        )
+        if problem:
+            raise ValueError(problem)
         if column == "Structure":
             collect = getattr(app, "collect_scoped_table_mols", None)
             if not callable(collect):
                 raise ValueError("The table is not available for selected-row docking.")
-            for oid, mol in collect("Structure", only_selected=True):
-                if mol is None:
-                    continue
-                ligand = ligand_mol_from_ensemble(mol, int(oid))
-                if ligand is not None:
-                    out.append(ligand)
-            return out
+            return ligands_from_row_mols(list(collect("Structure", only_selected=True)))
         model = getattr(app, "_table_model", None)
         if model is None:
             raise ValueError("The table is not available for selected-row docking.")
+        pairs: list[tuple[int, object]] = []
         for row in rows:
             try:
                 oid = int(model.row_oid(row))
             except Exception:
                 continue
-            packed = mol_for_ensemble_column(app, oid, column, min_conformers=1)
-            if packed is None:
-                continue
-            ligand = ligand_mol_from_ensemble(packed, oid)
-            if ligand is not None:
-                out.append(ligand)
-        return out
+            pairs.append((oid, mol_for_ensemble_column(app, oid, column, min_conformers=1)))
+        return ligands_from_row_mols(pairs)
 
     def _prepare_ligand_batch(self, ligand: str) -> int:
         paths = self._prepare_gnina_ligands(ligand)
@@ -1186,32 +1182,36 @@ class GninaDockDialog(QDialog):
             if rows or lig:
                 lig_paths = self._prepare_gnina_ligands(lig)
             out = self._effective_out_path()
-            if not rec:
-                raise ValueError("Choose a receptor PDB or PDBQT file.")
-            rec_path = self._resolve_path(rec)
-            if not rec_path.is_file():
-                raise ValueError(f"Receptor file not found:\n{rec_path}")
+            rec_path = self._resolve_path(rec) if rec else Path()
+            receptor_problem = gnina_receptor_problem(rec, rec_path)
+            if receptor_problem:
+                raise ValueError(receptor_problem)
             self._require_dock_pharmacophore()
-            if not out:
-                raise ValueError("Set an output path.")
+            output_problem = gnina_output_problem(out)
+            if output_problem:
+                raise ValueError(output_problem)
             self._worker.setup_crystal_validation(
                 rec,
                 durable_dir=self._resolve_path(out).parent,
                 validate=self.validate_crystal_cb.isChecked(),
             )
             crystal_lig = (self._validation_ligand_path or "").strip()
-            if not lig_paths and not crystal_lig:
-                raise ValueError("Choose a ligand file (PDBQT or SDF).")
-            extra_validation = False
-            if not lig_paths and crystal_lig:
+            same_crystal = bool(
+                lig_paths and crystal_lig and self._same_input_path(str(lig_paths[0]), crystal_lig)
+            )
+            run_plan = plan_gnina_run(
+                ligand_paths=lig_paths,
+                crystal_ligand=crystal_lig,
+                same_crystal_ligand=same_crystal,
+            )
+            if run_plan.message:
+                raise ValueError(run_plan.message)
+            extra_validation = run_plan.extra_validation
+            if run_plan.ligand_paths_are_crystal:
                 lig_paths = [Path(crystal_lig)]
                 self._stamp_crystal_on_poses = True
                 self.log.append(system_stamp("No docking ligand; redocking the crystal ligand."))
-            elif crystal_lig and (
-                len(lig_paths) != 1 or not self._same_input_path(str(lig_paths[0]), crystal_lig)
-            ):
-                extra_validation = True
-            elif crystal_lig:
+            elif run_plan.stamp_crystal_on_poses:
                 self._stamp_crystal_on_poses = True
             ligand_spec = self._ligand_arg(lig_paths)
             if extra_validation:
