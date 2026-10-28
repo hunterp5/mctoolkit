@@ -16,11 +16,14 @@
 
 """Dimred setup opens before the empty plot window; plot settings are appearance only."""
 
-from PyQt5.QtCore import Qt
+from types import SimpleNamespace
+
+from PyQt5.QtCore import QObject, Qt
 from PyQt5.QtWidgets import QGroupBox, QLabel, QListWidgetItem
 
 from molmanager.analysis.dimensionality_reduction import EMBEDDING_PCA_DIM
 from molmanager.platform_support.session_log import session_log_buffer
+from molmanager.platform_support.tool_progress import ToolProgressState
 from molmanager.ui.dialogs.dimensionality_reduction import (
     PCADialog,
     SOMPlotPanel,
@@ -28,6 +31,7 @@ from molmanager.ui.dialogs.dimensionality_reduction import (
     UMAPPlotPanel,
 )
 from molmanager.ui.plot_markers_controls import PlotMarkersControls
+from molmanager.ui.progress_controller import ProgressController
 
 
 def test_present_initial_ui_opens_options_not_plot(qapp):
@@ -232,6 +236,72 @@ def test_dimred_options_omit_results_section(qapp):
         dlg.close()
         dlg.deleteLater()
         qapp.processEvents()
+
+
+class _DimredStatusHost(QObject):
+    """Main-window stand-in with the real progress controller."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.status_label = QLabel("Ready")
+        self._tool_progress_state = ToolProgressState()
+        self.background_activity = None
+        self._loading_detail = None
+        self._export_busy = False
+        self.process_queue = None
+        self._background_jobs: dict[str, str] = {}
+        self.progress = ProgressController(self)
+
+    def _begin_tool_progress(self, *args, **kwargs):
+        return self.progress._begin_tool_progress(*args, **kwargs)
+
+    def _finish_tool_progress(self, *args, **kwargs):
+        return self.progress._finish_tool_progress(*args, **kwargs)
+
+    def _end_slots_with_message(self, message: str) -> None:
+        self.progress._end_slots_with_message(message)
+
+    def _workspace_loading_overlay_visible(self) -> bool:
+        return False
+
+    def _session_overlay_owns_loading_detail(self) -> bool:
+        return False
+
+    def _status_work_is_active(self) -> bool:
+        return bool(self._background_jobs) or self._tool_progress_state.any_active()
+
+
+def test_finished_embedding_clears_calculating_status_even_if_draw_fails(qapp):
+    for panel_cls, job_id in ((TSNEPlotPanel, "dimred-tsne"), (UMAPPlotPanel, "dimred-umap")):
+        panel = panel_cls(None)
+        host = _DimredStatusHost()
+        panel.parent_app = host
+        panel._bg_job_id = job_id
+        host._background_jobs[job_id] = f"{panel._window_title}…"
+        host._begin_tool_progress(panel._calculating_status_text(), -1, job_id=job_id)
+        assert host.status_label.text() == panel._calculating_status_text()
+
+        def _boom(status_host=host) -> None:
+            assert "calculating" not in status_host.status_label.text()
+            raise RuntimeError("draw failed")
+
+        panel._plot_view = object()
+        panel._refresh_plot_colors = _boom  # type: ignore[method-assign]
+        result = SimpleNamespace(summary="Samples used: 4", z=None)
+        try:
+            try:
+                panel._on_finished(result)
+            except RuntimeError as exc:
+                assert str(exc) == "draw failed"
+            assert "calculating" not in host.status_label.text()
+            assert host.status_label.text() == f"{panel._window_title}: done."
+            assert host._tool_progress_state.any_active() is False
+            host.progress._on_tool_progress(panel._calculating_status_text(), 0, -1, job_id=job_id)
+            host.progress._poll_tool_progress_state()
+            qapp.processEvents()
+            assert "calculating" not in host.status_label.text()
+        finally:
+            _close_dimred_panel(panel, qapp)
 
 
 def test_run_closes_options_and_sets_calculating_status(qapp):

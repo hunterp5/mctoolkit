@@ -250,6 +250,45 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         if label is not None:
             label.setText(message)
 
+    def _publish_dimred_status(self, message: str, job_id: str | None) -> None:
+        """Replace the calculating line. Plot drawing must not leave it behind."""
+        app = self.parent_app
+        if app is None:
+            return
+        finish = getattr(app, "_finish_tool_progress", None)
+        if callable(finish):
+            finish(self._window_title, status_message=message, job_id=job_id)
+        else:
+            label = getattr(app, "status_label", None)
+            if label is not None:
+                label.setText(message)
+        self._silence_calculating_status(message)
+
+    def _silence_calculating_status(self, replacement: str) -> None:
+        """Stop any slot still advertising this run, and take that sentence off the status line."""
+        app = self.parent_app
+        if app is None:
+            return
+        stale = self._calculating_status_text()
+        end_matching = getattr(app, "_end_slots_with_message", None)
+        if callable(end_matching):
+            end_matching(stale)
+        else:
+            state = getattr(app, "_tool_progress_state", None)
+            snaps = getattr(state, "snapshots", None) if state is not None else None
+            if callable(snaps):
+                for jid, (msg, *_rest) in list(snaps().items()):
+                    if str(msg or "") == stale:
+                        state.end(job_id=jid)
+        label = getattr(app, "status_label", None)
+        if label is None:
+            return
+        try:
+            if label.text() == stale:
+                label.setText(replacement)
+        except RuntimeError:
+            return
+
     def _log_dimred_summary(self, summary: str) -> None:
         text = (summary or "").strip()
         if not text:
@@ -871,16 +910,7 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         self._clear_dimred_background_job()
         self._job_running = False
         self.run_btn.setEnabled(True)
-        if self.parent_app is not None:
-            finish = getattr(self.parent_app, "_finish_tool_progress", None)
-            if callable(finish):
-                finish(
-                    self._window_title,
-                    status_message=f"{self._window_title}: ready.",
-                    job_id=job_id,
-                )
-            else:
-                self.parent_app.status_label.setText(f"{self._window_title}: ready.")
+        self._publish_dimred_status(f"{self._window_title}: ready.", job_id)
         if not self._plot_window_is_visible():
             self._open_setup_dialog()
 
@@ -897,35 +927,29 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         self._clear_dimred_background_job()
         self._job_running = False
         self.run_btn.setEnabled(True)
-        self._log_dimred_summary(getattr(result, "summary", ""))
-        self._last_result = result
-        if self._plot_view is None:
-            if self.parent_app is not None:
-                finish = getattr(self.parent_app, "_finish_tool_progress", None)
-                msg = f"{self._window_title}: done."
-                if callable(finish):
-                    finish(self._window_title, status_message=msg, job_id=job_id)
-                else:
-                    self.parent_app.status_label.setText(msg)
+        # Clear "calculating…" before the figure is pushed. Drawing can take long
+        # enough that the plot is on screen while that sentence is still the status line.
+        message = f"{self._window_title}: done."
+        self._publish_dimred_status(message, job_id)
+        try:
+            self._log_dimred_summary(getattr(result, "summary", ""))
+            self._last_result = result
+            if self._plot_view is None:
+                self.reveal_plot_window()
+                return
+            self._refresh_plot_colors()
+            self._update_spectrum_controls()
             self.reveal_plot_window()
-            return
-        self._refresh_plot_colors()
-        self._update_spectrum_controls()
-        self.reveal_plot_window()
-        if self.parent_app is not None:
             shown = self._displayed_dimred_result()
             n = len(shown.oids) if shown is not None else 0
             select_hint = (
                 "Click a point to select its table row."
-                if result.z
+                if getattr(result, "z", None)
                 else "Lasso or click to select table rows."
             )
-            msg = f"{self._window_title}: rendered {n:,} point(s). {select_hint}"
-            finish = getattr(self.parent_app, "_finish_tool_progress", None)
-            if callable(finish):
-                finish(self._window_title, status_message=msg, job_id=job_id)
-            else:
-                self.parent_app.status_label.setText(msg)
+            message = f"{self._window_title}: rendered {n:,} point(s). {select_hint}"
+        finally:
+            self._publish_dimred_status(message, job_id)
 
     def _on_failed(self, message: str) -> None:
         job_id = getattr(self, "_bg_job_id", None)
@@ -933,24 +957,12 @@ class DimensionReductionPanel(DockableResultPlotPanel):
         self._job_running = False
         self.run_btn.setEnabled(True)
         if message == "Cancelled.":
-            if self.parent_app is not None:
-                msg = f"{self._window_title}: cancelled."
-                finish = getattr(self.parent_app, "_finish_tool_progress", None)
-                if callable(finish):
-                    finish(self._window_title, status_message=msg, job_id=job_id)
-                else:
-                    self.parent_app.status_label.setText(msg)
+            self._publish_dimred_status(f"{self._window_title}: cancelled.", job_id)
             if not self._plot_window_is_visible():
                 self._open_setup_dialog()
             return
         self._log_dimred_failure(message)
-        if self.parent_app is not None:
-            msg = f"{self._window_title}: failed."
-            finish = getattr(self.parent_app, "_finish_tool_progress", None)
-            if callable(finish):
-                finish(self._window_title, status_message=msg, job_id=job_id)
-            else:
-                self.parent_app.status_label.setText(msg)
+        self._publish_dimred_status(f"{self._window_title}: failed.", job_id)
         if not self._plot_window_is_visible():
             self._open_setup_dialog()
         QMessageBox.warning(self._ui_parent(), self._window_title, message or "Computation failed.")

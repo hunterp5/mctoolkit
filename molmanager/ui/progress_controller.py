@@ -63,7 +63,9 @@ class ProgressController:
         bind_mixin_methods(self, app, AppProgressMixin)
         self._active_label = ""
         self._last_status_text = ""
+        self._last_progress_text = ""
         self._closed_progress_messages: set[str] = set()
+        self._closed_progress_job_ids: set[str] = set()
         self._background_job_ui_depth = 0
         self._partial_results_notice: str | None = None
         self._poll_interval_ms = int(load_config().tool_progress_poll_ms)
@@ -111,6 +113,8 @@ class ProgressController:
         """
         self._active_label = str(message or "")
         self._closed_progress_messages.discard(self._active_label)
+        if job_id:
+            self._closed_progress_job_ids.discard(str(job_id))
         total_i = int(total)
         if total_i < 0:
             self._on_tool_progress(message, 0, -1, job_id=job_id)
@@ -124,6 +128,7 @@ class ProgressController:
     def _poll_tool_progress_state(self) -> None:
         if not self._progress_any_active():
             self._poll_timer.stop()
+            self._drop_lingering_progress_status()
             return
         self._refresh_status_from_slots()
         self._notify_activity_hub()
@@ -172,9 +177,13 @@ class ProgressController:
         except TypeError:
             msg, done, total, active = state.snapshot()
         final_msg = message or msg or self._active_label
-        if total > 0 and (active or done < total):
+        # An already stopped slot must not be revived just to paint 100%.
+        # That update lands after the job is gone and the poll keeps it on screen.
+        if active and total > 0 and done < total:
             self._on_tool_progress(final_msg, total, total, job_id=key)
-        self._end_progress_slot(key, also_message=str(msg or ""))
+        captured = str(msg or "")
+        self._end_progress_slot(key, also_message=captured)
+        self._end_slots_with_message(captured)
         leftover = getattr(state, "snapshots", None)
         if key and callable(leftover) and not any(jid for jid in leftover() if jid):
             state.end()
@@ -230,6 +239,8 @@ class ProgressController:
         if job_id:
             with suppress(TypeError):
                 messages.add(str(state.snapshot(job_id=job_id)[0] or ""))
+        if job_id:
+            self._closed_progress_job_ids.add(str(job_id))
         state.end(job_id=job_id)
         messages.discard("")
         self._closed_progress_messages.update(messages)
@@ -276,6 +287,8 @@ class ProgressController:
         the 100% update can land after the job has finished and pin the status
         line there.
         """
+        if job_id and str(job_id) in self._closed_progress_job_ids:
+            return True
         text = str(message or "")
         if job_id or not text or text not in self._closed_progress_messages:
             return False
@@ -288,14 +301,64 @@ class ProgressController:
             return True
         return not active
 
-    def _refresh_status_from_slots(self) -> None:
-        message, done, total, active = self._status_progress_snapshot()
-        text = format_tool_progress_text(message, done, total) if active else ""
+    def _end_slots_with_message(self, message: str) -> None:
+        """Stop every active slot still showing *message*."""
+        text = str(message or "")
+        if not text:
+            return
+        state = self._app._tool_progress_state
+        snaps_fn = getattr(state, "snapshots", None)
+        if not callable(snaps_fn):
+            return
+        for jid, (msg, _done, _total, _active) in list(snaps_fn().items()):
+            if str(msg or "") != text:
+                continue
+            self._end_progress_slot(str(jid) if jid else None, also_message=text)
+
+    def _drop_lingering_progress_status(self) -> None:
+        """Clear an in-progress status line after every progress slot has stopped.
+
+        The poll used to stop and leave the last progress sentence in place, so
+        "t-SNE Visualization: calculating…" stayed up after the figure was drawn.
+        """
+        if self._progress_any_active():
+            return
+        work = getattr(self._app, "_status_work_is_active", None)
+        if callable(work) and work():
+            return
+        label = getattr(self._app, "status_label", None)
+        if label is None:
+            return
+        try:
+            current = str(label.text() or "")
+        except RuntimeError:
+            return
+        stale = {self._last_progress_text, self._active_label}
+        stale.discard("")
+        self._active_label = ""
+        if current not in stale:
+            return
+        if current != STATUS_READY:
+            label.setText(STATUS_READY)
+        self._last_status_text = STATUS_READY
+        self._last_progress_text = ""
+
+    def _paint_progress_text(self, text: str) -> None:
         if text == self._last_status_text:
             return
         self._last_status_text = text
-        if text:
-            self._app.status_label.setText(text)
+        if not text:
+            return
+        self._last_progress_text = text
+        self._app.status_label.setText(text)
+
+    def _refresh_status_from_slots(self) -> None:
+        message, done, total, active = self._status_progress_snapshot()
+        text = format_tool_progress_text(message, done, total) if active else ""
+        if not text:
+            self._drop_lingering_progress_status()
+            return
+        self._paint_progress_text(text)
 
     def _on_tool_progress(
         self,
@@ -315,9 +378,11 @@ class ProgressController:
         message, done, total, active = self._status_progress_snapshot()
         text = format_tool_progress_text(message, done, total) if active else ""
         if text != self._last_status_text:
-            self._last_status_text = text
             if text:
-                self._app.status_label.setText(text)
+                self._paint_progress_text(text)
+            else:
+                self._last_status_text = ""
+                self._drop_lingering_progress_status()
             if (
                 text
                 and self._app._workspace_loading_overlay_visible()

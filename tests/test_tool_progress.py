@@ -222,6 +222,91 @@ def test_clearing_prepare_progress_drops_the_unnamed_copy(qapp):  # noqa: ARG001
     assert state.snapshot()[3] is True
 
 
+def test_indeterminate_progress_does_not_linger_after_finish(qapp):  # noqa: ARG001
+    """t-SNE / UMAP leave an indeterminate 'calculating…' line with no percent."""
+    from PyQt5.QtCore import QObject
+    from PyQt5.QtWidgets import QLabel
+
+    from molmanager.ui.progress_controller import ProgressController
+    from molmanager.ui.strings import STATUS_READY
+
+    class _Host(QObject):
+        def __init__(self):
+            super().__init__()
+            self.status_label = QLabel()
+            self._tool_progress_state = ToolProgressState()
+            self.background_activity = None
+            self._loading_detail = None
+            self._export_busy = False
+            self.process_queue = None
+
+        def _workspace_loading_overlay_visible(self) -> bool:
+            return False
+
+        def _session_overlay_owns_loading_detail(self) -> bool:
+            return False
+
+        def _status_work_is_active(self) -> bool:
+            return False
+
+    host = _Host()
+    progress = ProgressController(host)
+    progress._begin_tool_progress("t-SNE Visualization: calculating…", -1, job_id="dimred-tsne")
+    assert host.status_label.text() == "t-SNE Visualization: calculating…"
+    progress._finish_tool_progress(
+        "t-SNE Visualization",
+        status_message="t-SNE Visualization: rendered 4 point(s).",
+        job_id="dimred-tsne",
+    )
+    assert host.status_label.text() == "t-SNE Visualization: rendered 4 point(s)."
+    assert host._tool_progress_state.any_active() is False
+    progress._poll_tool_progress_state()
+    progress._on_tool_progress("t-SNE Visualization: calculating…", 0, -1, job_id="dimred-tsne")
+    assert host.status_label.text() == "t-SNE Visualization: rendered 4 point(s)."
+    assert host._tool_progress_state.any_active() is False
+
+    progress._begin_tool_progress("UMAP Visualization: calculating…", -1, job_id="dimred-umap")
+    host._tool_progress_state.end(job_id="dimred-umap")
+    progress._poll_tool_progress_state()
+    assert host.status_label.text() == STATUS_READY
+
+
+def test_idle_poll_keeps_another_jobs_progress(qapp):  # noqa: ARG001
+    from PyQt5.QtCore import QObject
+    from PyQt5.QtWidgets import QLabel
+
+    from molmanager.ui.progress_controller import ProgressController
+
+    class _Host(QObject):
+        def __init__(self):
+            super().__init__()
+            self.status_label = QLabel()
+            self._tool_progress_state = ToolProgressState()
+            self.background_activity = None
+            self._loading_detail = None
+            self._export_busy = False
+            self.process_queue = None
+
+        def _workspace_loading_overlay_visible(self) -> bool:
+            return False
+
+        def _session_overlay_owns_loading_detail(self) -> bool:
+            return False
+
+        def _status_work_is_active(self) -> bool:
+            return False
+
+    host = _Host()
+    progress = ProgressController(host)
+    progress._begin_tool_progress("Applying filters", 10, job_id="filter")
+    progress._begin_tool_progress("UMAP Visualization: calculating…", -1, job_id="dimred-umap")
+    host._tool_progress_state.end(job_id="dimred-umap")
+    progress._poll_tool_progress_state()
+    assert "calculating" not in host.status_label.text()
+    assert host.status_label.text().startswith("Applying filters")
+    assert host._tool_progress_state.snapshot(job_id="filter")[3] is True
+
+
 def test_drain_completed_futures_keeps_pending_and_collects_done():
     from concurrent.futures import Future
 
