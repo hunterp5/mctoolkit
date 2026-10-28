@@ -169,19 +169,21 @@ class ProtonateToolsMixin:
         res = []
         for row in rows:
             oid, smi, pct, pka = row[0], row[1], row[2], row[3]
+            pka_text = str(pka or "").strip() or "N/A"
             res.append(
                 (
                     int(oid),
                     {
                         out_col: str(smi),
                         pct_col: f"{float(pct):.2f}",
-                        "pKa": str(pka),
+                        "pKa": pka_text,
                     },
                 )
             )
 
         def _after(cols: list[str], a=allowed, render=render_2d, done=on_done) -> None:
             self._protonate_after_table_write(cols, a, render)
+            self.status_label.setText(f"Protonate: wrote {out_col}, the population, and pKa.")
             self._notify_protonate_done(done, None, cols)
 
         self.on_calc_finished(

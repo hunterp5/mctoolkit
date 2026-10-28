@@ -115,18 +115,18 @@ def test_conformations_menu_outline():
     ]
 
 
-def test_prepare_structures_nests_protonate_and_hydrogens():
+def test_prepare_is_one_chemistry_command():
     tools = find_submenu(MAIN_WINDOW_MENUS, "Chemistry")
-    prepare = find_submenu(tools.items, "Prepare Structures")
-    labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(prepare.items)]
-    assert "Add Explicit Hydrogens…" not in labels
-    assert "Explicit Hydrogens" in labels
-    assert "Protonate" in labels
-    assert labels.index("Protonate") == labels.index("Disconnect Largest Fragments…") + 1
-    protonate = find_submenu(prepare.items, "Protonate")
-    assert menu_outline(protonate.items) == ["Protonate…", "Generate Protomers…", "Neutralize…"]
-    hydrogens = find_submenu(prepare.items, "Explicit Hydrogens")
-    assert menu_outline(hydrogens.items) == ["Add…", "Remove…"]
+    labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(tools.items)]
+    assert "Prepare…" in labels
+    assert "Prepare Structures" not in labels
+    assert "Fast Prepare…" not in labels
+    predict = find_submenu(tools.items, "Predict")
+    predict_labels = [
+        x if isinstance(x, str) else next(iter(x)) for x in menu_outline(predict.items)
+    ]
+    assert "pKa…" in predict_labels
+    assert "Align to Substructure…" in labels
 
 
 def test_substructure_menu_sits_between_conformations_and_predict():

@@ -36,7 +36,7 @@ from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass
 
 from PyQt5.QtCore import QRunnable
-from rdkit import Chem
+from rdkit import Chem, rdBase
 
 from ..chem.depiction_builder import build_scene
 from ..chem.depiction_coords import apply_depiction_coords, depiction_blob_from_mol
@@ -44,6 +44,7 @@ from ..chem.depiction_layout import LayoutOptions, current_layout_options, layou
 from ..chem.depiction_scene import pack_scene
 from ..chem.fragment_disconnect import largest_fragment_and_rest
 from ..chem.structure_neutralize import neutralize_mol
+from ..chem.structure_prepare import StructurePrepareOptions, apply_structure_prepare
 from ..chem.molecule_conversion import (
     mol_graph_binary,
     mol_to_canonical_smiles,
@@ -70,6 +71,7 @@ class FastPrepareParams:
     is_smiles: bool = False
     need_smiles: bool = False
     neutralize: bool = False
+    options: StructurePrepareOptions | None = None
     batch_size: int = 64
     process_pool_min_rows: int = 250
     # Structure output only. The scene is built here, while the molecule still has coordinates,
@@ -124,6 +126,8 @@ def _prepare_one(
     neutralize: bool = False,
     want_scene: bool = False,
     layout: LayoutOptions | None = None,
+    options: StructurePrepareOptions | None = None,
+    prior_xy: bytes = b"",
 ) -> tuple | None:
     """Disconnect the largest fragment, then optionally neutralize it.
 
@@ -142,12 +146,19 @@ def _prepare_one(
             mol = parse_molecule_from_cell_text(source_text)
     if mol is None:
         return None
-    parent, fragments = largest_fragment_and_rest(mol, source_text)
-    if parent is None:
-        return None
-    out = parent
-    if neutralize:
-        out = neutralize_mol(parent) or parent
+    if options is None:
+        parent, fragments = largest_fragment_and_rest(mol, source_text)
+        if parent is None:
+            return None
+        out = neutralize_mol(parent) or parent if neutralize else parent
+    else:
+        out, fragments = apply_structure_prepare(mol, options, source_text)
+        if out is None:
+            return None
+    # The stored blob has no conformer. Reapply the table's orientation when the
+    # edit did not change the atom count, so Render 2D does not invent a new one.
+    if prior_xy:
+        out = apply_depiction_coords(out, prior_xy)
     smiles = mol_to_canonical_smiles(out) if need_smiles else ""
     blob = mol_graph_binary(out) or out.ToBinary()
     if not want_scene:
@@ -157,28 +168,40 @@ def _prepare_one(
 
 
 def _mp_fast_prepare_batch(args: tuple) -> list[tuple]:
-    """Run :func:`_prepare_one` over one batch inside a child process (picklable args)."""
-    items, is_text, need_smiles, neutralize = args[:4]
-    want_scene = bool(args[4]) if len(args) > 4 else False
-    layout = current_layout_options() if want_scene else None
-    out: list[tuple] = []
-    for oid, payload, source_text in items:
-        try:
-            res = _prepare_one(
-                payload,
-                source_text,
-                is_text=bool(is_text),
-                need_smiles=bool(need_smiles),
-                neutralize=bool(neutralize),
-                want_scene=want_scene,
-                layout=layout,
-            )
-        except Exception:
-            res = None
-        if res is None:
-            continue
-        out.append((int(oid), *res))
-    return out
+    """Run :func:`_prepare_one` over one batch inside a child process (picklable args).
+
+    Pool workers are fresh processes, so they do not inherit the desktop app's
+    RDKit log settings. Without this block, a tautomer search and any failed
+    kekulization print on the console.
+    """
+    with rdBase.BlockLogs():
+        items, is_text, need_smiles, neutralize = args[:4]
+        want_scene = bool(args[4]) if len(args) > 4 else False
+        options = args[5] if len(args) > 5 else None
+        layout = current_layout_options() if want_scene else None
+        out: list[tuple] = []
+        for item in items:
+            oid, payload = item[0], item[1]
+            source_text = item[2] if len(item) > 2 else None
+            prior_xy = bytes(item[3]) if len(item) > 3 and item[3] else b""
+            try:
+                res = _prepare_one(
+                    payload,
+                    source_text,
+                    is_text=bool(is_text),
+                    need_smiles=bool(need_smiles),
+                    neutralize=bool(neutralize),
+                    want_scene=want_scene,
+                    layout=layout,
+                    options=options,
+                    prior_xy=prior_xy,
+                )
+            except Exception:
+                res = None
+            if res is None:
+                continue
+            out.append((int(oid), *res))
+        return out
 
 
 class FastPrepareWorker(QRunnable):
@@ -223,13 +246,14 @@ class FastPrepareWorker(QRunnable):
             throttle=self._progress_throttle,
         )
 
-    def _tasks(self) -> list[tuple[int, object, str | None]]:
-        """Serialize input rows into picklable ``(oid, payload, source_text)`` tuples."""
-        tasks: list[tuple[int, object, str | None]] = []
+    def _tasks(self) -> list[tuple]:
+        """Serialize input rows into picklable ``(oid, payload, source_text, xy)`` tuples."""
+        tasks: list[tuple] = []
         for row in self.items:
             oid = int(row[0])
+            prior_xy = bytes(row[3]) if len(row) > 3 and row[3] else b""
             if self.params.is_smiles:
-                tasks.append((oid, str(row[1] or ""), None))
+                tasks.append((oid, str(row[1] or ""), None, prior_xy))
                 continue
             structure = row[1]
             source_text = (str(row[2]).strip() or None) if len(row) >= 3 and row[2] else None
@@ -240,7 +264,7 @@ class FastPrepareWorker(QRunnable):
                     blob = structure.ToBinary() if structure is not None else b""
                 except Exception:
                     blob = b""
-            tasks.append((oid, blob, source_text))
+            tasks.append((oid, blob, source_text, prior_xy))
         return tasks
 
     def _accept_rows(self, rows: list[tuple]) -> None:
@@ -275,7 +299,14 @@ class FastPrepareWorker(QRunnable):
         p = self.params
         batch_size = max(1, int(p.batch_size))
         batches = [
-            (tasks[s : s + batch_size], p.is_smiles, p.need_smiles, p.neutralize, p.want_scene)
+            (
+                tasks[s : s + batch_size],
+                p.is_smiles,
+                p.need_smiles,
+                p.neutralize,
+                p.want_scene,
+                p.options,
+            )
             for s in range(0, len(tasks), batch_size)
         ]
         from ..platform_support.worker_budget import rdkit_process_workers

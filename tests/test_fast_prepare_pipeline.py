@@ -84,6 +84,22 @@ def _run_fast_prepare_inline(
     win.on_fast_prepare_finished(captured[0])
 
 
+def test_prepare_items_carry_the_stored_orientation(qapp):  # noqa: ARG001
+    from molmanager.chem.depiction_coords import pack_xy
+
+    win = _seeded_window()
+    try:
+        oid = next(iter(win.mols))
+        xy = pack_xy([(0.0, float(i)) for i in range(4)])
+        win._depiction_coords.set("Structure", oid, xy)
+        items = win._collect_fast_prepare_items("Structure", None)
+        found = [item for item in items if int(item[0]) == int(oid)]
+        assert found
+        assert found[0][3] == xy
+    finally:
+        win.close()
+
+
 def test_fast_prepare_structure_target_neutralizes_and_lists_fragments(qapp):  # noqa: ARG001
     win = _seeded_window()
     try:

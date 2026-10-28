@@ -28,11 +28,11 @@ class FastPrepareToolsMixin:
     def run_fast_prepare(self) -> None:
         if not self.headers or not self.mols:
             return
-        from ..dialogs import FastPrepareDialog
+        from ..dialogs.prepare import PrepareDialog
 
         candidates = self.chemistry_tool_structure_sources()
         n_sel = len(self._selected_logical_rows())
-        dlg = FastPrepareDialog(candidates, self.headers, n_sel, self)
+        dlg = PrepareDialog(candidates, self.headers, n_sel, self)
         self._prepare_tool_dialog(dlg)
         dlg.setAttribute(Qt.WA_DeleteOnClose, True)
         dlg.accepted.connect(lambda *_, d=dlg: self._on_fast_prepare_dialog_accepted(d))
@@ -44,7 +44,7 @@ class FastPrepareToolsMixin:
 
         cfg = dlg.config()
         allowed = self._selected_oids_set() if cfg.only_selected else None
-        if self._abort_if_only_selected_but_empty(cfg.only_selected, allowed, "Fast Prepare"):
+        if self._abort_if_only_selected_but_empty(cfg.only_selected, allowed, "Prepare"):
             return
         dispatch_step(self, fast_prepare_step(cfg), {})
 
@@ -70,12 +70,20 @@ class FastPrepareToolsMixin:
         rows = self._structure_tool_inputs(src, allowed, with_source_text=True)
         if src != "Structure":
             return [(oid, text) for oid, _blob, text in rows]
-        return [(oid, blob or b"", text or None) for oid, blob, text in rows]
+        depiction = getattr(self, "_depiction_coords", None)
+        items = []
+        for oid, blob, text in rows:
+            xy = b""
+            if depiction is not None:
+                xy = depiction.get(src, int(oid)) or b""
+            items.append((int(oid), blob or b"", text or None, xy))
+        return items
 
     def start_fast_prepare_job(self, params: dict, *, allowed: set[int] | None, on_done) -> None:
         """Prepare structures. ``on_done`` runs after the columns are written, before Render 2D."""
         from PyQt5.QtCore import Qt
 
+        from ...chem.structure_prepare import options_from_prepare_params
         from ...workers.fast_prepare import FastPrepareParams, FastPrepareWorker
         from ..job_signals import FastPrepareJobSignals, release_job_signals, retain_job_signals
         from ..macro_recorder import report_unless_replaying
@@ -90,7 +98,7 @@ class FastPrepareToolsMixin:
             self.status_label.setText("Ready.")
             if on_done is not None:
                 on_done(message, {})
-            report_unless_replaying(self, "Fast Prepare", message)
+            report_unless_replaying(self, "Prepare", message)
             return
         data = self._collect_fast_prepare_items(source, allowed)
         if not data:
@@ -98,18 +106,51 @@ class FastPrepareToolsMixin:
             self.status_label.setText("Ready.")
             if on_done is not None:
                 on_done(message, {})
-            report_unless_replaying(self, "Fast Prepare", message, warning=False)
+            report_unless_replaying(self, "Prepare", message, warning=False)
+            return
+        options = options_from_prepare_params(params)
+        render = (
+            prepare_col == "Structure"
+            if "render_2d" not in params
+            else bool(params.get("render_2d"))
+        )
+        protonate_pending = bool(params.get("protonate")) and not params.get("_protonate_done")
+        molecule_options = (
+            options.before_protonation() if options is not None and protonate_pending else options
+        )
+        after = options.after_protonation() if options is not None and protonate_pending else None
+        if (
+            options is not None
+            and molecule_options is not None
+            and not molecule_options.has_edits()
+        ):
+            skipped = dict(params)
+            skipped["_needs_render"] = bool(render)
+            self._after_prepare_write(
+                skipped, allowed, prepare_col, after, on_done, {"output": prepare_col}
+            )
             return
         cfg = load_config()
+        want_scene = bool(render and prepare_col == "Structure" and after is None)
         worker_params = FastPrepareParams(
             is_smiles=source != "Structure",
             need_smiles=True,
             neutralize=bool(params.get("neutralize")),
+            options=molecule_options,
             batch_size=int(cfg.fast_prepare_batch_size),
             process_pool_min_rows=int(cfg.fast_prepare_process_pool_min_rows),
-            want_scene=prepare_col == "Structure",
+            want_scene=want_scene,
         )
-        job = _FastPrepareJob(prepare_col, fragments, update_target, on_done)
+        job = _FastPrepareJob(
+            prepare_col,
+            fragments,
+            update_target,
+            on_done,
+            write_fragments=True
+            if options is None
+            else bool(molecule_options and molecule_options.largest_fragment),
+            render_2d=want_scene or (render and after is None and prepare_col != "Structure"),
+        )
         sig = FastPrepareJobSignals(self)
         retain_job_signals(self, sig)
 
@@ -124,6 +165,19 @@ class FastPrepareToolsMixin:
 
         sig.fast_prepared_batch.connect(_batch, Qt.QueuedConnection)
         sig.fast_prepared.connect(_finished, Qt.QueuedConnection)
+        held_params = dict(params)
+        original_done = on_done
+
+        def _chained(error, outputs, state=job) -> None:
+            if error:
+                if original_done is not None:
+                    original_done(error, outputs or {})
+                return
+            self._after_prepare_write(
+                held_params, allowed, state.prepare_col, after, original_done, outputs or {}
+            )
+
+        job.on_done = _chained
         enqueue_process_queue_job(
             self,
             "Fast prepare",
@@ -131,7 +185,7 @@ class FastPrepareToolsMixin:
             lambda ev, ps, d=data, p=worker_params, s=sig: FastPrepareWorker(
                 d, p, s, cancel_event=ev, progress_state=ps
             ),
-            queue_label="Fast prepare: prepare structures",
+            queue_label="Prepare: structures",
         )
 
     def _enqueue_fast_prepare(
@@ -199,7 +253,8 @@ class FastPrepareToolsMixin:
         job.written_oids = []
         job.applying = True
         self.table.setSortingEnabled(False)
-        self._ensure_disconnect_output_column(job.apply_fragments)
+        if job.write_fragments:
+            self._ensure_disconnect_output_column(job.apply_fragments)
         if not job.apply_update:
             self._ensure_disconnect_output_column(job.apply_col)
         return job.apply_col, job.apply_fragments, job.apply_update
@@ -294,22 +349,115 @@ class FastPrepareToolsMixin:
         # Scenes already cover the Structure rows. Only the builder's leftovers are redrawn,
         # and they still have the coordinates just stored, so that redraw keeps the layout.
         redraw = fallbacks if structure_scenes else written
-        if redraw and self._render_tool_structures(
-            prepare_col, redraw, queue_title_prefix="Fast prepare: "
+        if (
+            job.render_2d
+            and redraw
+            and self._render_tool_structures(prepare_col, redraw, queue_title_prefix="Prepare: ")
         ):
-            self.status_label.setText("Fast prepare: rendering 2D…")
+            self.status_label.setText("Prepare: rendering 2D…")
             return
-        self.status_label.setText(self._consume_partial_results_notice() or "Fast prepare done.")
+        self.status_label.setText(self._consume_partial_results_notice() or "Prepare done.")
+
+    def _after_prepare_write(self, params, allowed, column, after, on_done, outputs) -> None:
+        """Run protonation, the edits that follow it, then the optional side tools."""
+        if bool(params.get("protonate")) and not params.get("_protonate_done"):
+            self._prepare_protonate(params, allowed, column, after, on_done, outputs)
+            return
+        if after is not None and after.has_edits():
+            next_params = dict(params)
+            next_params.update(
+                {
+                    "standardize": False,
+                    "largest_fragment": False,
+                    "neutralize": False,
+                    "protonate": False,
+                    "_protonate_done": True,
+                    "canonical_tautomer": after.canonical_tautomer,
+                    "remove_isotopes": after.remove_isotopes,
+                    "explicit_hydrogens": after.explicit_hydrogens,
+                    "structure_source": column,
+                    "update_target": True,
+                    "largest_column": None,
+                }
+            )
+            self.start_fast_prepare_job(next_params, allowed=allowed, on_done=on_done)
+            return
+        self._prepare_side_jobs(params, allowed, column, on_done, outputs)
+
+    def _prepare_protonate(self, params, allowed, column, after, on_done, outputs) -> None:
+        from ...workflows.macro_recipe import ROW_SCOPE_SELECTION, ROW_SCOPE_TABLE
+        from ...workflows.tool_requests import ProtonateRequest
+
+        output = column if column != "Structure" else "Protonated"
+        request = ProtonateRequest(
+            structure_source=column,
+            ph=float(params.get("protonate_ph") or 7.4),
+            output_column=output,
+            render_2d=bool(params.get("render_2d"))
+            and not (after is not None and after.has_edits()),
+            row_scope=ROW_SCOPE_SELECTION if allowed is not None else ROW_SCOPE_TABLE,
+        )
+
+        def _next(error, prot_outputs) -> None:
+            if error:
+                if on_done is not None:
+                    on_done(error, {})
+                return
+            written = str((prot_outputs or {}).get("output") or output)
+            marked = dict(params)
+            marked["_protonate_done"] = True
+            self._after_prepare_write(
+                marked, allowed, written, after, on_done, prot_outputs or outputs
+            )
+
+        self.start_protonate_job(request, allowed=allowed, on_done=_next)
+
+    def _prepare_side_jobs(self, params, allowed, column, on_done, outputs) -> None:
+        if params.get("_needs_render"):
+            rows = self._structure_tool_inputs(column, allowed)
+            oids = [int(row[0]) for row in rows]
+            if oids:
+                self._render_tool_structures(column, oids, queue_title_prefix="Prepare: ")
+        if params.get("generate_protomers"):
+            self._prepare_protomers(params, column)
+        if on_done is not None:
+            on_done(
+                None, outputs or {"output": column, "fragments": params.get("fragments_column")}
+            )
+
+    def _prepare_protomers(self, params, column) -> None:
+        from ..dialogs.protomer import ProtomerGeneratorDialog
+
+        dialog = ProtomerGeneratorDialog(self)
+        dialog.ph_spin.setValue(float(params.get("protomer_ph") or 7.4))
+        dialog.output_file.setText(str(params.get("protomer_output_file") or ""))
+        dialog._refresh_structure_sources()
+        index = dialog._structure_input.src_combo.findText(column)
+        if index >= 0:
+            dialog._structure_input.src_combo.setCurrentIndex(index)
+        dialog.show()
+        dialog._on_generate()
 
 
 class _FastPrepareJob:
     """Columns and completion for one Fast Prepare writeback."""
 
-    def __init__(self, prepare_col: str, fragments_col: str, update_target: bool, on_done=None):
+    def __init__(
+        self,
+        prepare_col: str,
+        fragments_col: str,
+        update_target: bool,
+        on_done=None,
+        *,
+        write_fragments: bool = True,
+        render_2d: bool = True,
+    ):
         self.prepare_col = prepare_col
         self.fragments_col = fragments_col
         self.update_target = bool(update_target)
         self.on_done = on_done
+        self.write_fragments = bool(write_fragments)
+        self.render_2d = bool(render_2d)
         self.applying = False
         self.settled = False
         self.apply_col = prepare_col

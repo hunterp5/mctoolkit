@@ -1435,30 +1435,18 @@ def test_tools_menu_nests_superpose_under_conformations(qapp):  # noqa: ARG001
     w.close()
 
 
-def test_prepare_structures_nests_explicit_hydrogens(qapp):  # noqa: ARG001
+def test_prepare_is_one_chemistry_command(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     mb = w.menuBar()
     tools = next(a.menu() for a in mb.actions() if a.text().replace("&", "") == "Chemistry")
-    prepare = next(
-        a.menu() for a in tools.actions() if a.text().replace("&", "") == "Prepare Structures"
-    )
-    labels = [a.text().replace("&", "") for a in prepare.actions()]
-    assert "Add Explicit Hydrogens…" not in labels
-    assert "Remove Explicit Hydrogens…" not in labels
-    assert "Explicit Hydrogens" in labels
-    assert "Protonate" in labels
-    assert "Protonate Structures" not in labels
-    assert labels.index("Protonate") == labels.index("Disconnect Largest Fragments…") + 1
-    protonate = next(
-        a.menu() for a in prepare.actions() if a.text().replace("&", "") == "Protonate"
-    )
-    p_labels = [a.text().replace("&", "") for a in protonate.actions()]
-    assert p_labels == ["Protonate…", "Generate Protomers…", "Neutralize…"]
-    hydrogens = next(
-        a.menu() for a in prepare.actions() if a.text().replace("&", "") == "Explicit Hydrogens"
-    )
-    h_labels = [a.text().replace("&", "") for a in hydrogens.actions()]
-    assert h_labels == ["Add…", "Remove…"]
+    labels = [a.text().replace("&", "") for a in tools.actions()]
+    assert "Prepare…" in labels
+    assert "Prepare Structures" not in labels
+    assert "Fast Prepare…" not in labels
+    predict = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "Predict")
+    predict_labels = [a.text().replace("&", "") for a in predict.actions()]
+    assert "pKa…" in predict_labels
+    assert "Align to Substructure…" in labels
     w.close()
 
 

@@ -63,7 +63,7 @@ HOTKEY_SPECS: tuple[HotkeySpec, ...] = (
     HotkeySpec("tools.calculator", "Calculator…", "Tools", ()),
     HotkeySpec("tools.macros", "Macros…", "Tools", ()),
     HotkeySpec("tools.fingerprint_similarity", "Fingerprint Similarity…", "Data", ()),
-    HotkeySpec("tools.render_2d", "Render 2D…", "Chemistry", ()),
+    HotkeySpec("tools.render_2d", "Prepare…", "Chemistry", ()),
     HotkeySpec("data.plotter", "Plotter…", "Data", ()),
     HotkeySpec("data.cluster", "Cluster…", "Data", ()),
     HotkeySpec("data.add_row", "Add Row…", "Data", ()),

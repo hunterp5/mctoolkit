@@ -40,6 +40,32 @@ def test_fast_prepare_dialog_config(qapp):  # noqa: ARG001
     assert dlg.neutralize_cb.isChecked() is False
 
 
+def test_prepare_dialog_defaults_and_exclusions(qapp):  # noqa: ARG001
+    from molmanager.ui.dialogs.prepare import PrepareDialog
+
+    dialog = PrepareDialog(["Structure", "SMILES"], ["Structure", "SMILES"], 2)
+    assert dialog.standardize_cb.isChecked()
+    assert dialog.fragment_cb.isChecked()
+    assert dialog.tautomer_cb.isChecked()
+    assert dialog.render_cb.isChecked()
+    assert dialog.neutralize_cb.isChecked() is False
+    assert dialog.protonate_cb.isChecked() is False
+    assert dialog.protomer_file.text() == ""
+    dialog.neutralize_cb.setChecked(True)
+    dialog.protonate_cb.setChecked(True)
+    assert dialog.neutralize_cb.isChecked() is False
+    dialog.add_h_cb.setChecked(True)
+    dialog.remove_h_cb.setChecked(True)
+    assert dialog.add_h_cb.isChecked() is False
+    cfg = dialog.config()
+    assert cfg.standardize is True
+    assert cfg.largest_fragment is True
+    assert cfg.canonical_tautomer is True
+    assert cfg.render_2d is True
+    assert cfg.protonate is True
+    assert cfg.explicit_hydrogens == "remove"
+
+
 def test_fast_prepare_dialog_new_column_mode(qapp):  # noqa: ARG001
     dlg = FastPrepareDialog(["Structure", "SMILES"], ["Structure", "SMILES"], 0)
     dlg.radio_new_columns.setChecked(True)

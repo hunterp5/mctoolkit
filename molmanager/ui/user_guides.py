@@ -178,9 +178,9 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
             ),
             _e(
                 "tools_fast_prepare",
-                "Fast Prepare",
-                "Fast Prepare",
-                "Largest fragment, optional neutralize, and redraw in one job.",
+                "Prepare",
+                "Prepare",
+                "Choose standardization steps, then run only the ones that are checked.",
             ),
             _e(
                 "tools_disconnect_fragments",
@@ -192,13 +192,13 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_add_explicit_h",
                 "Explicit Hydrogens — Add",
                 "Add Explicit Hydrogens",
-                "Chemistry → Prepare Structures → Explicit Hydrogens → Add.",
+                "Show valence hydrogens from Chemistry → Prepare. Charge stays the same.",
             ),
             _e(
                 "tools_remove_explicit_h",
                 "Explicit Hydrogens — Remove",
                 "Remove Explicit Hydrogens",
-                "Chemistry → Prepare Structures → Explicit Hydrogens → Remove.",
+                "Hide explicit valence hydrogens from Chemistry → Prepare. Charge stays the same.",
             ),
             _e(
                 "tools_render_2d",
@@ -210,25 +210,25 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_align_substructure",
                 "Align to Substructure",
                 "Align to Substructure",
-                "Redraw matching rows so a drawn substructure shares one orientation.",
+                "Redraw matching rows from Chemistry → Align to Substructure.",
             ),
             _e(
                 "tools_protonate",
                 "Protonate",
                 "Protonate",
-                "Dominant protomer at a chosen pH (Chemistry → Prepare Structures → Protonate).",
+                "Dominant protomer at a chosen pH from Chemistry → Prepare.",
             ),
             _e(
                 "tools_generate_protomers",
                 "Generate Protomers",
                 "Generate Protomers",
-                "Enumerate protomers/tautomers (Chemistry → Prepare Structures → Protonate).",
+                "Enumerate protomers from Chemistry → Prepare.",
             ),
             _e(
                 "tools_neutralize",
                 "Neutralize",
                 "Neutralize",
-                "Zero net formal charge (Chemistry → Prepare Structures → Protonate → Neutralize).",
+                "Zero net formal charge from Chemistry → Prepare.",
             ),
             _e(
                 "tools_calculator",
@@ -434,7 +434,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_pka",
                 "Predict pKa",
                 "pKa",
-                "Uni-pKa macro pKa values from a structure column or SMILES.",
+                "Uni-pKa macro pKa values from Predict → pKa.",
             ),
             _e(
                 "data_qsar",

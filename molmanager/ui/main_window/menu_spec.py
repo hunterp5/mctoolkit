@@ -333,82 +333,22 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             ),
         ),
         SEPARATOR,
-        submenu(
-            "&Prepare Structures",
-            action(
-                "Fast Prepare…",
-                "run_fast_prepare",
-                tooltip=(
-                    "Disconnect largest fragment, optionally neutralize, and redraw 2D "
-                    "images in one background job."
-                ),
+        action(
+            "&Prepare…",
+            "run_fast_prepare",
+            hotkey="tools.render_2d",
+            tooltip=(
+                "Choose which standardization steps to apply: cleanup, the organic parent, "
+                "tautomers, charge, hydrogens, protomers, and 2D rendering."
             ),
-            SEPARATOR,
-            action(
-                "Disconnect Largest Fragments…",
-                "run_disconnect_fragments",
-                tooltip=(
-                    "Split disconnected structure fragments into separate rows, "
-                    "keeping the heaviest fragment."
-                ),
+        ),
+        action(
+            "Align to Substructure…",
+            "run_align_substructure",
+            tooltip=(
+                "Redraw matching rows so a substructure you supply sits in one "
+                "shared orientation. Rows that do not match are left unchanged."
             ),
-            submenu(
-                "Protonate",
-                action(
-                    "Protonate…",
-                    "run_protonate",
-                    tooltip=(
-                        "Generate the dominant protomer (Uni-pKa) into a column and "
-                        "optionally render it like Structure."
-                    ),
-                ),
-                action(
-                    "Generate Protomers…",
-                    "open_protomer_generator",
-                    tooltip="Enumerate protomers or tautomers from structures and add results to the table.",
-                ),
-                action(
-                    "Neutralize…",
-                    "run_neutralize",
-                    tooltip=(
-                        "Adjust protonation so the net formal charge is zero "
-                        "(RDKit Uncharger); updates the target column."
-                    ),
-                ),
-                tooltips_visible=True,
-            ),
-            submenu(
-                "Explicit Hydrogens",
-                action(
-                    "Add…",
-                    "run_add_explicit_hydrogens",
-                    tooltip="Expand implicit hydrogens to explicit H atoms in the target column (RDKit AddHs).",
-                ),
-                action(
-                    "Remove…",
-                    "run_remove_explicit_hydrogens",
-                    tooltip="Remove explicit H atoms from structures in the target column (RDKit RemoveHs).",
-                ),
-                tooltips_visible=True,
-            ),
-            action(
-                "Render 2D…",
-                "run_render_2d_structures",
-                hotkey="tools.render_2d",
-                tooltip=(
-                    "Regenerate 2D structure drawings for selected rows as a background "
-                    "batch (see Log)."
-                ),
-            ),
-            action(
-                "Align to Substructure…",
-                "run_align_substructure",
-                tooltip=(
-                    "Redraw matching rows so a substructure you supply sits in one "
-                    "shared orientation. Rows that do not match are left unchanged."
-                ),
-            ),
-            tooltips_visible=True,
         ),
         submenu(
             "&Conformations",

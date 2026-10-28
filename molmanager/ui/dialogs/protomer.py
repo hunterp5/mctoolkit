@@ -18,12 +18,17 @@
 
 from __future__ import annotations
 
+import csv
+from pathlib import Path
+
 from PyQt5.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -41,6 +46,49 @@ from ...workers.protomer_generator import (
 from ..analysis_job_support import enqueue_process_queue_job
 from ..qt_widget_utils import make_window_minimizable
 from .structure_input import attach_structure_input
+
+
+def write_protomer_file(path: str, rows: list[tuple]) -> None:
+    """Write protomer rows ``(source oid, smiles, percent, pKa)`` to SDF or CSV."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.suffix.lower() == ".sdf":
+        _write_protomer_sdf(destination, rows)
+        return
+    _write_protomer_csv(destination, rows)
+
+
+def _write_protomer_sdf(path: Path, rows: list[tuple]) -> None:
+    from rdkit import Chem
+
+    writer = Chem.SDWriter(str(path))
+    try:
+        for source_oid, smiles, percent, pka in rows:
+            mol = Chem.MolFromSmiles(str(smiles))
+            if mol is None:
+                continue
+            mol.SetProp("SMILES", str(smiles))
+            mol.SetProp("Protomer_percent", f"{float(percent):.2f}")
+            mol.SetProp("pKa", str(pka or "N/A"))
+            mol.SetProp("Source_OID", "" if source_oid is None else str(source_oid))
+            writer.write(mol)
+    finally:
+        writer.close()
+
+
+def _write_protomer_csv(path: Path, rows: list[tuple]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["Source OID", "SMILES", "Protomer %", "pKa"])
+        for source_oid, smiles, percent, pka in rows:
+            writer.writerow(
+                [
+                    "" if source_oid is None else source_oid,
+                    smiles,
+                    f"{float(percent):.2f}",
+                    str(pka or "N/A"),
+                ]
+            )
 
 
 class ProtomerGeneratorDialog(QDialog):
@@ -98,6 +146,19 @@ class ProtomerGeneratorDialog(QDialog):
         self.results_table.horizontalHeader().setStretchLastSection(True)
         self.results_table.setMinimumHeight(160)
         root.addWidget(self.results_table, 1)
+
+        file_row = QHBoxLayout()
+        self.output_file = QLineEdit()
+        self.output_file.setPlaceholderText("Optional SDF or CSV")
+        self.output_file.setToolTip(
+            "Leave blank to keep the results in this dialog. "
+            "A path writes every protomer when generation finishes."
+        )
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._browse_output_file)
+        file_row.addWidget(self.output_file, 1)
+        file_row.addWidget(browse)
+        root.addLayout(file_row)
 
         add_row = QHBoxLayout()
         self.add_all_btn = QPushButton("Add all to main table")
@@ -164,6 +225,7 @@ class ProtomerGeneratorDialog(QDialog):
         )
         source_oids = {int(oid) for oid, _smi, _pct in rows if oid is not None}
         self._write_unipka_pka_for_oids(source_oids)
+        self._write_output_file(rows_sorted)
 
     def _on_failed(self, msg: str) -> None:
         self.generate_btn.setEnabled(True)
@@ -199,6 +261,31 @@ class ProtomerGeneratorDialog(QDialog):
             self.parent_app.on_calc_finished(
                 rows, ["pKa"], finish_progress=False, progress_label=None
             )
+
+    def _browse_output_file(self) -> None:
+        path, _selected = QFileDialog.getSaveFileName(
+            self,
+            "Protomer output",
+            self.output_file.text().strip(),
+            "Structure file (*.sdf);;CSV (*.csv)",
+        )
+        if path:
+            self.output_file.setText(path)
+
+    def _write_output_file(self, rows: list) -> None:
+        path = self.output_file.text().strip()
+        if not path:
+            return
+        records = []
+        for src_oid, smi, pct in rows:
+            records.append((src_oid, smi, float(pct), self._pka_for_source_oid(src_oid)))
+        try:
+            write_protomer_file(path, records)
+        except (OSError, ValueError, RuntimeError) as exc:
+            QMessageBox.warning(self, "Generate Protomers", str(exc) or "Could not write the file.")
+            return
+        if self.parent_app is not None:
+            self.parent_app.status_label.setText(f"Wrote {len(records)} protomer(s) to {path}.")
 
     def _unique_col(self, base: str) -> str:
         name = base

@@ -227,20 +227,37 @@ def structure_edit_step(
 
 
 def fast_prepare_step(config: Any) -> MacroStep:
-    """A recipe step for one accepted Fast Prepare dialog."""
+    """A recipe step for one accepted Prepare dialog."""
     from .tool_requests import row_scope_from_only_selected
 
+    params: dict[str, Any] = {
+        "row_scope": row_scope_from_only_selected(config.only_selected),
+        "structure_source": config.source_column,
+        "update_target": bool(config.update_target),
+        "largest_column": config.largest_column,
+        "fragments_column": config.fragments_column,
+        "neutralize": bool(config.neutralize),
+    }
+    if hasattr(config, "standardize"):
+        params.update(
+            {
+                "standardize": bool(config.standardize),
+                "largest_fragment": bool(config.largest_fragment),
+                "canonical_tautomer": bool(config.canonical_tautomer),
+                "render_2d": bool(config.render_2d),
+                "protonate": bool(config.protonate),
+                "protonate_ph": float(config.protonate_ph),
+                "generate_protomers": bool(config.generate_protomers),
+                "protomer_ph": float(config.protomer_ph),
+                "protomer_output_file": str(config.protomer_output_file or ""),
+                "explicit_hydrogens": str(config.explicit_hydrogens or ""),
+                "remove_isotopes": bool(config.remove_isotopes),
+            }
+        )
     return MacroStep(
         id="pending",
         kind=STEP_FAST_PREPARE,
-        params={
-            "row_scope": row_scope_from_only_selected(config.only_selected),
-            "structure_source": config.source_column,
-            "update_target": bool(config.update_target),
-            "largest_column": config.largest_column,
-            "fragments_column": config.fragments_column,
-            "neutralize": bool(config.neutralize),
-        },
+        params=params,
     )
 
 

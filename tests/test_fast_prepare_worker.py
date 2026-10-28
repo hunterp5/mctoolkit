@@ -107,6 +107,31 @@ def test_need_smiles_false_skips_canonical_smiles() -> None:
     assert res[2] == ""
 
 
+def test_prepare_batch_hides_rdkit_console_chatter(capfd) -> None:
+    from rdkit import RDLogger
+
+    from molmanager.chem.structure_prepare import StructurePrepareOptions
+
+    RDLogger.EnableLog("rdApp.*")
+    try:
+        items = [
+            (1, "n1ccc2c1cccc2", None),
+            (
+                2,
+                "N=C(N)NCCC[C@@H]1NC(=O)[C@H](CCCCN)NC(=O)[C@@H](Cc2ccc(O)cc2)"
+                "NC(=O)[C@H](CC(=O)O)NC(=O)CNC1=O",
+                None,
+            ),
+        ]
+        options = StructurePrepareOptions(standardize=True, canonical_tautomer=True)
+        _mp_fast_prepare_batch((items, True, False, False, False, options))
+        captured = capfd.readouterr().err.lower()
+    finally:
+        RDLogger.DisableLog("rdApp.*")
+    assert "kekul" not in captured
+    assert "tautomer enumeration" not in captured
+
+
 def test_batch_helper_preserves_oids_and_drops_failures() -> None:
     items = [
         (7, "C[NH+](C)C.[Cl-]", None),
@@ -176,6 +201,51 @@ def test_worker_reports_progress_and_empty_input() -> None:
     sig, _ = _worker_rows(items, is_smiles=True, batch_size=2)
     assert sig.progress
     assert sig.progress[-1][2] == len(items)
+
+
+def test_prepare_keeps_orientation_when_the_atom_count_is_unchanged() -> None:
+    from molmanager.chem.depiction_coords import pack_xy
+    from molmanager.chem.structure_prepare import StructurePrepareOptions
+
+    mol = Chem.MolFromSmiles("c1ccccc1")
+    assert mol is not None
+    xy = pack_xy([(float(i), 0.0) for i in range(mol.GetNumAtoms())])
+    res = _prepare_one(
+        mol.ToBinary(),
+        "c1ccccc1",
+        is_text=False,
+        need_smiles=True,
+        want_scene=True,
+        options=StructurePrepareOptions(
+            standardize=True, largest_fragment=True, canonical_tautomer=True
+        ),
+        prior_xy=xy,
+    )
+    assert res is not None
+    assert res[4] == xy
+
+
+def test_prepare_lays_out_again_when_the_atom_count_changes() -> None:
+    from molmanager.chem.depiction_coords import pack_xy, unpack_xy
+    from molmanager.chem.structure_prepare import StructurePrepareOptions
+
+    mol = Chem.MolFromSmiles("CC(=O)[O-].[Na+]")
+    assert mol is not None
+    xy = pack_xy([(float(i), 1.0) for i in range(mol.GetNumAtoms())])
+    res = _prepare_one(
+        mol.ToBinary(),
+        "CC(=O)[O-].[Na+]",
+        is_text=False,
+        need_smiles=True,
+        want_scene=True,
+        options=StructurePrepareOptions(largest_fragment=True),
+        prior_xy=xy,
+    )
+    assert res is not None
+    assert res[4] != xy
+    kept = unpack_xy(res[4])
+    assert kept is not None
+    assert len(kept) == Chem.Mol(res[0]).GetNumAtoms()
 
 
 def test_prepare_one_scene_matches_a_rebuild_from_the_stored_coordinates() -> None:
