@@ -39,7 +39,11 @@ from ...chem.structure_source_headers import (
     is_murcko_structure_header,
 )
 from ...chem.render2d_mp import STRUCTURE_PAYLOAD_TAG
-from ...workers import Render2DBatchHeldJob, Render2DBatchProcessWorker
+from ...workers.load_render import (
+    Render2DBatchHeldJob,
+    Render2DBatchProcessWorker,
+    render2d_batch_payload,
+)
 from ..strings import TOOL_RENDER_2D
 from .column_write_mixin import cell_looks_uncalculated
 
@@ -437,10 +441,15 @@ class Render2DMixin:
                 continue
             kept = {int(task[0]) for task in renders}
             rows = {oid: row for oid, row in row_by_oid.items() if oid in kept}
-            payload = (renders, rows, header, True)
+            payload = render2d_batch_payload(renders, rows, header, column_pixmap_mode=True)
             queue.enqueue(
                 f"Render 2D: {header} ({len(renders)} rows)",
-                lambda ev, p=payload: Render2DBatchHeldJob(self, p, ev),
+                lambda ev, p=payload: Render2DBatchHeldJob(
+                    p,
+                    self._render2d_queue_bridge,
+                    ev,
+                    self._render2d_batch_done_event,
+                ),
             )
 
     def _start_render_2d_batch(
@@ -471,10 +480,21 @@ class Render2DMixin:
             )
             return
         title = f"{queue_title_prefix}render 2D ({len(renders)} rows)".strip()
-        payload = (renders, row_by_oid, src, column_pixmap_mode, merge_structure_store)
+        payload = render2d_batch_payload(
+            renders,
+            row_by_oid,
+            src,
+            column_pixmap_mode=column_pixmap_mode,
+            merge_structure_store=merge_structure_store,
+        )
         self.process_queue.enqueue(
             title,
-            lambda ev, p=payload: Render2DBatchHeldJob(self, p, ev),
+            lambda ev, p=payload: Render2DBatchHeldJob(
+                p,
+                self._render2d_queue_bridge,
+                ev,
+                self._render2d_batch_done_event,
+            ),
         )
 
     def _begin_render2d_batch_impl(

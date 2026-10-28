@@ -18,7 +18,7 @@ import logging
 import sys
 import threading
 
-from PyQt5.QtCore import QThreadPool, QTimer, Qt, pyqtSlot
+from PyQt5.QtCore import QThreadPool, QTimer, Qt
 from PyQt5.QtGui import QCloseEvent, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent
 from PyQt5.QtWidgets import (
     QApplication,
@@ -58,6 +58,7 @@ from ...workers import (
     SubstructureFilterSignals,
     WorkerSignals,
 )
+from ...workers.load_render import Render2DQueueBridge
 from ..app_kernel import install_window_forwards
 from ..background_activity import BackgroundActivityHub
 from ..compound_table_model import (
@@ -412,8 +413,11 @@ class ChemistryWorkspaceWindow(QMainWindow):
         self._structure_lazy_scroll_hooked = False
         self._render2d_batch_done_event = threading.Event()
         self._render2d_batch_done_event.set()
-        self._render2d_queue_payload = None
-        self._render2d_queue_cancel_event = None
+        self._render2d_queue_bridge = Render2DQueueBridge(
+            self._begin_render2d_batch_from_queue,
+            self.render2d_batch_active,
+            parent=self,
+        )
         self._ingest_append_mode = False
         self.process_queue = ProcessQueueManager(self)
         self._background_jobs: dict[str, str] = {}
@@ -460,11 +464,8 @@ class ChemistryWorkspaceWindow(QMainWindow):
         """True while Chemistry → Render 2D batch is running (sorting frozen, etc.)."""
         return self._render2d_batch_active
 
-    @pyqtSlot()
-    def _begin_render2d_batch_from_queue(self) -> None:
-        """GUI-thread entry for :class:`Render2DBatchHeldJob` (see ``_render2d_queue_payload``)."""
-        payload = getattr(self, "_render2d_queue_payload", None)
-        cancel_event = getattr(self, "_render2d_queue_cancel_event", None)
+    def _begin_render2d_batch_from_queue(self, payload, cancel_event) -> None:
+        """GUI-thread entry for :class:`Render2DBatchHeldJob` via :class:`Render2DQueueBridge`."""
         if not payload:
             return
         renders, row_by_oid, src, column_pixmap_mode, merge_structure_store = payload

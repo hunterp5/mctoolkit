@@ -37,7 +37,7 @@ from .render2d_pool import (
 )
 from .render2d_plan import PriorityRenderPlan
 
-from PyQt5.QtCore import QRunnable
+from PyQt5.QtCore import QMetaObject, QObject, QRunnable, Qt, pyqtSlot
 from rdkit import Chem
 
 from ..table.structure_depiction_layout import structure_depict_height, structure_depict_width
@@ -154,49 +154,101 @@ def render2d_process_worker_count() -> int:
     return _count()
 
 
+def render2d_batch_payload(
+    renders,
+    row_by_oid,
+    source: str,
+    *,
+    column_pixmap_mode: bool = True,
+    merge_structure_store: bool = False,
+) -> tuple:
+    """Record a queued Render 2D batch.
+
+    ``(renders, row_by_oid, source, column_pixmap_mode, merge_structure_store)``.
+    The held job passes this tuple to :class:`Render2DQueueBridge`; it does not
+    read the window.
+    """
+    return (
+        renders,
+        row_by_oid,
+        source,
+        bool(column_pixmap_mode),
+        bool(merge_structure_store),
+    )
+
+
+class Render2DQueueBridge(QObject):
+    """GUI-thread slot a queued Render 2D job invokes.
+
+    ``begin`` starts the batch from the payload. ``is_active`` reports whether
+    that start left a batch running. The job holds this object, not the window.
+    """
+
+    def __init__(self, begin, is_active, parent=None) -> None:
+        super().__init__(parent)
+        self._begin = begin
+        self._is_active = is_active
+        self.payload = None
+        self.cancel_event = None
+
+    @pyqtSlot()
+    def begin_batch(self) -> None:
+        payload = self.payload
+        cancel_event = self.cancel_event
+        if not payload:
+            return
+        self._begin(payload, cancel_event)
+
+    def batch_active(self) -> bool:
+        return bool(self._is_active())
+
+
 class Render2DBatchHeldJob(QRunnable):
     """
     Process-queue adapter for Chemistry → Render 2D.
 
-    Prepares the batch on the GUI thread, runs subprocess rendering, then blocks until the
-    UI has flushed results (``_render2d_batch_done_event``).
+    Hands the batch record to :class:`Render2DQueueBridge` on the GUI thread, then
+    blocks until ``done_event`` is set (the UI has flushed results, or the batch
+    never started).
     """
 
-    def __init__(self, app, payload: tuple, cancel_event: threading.Event | None) -> None:
+    def __init__(
+        self,
+        payload: tuple,
+        bridge: Render2DQueueBridge,
+        cancel_event: threading.Event | None,
+        done_event: threading.Event,
+    ) -> None:
         super().__init__()
-        self._app = app
         self._payload = payload
+        self._bridge = bridge
         self._cancel_event = cancel_event
+        self._done_event = done_event
 
     def run(self) -> None:
         if self._cancel_event is not None and self._cancel_event.is_set():
             return
-        done_ev = getattr(self._app, "_render2d_batch_done_event", None)
-        if done_ev is not None:
-            done_ev.clear()
+        done_ev = self._done_event
+        done_ev.clear()
         try:
-            from PyQt5.QtCore import QMetaObject, Qt
-
-            self._app._render2d_queue_payload = self._payload
-            self._app._render2d_queue_cancel_event = self._cancel_event
+            self._bridge.payload = self._payload
+            self._bridge.cancel_event = self._cancel_event
             QMetaObject.invokeMethod(
-                self._app,
-                "_begin_render2d_batch_from_queue",
+                self._bridge,
+                "begin_batch",
                 Qt.BlockingQueuedConnection,
             )
         except Exception:
             logger.exception("Render2D batch UI prepare failed")
-            if done_ev is not None:
-                done_ev.set()
+            done_ev.set()
             return
-        if done_ev is not None:
-            if not getattr(self._app, "render2d_batch_active", lambda: False)():
-                done_ev.set()
+        if not self._bridge.batch_active():
+            done_ev.set()
+            return
+        # The GUI sets the event; once the app is closing it never will.
+        while not done_ev.wait(timeout=0.2):
+            if should_terminate_process_pool(self._cancel_event):
                 return
-            # The GUI sets the event; once the app is closing it never will.
-            while not done_ev.wait(timeout=0.2):
-                if should_terminate_process_pool(self._cancel_event):
-                    return
 
 
 class Render2DBatchProcessWorker(QRunnable):

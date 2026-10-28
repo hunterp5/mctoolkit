@@ -680,7 +680,6 @@ class DiverseSubsetWorker(QRunnable):
         request: DiverseSubsetRequest,
         signals: DiverseSubsetSignals,
         *,
-        app: Any | None = None,
         cancel_event: threading.Event | None = None,
         progress_state=None,
     ):
@@ -688,8 +687,6 @@ class DiverseSubsetWorker(QRunnable):
         self.rows = request.rows
         self.oids = [int(o) for o in (request.oids or [])]
         self.structure_source = request.structure_source or "Structure"
-        # Prefer mols_by_oid / structure_texts snapshots — never touch Qt from this thread.
-        self.app = app
         self.mols_by_oid = request.mols_by_oid
         self.structure_texts = request.structure_texts
         self.fp_choice = request.fp_choice
@@ -742,19 +739,6 @@ class DiverseSubsetWorker(QRunnable):
                 if mol is not None:
                     out.append((oi, mol))
                     seen.add(oi)
-        if out or mols_map is not None or texts is not None:
-            return out
-        # Legacy fallback (tests / callers that still pass app + oids).
-        app = self.app
-        if app is None:
-            return []
-        mols_fallback = getattr(app, "mols", None) or {}
-        for oid in self.oids:
-            if self.cancel_event is not None and self.cancel_event.is_set():
-                raise _Cancelled()
-            mol = mols_fallback.get(int(oid))
-            if mol is not None:
-                out.append((int(oid), mol))
         return out
 
     def _feature_matrix(

@@ -18,10 +18,13 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from molmanager.ui.main_window.render_2d_mixin import Render2DMixin
+from molmanager.workers.load_render import Render2DBatchHeldJob, Render2DQueueBridge
 
 
 class _QueueHost(Render2DMixin):
@@ -102,3 +105,87 @@ def test_run_render_2d_structures_allows_dialog_while_conforge_runs(qapp, monkey
     monkeypatch.setattr(dialogs_pkg, "Render2DStructureDialog", _Dlg, raising=False)
     host.run_render_2d_structures()
     assert shown["n"] == 1
+
+
+def _pump(qapp, predicate, timeout: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while not predicate() and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    return bool(predicate())
+
+
+def test_queued_render_job_passes_the_batch_record(qapp) -> None:  # noqa: ARG001
+    host = _QueueHost(running_title=None)
+    host._render2d_batch_done_event = threading.Event()
+    host._render2d_queue_bridge = Render2DQueueBridge(lambda *_a: None, lambda: False)
+    renders = [(1, None, 100, 80)]
+    host._start_render_2d_batch(
+        renders, {1: 0}, "Structure", column_pixmap_mode=False, merge_structure_store=True
+    )
+    _title, factory = host.process_queue.enqueue.call_args.args
+    job = factory(threading.Event())
+    assert job._payload == (renders, {1: 0}, "Structure", False, True)
+    assert job._bridge is host._render2d_queue_bridge
+    assert not hasattr(job, "_app")
+
+
+def test_held_render_job_starts_through_the_bridge(qapp) -> None:
+    started: dict = {}
+    active = {"v": False}
+    done = threading.Event()
+
+    def begin(payload, cancel_event) -> None:
+        started["payload"] = payload
+        started["cancel"] = cancel_event
+        active["v"] = True
+
+    bridge = Render2DQueueBridge(begin, lambda: active["v"])
+    payload = ([(1, "CCO")], {1: 0}, "Structure", True, False)
+    cancel = threading.Event()
+    job = Render2DBatchHeldJob(payload, bridge, cancel, done)
+    thread = threading.Thread(target=job.run)
+    thread.start()
+    try:
+        assert _pump(qapp, lambda: "payload" in started)
+        assert started["payload"] is payload
+        assert started["cancel"] is cancel
+        done.set()
+        assert _pump(qapp, lambda: not thread.is_alive())
+    finally:
+        done.set()
+        thread.join(2)
+    assert not thread.is_alive()
+
+
+def test_held_render_job_releases_the_queue_when_the_batch_does_not_start(qapp) -> None:
+    began = {"n": 0}
+    done = threading.Event()
+
+    def begin(*_args) -> None:
+        began["n"] += 1
+
+    bridge = Render2DQueueBridge(begin, lambda: False)
+    job = Render2DBatchHeldJob(([], {}, "Structure", True, False), bridge, None, done)
+    thread = threading.Thread(target=job.run)
+    thread.start()
+    try:
+        assert _pump(qapp, lambda: not thread.is_alive())
+    finally:
+        done.set()
+        thread.join(2)
+    assert began["n"] == 1
+    assert done.is_set()
+    assert not thread.is_alive()
+
+
+def test_held_render_job_skips_a_cancelled_batch() -> None:
+    called = {"n": 0}
+    bridge = Render2DQueueBridge(lambda *_a: called.__setitem__("n", 1), lambda: True)
+    cancel = threading.Event()
+    cancel.set()
+    done = threading.Event()
+    job = Render2DBatchHeldJob(([], {}, "Structure", True, False), bridge, cancel, done)
+    job.run()
+    assert called["n"] == 0
+    assert not done.is_set()

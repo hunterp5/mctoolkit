@@ -262,32 +262,21 @@ def test_prefilter_skips_leader_on_large_pools(monkeypatch):
     assert len(set(idx)) == 100
 
 
-def test_diverse_subset_worker_resolves_oids_via_app():
-    class _App:
-        def __init__(self, mols: dict[int, Chem.Mol]):
-            self.mols = mols
-
-    smis = ["CCO", "c1ccccc1", "CC(=O)O", "CCC"]
-    mols = {}
-    for i, s in enumerate(smis):
-        m = Chem.MolFromSmiles(s)
-        assert m is not None
-        mols[i] = m
+def test_diverse_subset_worker_oids_without_structures_do_not_read_a_window():
     sig = _CaptureSignals()
     worker = DiverseSubsetWorker(
         DiverseSubsetRequest(
             fp_choice="Morgan (r=2, n=2048)",
             subset_size=2,
-            oids=list(mols.keys()),
+            oids=[0, 1, 2],
             structure_source="Structure",
             mode="exact",
         ),
         sig,
-        app=_App(mols),
     )
     worker.run()
-    assert sig.err is None
-    assert len(sig.picked) == 2
+    assert sig.err == "No rows in scope."
+    assert sig.picked == []
 
 
 def test_diverse_subset_worker_resolves_mols_by_oid_snapshot():

@@ -138,11 +138,15 @@ def _window_with_one_row():
 
 
 def test_murcko_columns_queue_render_2d(qapp) -> None:  # noqa: ARG001
+    import threading
+
     window = _window_with_one_row()
     queued: list[str] = []
+    jobs = []
 
-    def _record(title, _factory, **_kwargs):
+    def _record(title, factory, **_kwargs):
         queued.append(title)
+        jobs.append(factory(threading.Event()))
         return "test-job"
 
     window.process_queue.enqueue = _record
@@ -172,6 +176,11 @@ def test_murcko_columns_queue_render_2d(qapp) -> None:  # noqa: ARG001
             "Render 2D: Murcko ring systems (1 rows)",
         ]
         assert window._table_model.value_for_header(0, "Scaffold count") == "1"
+        scaffold = jobs[0]
+        assert scaffold._bridge is window._render2d_queue_bridge
+        assert scaffold._payload[2] == "Murcko scaffold"
+        assert scaffold._payload[3] is True
+        assert scaffold._payload[4] is False
     finally:
         window.close()
 
