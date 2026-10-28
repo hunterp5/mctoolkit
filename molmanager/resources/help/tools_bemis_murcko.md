@@ -4,7 +4,7 @@
 
 ## Goal
 
-See the ring-and-linker skeleton shared by a series, and how many rows use each one.
+See the ring-and-linker skeleton shared by a series, and mark each distinct scaffold with one ID.
 
 ## When to use
 
@@ -12,14 +12,14 @@ Use after the table has structures, when fingerprint clusters are splitting a se
 
 ## Inputs / scope
 
-Rows with valid molecules in the chosen **Target Column**. **Selected Rows Only** limits the run to the selection. Scaffold count is how many rows in that run share the scaffold.
+Rows with valid molecules in the chosen **Target Column**. **Selected Rows Only** limits the run to the selection. Scaffold ID is assigned within that run: the same scaffold gets the same ID.
 
 ## Options
 
 - **Murcko scaffold** - rings and the linkers between them, with atom types kept. Drawn in 2D when the run finishes. Blank when the structure has no rings.
 - **Murcko framework** - that skeleton as carbon with single bonds. Drawn in 2D.
-- **Murcko ring systems** - the scaffold with linker atoms removed. Separate systems are joined with a dot. Drawn in 2D.
-- **Scaffold count** - how many rows in the same run share the scaffold. `0` when there are no rings. This column stays a number.
+- **Murcko ring systems** - the scaffold with linker atoms removed. Carbonyls and other exocyclic double bonds stay on the ring. Separate systems are joined with a dot. Drawn in 2D.
+- **Scaffold ID** - one integer per distinct scaffold in the run, in the order scaffolds first appear. The same scaffold gets the same ID. `0` when there are no rings. This column stays a number.
 
 All four start checked. Clear a box to skip that column.
 
@@ -31,9 +31,9 @@ All four start checked. Clear a box to skip that column.
 
 ## Use cases
 
-- Color a plot by scaffold, or pick one example from each skeleton.
+- Color a plot by scaffold ID, or pick one example from each skeleton.
 - Compare frameworks when atom type should not split the series.
 
 ## Tips and limits
 
-A structure with no rings gets a blank scaffold and a count of `0`. Invalid structures write **N/A**. Re-running writes `Name (1)` when the previous column is already filled.
+A structure with no rings gets a blank scaffold and ID `0`. Invalid structures write **N/A**. IDs start over on each run. Re-running writes `Name (1)` when the previous column is already filled.

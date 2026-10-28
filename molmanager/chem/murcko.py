@@ -18,12 +18,14 @@
 
 The scaffold keeps rings and the linker atoms between them. The framework is
 that skeleton drawn as carbon with single bonds. Ring systems drop the linker
-atoms. Scaffold count is how many rows in the same run share the scaffold.
+atoms and keep exocyclic double bonds. Scaffold ID gives every distinct scaffold
+in the run one integer, so
+rows that share a scaffold share that ID.
 """
 
 from __future__ import annotations
 
-from rdkit import Chem
+from rdkit import Chem, rdBase
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
 # Display header, worker key, checkbox tooltip.
@@ -43,13 +45,15 @@ SCAFFOLD_COLUMNS: tuple[tuple[str, str, str], ...] = (
     (
         "Murcko ring systems",
         "MURCKO_RINGS",
-        "Ring systems from the Murcko scaffold, without linker atoms. "
-        "Separate systems are joined with a dot. Blank when the structure has no rings.",
+        "Ring systems from the Murcko scaffold, without the atoms that link them. "
+        "Exocyclic double bonds stay on the ring. Separate systems are joined with a dot. "
+        "Blank when the structure has no rings.",
     ),
     (
-        "Scaffold count",
-        "MURCKO_COUNT",
-        "How many rows in this run share the Murcko scaffold. 0 when the structure has no rings.",
+        "Scaffold ID",
+        "MURCKO_ID",
+        "Integer shared by every row in this run with the same Murcko scaffold. "
+        "IDs start at 1 in the order scaffolds first appear. 0 when the structure has no rings.",
     ),
 )
 
@@ -61,7 +65,7 @@ _SCAFFOLD_VALUE_FNS = {
 
 
 def murcko_callable_for_key(internal: str):
-    """``callable(mol)`` for one scaffold column. Count is filled after the run."""
+    """``callable(mol)`` for one scaffold column. Scaffold ID is filled after the run."""
     kind = _SCAFFOLD_VALUE_FNS.get(internal)
     if kind is None:
         return lambda _mol: ""
@@ -99,12 +103,18 @@ def murcko_framework_smiles(mol) -> str:
 
 
 def murcko_ring_systems_smiles(mol) -> str:
-    """Canonical SMILES of each ring system in the scaffold, joined with ``.``."""
+    """Canonical SMILES of each ring system in the scaffold, joined with ``.``.
+
+    Linker atoms are left out. Exocyclic multiple bonds, such as carbonyls, stay
+    on the ring. A bond cut by that split is replaced by hydrogen, so a
+    substituted aromatic nitrogen is written as ``[nH]`` and the fragment can
+    be drawn.
+    """
     scaffold = _scaffold_mol(mol)
     if scaffold is None:
         return ""
     parts: list[str] = []
-    for atoms in _ring_system_atom_sets(scaffold):
+    for atoms in _ring_system_fragments(scaffold):
         smiles = _fragment_smiles(scaffold, atoms)
         if smiles:
             parts.append(smiles)
@@ -112,35 +122,33 @@ def murcko_ring_systems_smiles(mol) -> str:
     return ".".join(parts)
 
 
-def apply_murcko_scaffold_counts(results, prepared, disp_headers, int_fns):
-    """Fill scaffold-count cells from the Murcko scaffold shared by rows in this run.
+def apply_murcko_scaffold_ids(results, prepared, disp_headers, int_fns):
+    """Fill scaffold-ID cells so rows that share a Murcko scaffold share an ID.
 
-    Rows whose count cell is already ``N/A`` (no structure) are left alone and
-    are not part of the tally. A structure with no rings gets ``0``.
+    IDs start at 1 and follow the order scaffolds first appear in *prepared*
+    (the run order), not the order worker results happen to finish. Rows whose
+    ID cell is already ``N/A`` (no structure) are left alone. A structure with
+    no rings gets ``0``, and every such row shares that ID.
     """
-    count_headers = [str(disp) for disp, fn in zip(disp_headers, int_fns) if fn == "MURCKO_COUNT"]
-    if not count_headers:
+    id_headers = [str(disp) for disp, fn in zip(disp_headers, int_fns) if fn == "MURCKO_ID"]
+    if not id_headers:
         return results
     smiles_by_oid = {int(oid): murcko_scaffold_smiles(mol) for oid, mol in prepared}
-    pending: list[tuple[int, dict, str | None]] = []
-    tally: dict[str, int] = {}
+    scaffold_ids: dict[str, int] = {}
+    for oid, _mol in prepared:
+        smiles = smiles_by_oid.get(int(oid), "")
+        if smiles and smiles not in scaffold_ids:
+            scaffold_ids[smiles] = len(scaffold_ids) + 1
+    out: list[tuple[int, dict]] = []
     for oid, row in results:
         copied = dict(row or {})
         oid_i = int(oid)
-        if copied.get(count_headers[0]) == "N/A":
-            pending.append((oid_i, copied, None))
-            continue
-        smiles = smiles_by_oid.get(oid_i, "")
-        if smiles:
-            tally[smiles] = tally.get(smiles, 0) + 1
-        pending.append((oid_i, copied, smiles))
-    out: list[tuple[int, dict]] = []
-    for oid, row, smiles in pending:
-        if smiles is not None:
-            value = str(tally[smiles]) if smiles else "0"
-            for header in count_headers:
-                row[header] = value
-        out.append((oid, row))
+        if copied.get(id_headers[0]) != "N/A":
+            smiles = smiles_by_oid.get(oid_i, "")
+            value = str(scaffold_ids[smiles]) if smiles else "0"
+            for header in id_headers:
+                copied[header] = value
+        out.append((oid_i, copied))
     return out
 
 
@@ -184,16 +192,115 @@ def _ring_system_atom_sets(mol) -> list[set[int]]:
     return systems
 
 
+# Bond order a cut bond contributes when it is replaced by hydrogen. Aromatic
+# bonds count as one: ``GetBondTypeAsDouble`` reports 1.5, which would add two.
+_CUT_BOND_HYDROGENS = {
+    Chem.BondType.SINGLE: 1,
+    Chem.BondType.DOUBLE: 2,
+    Chem.BondType.TRIPLE: 3,
+    Chem.BondType.QUADRUPLE: 4,
+    Chem.BondType.AROMATIC: 1,
+    Chem.BondType.DATIVE: 0,
+}
+
+
+def _ring_system_fragments(mol) -> list[set[int]]:
+    """Ring-system atoms plus exocyclic atoms that are not linkers.
+
+    Carbonyl oxygens and other dead-end substituents are peeled off the scaffold
+    and given back to the ring they touch. An oxygen on a linker carbonyl stays
+    out, because it does not touch a ring.
+    """
+    systems = _ring_system_atom_sets(mol)
+    if not systems:
+        return []
+    ring_of: dict[int, int] = {}
+    for index, atoms in enumerate(systems):
+        for atom_id in atoms:
+            ring_of[atom_id] = index
+    pendants = _pendant_atoms(mol, ring_of)
+    extras = [set() for _ in systems]
+    owner: dict[int, int] = {}
+    for atom_id in reversed(pendants):
+        system = _pendant_system(mol, atom_id, ring_of, owner)
+        if system is None:
+            continue
+        owner[atom_id] = system
+        extras[system].add(atom_id)
+    return [set(atoms) | extras[index] for index, atoms in enumerate(systems)]
+
+
+def _pendant_atoms(mol, ring_of: dict[int, int]) -> list[int]:
+    """Non-ring atoms peeled from the outside in. What remains are linkers."""
+    remaining = {atom.GetIdx() for atom in mol.GetAtoms() if atom.GetIdx() not in ring_of}
+    pendants: list[int] = []
+    changed = True
+    while changed:
+        changed = False
+        for atom_id in list(remaining):
+            degree = sum(
+                1
+                for neighbor in mol.GetAtomWithIdx(atom_id).GetNeighbors()
+                if neighbor.GetIdx() in remaining or neighbor.GetIdx() in ring_of
+            )
+            if degree <= 1:
+                remaining.remove(atom_id)
+                pendants.append(atom_id)
+                changed = True
+    return pendants
+
+
+def _pendant_system(
+    mol, atom_id: int, ring_of: dict[int, int], owner: dict[int, int]
+) -> int | None:
+    """Ring system a peeled atom belongs to, or ``None`` when it hangs off a linker."""
+    for neighbor in mol.GetAtomWithIdx(atom_id).GetNeighbors():
+        idx = neighbor.GetIdx()
+        if idx in ring_of:
+            return ring_of[idx]
+        if idx in owner:
+            return owner[idx]
+    return None
+
+
+def _hydrogens_for_cut_bond(bond) -> int:
+    mapped = _CUT_BOND_HYDROGENS.get(bond.GetBondType())
+    if mapped is not None:
+        return mapped
+    order = bond.GetBondTypeAsDouble()
+    if order <= 0:
+        return 0
+    return int(round(order))
+
+
 def _fragment_smiles(mol, atom_ids: set[int]) -> str:
-    bonds = [
-        bond.GetIdx()
-        for bond in mol.GetBonds()
-        if bond.GetBeginAtomIdx() in atom_ids and bond.GetEndAtomIdx() in atom_ids
-    ]
+    """Canonical SMILES of one ring system.
+
+    Hydrogens replace bonds to atoms outside *atom_ids*. ``MolFragmentToSmiles``
+    otherwise keeps the parent's hydrogen count, so a glycosidic nitrogen is
+    written as ``n`` and the purine cannot be kekulized.
+    """
+    if not atom_ids:
+        return ""
+    copied = Chem.RWMol(mol)
     try:
-        return (
+        for atom_id in atom_ids:
+            atom = copied.GetAtomWithIdx(atom_id)
+            missing = 0
+            for bond in atom.GetBonds():
+                if bond.GetOtherAtomIdx(atom_id) not in atom_ids:
+                    missing += _hydrogens_for_cut_bond(bond)
+            if missing:
+                atom.SetNumExplicitHs(atom.GetTotalNumHs() + missing)
+                atom.SetNoImplicit(True)
+        bonds = [
+            bond.GetIdx()
+            for bond in copied.GetBonds()
+            if bond.GetBeginAtomIdx() in atom_ids and bond.GetEndAtomIdx() in atom_ids
+        ]
+        smiles = (
             Chem.MolFragmentToSmiles(
-                mol,
+                copied,
                 atomsToUse=sorted(atom_ids),
                 bondsToUse=bonds,
                 canonical=True,
@@ -202,3 +309,15 @@ def _fragment_smiles(mol, atom_ids: set[int]) -> str:
         )
     except (ValueError, RuntimeError):
         return ""
+    if not smiles or not _smiles_parses(smiles):
+        return ""
+    return smiles
+
+
+def _smiles_parses(smiles: str) -> bool:
+    """True when *smiles* is a molecule the 2D renderer can read back."""
+    blocker = rdBase.BlockLogs()
+    try:
+        return Chem.MolFromSmiles(smiles) is not None
+    finally:
+        del blocker
