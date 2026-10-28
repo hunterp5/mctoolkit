@@ -1,9 +1,9 @@
 name: Package
 
-# Unsigned core desktop bundle. Runtime packages come from the hashed
-# requirements-core.lock. A signing certificate is not in this repo, so
-# codesign_identity stays unset. This does not run on every push: the test CI
-# stays the fast gate. Run it by hand, or by pushing a v* tag.
+# Core desktop bundle. Runtime packages come from the hashed
+# requirements-core.lock. Signing runs only when the matching Actions secret
+# is set; without it the artifact stays unsigned. This does not run on every
+# push: the test CI stays the fast gate. Run it by hand, or by pushing a v* tag.
 on:
   workflow_dispatch:
   push:
@@ -64,7 +64,22 @@ jobs:
           pip freeze > dist/MolManager/requirements-freeze.txt
           python scripts/write_sbom.py dist/MolManager/sbom.cdx.json
 
-      - name: Upload the unsigned core bundle
+      - name: Sign the file list when a GPG key is configured
+        env:
+          MOLMANAGER_LINUX_GPG_PRIVATE_KEY: ${{ secrets.MOLMANAGER_LINUX_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "$MOLMANAGER_LINUX_GPG_PRIVATE_KEY" ]; then
+            echo "No MOLMANAGER_LINUX_GPG_PRIVATE_KEY secret; the Linux bundle stays unsigned."
+            exit 0
+          fi
+          printf '%s\n' "$MOLMANAGER_LINUX_GPG_PRIVATE_KEY" | gpg --batch --import
+          (
+            cd dist/MolManager
+            find . -type f ! -name SHA256SUMS ! -name SHA256SUMS.asc | sort | xargs sha256sum > SHA256SUMS
+          )
+          gpg --batch --yes --detach-sign --armor -o dist/MolManager/SHA256SUMS.asc dist/MolManager/SHA256SUMS
+
+      - name: Upload the core bundle
         uses: actions/upload-artifact@v4
         with:
           name: MolManager-core-linux
@@ -100,6 +115,12 @@ jobs:
           pip freeze | Out-File -Encoding ascii dist/MolManager/requirements-freeze.txt
           python scripts/write_sbom.py dist/MolManager/sbom.cdx.json
 
+      - name: Sign MolManager.exe when a certificate secret is set
+        env:
+          MOLMANAGER_WINDOWS_CERT_BASE64: ${{ secrets.MOLMANAGER_WINDOWS_CERT_BASE64 }}
+          MOLMANAGER_WINDOWS_CERT_PASSWORD: ${{ secrets.MOLMANAGER_WINDOWS_CERT_PASSWORD }}
+        run: powershell -File scripts/sign_windows_artifact.ps1 dist/MolManager/MolManager.exe
+
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
 
@@ -108,7 +129,13 @@ jobs:
           $version = python -c "import molmanager; print(molmanager.__version__)"
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" packaging/molmanager.iss
 
-      - name: Upload the unsigned setup
+      - name: Sign the setup when a certificate secret is set
+        env:
+          MOLMANAGER_WINDOWS_CERT_BASE64: ${{ secrets.MOLMANAGER_WINDOWS_CERT_BASE64 }}
+          MOLMANAGER_WINDOWS_CERT_PASSWORD: ${{ secrets.MOLMANAGER_WINDOWS_CERT_PASSWORD }}
+        run: powershell -File scripts/sign_windows_artifact.ps1 (Get-ChildItem dist/installer/*.exe | Select-Object -ExpandProperty FullName)
+
+      - name: Upload the core setup
         uses: actions/upload-artifact@v4
         with:
           name: MolManager-core-windows-setup

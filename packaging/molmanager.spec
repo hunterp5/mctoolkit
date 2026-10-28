@@ -2,7 +2,9 @@
 # Starter PyInstaller spec — run from repo root:
 #   pyinstaller packaging/molmanager.spec
 # UPX is off. Packing fights code signing and is commonly flagged by scanners.
-# codesign_identity stays unset until a signing certificate is available.
+# Windows Authenticode is applied by scripts/sign_windows_artifact.ps1 in the
+# Package workflow when MOLMANAGER_WINDOWS_CERT_BASE64 is set. This field is
+# the macOS identity, and it stays unset until there is an Apple certificate.
 
 import sys
 from pathlib import Path
@@ -29,6 +31,9 @@ a = Analysis(
         "rdkit.Chem.Draw",
         "rdkit.Chem.Draw.rdMolDraw2D",
         "PyQt5.QtWebEngineWidgets",
+        "cryptography",
+        "cryptography.hazmat.primitives.ciphers",
+        "cryptography.hazmat.backends.openssl",
     ],
     hookspath=[],
     hooksconfig={},

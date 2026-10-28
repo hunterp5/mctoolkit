@@ -88,7 +88,9 @@ Actions workflow `Package` builds that unsigned core bundle on Ubuntu, and on Wi
 MolManager-0.1.0-setup.exe /VERYSILENT /NORESTART
 ```
 
-The setup is not signed. You still need to ship:
+The Package workflow signs Windows outputs when the Actions secrets `MOLMANAGER_WINDOWS_CERT_BASE64` (the `.pfx`, base64) and `MOLMANAGER_WINDOWS_CERT_PASSWORD` are set. It signs `MolManager.exe` and then `MolManager-<version>-setup.exe` with SHA-256 and an RFC 3161 timestamp. Without those secrets the setup is still unsigned and the job stays green. On Ubuntu, `MOLMANAGER_LINUX_GPG_PRIVATE_KEY` (an armored private key with no passphrase) writes `SHA256SUMS` and `SHA256SUMS.asc` into the bundle. There is no certificate in this repo.
+
+You still need to ship:
 
 - Qt platform plugins (PyInstaller usually collects these)
 - Optional `resources/bin/` for Gnina
