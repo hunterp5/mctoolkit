@@ -1085,13 +1085,15 @@ def _structure_molecular_weights(app, oids: list[int], *, only_selected: bool) -
 
 def _positive_column_value(app, oid: int, column: str) -> float | None:
     from ...chem.potency import parse_concentration
+    from ..table_reader_view import WindowTableReader
 
-    if column not in app.headers:
+    reader = WindowTableReader(app)
+    if column not in reader.headers:
         return None
-    row = app.logical_row_for_oid(oid)
+    row = reader.row_for_oid(oid)
     if row < 0:
         return None
-    return parse_concentration(app._table_cell_text(row, app.headers.index(column)))
+    return parse_concentration(reader.cell_text(row, reader.headers.index(column)))
 
 
 def _fixed_molar(value: float | None, unit: str) -> float | None:
@@ -1104,14 +1106,16 @@ def _fixed_molar(value: float | None, unit: str) -> float | None:
 
 def _column_molar(app, oid: int, column: str, unit: str, *, allow_zero: bool) -> float | None:
     from ...chem.potency import parse_concentration, to_molar
+    from ..table_reader_view import WindowTableReader
 
-    if column not in app.headers:
+    reader = WindowTableReader(app)
+    if column not in reader.headers:
         return None
-    row = app.logical_row_for_oid(oid)
+    row = reader.row_for_oid(oid)
     if row < 0:
         return None
     value = parse_concentration(
-        app._table_cell_text(row, app.headers.index(column)), allow_zero=allow_zero
+        reader.cell_text(row, reader.headers.index(column)), allow_zero=allow_zero
     )
     if value is None:
         return None

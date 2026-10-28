@@ -31,16 +31,15 @@ from ...services.chemistry_columns import (
     skip_chemistry_tool_column_dropdown,
     should_skip_chemical_scan_column,
 )
-from ...services.table_scope import collect_scoped_pairs, resolve_structure_row_for_oid
+from ...services.table_reader import collect_structure_payloads
+from ...services.table_scope import resolve_structure_row_for_oid
 from ...chem.molecule_conversion import (
     looks_like_mol_block,
     parse_molecule_from_cell_text,
     row_cells_from_mol,
 )
-from ...chem.structure_payload import (
-    StructurePayload,
-    mols_from_payloads,
-)
+from ...chem.structure_payload import StructurePayload, mols_from_payloads
+from ..table_reader_view import WindowTableReader
 from ..compound_table_model import CompoundTableModel
 
 
@@ -204,23 +203,6 @@ class TableChemistryAccessMixin:
             visible_rows = None if vis is None else set(vis)
         return allowed, visible_rows
 
-    def _plain_store_structure_payloads(
-        self, allowed: set[int] | None
-    ) -> list[tuple[int, bytes | None, str]]:
-        """``(oid, blob, smiles)`` from a plain-dict mol store (tests, legacy sessions)."""
-        rows: list[tuple[int, bytes | None, str]] = []
-        oids = list(self.mols) if allowed is None else [o for o in allowed if o in self.mols]
-        for oid in oids:
-            mol = self.mols.get(oid)
-            if mol is None:
-                continue
-            try:
-                blob = mol.ToBinary()
-            except (AttributeError, RuntimeError):
-                continue
-            rows.append((int(oid), bytes(blob) if blob else None, ""))
-        return rows
-
     def collect_scoped_table_structure_payloads(
         self,
         src: str,
@@ -241,47 +223,14 @@ class TableChemistryAccessMixin:
         )
         if allowed_oids is not None:
             allowed = set(allowed_oids)
-        store_map: dict[int, tuple[bytes | None, str]] = {}
-        if src == "Structure":
-            scoped_fn = getattr(self.mols, "structure_payloads_for", None)
-            iter_fn = getattr(self.mols, "iter_structure_payloads", None)
-            if allowed is not None and callable(scoped_fn):
-                rows = scoped_fn(allowed)
-            elif callable(iter_fn):
-                rows = iter_fn()
-            else:
-                rows = self._plain_store_structure_payloads(allowed)
-            for oid, blob, smi in rows:
-                store_map[int(oid)] = (blob, smi or "")
-        col = None if src == "Structure" else self.headers.index(src)
-        is_pixmap_src = src != "Structure" and self._table_model.is_pixmap_data_column(src)
-
-        def _cell(r: int) -> str:
-            raw = (self._table_model.backing_value_for_row_header(r, src) or "").strip()
-            if raw or is_pixmap_src:
-                return raw
-            return (self._table_cell_text(r, col) or "").strip()
-
-        def _resolve(r: int, oid: int) -> StructurePayload | None:
-            if src == "Structure":
-                blob, smi = store_map.get(int(oid), (None, ""))
-                smi = (smi or "").strip()
-                if blob or smi:
-                    return StructurePayload(int(oid), blob, smi)
-                return None
-            raw = _cell(r)
-            if not raw:
-                return None
-            return StructurePayload(int(oid), None, raw)
-
-        pairs = collect_scoped_pairs(
-            self._table_model.rowCount(),
-            row_oid=self._table_model.row_oid,
-            resolve=_resolve,
+        if src != "Structure":
+            self.headers.index(src)
+        return collect_structure_payloads(
+            WindowTableReader(self),
+            src,
             allowed_oids=allowed,
             visible_rows=visible_rows,
         )
-        return [payload for _oid, payload in pairs]
 
     def collect_scoped_table_mols(
         self,

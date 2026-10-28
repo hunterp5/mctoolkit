@@ -35,8 +35,14 @@ from ..chem.structure_payload import (
     mol_from_payload,
     oid_mol_rows_from_payloads,
 )
-from ..services.activity_records import build_oid_mol_activity_records, parse_activity_float
+from ..services.table_reader import activity_for_oid
+from ..workflows.scoped_records import (
+    ScopeBlocker,
+    plan_scoped_activity_records,
+    plan_scoped_structure_records,
+)
 from ..workflows.tool_readiness import ToolBlocker, plan_activity_analysis, plan_table_readiness
+from .table_reader_view import WindowTableReader
 from .tool_dialog_scope import abort_if_only_selected_but_empty, prepare_tool_dialog
 
 WorkerFactory = Callable[..., Any]
@@ -55,13 +61,12 @@ def activity_value_for_table_oid(
     activity_col_index: int,
 ) -> float | None:
     """Read a numeric activity for *oid* from cell text or backing value."""
-    row = app.logical_row_for_oid(oid)
-    if row < 0:
-        return None
-    raw = (app._table_cell_text(row, activity_col_index) or "").strip()
-    if not raw:
-        raw = (app._table_model.backing_value_for_row_header(row, activity_column) or "").strip()
-    return parse_activity_float(raw)
+    return activity_for_oid(
+        WindowTableReader(app),
+        oid,
+        activity_column=activity_column,
+        activity_col_index=activity_col_index,
+    )
 
 
 def ensure_table_ready_for_tool(
@@ -167,32 +172,25 @@ def prepare_scoped_structure_payloads(
     """
     if abort_if_only_selected_but_empty(app, only_selected, app._selected_oids_set(), tool_label):
         return None
-    collect = getattr(app, "collect_scoped_table_structure_payloads", None)
-    if callable(collect):
-        payloads = list(collect(structure_source, only_selected=only_selected) or [])
+    reader, allowed = _reader_for_scope(app, only_selected=only_selected)
+    plan = plan_scoped_structure_records(
+        reader,
+        structure_source,
+        allowed_oids=allowed,
+        min_count=min_mols,
+    )
+    if plan.is_ready:
+        return list(plan.payloads)
+    if plan.blocked_by is ScopeBlocker.TOO_FEW_STRUCTURES:
+        message = too_few_message or (
+            f"Need at least {int(plan.min_count)} row(s) with valid structures in this scope."
+        )
     else:
-        payloads = [
-            StructurePayload(int(oid), None, "")
-            for oid, _mol in (
-                app.collect_scoped_table_mols(structure_source, only_selected=only_selected) or []
-            )
-        ]
-    if not payloads:
-        QMessageBox.information(
-            app,
-            tool_label,
-            empty_message or "No valid structures were found for the selected source and scope.",
+        message = empty_message or (
+            "No valid structures were found for the selected source and scope."
         )
-        return None
-    if len(payloads) < int(min_mols):
-        QMessageBox.information(
-            app,
-            tool_label,
-            too_few_message
-            or f"Need at least {int(min_mols)} row(s) with valid structures in this scope.",
-        )
-        return None
-    return payloads
+    QMessageBox.information(app, tool_label, message)
+    return None
 
 
 def prepare_scoped_activity_mol_records(
@@ -248,56 +246,38 @@ def prepare_scoped_activity_payload_records(
     """Snapshot payloads + numeric activity without hydrating RDKit molecules."""
     if abort_if_only_selected_but_empty(app, only_selected, app._selected_oids_set(), tool_label):
         return None
-    if not activity_column or str(activity_column).startswith("("):
-        QMessageBox.information(app, tool_label, "Select a numeric activity column.")
-        return None
-    if activity_column not in app.headers:
-        QMessageBox.information(
-            app,
-            tool_label,
-            f"Activity column “{activity_column}” is not in the table.",
-        )
-        return None
-
-    collect = getattr(app, "collect_scoped_table_structure_payloads", None)
-    if callable(collect):
-        payloads = list(collect(structure_source, only_selected=only_selected) or [])
-        mol_data = [(int(p.oid), p) for p in payloads if p.oid is not None]
-    else:
-        mol_data = [
-            (int(oid), StructurePayload(int(oid), None, ""))
-            for oid, _mol in (
-                app.collect_scoped_table_mols(structure_source, only_selected=only_selected) or []
-            )
-        ]
-    if not mol_data:
-        QMessageBox.information(
-            app,
-            tool_label,
-            "No valid structures were found for the selected source and scope.",
-        )
-        app.status_label.setText("Ready.")
-        return None
-
-    act_col = app.headers.index(activity_column)
-    records = build_oid_mol_activity_records(
-        mol_data,
-        activity_for_oid=lambda oid: activity_value_for_table_oid(
-            app,
-            oid,
-            activity_column=activity_column,
-            activity_col_index=act_col,
-        ),
+    reader, allowed = _reader_for_scope(app, only_selected=only_selected)
+    plan = plan_scoped_activity_records(
+        reader,
+        structure_source,
+        activity_column=activity_column,
+        allowed_oids=allowed,
+        min_records=min_records,
     )
-    if len(records) < int(min_records):
-        QMessageBox.information(
-            app,
-            tool_label,
-            "Need at least two molecules with both a structure and a numeric activity value.",
-        )
+    if plan.is_ready:
+        return [(oid, payload, activity) for oid, payload, activity in plan.records]
+    QMessageBox.information(app, tool_label, _activity_block_message(plan))
+    if plan.blocked_by in (ScopeBlocker.NO_STRUCTURES, ScopeBlocker.TOO_FEW_ACTIVITY):
         app.status_label.setText("Ready.")
-        return None
-    return records
+    return None
+
+
+def _reader_for_scope(
+    app: Any, *, only_selected: bool
+) -> tuple[WindowTableReader, set[int] | None]:
+    """The open table, and the selected oids when the job is limited to them."""
+    allowed = set(app._selected_oids_set()) if only_selected else None
+    return WindowTableReader(app), allowed
+
+
+def _activity_block_message(plan: Any) -> str:
+    if plan.blocked_by is ScopeBlocker.NO_ACTIVITY_CHOSEN:
+        return "Select a numeric activity column."
+    if plan.blocked_by is ScopeBlocker.MISSING_ACTIVITY_COLUMN:
+        return f"Activity column “{plan.activity_column}” is not in the table."
+    if plan.blocked_by is ScopeBlocker.NO_STRUCTURES:
+        return "No valid structures were found for the selected source and scope."
+    return "Need at least two molecules with both a structure and a numeric activity value."
 
 
 def prepare_queue_progress(app: Any, tool_label: str, n_items: int) -> tuple[str, Any]:

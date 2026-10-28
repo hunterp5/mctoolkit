@@ -244,20 +244,19 @@ class BinningDialog(QDialog):
             return []
         only_sel = self.only_selected_rows()
         allowed = app._selected_oids_set() if only_sel else None
-        try:
-            ci = app.headers.index(col)
-        except ValueError:
+        from ...services.table_reader import backing_then_cell
+        from ..table_reader_view import WindowTableReader
+
+        if col not in app.headers:
             return []
         texts: list[str] = []
         model = app._table_model
+        reader = WindowTableReader(app)
         for row in range(model.rowCount()):
             oid = model.row_oid(row)
             if allowed is not None and oid not in allowed:
                 continue
-            raw = model.backing_value_for_row_header(row, col) or ""
-            if not raw:
-                raw = app._table_cell_text(row, ci) or ""
-            texts.append(str(raw))
+            texts.append(str(backing_then_cell(reader, row, col)))
             if limit is not None and len(texts) >= limit:
                 break
         return texts

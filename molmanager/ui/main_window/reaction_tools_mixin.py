@@ -147,10 +147,10 @@ class ReactionToolsMixin:
         row = self._table_model.logical_row_for_oid(oid)
         if row < 0:
             return ""
-        raw = self._table_model.backing_value_for_row_header(row, source) or ""
-        if not raw:
-            raw = self._table_cell_text(row, column_index) or ""
-        return raw
+        from ...services.table_reader import backing_then_cell
+        from ..table_reader_view import WindowTableReader
+
+        return backing_then_cell(WindowTableReader(self), row, source)
 
     def _fail_reaction_extract(self, message: str, on_done) -> None:
         from ..macro_recorder import report_unless_replaying

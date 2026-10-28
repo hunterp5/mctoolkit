@@ -193,20 +193,19 @@ class SplitColumnDialog(QDialog):
             return []
         only_sel = self.only_selected_rows()
         allowed = app._selected_oids_set() if only_sel else None
+        from ...services.table_reader import backing_then_cell
+        from ..table_reader_view import WindowTableReader
+
+        if col not in app.headers:
+            return []
         texts: list[str] = []
         m = app._table_model
-        try:
-            ci = app.headers.index(col)
-        except ValueError:
-            return []
+        reader = WindowTableReader(app)
         for r in range(m.rowCount()):
             oid = m.row_oid(r)
             if allowed is not None and oid not in allowed:
                 continue
-            raw = m.backing_value_for_row_header(r, col) or ""
-            if not raw:
-                raw = app._table_cell_text(r, ci) or ""
-            texts.append(raw)
+            texts.append(backing_then_cell(reader, r, col))
             if len(texts) >= 400:
                 break
         return texts

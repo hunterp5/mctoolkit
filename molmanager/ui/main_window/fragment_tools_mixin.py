@@ -351,22 +351,22 @@ class FragmentToolsMixin:
         cols = fragment_columns_for_prefix(self.headers, prefix)
         if not cols:
             return []
+        from ...services.table_reader import cell_then_backing
+        from ..table_reader_view import WindowTableReader
+
+        reader = WindowTableReader(self)
         allowed = self._selected_oids_set() if only_selected else None
-        col_idx = {h: self.headers.index(h) for h in cols}
         out: list[str] = []
-        for r in range(self._table_model.rowCount()):
-            t0 = self._table_model.cell_text(r, 0)
-            if not t0.isdigit():
+        for row in range(reader.row_count()):
+            oid = reader.oid_at(row)
+            if oid < 0:
                 continue
-            oid = int(t0)
             if allowed is not None and oid not in allowed:
                 continue
-            for h in cols:
-                raw = self._table_cell_text(r, col_idx[h])
-                if not raw:
-                    raw = self._table_model.backing_value_for_row_header(r, h) or ""
+            for header in cols:
+                raw = cell_then_backing(reader, row, header)
                 if raw:
-                    out.append(str(raw).strip())
+                    out.append(raw)
         return out
 
     def _on_fragment_recomposition_dialog_accepted(self, d) -> None:

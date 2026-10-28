@@ -115,17 +115,68 @@ def test_prepare_scoped_structure_mols_empty_selection(monkeypatch):
     app.collect_scoped_table_mols.assert_not_called()
 
 
+def _one_row_app(source_values: dict[str, str], structures: list[tuple[int, bytes | None, str]]):
+    class _Model:
+        def rowCount(self) -> int:
+            return 1
+
+        def row_oid(self, row: int) -> int:
+            del row
+            return 1
+
+        def backing_value_for_row_header(self, row: int, header: str) -> str:
+            del row
+            return source_values.get(header, "")
+
+        def is_pixmap_data_column(self, header: str) -> bool:
+            del header
+            return False
+
+    class _Mols:
+        def __init__(self) -> None:
+            self.batch_calls = 0
+            self.scan_calls = 0
+
+        def structure_payloads_for(self, oids):
+            self.batch_calls += 1
+            wanted = {int(oid) for oid in oids}
+            for oid, blob, smiles in structures:
+                if int(oid) in wanted:
+                    yield oid, blob, smiles
+
+        def iter_structure_payloads(self):
+            self.scan_calls += 1
+            yield from structures
+
+        def structure_text_for(self, oid: int) -> str:
+            del oid
+            return ""
+
+        def blob_for(self, oid: int) -> bytes | None:
+            del oid
+            return None
+
+    mols = _Mols()
+    app = SimpleNamespace(
+        headers=["ID_HIDDEN", "Structure", "SMILES"],
+        _table_model=_Model(),
+        _table_cell_text=lambda row, col: "",
+        logical_row_for_oid=lambda oid: 0 if int(oid) == 1 else -1,
+        mols=mols,
+        _selected_oids_set=lambda: set(),
+        _abort_if_only_selected_but_empty=lambda *_a, **_k: False,
+        status_label=SimpleNamespace(setText=MagicMock()),
+    )
+    return app, mols
+
+
 def test_prepare_scoped_structure_mols_too_few(monkeypatch):
     infos: list[tuple] = []
     monkeypatch.setattr(
         "molmanager.ui.analysis_job_support.QMessageBox.information",
         lambda *a, **k: infos.append(a),
     )
-    app = SimpleNamespace(
-        _abort_if_only_selected_but_empty=MagicMock(return_value=False),
-        _selected_oids_set=MagicMock(return_value=set()),
-        collect_scoped_table_mols=MagicMock(return_value=[(1, object())]),
-    )
+    app, mols = _one_row_app({"SMILES": "CCO"}, [])
     assert (
         prepare_scoped_structure_mols(
             app,
@@ -138,30 +189,26 @@ def test_prepare_scoped_structure_mols_too_few(monkeypatch):
         is None
     )
     assert infos and infos[0][2] == "need two"
+    assert mols.batch_calls == 0
+    assert mols.scan_calls == 0
 
 
-def test_prepare_scoped_structure_payloads_uses_payload_collect(monkeypatch):
-    from molmanager.chem.structure_payload import StructurePayload
-
+def test_prepare_scoped_structure_payloads_batches_the_molecule_store(monkeypatch):
     monkeypatch.setattr(
         "molmanager.ui.analysis_job_support.QMessageBox.information",
         lambda *a, **k: None,
     )
-    payload = StructurePayload(1, None, "CCO")
-    app = SimpleNamespace(
-        _abort_if_only_selected_but_empty=MagicMock(return_value=False),
-        _selected_oids_set=MagicMock(return_value=set()),
-        collect_scoped_table_structure_payloads=MagicMock(return_value=[payload]),
-        collect_scoped_table_mols=MagicMock(),
-    )
+    app, mols = _one_row_app({}, [(1, b"blob", "CCO")])
     out = prepare_scoped_structure_payloads(
         app,
         tool_label="Cluster",
         structure_source="Structure",
         only_selected=False,
     )
-    assert out == [payload]
-    app.collect_scoped_table_mols.assert_not_called()
+    assert out is not None
+    assert [(payload.oid, payload.smiles, payload.blob) for payload in out] == [(1, "CCO", b"blob")]
+    assert mols.scan_calls == 1
+    assert mols.batch_calls == 0
 
 
 def test_enqueue_process_queue_job_returns_id():

@@ -175,23 +175,19 @@ class JoinColumnsDialog(QDialog):
             return None
         only_sel = self.only_selected_rows()
         allowed = app._selected_oids_set() if only_sel else None
-        m = app._table_model
-        try:
-            li = app.headers.index(left)
-            ri = app.headers.index(right)
-        except ValueError:
+        from ...services.table_reader import backing_then_cell
+        from ..table_reader_view import WindowTableReader
+
+        if left not in app.headers or right not in app.headers:
             return None
+        m = app._table_model
+        reader = WindowTableReader(app)
         for r in range(m.rowCount()):
             oid = m.row_oid(r)
             if allowed is not None and oid not in allowed:
                 continue
-
-            a = m.backing_value_for_row_header(r, left) or ""
-            if not a:
-                a = app._table_cell_text(r, li) or ""
-            b = m.backing_value_for_row_header(r, right) or ""
-            if not b:
-                b = app._table_cell_text(r, ri) or ""
+            a = backing_then_cell(reader, r, left)
+            b = backing_then_cell(reader, r, right)
             if a.strip() or b.strip():
                 return a, b
         return ("", "")

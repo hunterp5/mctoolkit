@@ -312,8 +312,11 @@ class DescriptorsToolsMixin:
         if not is_text:
             data = self._structure_tool_inputs(src, allowed_set)
         else:
+            from ..table_reader_view import WindowTableReader
+
+            reader = WindowTableReader(self)
             data = [
-                (o, self._table_cell_text(self.logical_row_for_oid(o), s_idx)) for o in oids_list
+                (oid, reader.cell_text(reader.row_for_oid(oid), s_idx) or "") for oid in oids_list
             ]
         if not data:
             if notify:

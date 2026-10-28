@@ -143,14 +143,10 @@ class StructureWritebackMixin:
             return self.mols.get(oid)
         if src not in self.headers:
             return None
-        col = self.headers.index(src)
-        raw = ""
-        if self._table_model.is_pixmap_data_column(src):
-            raw = (self._table_model.backing_value_for_row_header(row, src) or "").strip()
-        else:
-            raw = (self._table_cell_text(row, col) or "").strip()
-            if not raw:
-                raw = (self._table_model.backing_value_for_row_header(row, src) or "").strip()
+        from ...services.table_reader import cell_then_backing
+        from ..table_reader_view import WindowTableReader
+
+        raw = cell_then_backing(WindowTableReader(self), row, src)
         if not raw:
             return None
         return self._mol_from_structure_text(raw)
@@ -162,13 +158,12 @@ class StructureWritebackMixin:
             return None
         if src == "Structure":
             return self._structure_text_for_oid(oid) or None
-        if src in self.headers and self._table_model.is_pixmap_data_column(src):
-            raw = (self._table_model.backing_value_for_row_header(row, src) or "").strip()
-            return raw or None
-        col = self.headers.index(src)
-        raw = (self._table_cell_text(row, col) or "").strip()
-        if not raw:
-            raw = (self._table_model.backing_value_for_row_header(row, src) or "").strip()
+        from ...services.table_reader import cell_then_backing
+        from ..table_reader_view import WindowTableReader
+
+        if src not in self.headers:
+            return None
+        raw = cell_then_backing(WindowTableReader(self), row, src)
         return raw or None
 
     def _ensure_disconnect_output_column(self, header_name: str) -> None:
