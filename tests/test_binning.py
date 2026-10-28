@@ -28,6 +28,8 @@ from molmanager.table.column_binning import (
     BinningParams,
     bin_column_texts,
     classification_labels,
+    custom_range_labels,
+    parse_bin_names,
     parse_edges_text,
 )
 from molmanager.ui.main_window import ChemistryWorkspaceWindow
@@ -107,6 +109,39 @@ def test_custom_edges_open_and_closed() -> None:
     )
     assert closed.ranges == ("", "[5, 7]", "[5, 7]", "")
     assert closed.classes == ("", "Class 1", "Class 1", "")
+
+
+def test_custom_bin_names_override_defaults() -> None:
+    named = bin_column_texts(
+        ["4", "5", "8"],
+        _params(
+            method="custom",
+            edges=(5.0, 7.0),
+            open_ends=True,
+            bin_names=("Low", "Mid", "High"),
+        ),
+    )
+    assert named.classes == ("Low", "Mid", "High")
+    assert named.class_names == ("Low", "Mid", "High")
+    with pytest.raises(ValueError, match="3 names"):
+        bin_column_texts(
+            ["4", "5"],
+            _params(method="custom", edges=(5.0, 7.0), open_ends=True, bin_names=("A", "B")),
+        )
+
+
+def test_open_ends_add_outer_bins() -> None:
+    assert custom_range_labels((5, 6, 7), open_ends=True) == ("< 5", "[5, 6)", "[6, 7)", "≥ 7")
+    assert custom_range_labels((5, 6, 7), open_ends=False) == ("[5, 6)", "[6, 7]")
+
+
+def test_parse_bin_names() -> None:
+    assert parse_bin_names("") == ()
+    assert parse_bin_names("  ") == ()
+    assert parse_bin_names("Low, Medium, High") == ("Low", "Medium", "High")
+    assert parse_bin_names("A; B") == ("A", "B")
+    with pytest.raises(ValueError, match="blank"):
+        parse_bin_names("A,,B")
 
 
 def test_classification_labels_follow_bin_order() -> None:
@@ -193,30 +228,38 @@ def test_binning_dialog_methods_and_params(qapp) -> None:  # noqa: ARG001
     from molmanager.ui.dialogs.binning import BinningDialog
 
     dlg = BinningDialog(["SMILES", "LogP"], 0)
-    assert not hasattr(dlg, "preview_label")
     assert dlg.method_combo.currentData() == "equal_width"
     assert dlg.bin_count_spin.isHidden() is False
     assert dlg.edges_input.isHidden() is True
+    assert dlg.names_input.isHidden() is True
     assert dlg.open_ends_cb.isHidden() is True
     dlg.method_combo.setCurrentIndex(dlg.method_combo.findData("custom"))
     assert dlg.edges_input.isHidden() is False
+    assert dlg.names_input.isHidden() is False
     assert dlg.bin_count_spin.isHidden() is True
     assert dlg.open_ends_cb.isHidden() is False
+    dlg.edges_input.setText("1, 2, 3")
+    assert "4 names" in dlg.names_input.placeholderText()
     dlg.method_combo.setCurrentIndex(dlg.method_combo.findData("equal_width"))
     dlg.col_combo.setCurrentText("LogP")
     assert dlg.params().range_column == "LogP_bin"
     assert dlg.params().class_column == "LogP_class"
-    assert not hasattr(dlg, "class_labels_input")
+    assert dlg.params().bin_names == ()
     dlg.method_combo.setCurrentIndex(dlg.method_combo.findData("custom"))
     dlg.edges_input.setText("1, 2, 3")
-    dlg.range_input.setText("Band")
-    dlg.class_input.setText("BandClass")
+    dlg.names_input.setText("A, B, C, D")
+    assert "< 1" in dlg.bin_summary.text()
+    assert "≥ 3" in dlg.bin_summary.text()
+    dlg.open_ends_cb.setChecked(False)
+    assert "< 1" not in dlg.bin_summary.text()
+    assert "[1, 2)" in dlg.bin_summary.text()
     params = dlg.params()
     assert params.method == "custom"
     assert params.edges == (1.0, 2.0, 3.0)
-    assert params.open_ends is True
-    assert params.range_column == "Band"
-    assert params.class_column == "BandClass"
+    assert params.bin_names == ("A", "B", "C", "D")
+    assert params.open_ends is False
+    assert params.range_column == "LogP_bin"
+    assert params.class_column == "LogP_class"
     dlg.close()
 
 
@@ -227,3 +270,4 @@ def test_binning_help_topic() -> None:
     assert "Topic unavailable" not in html
     assert "Open ends" in html
     assert "Inactive" in html
+    assert "Names" in html

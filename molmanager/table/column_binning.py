@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Sequence
 
 from ..chem.molecule_conversion import safe_float
 
@@ -65,6 +65,7 @@ class BinningParams:
     maximum: float | None = None
     edges: tuple[float, ...] = ()
     open_ends: bool = True
+    bin_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,25 @@ def parse_edges_text(text: str) -> tuple[float, ...]:
     return tuple(edges)
 
 
+def parse_bin_names(text: str) -> tuple[str, ...]:
+    """Comma-separated bin names. Blank text keeps the default class labels."""
+    raw = (text or "").strip()
+    if not raw:
+        return ()
+    parts = [part.strip() for part in raw.replace(";", ",").split(",")]
+    if any(not part for part in parts):
+        raise ValueError("Bin names cannot be blank. Separate names with commas.")
+    if len(parts) > MAX_BINS:
+        raise ValueError(f"Use at most {MAX_BINS} bin names.")
+    return tuple(parts)
+
+
+def custom_range_labels(edges: Sequence[float], *, open_ends: bool) -> tuple[str, ...]:
+    """Range label for each custom bin, from the low bin to the high bin."""
+    intervals = _custom_intervals([float(edge) for edge in edges], open_ends=open_ends)
+    return tuple(_interval_label(interval) for interval in intervals)
+
+
 def classification_labels(n_bins: int) -> tuple[str, ...]:
     """Default class names from the low bin to the high bin."""
     if n_bins < 1:
@@ -135,7 +155,7 @@ def bin_column_texts(texts: list[str], params: BinningParams) -> BinnedColumn:
         raise ValueError("No numeric values in the current scope.")
     intervals = _intervals_for(finite, params)
     range_names = tuple(_interval_label(interval) for interval in intervals)
-    class_names = classification_labels(len(intervals))
+    class_names = _class_names_for(intervals, params.bin_names)
     ranges: list[str] = []
     classes: list[str] = []
     for value in numeric:
@@ -160,6 +180,24 @@ def bin_column_texts(texts: list[str], params: BinningParams) -> BinnedColumn:
         range_names,
         class_names,
         len(finite),
+    )
+
+
+def _class_names_for(intervals: tuple[BinInterval, ...], names: tuple[str, ...]) -> tuple[str, ...]:
+    """Use *names* when the user supplied one label per bin; otherwise the presets."""
+    count = len(intervals)
+    if not names:
+        return classification_labels(count)
+    if len(names) == count:
+        return names
+    if count <= 8:
+        ranges = ", ".join(_interval_label(interval) for interval in intervals)
+        detail = f" ({ranges})"
+    else:
+        detail = ""
+    raise ValueError(
+        f"This split makes {count} bins{detail}. "
+        f"Enter {count} names, from the low bin to the high bin, or leave Names blank."
     )
 
 

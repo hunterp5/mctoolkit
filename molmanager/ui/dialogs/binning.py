@@ -20,15 +20,18 @@ from __future__ import annotations
 
 import math
 
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
-    QGroupBox,
+    QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -41,8 +44,10 @@ from ...table.column_binning import (
     BinMethod,
     BinningParams,
     bin_column_texts,
+    custom_range_labels,
     default_bin_column_name,
     default_class_column_name,
+    parse_bin_names,
     parse_edges_text,
     parse_numeric_cell,
 )
@@ -52,7 +57,8 @@ from .scope import selection_scope_checked
 
 BinningDialogParams = BinningParams
 
-_RESERVED_COLUMNS = frozenset({"ID_HIDDEN", "Structure"})
+_QT_WIDGET_MAX = 16777215
+_DIALOG_WIDTH = 500
 
 
 class BinningDialog(QDialog):
@@ -62,24 +68,29 @@ class BinningDialog(QDialog):
         super().__init__(parent)
         self.parent_app = parent
         self.setWindowTitle(TOOL_BINNING)
-        self.setMinimumWidth(460)
-        self.resize(500, 0)
+        self.setMinimumWidth(_DIALOG_WIDTH)
         self._have_selection = selected_row_count > 0
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 10, 10, 8)
-        root.setSpacing(8)
+        root.setContentsMargins(18, 16, 18, 12)
+        root.setSpacing(16)
 
-        source = QGroupBox("Column")
-        source_form = QFormLayout(source)
-        source_form.setContentsMargins(8, 6, 8, 6)
-        source_form.setSpacing(4)
-        source_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self._form = QFormLayout()
+        self._form.setContentsMargins(0, 0, 0, 0)
+        self._form.setHorizontalSpacing(16)
+        self._form.setVerticalSpacing(2)
+        self._form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self._form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        column_field = QWidget()
+        column_row = QHBoxLayout(column_field)
+        column_row.setContentsMargins(0, 0, 0, 0)
+        column_row.setSpacing(16)
         self.col_combo = QComboBox()
         self.col_combo.addItems(columns)
+        self.col_combo.setMinimumWidth(180)
         self.col_combo.setToolTip("Numeric column to bin. Non-numeric cells are left blank.")
-        source_form.addRow("Column:", self.col_combo)
-
+        column_row.addWidget(self.col_combo, 1)
         self.only_selected_cb = QCheckBox("Selected Rows Only")
         self._only_selected_scope_prefix = "Selected Rows Only"
         if self._have_selection:
@@ -88,14 +99,9 @@ class BinningDialog(QDialog):
             )
         else:
             self.only_selected_cb.setEnabled(False)
-        source_form.addRow("", self.only_selected_cb)
-        root.addWidget(source)
-
-        bins = QGroupBox("Bins")
-        self._form = QFormLayout(bins)
-        self._form.setContentsMargins(8, 6, 8, 6)
-        self._form.setSpacing(4)
-        self._form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        column_row.addWidget(self.only_selected_cb, 0, Qt.AlignVCenter)
+        self._form.addRow("Column:", column_field)
+        root.addLayout(self._form)
 
         self.method_combo = QComboBox()
         for label, method in BIN_METHODS:
@@ -105,7 +111,6 @@ class BinningDialog(QDialog):
             "Equal count puts about the same number of values in each bin. "
             "Custom edges use the cut points you enter."
         )
-        self.method_combo.currentIndexChanged.connect(self._sync_fields)
         self._form.addRow("Method:", self.method_combo)
 
         self.bin_count_spin = QSpinBox()
@@ -142,38 +147,32 @@ class BinningDialog(QDialog):
         )
         self._form.addRow("Edges:", self.edges_input)
 
+        self.names_input = QLineEdit()
+        self.names_input.setPlaceholderText("comma-separated, low to high")
+        self.names_input.setToolTip(
+            "Optional names for these bins, from low to high, separated by commas. "
+            "The count must match the bins the edges produce, including open-end bins. "
+            "Leave blank for the default class names."
+        )
+        self._form.addRow("Names:", self.names_input)
+
         self.open_ends_cb = QCheckBox("Open ends")
         self.open_ends_cb.setChecked(True)
         self.open_ends_cb.setToolTip(
-            "Add a bin below the first edge and a bin at or above the last edge."
+            "Add a bin for values below the first edge and a bin for values at or above "
+            "the last edge. Uncheck to leave those values blank."
         )
-        self._form.addRow(self.open_ends_cb)
-        root.addWidget(bins)
+        self._form.addRow("", self.open_ends_cb)
 
-        output = QGroupBox("Output")
-        out_form = QFormLayout(output)
-        out_form.setContentsMargins(8, 6, 8, 6)
-        out_form.setSpacing(4)
-        out_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.bin_summary = QLabel("")
+        self.bin_summary.setWordWrap(True)
+        self.bin_summary.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.bin_summary.setStyleSheet("color: palette(mid);")
+        self.bin_summary.setToolTip("Bins these edges produce, from low to high.")
+        self._form.addRow("", self.bin_summary)
 
-        self.range_input = QLineEdit()
-        self.range_input.setPlaceholderText("Range column")
-        self.range_input.setToolTip(
-            "Column for the bin range, such as [0, 1). "
-            "Defaults to the source name plus _bin. Existing names get a (1) suffix."
-        )
-        out_form.addRow("Range column:", self.range_input)
-
-        self.class_input = QLineEdit()
-        self.class_input.setPlaceholderText("Class column")
-        self.class_input.setToolTip(
-            "Classification written beside the range. "
-            "Two bins are Inactive and Active; three are Low, Medium, and High; "
-            "four are Low, Medium, High, and Very high; otherwise Class 1, Class 2, …. "
-            "Defaults to the source name plus _class. Existing names get a (1) suffix."
-        )
-        out_form.addRow("Class column:", self.class_input)
-        root.addWidget(output)
+        self.edges_input.textChanged.connect(self._on_custom_edited)
+        self.open_ends_cb.toggled.connect(self._on_custom_edited)
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)
@@ -181,8 +180,7 @@ class BinningDialog(QDialog):
         root.addWidget(box)
 
         self._prefer_numeric_column()
-        self._on_source_changed(self.col_combo.currentText())
-        self.col_combo.currentTextChanged.connect(self._on_source_changed)
+        self.method_combo.currentIndexChanged.connect(self._sync_fields)
         self._sync_fields()
         make_window_minimizable(self)
 
@@ -190,13 +188,73 @@ class BinningDialog(QDialog):
         return self.method_combo.currentData() or "equal_width"
 
     def _set_row_visible(self, field: QWidget, visible: bool) -> None:
+        """Show or hide a form row. Qt 5 leaves a gap unless the row height is collapsed."""
         label = self._form.labelForField(field)
-        if label is not None:
-            label.setVisible(visible)
-        field.setVisible(visible)
-        setter = getattr(self._form, "setRowVisible", None)
-        if callable(setter):
-            setter(field, visible)
+        height = _QT_WIDGET_MAX if visible else 0
+        for widget in (label, field):
+            if widget is None:
+                continue
+            widget.setVisible(visible)
+            widget.setMinimumHeight(0)
+            widget.setMaximumHeight(height)
+
+    def _schedule_fit(self) -> None:
+        """Resize after Qt has applied show/hide, so hidden rows do not leave a gap."""
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(_QT_WIDGET_MAX)
+        timer = getattr(self, "_fit_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._fit_dialog)
+            self._fit_timer = timer
+        if not timer.isActive():
+            timer.start(0)
+
+    def _fit_dialog(self) -> None:
+        layout = self.layout()
+        if layout is not None:
+            layout.invalidate()
+            layout.activate()
+        height = self.sizeHint().height()
+        if height <= 0:
+            return
+        self.setMinimumHeight(height)
+        self.setMaximumHeight(height)
+        self.resize(_DIALOG_WIDTH, height)
+
+    def _sync_names_hint(self) -> None:
+        if self._method() != "custom":
+            return
+        try:
+            n_edges = len(parse_edges_text(self.edges_input.text()))
+        except ValueError:
+            self.names_input.setPlaceholderText("comma-separated, low to high")
+            return
+        count = n_edges + 1 if self.open_ends_cb.isChecked() else n_edges - 1
+        if count < 1:
+            self.names_input.setPlaceholderText("comma-separated, low to high")
+            return
+        noun = "name" if count == 1 else "names"
+        self.names_input.setPlaceholderText(f"{count} {noun}, low to high")
+
+    def _on_custom_edited(self) -> None:
+        self._sync_names_hint()
+        self._sync_bin_summary()
+        self._schedule_fit()
+
+    def _sync_bin_summary(self) -> None:
+        labels: tuple[str, ...] = ()
+        if self._method() == "custom":
+            try:
+                labels = custom_range_labels(
+                    parse_edges_text(self.edges_input.text()),
+                    open_ends=self.open_ends_cb.isChecked(),
+                )
+            except ValueError:
+                labels = ()
+        self.bin_summary.setText(" · ".join(labels))
+        self._set_row_visible(self.bin_summary, bool(labels))
 
     def _sync_fields(self) -> None:
         method = self._method()
@@ -208,7 +266,11 @@ class BinningDialog(QDialog):
         self._set_row_visible(self.min_input, equal_width)
         self._set_row_visible(self.max_input, equal_width)
         self._set_row_visible(self.edges_input, custom)
+        self._set_row_visible(self.names_input, custom)
         self._set_row_visible(self.open_ends_cb, custom)
+        self._sync_names_hint()
+        self._sync_bin_summary()
+        self._schedule_fit()
         if method == "equal_count":
             self.bin_count_spin.setToolTip(
                 "Number of bins with as equal a count as ties allow. "
@@ -218,12 +280,6 @@ class BinningDialog(QDialog):
             self.bin_count_spin.setToolTip(
                 "Number of equal-width bins across the range. Ignored when Bin width is set."
             )
-
-    def _on_source_changed(self, name: str) -> None:
-        if not (self.range_input.text() or "").strip():
-            self.range_input.setPlaceholderText(default_bin_column_name(name))
-        if not (self.class_input.text() or "").strip():
-            self.class_input.setPlaceholderText(default_class_column_name(name))
 
     def _prefer_numeric_column(self) -> None:
         app = self.parent_app
@@ -282,15 +338,12 @@ class BinningDialog(QDialog):
         source = (self.col_combo.currentText() or "").strip()
         if not source:
             raise ValueError("Choose a column to bin.")
-        range_column = (self.range_input.text() or "").strip() or default_bin_column_name(source)
-        class_column = (self.class_input.text() or "").strip() or default_class_column_name(source)
-        if range_column in _RESERVED_COLUMNS or class_column in _RESERVED_COLUMNS:
-            raise ValueError("That output name is reserved. Choose a different column name.")
-        if range_column == class_column:
-            raise ValueError("Choose different names for the range and classification columns.")
+        range_column = default_bin_column_name(source)
+        class_column = default_class_column_name(source)
         method = self._method()
         minimum = maximum = bin_width = None
         edges: tuple[float, ...] = ()
+        bin_names: tuple[str, ...] = ()
         if method == "equal_width":
             bin_width = self._optional_number(
                 self.bin_width_input.text(), "Bin width", positive=True
@@ -301,6 +354,7 @@ class BinningDialog(QDialog):
                 raise ValueError("Maximum must be greater than minimum.")
         elif method == "custom":
             edges = parse_edges_text(self.edges_input.text())
+            bin_names = parse_bin_names(self.names_input.text())
         return BinningDialogParams(
             source_column=source,
             range_column=range_column,
@@ -312,6 +366,7 @@ class BinningDialog(QDialog):
             maximum=maximum,
             edges=edges,
             open_ends=self.open_ends_cb.isChecked(),
+            bin_names=bin_names,
         )
 
     def accept(self) -> None:
