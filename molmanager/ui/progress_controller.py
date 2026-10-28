@@ -63,6 +63,7 @@ class ProgressController:
         bind_mixin_methods(self, app, AppProgressMixin)
         self._active_label = ""
         self._last_status_text = ""
+        self._closed_progress_messages: set[str] = set()
         self._background_job_ui_depth = 0
         self._partial_results_notice: str | None = None
         self._poll_interval_ms = int(load_config().tool_progress_poll_ms)
@@ -109,6 +110,7 @@ class ProgressController:
         ``total < 0`` is indeterminate: the status line is the message only.
         """
         self._active_label = str(message or "")
+        self._closed_progress_messages.discard(self._active_label)
         total_i = int(total)
         if total_i < 0:
             self._on_tool_progress(message, 0, -1, job_id=job_id)
@@ -230,6 +232,7 @@ class ProgressController:
                 messages.add(str(state.snapshot(job_id=job_id)[0] or ""))
         state.end(job_id=job_id)
         messages.discard("")
+        self._closed_progress_messages.update(messages)
         if not job_id or not messages:
             return
         try:
@@ -266,6 +269,25 @@ class ProgressController:
         self._app.status_label.setText(message)
         remember_successful_export(message)
 
+    def _stale_progress_signal(self, message: str, job_id: str | None) -> bool:
+        """True when a queued progress signal arrives after its job was cleared.
+
+        Prepare's progress signal is forwarded across two queued connections, so
+        the 100% update can land after the job has finished and pin the status
+        line there.
+        """
+        text = str(message or "")
+        if job_id or not text or text not in self._closed_progress_messages:
+            return False
+        running = self._running_queue_job_id()
+        if not running:
+            return True
+        try:
+            active = self._app._tool_progress_state.snapshot(job_id=running)[3]
+        except TypeError:
+            return True
+        return not active
+
     def _refresh_status_from_slots(self) -> None:
         message, done, total, active = self._status_progress_snapshot()
         text = format_tool_progress_text(message, done, total) if active else ""
@@ -283,6 +305,8 @@ class ProgressController:
         job_id: str | None = None,
     ) -> None:
         state = self._app._tool_progress_state
+        if self._stale_progress_signal(message, job_id):
+            return
         if message or job_id:
             if total < 0:
                 state.update(message, 0, -1, job_id=job_id)
