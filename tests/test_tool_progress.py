@@ -213,6 +213,13 @@ def test_clearing_prepare_progress_drops_the_unnamed_copy(qapp):  # noqa: ARG001
     progress._clear_tool_progress()
     assert state.any_active() is False
     assert "100%" not in host.status_label.text()
+    # The 100% signal is queued one event later than the finish handler.
+    progress._on_tool_progress("Preparing structures…", 4, 4)
+    assert state.any_active() is False
+    assert "100%" not in host.status_label.text()
+    progress._on_tool_progress("Render 2D", 1, 4)
+    assert state.snapshot()[0] == "Render 2D"
+    assert state.snapshot()[3] is True
 
 
 def test_drain_completed_futures_keeps_pending_and_collects_done():
