@@ -8,21 +8,24 @@
 #
 # MolManager is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
+# along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Staged AutoQSAR search over table columns, catalog descriptors, and fingerprint blocks.
+"""Dixon-style AutoQSAR: repeated 75/25 splits, a train/test score, and a consensus.
 
-Model choice uses cross-validation on the training split only. The hold-out score is
-computed once, by :func:`molmanager.analysis.qsar_models.fit_qsar_model`, on the winner.
+The learning set is every scoped row with a numeric activity and, when
+structures are available, a structure. Descriptors are filtered once.
+Fingerprints are modeled on their own. Quick keeps 5 models from 10 splits.
+Standard keeps 10 models from 50 splits.
 """
 
 from __future__ import annotations
 
 import threading
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -30,128 +33,138 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ..chem.rdkit_fingerprints import DEFAULT_FINGERPRINT_LABEL
-from ..descriptors.catalog import DESCRIPTOR_TAB_ORDER, descriptor_tab_items
-from ..descriptors.descriptor_cache_reuse import column_complete_for_oids
-from ..descriptors.descriptors_3d import DESCRIPTOR_3D_KEYS
-from .dimensionality_reduction import is_fingerprint_bitcount_column
-from .qsar_models import (
-    TaskKind,
-    QSARFitResult,
-    _merge_model_params,
-    _model_label,
-    _prepare_labels,
-    _prepare_model_for_x,
-    _scale_fit,
-    default_model_params,
-    fit_qsar_model,
-    infer_task_type,
-    models_for_task,
+from .auto_qsar_features import (
+    DESCRIPTOR_SET,
+    FINGERPRINT_SETS,
+    MIN_LEARNING_ROWS,
+    AutoQSARCancelled,
+    descriptor_matrix,
+    fingerprint_matrix,
+    select_descriptor_columns,
 )
-
-MIN_ROWS = 8
-TRAIN_FRACTION = 0.8
-MISSING_FRACTION = 0.20
-CORR_THRESHOLD = 0.95
-_3D_MIN_FRACTION = 0.80
-_QUICK_SKIP_MODELS = frozenset({"svr"})
-_IONIZATION_KEYS = frozenset({"LOGD74", "LOGS74", "AB_MPS", "BBB_SCORE", "CNS_MPO"})
-_SKIP_TABS = frozenset({"Name", "Fingerprints"})
-
-FP_MORGAN = DEFAULT_FINGERPRINT_LABEL
-FP_MACCS = "MACCS (166)"
-FP_RDK = "RDK path (1024)"
-
-_SCORE_ERRORS = (ValueError, ArithmeticError, np.linalg.LinAlgError, IndexError, KeyError)
-_DESCRIPTOR_ERRORS = (
-    ValueError,
-    TypeError,
-    RuntimeError,
-    ArithmeticError,
-    AttributeError,
-    KeyError,
-    IndexError,
+from .auto_qsar_models import (
+    conformal_half_width,
+    fit_errors,
+    fit_split_model,
+    population_variance,
+    prepare_domain,
+    score_predictions,
 )
+from .qsar_models import TaskKind, _prepare_labels, infer_task_type
 
 ProgressCallback = Callable[[int, int, str], None]
 
+_DESCRIPTOR_METHODS = {
+    "regression": ("mlr", "pls", "pcr", "kpls"),
+    "classification": ("bayes", "rp"),
+}
+_FINGERPRINT_METHODS = {
+    "regression": ("kpls",),
+    "classification": ("bayes",),
+}
+_METHOD_LABEL = {
+    "mlr": "MLR",
+    "pls": "PLS",
+    "pcr": "PCR",
+    "kpls": "KPLS",
+    "bayes": "Naive Bayes",
+    "rp": "Ensemble trees",
+}
 
-class AutoQSARCancelled(Exception):
-    """Raised when a search sees the job cancel event between trials."""
+
+def methods_for(task: str, feature_kind: str) -> tuple[str, ...]:
+    """Dixon methods for one feature kind. Fingerprints are never mixed with descriptors."""
+    key = str(task or "").strip().lower()
+    kind = str(feature_kind or "").strip().lower()
+    if kind == "descriptors":
+        return _DESCRIPTOR_METHODS[key]
+    if kind == "fingerprints":
+        return _FINGERPRINT_METHODS[key]
+    raise ValueError(f"Unknown AutoQSAR feature kind: {feature_kind}")
 
 
 @dataclass(frozen=True)
-class AutoQSARTrial:
-    """One scored candidate. ``model_params`` is the merged hyperparameter set."""
+class EffortSettings:
+    """How many splits to build and how many models to retain."""
 
-    model_key: str
-    model_label: str
+    key: str
+    splits: int
+    retain: int
+
+
+@dataclass
+class FeatureBlock:
+    """One learning-set matrix. Rows match :attr:`AutoQSARResult.learning_oids`."""
+
+    name: str
+    kind: str
+    columns: tuple[str, ...]
+    bit_ids: np.ndarray
+    fingerprint_kind: str
+    values: np.ndarray
+    requires_structure: bool
+
+
+@dataclass
+class AutoQSARModel:
+    """One retained model. ``train_index`` selects rows of its feature block."""
+
+    method: str
+    method_label: str
     feature_set: str
+    score: float
+    train_accuracy: float
+    test_accuracy: float
+    split_index: int
     n_features: int
-    cv_mean: float
-    cv_std: float
-    stage: int
-    feature_columns: tuple[str, ...]
-    fp_choice: str | None
-    model_params: tuple[tuple[str, Any], ...]
+    train_index: np.ndarray
+    estimator: Any
+    half_width: float
 
 
-@dataclass(frozen=True)
+@dataclass
 class AutoQSARResult:
-    """Winner, leaderboard, and the columns a later write should add to the table."""
+    """Retained models, the matrices they read, and the text report."""
 
     task: TaskKind
     effort: str
     activity_column: str
-    selection_metric: str
-    trials: tuple[AutoQSARTrial, ...]
-    winner: AutoQSARTrial
-    fit: QSARFitResult
+    n_built: int
+    n_attempted: int
+    models: tuple[AutoQSARModel, ...]
+    blocks: dict[str, FeatureBlock]
+    class_labels: tuple[Any, ...] | None
+    learning_oids: tuple[int, ...]
+    write_columns: tuple[str, ...]
     report_text: str
-    computed_columns_used: tuple[str, ...]
     notes: tuple[str, ...]
 
 
-@dataclass(frozen=True)
-class DescriptorAttachResult:
-    """Working table after catalog descriptors were reused or calculated."""
-
-    dataframe: pd.DataFrame
-    pool_columns: tuple[str, ...]
-    computed_columns: tuple[str, ...]
-    notes: tuple[str, ...]
-
-
-@dataclass
-class _PreparedSet:
-    name: str
-    X: np.ndarray
-    y: np.ndarray
-    train_idx: np.ndarray
-    n_numeric: int
-    feature_columns: tuple[str, ...]
-    fp_choice: str | None
-    fit_df: pd.DataFrame
-    fit_oids: list[int]
+def effort_settings(effort: str) -> EffortSettings:
+    """Quick is 10 splits retaining 5 models. Standard is 50 splits retaining 10."""
+    key = str(effort or "quick").strip().lower()
+    if key == "quick":
+        return EffortSettings("quick", 10, 5)
+    if key == "standard":
+        return EffortSettings("standard", 50, 10)
+    raise ValueError(f"Unknown AutoQSAR effort: {effort}")
 
 
-def auto_qsar_descriptor_specs(*, include_3d: bool = False) -> tuple[tuple[str, str], ...]:
-    """Catalog ``(display name, internal key)`` pairs AutoQSAR may use.
-
-    Ionization-backed scores and name/fingerprint-count columns are omitted. 3D
-    descriptors are included only when *include_3d* is true.
-    """
-    specs: list[tuple[str, str]] = []
-    for tab in DESCRIPTOR_TAB_ORDER:
-        if tab in _SKIP_TABS:
-            continue
-        if tab == "3D" and not include_3d:
-            continue
-        for display, key in descriptor_tab_items(tab):
-            if key in _IONIZATION_KEYS:
-                continue
-            specs.append((display, key))
-    return tuple(specs)
+def output_headers(
+    output_column: str,
+    task: str,
+    write_columns: Sequence[str],
+) -> list[str]:
+    """Table headers for descriptor write-back, the prediction, and its qualifiers."""
+    headers = [str(column) for column in write_columns]
+    name = (output_column or "").strip() or "AutoQSAR"
+    headers.append(name)
+    if task == "regression":
+        headers.append(f"{name} interval")
+    else:
+        headers.append(f"{name} probability")
+    headers.append(f"{name} domain")
+    return headers
 
 
 def table_numeric_feature_columns(
@@ -160,7 +173,9 @@ def table_numeric_feature_columns(
     *,
     blocked_columns: Sequence[str] | None = None,
 ) -> list[str]:
-    """Numeric columns eligible as existing-table features."""
+    """Numeric columns eligible as user-supplied descriptor features."""
+    from .dimensionality_reduction import is_fingerprint_bitcount_column
+
     blocked = set(blocked_columns or ())
     blocked.add(activity_column)
     blocked.update(("ID_HIDDEN", "Structure"))
@@ -176,205 +191,17 @@ def table_numeric_feature_columns(
     return kept
 
 
-def filter_training_features(
-    frame: pd.DataFrame,
-    y: np.ndarray,
-    train_positions: np.ndarray,
-    *,
-    missing_fraction: float = MISSING_FRACTION,
-    corr_threshold: float = CORR_THRESHOLD,
-) -> list[str]:
-    """Drop sparse, constant, or redundant columns using training rows only.
-
-    A pair with absolute correlation above *corr_threshold* keeps the column
-    more associated with *y* on the training rows. Ties keep the earlier column.
-    """
-    if frame.empty or len(frame.columns) == 0:
-        return []
-    positions = np.asarray(train_positions, dtype=int)
-    if positions.size == 0:
-        return []
-    y_train = np.asarray(y, dtype=float)[positions]
-    values = frame.apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
-    train = values[positions]
-    candidates: list[int] = []
-    associations: list[float] = []
-    min_present = 1.0 - float(missing_fraction)
-    for index, _name in enumerate(frame.columns):
-        column = train[:, index]
-        finite = np.isfinite(column)
-        if float(np.mean(finite)) < min_present:
-            continue
-        present = column[finite]
-        if present.size == 0 or float(np.std(present)) <= 1e-8 or np.unique(present).size <= 1:
-            continue
-        candidates.append(index)
-        associations.append(_association(column, y_train))
-    ranked = sorted(range(len(candidates)), key=lambda i: (-associations[i], candidates[i]))
-    chosen: list[int] = []
-    for rank in ranked:
-        index = candidates[rank]
-        column = train[:, index]
-        if any(
-            abs(_pairwise_corr(column, train[:, other])) > float(corr_threshold) for other in chosen
-        ):
-            continue
-        chosen.append(index)
-    chosen_set = set(chosen)
-    return [str(frame.columns[i]) for i in range(len(frame.columns)) if i in chosen_set]
-
-
-def modeling_split_indices(
-    y: np.ndarray,
-    task: TaskKind,
-    train_fraction: float = TRAIN_FRACTION,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Row indices of the same hold-out split :func:`fit_qsar_model` uses."""
-    from sklearn.model_selection import train_test_split
-
-    test_size = max(0.1, min(0.4, 1.0 - float(train_fraction)))
-    idx = np.arange(len(y))
-    stratify = y if task == "classification" and len(np.unique(y)) > 1 else None
-    train_idx, test_idx = train_test_split(
-        idx,
-        test_size=test_size,
-        random_state=42,
-        stratify=stratify,
-    )
-    return np.asarray(train_idx, dtype=int), np.asarray(test_idx, dtype=int)
-
-
-def score_training_matrix(
-    X: np.ndarray,
-    y: np.ndarray,
-    train_idx: np.ndarray,
-    *,
-    task: TaskKind,
-    model_key: str,
-    model_params: Mapping[str, Any] | None,
-    cv_folds: int,
-    n_numeric: int,
-) -> tuple[float, float]:
-    """Cross-validated selection score on training rows. The hold-out is not passed in."""
-    from sklearn.model_selection import cross_val_score
-
-    X_train = np.asarray(X)[np.asarray(train_idx, dtype=int)]
-    y_train = np.asarray(y)[np.asarray(train_idx, dtype=int)]
-    Xs, _scaler = _scale_fit(
-        X_train,
-        standardize_numeric=n_numeric > 0,
-        n_numeric=n_numeric,
-    )
-    model = _prepare_model_for_x(_make_model(task, model_key, model_params), Xs)
-    folds = _cv_folds(y_train, task, cv_folds)
-    scoring = "r2" if task == "regression" else "balanced_accuracy"
-    scores = cross_val_score(model, Xs, y_train, cv=folds, scoring=scoring, n_jobs=1)
-    return float(np.mean(scores)), float(np.std(scores))
-
-
-def cv_folds_for_effort(effort: str) -> int:
-    """Quick uses 3-fold CV. Standard uses 5-fold CV."""
-    return 3 if _normalize_effort(effort) == "quick" else 5
-
-
-def model_keys_for_search(task: TaskKind, effort: str) -> list[str]:
-    """Algorithms scored for *task*. Quick omits SVR."""
-    keys = [key for key, _label in models_for_task(task)]
-    if _normalize_effort(effort) == "quick":
-        keys = [key for key in keys if key not in _QUICK_SKIP_MODELS]
-    return keys
-
-
-def stage2_param_grid(model_key: str) -> tuple[dict[str, Any], ...]:
-    """Short second-stage grids. Points that match the stage-1 defaults are skipped later."""
-    grids: dict[str, tuple[dict[str, Any], ...]] = {
-        "ridge": ({"alpha": 0.1}, {"alpha": 1.0}, {"alpha": 10.0}),
-        "lasso": ({"alpha": 0.01}, {"alpha": 0.1}, {"alpha": 1.0}),
-        "mlr": ({"fit_intercept": True}, {"fit_intercept": False}),
-        "pls": ({"n_components": 2}, {"n_components": 5}),
-        "knn": ({"n_neighbors": 3}, {"n_neighbors": 5}, {"n_neighbors": 9}),
-        "random_forest": (
-            {"n_estimators": 100, "max_depth": 0},
-            {"n_estimators": 100, "max_depth": 8},
-        ),
-        "gradient_boosting": (
-            {"learning_rate": 0.05, "max_depth": 2},
-            {"learning_rate": 0.1, "max_depth": 3},
-            {"learning_rate": 0.05, "max_depth": 3},
-        ),
-        "logistic": ({"C": 0.1}, {"C": 1.0}, {"C": 10.0}),
-        "svm": (
-            {"C": 0.1, "kernel": "linear"},
-            {"C": 1.0, "kernel": "linear"},
-            {"C": 1.0, "kernel": "rbf"},
-        ),
-        "svr": (
-            {"C": 0.1, "kernel": "rbf"},
-            {"C": 1.0, "kernel": "rbf"},
-            {"C": 10.0, "kernel": "rbf"},
-        ),
-    }
-    return grids.get(str(model_key), ())
-
-
-def attach_catalog_descriptors(
-    df: pd.DataFrame,
-    oids: list[int],
-    mol_rows: list[tuple[int, object]] | None,
-    *,
-    specs: Sequence[tuple[str, str]] | None = None,
-    include_3d: bool | None = None,
-    cancel_event: threading.Event | None = None,
-    on_row: Callable[[int, int], None] | None = None,
-) -> DescriptorAttachResult:
-    """Reuse complete descriptor columns and calculate the rest from structures.
-
-    3D descriptors are calculated only when a 3D pose exists for at least 80% of
-    the structures. The returned frame is a copy.
-    """
-    if len(oids) != len(df):
-        raise ValueError("OID list length must match dataframe row count.")
-    _check_cancel(cancel_event)
-    out = df.copy()
-    notes: list[str] = []
-    mol_by_oid, three_d_by_oid, fraction = _structure_maps(mol_rows)
-    use_3d = fraction >= _3D_MIN_FRACTION if include_3d is None else bool(include_3d)
-    if include_3d and fraction < _3D_MIN_FRACTION:
-        use_3d = False
-    chosen, three_d_note = _specs_for_attach(specs, use_3d=use_3d, have_structures=bool(mol_by_oid))
-    if three_d_note and mol_by_oid:
-        notes.append(_three_d_note(fraction, included=use_3d and three_d_note == "included"))
-    pool: list[str] = []
-    computed: list[str] = []
-    to_compute: list[tuple[str, str]] = []
-    for display, key in chosen:
-        if _column_complete(out, display, oids) and _has_numeric(out, display):
-            pool.append(display)
-            continue
-        if mol_by_oid:
-            to_compute.append((display, key))
-    if to_compute:
-        _calculate_descriptor_columns(
-            out,
-            oids,
-            to_compute,
-            mol_by_oid,
-            three_d_by_oid,
-            cancel_event=cancel_event,
-            on_row=on_row,
-        )
-        for display, _key in to_compute:
-            if _has_numeric(out, display):
-                pool.append(display)
-                computed.append(display)
-    if not mol_by_oid and not pool:
-        notes.append("No structures; descriptors were not calculated.")
-    return DescriptorAttachResult(
-        dataframe=out,
-        pool_columns=tuple(pool),
-        computed_columns=tuple(computed),
-        notes=tuple(notes),
-    )
+def table_write_rows(
+    predictions: Sequence[tuple[int, Mapping[str, str]]],
+    headers: Sequence[str],
+) -> tuple[list[str], list[tuple[int, dict[str, str]]]]:
+    """Shape prediction dicts into a table write. Missing cells become ``N/A``."""
+    header_list = [str(header) for header in headers]
+    rows = []
+    for oid, values in predictions:
+        payload = {header: str(values.get(header, "N/A")) for header in header_list}
+        rows.append((int(oid), payload))
+    return header_list, rows
 
 
 def search_auto_qsar(
@@ -386,191 +213,258 @@ def search_auto_qsar(
     effort: str,
     mol_rows: list[tuple[int, object]] | None = None,
     table_columns: Sequence[str] | None = None,
-    descriptor_columns: Sequence[str] | None = None,
-    computed_columns: Sequence[str] | None = None,
     blocked_columns: Sequence[str] | None = None,
-    initial_notes: Sequence[str] | None = None,
-    train_fraction: float = TRAIN_FRACTION,
     cancel_event: threading.Event | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> AutoQSARResult:
-    """Score feature sets and models, then refit the winner on its frozen rows.
-
-    *table_columns* should be the numeric columns that existed before descriptor
-    calculation. *computed_columns* are catalog columns this job calculated; the
-    winner's overlap is what a later write should add to the table.
-    """
+    """Build, score, and retain the Dixon model pool for one activity column."""
     _check_cancel(cancel_event)
     if activity_column not in df.columns:
         raise ValueError(f"Activity column not found: {activity_column}")
-    effort_key = _normalize_effort(effort)
-    folds = cv_folds_for_effort(effort_key)
+    if len(oids) != len(df):
+        raise ValueError("OID list length must match dataframe row count.")
+    if table_columns is None:
+        table_columns = table_numeric_feature_columns(
+            df, activity_column, blocked_columns=blocked_columns
+        )
+    settings = effort_settings(effort)
     task = _resolve_task(df, activity_column, task_mode)
-    blocked = set(blocked_columns or ())
-    blocked.add(activity_column)
-    notes = [note for note in (initial_notes or ()) if note]
-    table_cols = [
-        column
-        for column in (
-            list(table_columns)
-            if table_columns is not None
-            else table_numeric_feature_columns(df, activity_column)
+    notes: list[str] = []
+    y_all = pd.to_numeric(df[activity_column], errors="coerce").to_numpy(dtype=float)
+    mol_by_oid = _mol_by_oid(mol_rows)
+    if mol_by_oid:
+        notes.append(
+            "RDKit 2D descriptors are used. Ipc, qed, Morgan fingerprint densities, "
+            "and the unspecified-stereocenter count are left out."
         )
-        if column not in blocked and column in df.columns
-    ]
-    desc_cols = [
-        column
-        for column in (descriptor_columns or ())
-        if column not in blocked and column in df.columns
-    ]
-    computed = [column for column in (computed_columns or ()) if column in df.columns]
-    model_keys = model_keys_for_search(task, effort_key)
-    prepared = _prepare_sets(
-        df=df,
-        oids=oids,
-        activity_column=activity_column,
-        task=task,
-        train_fraction=train_fraction,
-        table_columns=table_cols,
-        descriptor_columns=desc_cols,
-        mol_rows=mol_rows,
-        effort=effort_key,
-        notes=notes,
+        notes.append("MOLPRINT2D is represented by unfolded feature-Morgan (FCFP), radius 2.")
+    if table_columns:
+        joined = ", ".join(str(column) for column in table_columns)
+        notes.append(f"Table columns added to the calculated descriptors: {joined}.")
+    else:
+        notes.append("No table columns were added to the calculated descriptors.")
+    candidate = _candidate_rows(oids, y_all, mol_by_oid, notes)
+    if candidate.size < MIN_LEARNING_ROWS:
+        raise ValueError(
+            f"Need at least {MIN_LEARNING_ROWS} labeled rows"
+            + (" with structures." if mol_by_oid else ".")
+            + f" Found {int(candidate.size)}."
+        )
+    max_methods = len(_DESCRIPTOR_METHODS[task]) + 4 * len(_FINGERPRINT_METHODS[task])
+    progress_total = int(candidate.size) + settings.splits * max_methods
+    _emit(on_progress, 0, progress_total, "AutoQSAR: calculating descriptors")
+    names, combined, calculated = _learning_matrix(
+        df,
+        oids,
+        candidate,
+        mol_by_oid,
+        table_columns,
+        blocked_columns,
+        activity_column,
+        cancel_event,
+        on_progress,
+        progress_total=progress_total,
     )
-    can_combo = bool(mol_rows) and any(item.fp_choice is None for item in prepared)
-    stage2_budget = 0 if effort_key == "quick" else 12
-    combo_slots = len(model_keys) if can_combo else 0
-    total = max(1, len(prepared) * len(model_keys) + combo_slots + stage2_budget + 1)
+    row_local, columns, filter_note = select_descriptor_columns(combined)
+    if filter_note:
+        notes.append(filter_note)
+    blocks: dict[str, FeatureBlock] = {}
+    if columns.size:
+        learning = candidate[row_local]
+        desc_names = tuple(names[int(index)] for index in columns)
+        blocks[DESCRIPTOR_SET] = FeatureBlock(
+            name=DESCRIPTOR_SET,
+            kind="descriptors",
+            columns=desc_names,
+            bit_ids=np.array([], dtype=np.int64),
+            fingerprint_kind="",
+            values=np.asarray(combined[np.ix_(row_local, columns)], dtype=float),
+            requires_structure=any(name in calculated for name in desc_names),
+        )
+    elif mol_by_oid:
+        learning = candidate
+        notes.append("No descriptor column survived filtering.")
+    else:
+        raise ValueError(filter_note or "No descriptor column survived filtering.")
+    if learning.size < MIN_LEARNING_ROWS:
+        raise ValueError(
+            f"Need at least {MIN_LEARNING_ROWS} complete learning rows. Found {int(learning.size)}."
+        )
+    y_raw = y_all[learning]
+    y, class_labels = _prepare_labels(y_raw, task)
+    if task == "classification" and (class_labels is None or len(class_labels) < 2):
+        raise ValueError("Classification needs at least two activity classes.")
+    learning_oids = tuple(int(oids[int(index)]) for index in learning)
+    mols = [mol_by_oid.get(oid) for oid in learning_oids]
+    if mol_by_oid:
+        _note_duplicate_structures(mols, notes)
+        _add_fingerprint_blocks(blocks, mols, notes, cancel_event)
+    else:
+        notes.append("No structures; fingerprints were not calculated.")
+    if not blocks:
+        raise ValueError("AutoQSAR found no descriptor or fingerprint features.")
+    jobs = _jobs_for_blocks(task, blocks)
+    if not jobs:
+        raise ValueError("AutoQSAR found no model to fit for this task.")
+    fit_total = int(candidate.size) + settings.splits * len(jobs)
+    built: list[AutoQSARModel] = []
+    attempted = 0
     done = 0
-    trials: list[AutoQSARTrial] = []
-
-    def _score_many(
-        items: Sequence[_PreparedSet],
-        stage: int,
-        params_for_key: Callable[[str], Mapping[str, Any]],
-        keys: Sequence[str],
-    ) -> None:
-        nonlocal done
-        for item in items:
-            for model_key in keys:
-                _check_cancel(cancel_event)
-                done += 1
-                params = dict(params_for_key(model_key))
-                _emit_progress(
-                    on_progress,
-                    done,
-                    total,
-                    f"AutoQSAR: {_model_label(task, model_key)} / {item.name}",
-                )
-                trial = _try_trial(item, task, model_key, params, stage, folds)
-                if trial is not None:
-                    trials.append(trial)
-
-    _score_many(prepared, 1, default_model_params, model_keys)
-    if can_combo:
-        combo = _prepare_morgan_combo(
-            prepared,
-            trials,
-            df=df,
-            oids=oids,
-            activity_column=activity_column,
-            task=task,
-            train_fraction=train_fraction,
-            mol_rows=mol_rows,
-            notes=notes,
-        )
-        if combo is not None:
-            prepared.append(combo)
-            _score_many([combo], 1, default_model_params, model_keys)
-    if effort_key == "standard" and trials:
-        done = _score_stage2(
-            prepared,
-            trials,
-            task,
-            folds,
-            total,
-            on_progress,
-            cancel_event,
-            done,
-        )
-    if not trials:
-        detail = " ".join(notes)
-        raise ValueError(detail or "AutoQSAR could not score any model on this scope.")
-    _check_cancel(cancel_event)
-    ranked = tuple(sorted(trials, key=_trial_key))
-    winner = ranked[0]
-    winner_set = next(item for item in prepared if item.name == winner.feature_set)
-    _emit_progress(on_progress, total, total, "AutoQSAR: refitting winner")
-    fit = fit_qsar_model(
-        df=winner_set.fit_df,
-        oids=winner_set.fit_oids,
-        activity_column=activity_column,
-        feature_columns=list(winner.feature_columns) or None,
-        fp_choice=winner.fp_choice,
-        mol_rows=mol_rows,
-        model_key=winner.model_key,
-        task_mode=task,
-        train_fraction=train_fraction,
-        cv_folds=folds,
-        standardize=True,
-        model_params=dict(winner.model_params),
+    last_error = ""
+    learning_variance = population_variance(y) if task == "regression" else 0.0
+    classes = tuple(range(len(class_labels))) if class_labels else ()
+    for split_index in range(settings.splits):
+        try:
+            train_index, test_index = _split_indices(y, task, split_index)
+        except ValueError:
+            continue
+        if task == "classification" and len(np.unique(np.asarray(y)[train_index])) < 2:
+            continue
+        if train_index.size < 4 or test_index.size < 1:
+            continue
+        for method, feature_name in jobs:
+            _check_cancel(cancel_event)
+            done += 1
+            attempted += 1
+            block = blocks[feature_name]
+            _emit(
+                on_progress,
+                int(candidate.size) + done,
+                fit_total,
+                f"AutoQSAR: {_METHOD_LABEL[method]} / {feature_name} "
+                f"(split {split_index + 1}/{settings.splits})",
+            )
+            model, error = _try_model(
+                method,
+                feature_name,
+                block,
+                y,
+                train_index,
+                test_index,
+                task=task,
+                split_index=split_index,
+                learning_variance=learning_variance,
+                classes=classes,
+            )
+            if model is not None:
+                built.append(model)
+            elif error:
+                last_error = error
+    if not built:
+        detail = last_error or " ".join(notes)
+        raise ValueError(detail or "AutoQSAR could not fit a model on this scope.")
+    retained = tuple(sorted(built, key=_rank_key)[: settings.retain])
+    for model in retained:
+        prepare_domain(model.estimator, blocks[model.feature_set].values[model.train_index])
+    write_columns = _write_columns(df, retained, blocks.get(DESCRIPTOR_SET), calculated)
+    report = _format_report(
+        settings,
+        task,
+        learning_oids,
+        len(built),
+        attempted,
+        retained,
+        notes,
     )
-    used = tuple(column for column in computed if column in set(winner.feature_columns))
-    metric = "R²" if task == "regression" else "balanced accuracy"
-    report = _format_report(effort_key, task, metric, winner, fit, notes)
+    _emit(on_progress, fit_total, fit_total, "AutoQSAR: done")
     return AutoQSARResult(
         task=task,
-        effort=effort_key,
+        effort=settings.key,
         activity_column=activity_column,
-        selection_metric=metric,
-        trials=ranked,
-        winner=winner,
-        fit=fit,
+        n_built=len(built),
+        n_attempted=attempted,
+        models=retained,
+        blocks=blocks,
+        class_labels=class_labels,
+        learning_oids=learning_oids,
+        write_columns=write_columns,
         report_text=report,
-        computed_columns_used=used,
         notes=tuple(notes),
     )
 
 
-def table_write_rows(
+def predict_auto_qsar(
+    result: AutoQSARResult,
+    *,
     df: pd.DataFrame,
     oids: list[int],
-    descriptor_columns: Sequence[str],
-    predictions: Sequence[tuple[int, Mapping[str, str]]],
-    prediction_column: str,
-) -> tuple[list[str], list[tuple[int, dict[str, str]]]]:
-    """Merge calculated descriptor cells with prediction cells for one table write."""
-    columns = [column for column in descriptor_columns if column in df.columns]
-    pred_col = (prediction_column or "").strip()
-    by_oid: dict[int, dict[str, str]] = {}
-    if columns:
-        for pos, oid in enumerate(oids):
-            payload: dict[str, str] = {}
-            for column in columns:
-                raw = df.iloc[pos][column]
-                payload[column] = "N/A" if _missing_cell(raw) else str(raw)
-            by_oid[int(oid)] = payload
-    for oid, values in predictions:
-        slot = by_oid.setdefault(int(oid), {})
-        slot.update({str(key): str(value) for key, value in values.items()})
-    headers = list(columns)
-    if pred_col:
-        headers.append(pred_col)
-    rows = [(oid, by_oid[oid]) for oid in by_oid]
-    return headers, rows
+    mol_rows: list[tuple[int, object]] | None,
+    output_column: str,
+    model_index: int | None = None,
+    cancel_event: threading.Event | None = None,
+) -> list[tuple[int, dict[str, str]]]:
+    """Score rows with the consensus, or with one retained model when *model_index* is set."""
+    _check_cancel(cancel_event)
+    if len(oids) != len(df):
+        raise ValueError("OID list length must match dataframe row count.")
+    if not result.models:
+        return []
+    if model_index is None:
+        chosen = result.models
+    else:
+        if model_index < 0 or model_index >= len(result.models):
+            raise ValueError("Selected AutoQSAR model is no longer available.")
+        chosen = (result.models[model_index],)
+    headers = output_headers(output_column, result.task, result.write_columns)
+    pred_name, qualifier_name, domain_name = headers[-3:]
+    mol_by_oid = _mol_by_oid(mol_rows)
+    mols = [mol_by_oid.get(int(oid)) for oid in oids]
+    query_blocks = _query_blocks(result, df, oids, mols, cancel_event)
+    rows: list[tuple[int, dict[str, str]]] = []
+    write_block = result.blocks.get(DESCRIPTOR_SET)
+    for row_index, oid in enumerate(oids):
+        _check_cancel(cancel_event)
+        if not all(_row_is_ready(model, query_blocks, row_index) for model in chosen):
+            continue
+        predictions = []
+        domains = []
+        probabilities = []
+        for model in chosen:
+            block = result.blocks[model.feature_set]
+            query = query_blocks[model.feature_set]
+            train = block.values[model.train_index]
+            row = query.values[row_index : row_index + 1]
+            predictions.append(np.asarray(model.estimator.predict(row, train)).ravel()[0])
+            domains.append(bool(np.asarray(model.estimator.domain_mask(row, train)).ravel()[0]))
+            probabilities.append(_probability_map(model.estimator, row))
+        payload: dict[str, str] = {}
+        _fill_descriptor_cells(payload, result.write_columns, write_block, query_blocks, row_index)
+        if result.task == "regression":
+            value = float(np.mean(predictions))
+            half = float(np.mean([model.half_width for model in chosen]))
+            payload[pred_name] = f"{value:.6g}"
+            payload[qualifier_name] = f"{half:.4g}"
+        else:
+            code, probability = _consensus_class(
+                [int(value) for value in predictions],
+                probabilities,
+            )
+            label = _class_label(result.class_labels, code)
+            payload[pred_name] = label
+            payload[qualifier_name] = f"{probability:.3f}"
+        in_domain = sum(domains) * 2 >= len(domains)
+        payload[domain_name] = "in" if in_domain else "out"
+        rows.append((int(oid), payload))
+    return rows
 
 
-def _make_model(task: TaskKind, model_key: str, params: Mapping[str, Any] | None) -> Any:
-    from .qsar_models import _make_model as build_model
+def _fingerprint_onbit_headers() -> frozenset[str]:
+    from ..chem.rdkit_fingerprints import FINGERPRINT_SPECS, descriptor_onbits_column_aliases
 
-    return build_model(task, model_key, dict(params) if params else None)
+    names: set[str] = set()
+    for spec in FINGERPRINT_SPECS:
+        names.update(descriptor_onbits_column_aliases(spec.label))
+    return frozenset(names)
 
 
-def _normalize_effort(effort: str) -> str:
-    key = str(effort or "quick").strip().lower()
-    if key not in {"quick", "standard"}:
-        raise ValueError(f"Unknown AutoQSAR effort: {effort}")
-    return key
+def _check_cancel(cancel_event: threading.Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise AutoQSARCancelled()
+
+
+def _emit(on_progress: ProgressCallback | None, done: int, total: int, message: str) -> None:
+    if on_progress is not None:
+        on_progress(int(done), int(total), message)
 
 
 def _resolve_task(df: pd.DataFrame, activity_column: str, task_mode: str) -> TaskKind:
@@ -585,525 +479,471 @@ def _resolve_task(df: pd.DataFrame, activity_column: str, task_mode: str) -> Tas
     return infer_task_type(y[np.isfinite(y)])
 
 
-def _check_cancel(cancel_event: threading.Event | None) -> None:
-    if cancel_event is not None and cancel_event.is_set():
-        raise AutoQSARCancelled()
-
-
-def _emit_progress(
-    on_progress: ProgressCallback | None,
-    done: int,
-    total: int,
-    message: str,
-) -> None:
-    if on_progress is not None:
-        on_progress(int(done), int(total), message)
-
-
-def _fingerprint_onbit_headers() -> frozenset[str]:
-    from ..chem.rdkit_fingerprints import FINGERPRINT_SPECS, descriptor_onbits_column_aliases
-
-    names: set[str] = set()
-    for spec in FINGERPRINT_SPECS:
-        names.update(descriptor_onbits_column_aliases(spec.label))
-    return frozenset(names)
-
-
-def _association(column: np.ndarray, y: np.ndarray) -> float:
-    mask = np.isfinite(column) & np.isfinite(y)
-    if int(mask.sum()) < 3:
-        return 0.0
-    return abs(_pairwise_corr(column[mask], y[mask]))
-
-
-def _pairwise_corr(left: np.ndarray, right: np.ndarray) -> float:
-    mask = np.isfinite(left) & np.isfinite(right)
-    if int(mask.sum()) < 3:
-        return 0.0
-    a = left[mask]
-    b = right[mask]
-    if float(np.std(a)) <= 1e-12 or float(np.std(b)) <= 1e-12:
-        return 0.0
-    corr = float(np.corrcoef(a, b)[0, 1])
-    if not np.isfinite(corr):
-        return 0.0
-    return corr
-
-
-def _cv_folds(y_train: np.ndarray, task: TaskKind, cv_folds: int) -> int:
-    folds = max(2, min(int(cv_folds), len(y_train) - 1))
-    if task == "classification":
-        _labels, counts = np.unique(y_train, return_counts=True)
-        folds = min(folds, int(counts.min()) if counts.size else 0)
-    if folds < 2 or len(y_train) < folds + 1:
-        raise ValueError("Too few training rows for cross-validation.")
-    return folds
-
-
-def _column_complete(df: pd.DataFrame, column: str, oids: Sequence[int]) -> bool:
-    headers = [str(name) for name in df.columns]
-    oid_to_row = {int(oid): pos for pos, oid in enumerate(oids)}
-
-    def cell_text(row: int, col: int) -> str:
-        if row < 0:
-            return ""
-        return str(df.iat[row, col])
-
-    def row_for_oid(oid: int) -> int:
-        return oid_to_row.get(int(oid), -1)
-
-    return column_complete_for_oids(
-        column,
-        oids,
-        headers=headers,
-        cell_text=cell_text,
-        row_for_oid=row_for_oid,
-    )
-
-
-def _has_numeric(df: pd.DataFrame, column: str) -> bool:
-    if column not in df.columns:
-        return False
-    return bool(pd.to_numeric(df[column], errors="coerce").notna().any())
-
-
-def _missing_cell(raw: Any) -> bool:
-    if raw is None:
-        return True
-    try:
-        if pd.isna(raw):
-            return True
-    except (TypeError, ValueError):
-        return False
-    return False
-
-
-def _format_descriptor_value(value: Any) -> str:
-    if isinstance(value, str):
-        text = value.strip()
-        lowered = text.lower()
-        if lowered == "yes":
-            return "1"
-        if lowered == "no":
-            return "0"
-        return text or "N/A"
-    if isinstance(value, (bool, np.bool_)):
-        return "1" if value else "0"
-    if isinstance(value, (int, np.integer)):
-        return str(int(value))
-    if isinstance(value, (float, np.floating)):
-        number = float(value)
-        if not np.isfinite(number):
-            return "N/A"
-        return f"{number:.3f}"
-    return str(value)
-
-
-def _structure_maps(
-    mol_rows: list[tuple[int, object]] | None,
-) -> tuple[dict[int, object], dict[int, object], float]:
-    from ..descriptors.descriptors_3d import mol_for_3d_descriptors
-
-    mol_by_oid: dict[int, object] = {}
-    three_d_by_oid: dict[int, object] = {}
-    if not mol_rows:
-        return mol_by_oid, three_d_by_oid, 0.0
-    n_3d = 0
-    for oid, mol in mol_rows:
-        if oid is None:
+def _mol_by_oid(mol_rows: list[tuple[int, object]] | None) -> dict[int, object]:
+    found: dict[int, object] = {}
+    for oid, mol in mol_rows or []:
+        if oid is None or mol is None:
             continue
-        mol_by_oid[int(oid)] = mol
-        posed = mol_for_3d_descriptors(mol)
-        three_d_by_oid[int(oid)] = posed
-        if posed is not None:
-            n_3d += 1
-    fraction = n_3d / len(mol_by_oid) if mol_by_oid else 0.0
-    return mol_by_oid, three_d_by_oid, fraction
+        found[int(oid)] = mol
+    return found
 
 
-def _specs_for_attach(
-    specs: Sequence[tuple[str, str]] | None,
-    *,
-    use_3d: bool,
-    have_structures: bool,
-) -> tuple[list[tuple[str, str]], str | None]:
-    """Return the specs to consider and whether a 3D note should be recorded."""
-    del have_structures
-    if specs is None:
-        chosen = list(auto_qsar_descriptor_specs(include_3d=use_3d))
-        return chosen, "included" if use_3d else "skipped"
-    chosen = [(display, key) for display, key in specs if use_3d or key not in DESCRIPTOR_3D_KEYS]
-    mentions_3d = any(key in DESCRIPTOR_3D_KEYS for _display, key in specs)
-    if not mentions_3d:
-        return chosen, None
-    return chosen, "included" if use_3d else "skipped"
-
-
-def _three_d_note(fraction: float, *, included: bool) -> str:
-    pct = f"{fraction:.0%}"
-    if included:
-        return f"3D descriptors included (poses on {pct} of rows)."
-    return f"3D descriptors skipped (poses on {pct} of rows; need at least 80%)."
-
-
-def _calculate_descriptor_columns(
-    df: pd.DataFrame,
-    oids: list[int],
-    specs: Sequence[tuple[str, str]],
+def _candidate_rows(
+    oids: Sequence[int],
+    y_all: np.ndarray,
     mol_by_oid: Mapping[int, object],
-    three_d_by_oid: Mapping[int, object],
-    *,
+    notes: list[str],
+) -> np.ndarray:
+    labeled = np.flatnonzero(np.isfinite(y_all))
+    if not mol_by_oid:
+        return labeled
+    kept = [int(index) for index in labeled if mol_by_oid.get(int(oids[int(index)])) is not None]
+    skipped = int(labeled.size - len(kept))
+    if skipped:
+        notes.append(
+            f"{skipped} labeled rows had no structure and were left out of the learning set."
+        )
+    return np.asarray(kept, dtype=int)
+
+
+def _learning_matrix(
+    df: pd.DataFrame,
+    oids: Sequence[int],
+    candidate: np.ndarray,
+    mol_by_oid: Mapping[int, object],
+    table_columns: Sequence[str] | None,
+    blocked_columns: Sequence[str] | None,
+    activity_column: str,
     cancel_event: threading.Event | None,
-    on_row: Callable[[int, int], None] | None,
-) -> None:
-    from ..workers.chemistry_descriptors import descriptor_callable_for_int_fn
-
-    smarts_cache: dict[str, Any] = {}
-    for display, _key in specs:
-        if display not in df.columns:
-            df[display] = pd.Series(["N/A"] * len(df), index=df.index, dtype=object)
-        else:
-            df[display] = df[display].astype(object)
-    locations = {display: int(df.columns.get_loc(display)) for display, _key in specs}
-    total = len(oids)
-    for pos, oid in enumerate(oids):
-        _check_cancel(cancel_event)
-        row_oid = int(oid)
-        mol = mol_by_oid.get(row_oid)
-        row_ctx = {"oid": row_oid, "mol_3d": three_d_by_oid.get(row_oid)}
-        for display, key in specs:
-            text = "N/A"
-            if mol is not None or row_ctx.get("mol_3d") is not None:
-                fn = descriptor_callable_for_int_fn(key, smarts_cache, row_ctx)
-                text = _call_descriptor(fn, mol)
-            df.iat[pos, locations[display]] = text
-        if on_row is not None:
-            on_row(pos + 1, total)
-
-
-def _call_descriptor(fn: Callable[..., Any], mol: object) -> str:
-    try:
-        value = fn(mol)
-    except _DESCRIPTOR_ERRORS:
-        return "N/A"
-    return _format_descriptor_value(value)
-
-
-def _prepare_sets(
-    *,
-    df: pd.DataFrame,
-    oids: list[int],
-    activity_column: str,
-    task: TaskKind,
-    train_fraction: float,
-    table_columns: Sequence[str],
-    descriptor_columns: Sequence[str],
-    mol_rows: list[tuple[int, object]] | None,
-    effort: str,
-    notes: list[str],
-) -> list[_PreparedSet]:
-    prepared: list[_PreparedSet] = []
-    numeric_groups: list[tuple[str, Sequence[str]]] = []
-    if table_columns:
-        numeric_groups.append(("Table columns", table_columns))
-    if descriptor_columns:
-        numeric_groups.append(("Computed descriptors", descriptor_columns))
-    for name, columns in numeric_groups:
-        item, reason = _prepare_feature_set(
-            name=name,
-            df=df,
-            oids=oids,
-            activity_column=activity_column,
-            task=task,
-            train_fraction=train_fraction,
-            numeric_columns=list(columns),
-            fp_choice=None,
-            mol_rows=None,
-        )
-        if item is not None:
-            prepared.append(item)
-        elif reason:
-            notes.append(f"{name}: {reason}")
-    if mol_rows:
-        fp_groups = [(FP_MORGAN, "Morgan"), (FP_MACCS, "MACCS")]
-        if effort == "standard":
-            fp_groups.append((FP_RDK, "RDK"))
-        for fp_choice, name in fp_groups:
-            item, reason = _prepare_feature_set(
-                name=name,
-                df=df,
-                oids=oids,
-                activity_column=activity_column,
-                task=task,
-                train_fraction=train_fraction,
-                numeric_columns=None,
-                fp_choice=fp_choice,
-                mol_rows=mol_rows,
-            )
-            if item is not None:
-                prepared.append(item)
-            elif reason:
-                notes.append(f"{name}: {reason}")
-    return prepared
-
-
-def _prepare_morgan_combo(
-    prepared: Sequence[_PreparedSet],
-    trials: Sequence[AutoQSARTrial],
-    *,
-    df: pd.DataFrame,
-    oids: list[int],
-    activity_column: str,
-    task: TaskKind,
-    train_fraction: float,
-    mol_rows: list[tuple[int, object]] | None,
-    notes: list[str],
-) -> _PreparedSet | None:
-    numeric = [item for item in prepared if item.fp_choice is None]
-    numeric_names = {item.name for item in numeric}
-    ranked = sorted(
-        (trial for trial in trials if trial.feature_set in numeric_names), key=_trial_key
-    )
-    if not ranked:
-        return None
-    best = next(item for item in numeric if item.name == ranked[0].feature_set)
-    name = f"{best.name} + Morgan"
-    item, reason = _prepare_feature_set(
-        name=name,
-        df=df,
-        oids=oids,
-        activity_column=activity_column,
-        task=task,
-        train_fraction=train_fraction,
-        numeric_columns=list(best.feature_columns),
-        fp_choice=FP_MORGAN,
-        mol_rows=mol_rows,
-    )
-    if item is None and reason:
-        notes.append(f"{name}: {reason}")
-    return item
-
-
-def _prepare_feature_set(
-    *,
-    name: str,
-    df: pd.DataFrame,
-    oids: list[int],
-    activity_column: str,
-    task: TaskKind,
-    train_fraction: float,
-    numeric_columns: list[str] | None,
-    fp_choice: str | None,
-    mol_rows: list[tuple[int, object]] | None,
-) -> tuple[_PreparedSet | None, str | None]:
-    from ..descriptors.ml_feature_matrix import build_combined_feature_matrix
-
-    columns = _columns_with_enough_values(df, numeric_columns or [], activity_column)
-    if not columns and not fp_choice:
-        return None, "no columns left after the missing-value filter"
-    try:
-        built = build_combined_feature_matrix(
-            df=df,
-            oids=oids,
-            feature_columns=columns or None,
-            mol_rows=mol_rows,
-            fp_choice=fp_choice,
-            min_rows=MIN_ROWS,
-            activity_column=activity_column,
-        )
-    except ValueError as exc:
-        return None, str(exc)
-    fit_df, fit_oids = _frame_for_matrix(df, built)
-    y_raw = pd.to_numeric(fit_df[activity_column], errors="coerce").to_numpy(dtype=float)
-    y, labels = _prepare_labels(y_raw, task)
-    if task == "classification" and (labels is None or len(labels) < 2):
-        return None, "classification needs at least two activity classes"
-    try:
-        train_idx, _test_idx = modeling_split_indices(y, task, train_fraction)
-    except ValueError as exc:
-        return None, str(exc)
-    feature_columns: tuple[str, ...] = ()
-    n_numeric = 0
-    matrix = built.X
-    if columns:
-        names = list(built.feature_names[: built.n_numeric_features])
-        numeric_frame = pd.DataFrame(
-            np.asarray(built.X)[:, : built.n_numeric_features], columns=names
-        )
-        filtered = filter_training_features(numeric_frame, y, train_idx)
-        if not filtered:
-            return None, "all columns removed by the training-set filter"
-        positions = [names.index(column) for column in filtered]
-        numeric_block = np.asarray(built.X)[:, positions]
-        n_numeric = len(filtered)
-        feature_columns = tuple(filtered)
-        if fp_choice and built.n_numeric_features < built.X.shape[1]:
-            bits = np.asarray(built.X)[:, built.n_numeric_features :]
-            matrix = np.hstack([numeric_block, bits])
-        else:
-            matrix = numeric_block
-    return (
-        _PreparedSet(
-            name=name,
-            X=np.asarray(matrix),
-            y=y,
-            train_idx=train_idx,
-            n_numeric=n_numeric,
-            feature_columns=feature_columns,
-            fp_choice=fp_choice,
-            fit_df=fit_df,
-            fit_oids=fit_oids,
-        ),
-        None,
-    )
-
-
-def _columns_with_enough_values(
-    df: pd.DataFrame,
-    columns: Sequence[str],
-    activity_column: str,
-) -> list[str]:
-    if not columns or activity_column not in df.columns:
-        return []
-    labeled = pd.to_numeric(df[activity_column], errors="coerce").notna()
-    if not bool(labeled.any()):
-        return []
-    min_present = 1.0 - MISSING_FRACTION
-    kept: list[str] = []
-    for column in columns:
-        if column not in df.columns or column == activity_column:
-            continue
-        values = pd.to_numeric(df.loc[labeled, column], errors="coerce")
-        if float(values.notna().mean()) >= min_present:
-            kept.append(column)
-    return kept
-
-
-def _frame_for_matrix(df: pd.DataFrame, built: Any) -> tuple[pd.DataFrame, list[int]]:
-    """Rows of *built*, in matrix order, so a later refit cannot add hold-out rows."""
-    subset = df.iloc[list(built.df_positions)].reset_index(drop=True)
-    return subset, [int(oid) for oid in built.oids]
-
-
-def _try_trial(
-    item: _PreparedSet,
-    task: TaskKind,
-    model_key: str,
-    params: Mapping[str, Any],
-    stage: int,
-    cv_folds: int,
-) -> AutoQSARTrial | None:
-    merged = _merge_model_params(model_key, dict(params))
-    try:
-        mean, std = score_training_matrix(
-            item.X,
-            item.y,
-            item.train_idx,
-            task=task,
-            model_key=model_key,
-            model_params=merged,
-            cv_folds=cv_folds,
-            n_numeric=item.n_numeric,
-        )
-    except _SCORE_ERRORS:
-        return None
-    if not np.isfinite(mean):
-        return None
-    return AutoQSARTrial(
-        model_key=model_key,
-        model_label=_model_label(task, model_key),
-        feature_set=item.name,
-        n_features=int(item.X.shape[1]),
-        cv_mean=mean,
-        cv_std=std if np.isfinite(std) else 0.0,
-        stage=stage,
-        feature_columns=item.feature_columns,
-        fp_choice=item.fp_choice,
-        model_params=tuple(merged.items()),
-    )
-
-
-def _score_stage2(
-    prepared: Sequence[_PreparedSet],
-    trials: list[AutoQSARTrial],
-    task: TaskKind,
-    cv_folds: int,
-    total: int,
     on_progress: ProgressCallback | None,
+    progress_total: int = 0,
+) -> tuple[list[str], np.ndarray, set[str]]:
+    mols = [mol_by_oid.get(int(oids[int(index)])) for index in candidate]
+    names: list[str] = []
+    parts: list[np.ndarray] = []
+    calculated: set[str] = set()
+    if any(mol is not None for mol in mols):
+
+        def on_row(done: int, total: int) -> None:
+            overall = progress_total if progress_total else total
+            _emit(on_progress, done, max(1, overall), "AutoQSAR: calculating descriptors")
+
+        rdkit_names, rdkit_values = descriptor_matrix(
+            mols, cancel_event=cancel_event, on_row=on_row
+        )
+        names.extend(rdkit_names)
+        parts.append(rdkit_values)
+        calculated.update(rdkit_names)
+    blocked = set(blocked_columns or ())
+    blocked.add(activity_column)
+    for column in table_columns or ():
+        if column in names or column in blocked or column not in df.columns:
+            continue
+        values = pd.to_numeric(df.iloc[candidate][column], errors="coerce").to_numpy(dtype=float)
+        names.append(str(column))
+        parts.append(values.reshape(-1, 1))
+    if not parts:
+        raise ValueError(
+            "AutoQSAR needs structures to calculate descriptors, or at least one selected table column."
+        )
+    combined = parts[0] if len(parts) == 1 else np.column_stack(parts)
+    return names, np.asarray(combined, dtype=float), calculated
+
+
+def _add_fingerprint_blocks(
+    blocks: dict[str, FeatureBlock],
+    mols: Sequence[object | None],
+    notes: list[str],
     cancel_event: threading.Event | None,
-    done: int,
-) -> int:
-    by_name = {item.name: item for item in prepared}
-    for seed in _top_unique(trials, 3):
-        item = by_name.get(seed.feature_set)
-        if item is None:
+) -> None:
+    ready = [mol for mol in mols if mol is not None]
+    if len(ready) != len(mols):
+        notes.append("Fingerprints were skipped because a learning row has no structure.")
+        return
+    for label, kind in FINGERPRINT_SETS:
+        _check_cancel(cancel_event)
+        bit_ids, values = fingerprint_matrix(ready, kind)
+        if bit_ids.size == 0:
+            notes.append(f"{label}: no varying fingerprint bits.")
             continue
-        baseline = dict(seed.model_params)
-        for overrides in stage2_param_grid(seed.model_key):
-            merged = _merge_model_params(seed.model_key, overrides)
-            if merged == baseline:
-                continue
-            _check_cancel(cancel_event)
-            done += 1
-            _emit_progress(
-                on_progress,
-                done,
-                total,
-                f"AutoQSAR: {seed.model_label} / {item.name}",
-            )
-            trial = _try_trial(item, task, seed.model_key, merged, 2, cv_folds)
-            if trial is not None:
-                trials.append(trial)
-    return done
+        blocks[label] = FeatureBlock(
+            name=label,
+            kind="fingerprints",
+            columns=(),
+            bit_ids=bit_ids,
+            fingerprint_kind=kind,
+            values=values,
+            requires_structure=True,
+        )
 
 
-def _top_unique(trials: Sequence[AutoQSARTrial], limit: int) -> list[AutoQSARTrial]:
-    seen: set[tuple[str, str]] = set()
-    chosen: list[AutoQSARTrial] = []
-    for trial in sorted(trials, key=_trial_key):
-        key = (trial.feature_set, trial.model_key)
-        if key in seen:
+def _note_duplicate_structures(mols: Sequence[object | None], notes: list[str]) -> None:
+    from rdkit import Chem
+
+    smiles: list[str] = []
+    for mol in mols:
+        if mol is None:
             continue
-        seen.add(key)
-        chosen.append(trial)
-        if len(chosen) >= limit:
-            break
-    return chosen
+        try:
+            smiles.append(Chem.MolToSmiles(mol))
+        except (ValueError, RuntimeError):
+            continue
+    extra = len(smiles) - len(set(smiles))
+    if extra:
+        notes.append(f"{extra} duplicate structures were kept in the learning set.")
 
 
-def _trial_key(trial: AutoQSARTrial) -> tuple[Any, ...]:
+def _split_indices(
+    y: np.ndarray, task: TaskKind, split_index: int
+) -> tuple[np.ndarray, np.ndarray]:
+    from sklearn.model_selection import train_test_split
+
+    index = np.arange(len(y))
+    stratify = y if task == "classification" and len(np.unique(y)) > 1 else None
+    try:
+        train, test = train_test_split(
+            index, test_size=0.25, random_state=int(split_index), stratify=stratify
+        )
+    except ValueError:
+        if stratify is None:
+            raise
+        train, test = train_test_split(index, test_size=0.25, random_state=int(split_index))
+    return np.asarray(train, dtype=int), np.asarray(test, dtype=int)
+
+
+def _try_model(
+    method: str,
+    feature_name: str,
+    block: FeatureBlock,
+    y: np.ndarray,
+    train_index: np.ndarray,
+    test_index: np.ndarray,
+    *,
+    task: str,
+    split_index: int,
+    learning_variance: float,
+    classes: Sequence,
+) -> tuple[AutoQSARModel | None, str]:
+    if block.values.shape[1] == 0:
+        return None, f"{feature_name} has no columns."
+    try:
+        estimator, train_pred, test_pred, n_features = fit_split_model(
+            method,
+            block.values,
+            y,
+            train_index,
+            test_index,
+            task=task,
+            split_index=split_index,
+        )
+        score, train_accuracy, test_accuracy = score_predictions(
+            y,
+            train_index,
+            test_index,
+            train_pred,
+            test_pred,
+            task=task,
+            learning_variance=learning_variance,
+            classes=classes,
+        )
+    except fit_errors() as exc:
+        return None, str(exc) or exc.__class__.__name__
+    if not np.isfinite(score):
+        return None, f"{feature_name} produced a non-finite score."
+    half_width = 0.0
+    if task == "regression":
+        half_width = conformal_half_width(np.asarray(y)[test_index] - np.asarray(test_pred))
+    return AutoQSARModel(
+        method=method,
+        method_label=_METHOD_LABEL.get(method, method),
+        feature_set=feature_name,
+        score=float(score),
+        train_accuracy=float(train_accuracy),
+        test_accuracy=float(test_accuracy),
+        split_index=int(split_index),
+        n_features=int(n_features),
+        train_index=np.asarray(train_index, dtype=int),
+        estimator=estimator,
+        half_width=float(half_width),
+    ), ""
+
+
+def _rank_key(model: AutoQSARModel) -> tuple:
     return (
-        -float(trial.cv_mean),
-        float(trial.cv_std),
-        int(trial.n_features),
-        trial.model_key,
-        trial.feature_set,
-        int(trial.stage),
+        -float(model.score),
+        -float(model.test_accuracy),
+        -float(model.train_accuracy),
+        model.method,
+        model.feature_set,
+        int(model.split_index),
     )
+
+
+def _write_columns(
+    df: pd.DataFrame,
+    models: Sequence[AutoQSARModel],
+    block: FeatureBlock | None,
+    calculated: set[str],
+) -> tuple[str, ...]:
+    if block is None:
+        return ()
+    from .auto_qsar_models import MLREnsemble
+
+    used: set[str] = set()
+    for model in models:
+        if model.feature_set != block.name:
+            continue
+        if isinstance(model.estimator, MLREnsemble):
+            for subset in model.estimator.subsets:
+                used.update(block.columns[int(index)] for index in subset)
+        else:
+            used.update(block.columns)
+    ordered = []
+    for name in block.columns:
+        if name not in used or name not in calculated:
+            continue
+        if name not in df.columns:
+            ordered.append(name)
+            continue
+        numeric = pd.to_numeric(df[name], errors="coerce")
+        if not bool(numeric.notna().all()):
+            ordered.append(name)
+    return tuple(ordered)
+
+
+def _jobs_for_blocks(task: TaskKind, blocks: Mapping[str, FeatureBlock]) -> list[tuple[str, str]]:
+    jobs: list[tuple[str, str]] = []
+    if DESCRIPTOR_SET in blocks:
+        jobs.extend((method, DESCRIPTOR_SET) for method in _DESCRIPTOR_METHODS[task])
+    for name, block in blocks.items():
+        if block.kind != "fingerprints":
+            continue
+        jobs.extend((method, name) for method in _FINGERPRINT_METHODS[task])
+    return jobs
 
 
 def _format_report(
-    effort: str,
+    settings: EffortSettings,
     task: TaskKind,
-    metric: str,
-    winner: AutoQSARTrial,
-    fit: QSARFitResult,
+    learning_oids: Sequence[int],
+    n_built: int,
+    attempted: int,
+    models: Sequence[AutoQSARModel],
     notes: Sequence[str],
 ) -> str:
+    if n_built == attempted:
+        built_line = f"Built {n_built} models and retained {len(models)}."
+    else:
+        built_line = f"Built {n_built} of {attempted} models and retained {len(models)}."
     lines = [
-        f"AutoQSAR ({effort})",
+        "AutoQSAR",
         f"Task: {task}",
-        f"Selection metric: CV {metric} on the training split only.",
-        "The hold-out score below was not used to choose the model.",
+        f"Learning rows: {len(learning_oids)}",
+        f"Split: random 75/25, repeated {settings.splits} times.",
+        built_line,
+        "Score = test accuracy × (1 − |train accuracy − test accuracy|).",
+        "A negative test accuracy is used as the score.",
+        "Continuous test accuracy divides by the variance of the learning-set activity.",
+        "Categorical accuracy is the unweighted mean of per-class recall.",
         "",
-        f"Winner: {winner.model_label}  |  {winner.feature_set}",
-        f"Selection CV: mean = {winner.cv_mean:.4f}  std = {winner.cv_std:.4f}",
-        "",
-        fit.metrics_text,
+        "Retained models, best score first:",
     ]
+    for model in models:
+        lines.append(
+            f"  {model.score:.4f}  test {model.test_accuracy:.4f}  "
+            f"train {model.train_accuracy:.4f}  {model.method_label}  {model.feature_set}"
+        )
+    lines.extend(
+        [
+            "",
+            "Default predictions are the unweighted consensus of the retained models.",
+            "Regression consensus is the mean. Classification consensus is a majority vote,",
+            "with ties broken by the average class probability.",
+            "Learning-set rows were used to train some of the retained models.",
+            "Rows outside this scope are the external set.",
+            "A row is out of domain when its distance to a model's training rows exceeds",
+            "the 95th percentile of distances inside that training set. The regression",
+            "interval is a 90% split-conformal half-width from each model's own test residuals.",
+        ]
+    )
     if notes:
         lines.append("")
         lines.append("Notes:")
         for note in notes:
             lines.append(f"  {note}")
     return "\n".join(lines)
+
+
+@dataclass
+class _QueryBlock:
+    values: np.ndarray
+    valid: np.ndarray
+
+
+def _query_blocks(
+    result: AutoQSARResult,
+    df: pd.DataFrame,
+    oids: Sequence[int],
+    mols: Sequence[object | None],
+    cancel_event: threading.Event | None,
+) -> dict[str, _QueryBlock]:
+    from .auto_qsar_features import _on_bit_ids
+
+    found: dict[str, _QueryBlock] = {}
+    descriptor_block = result.blocks.get(DESCRIPTOR_SET)
+    full_names: tuple[str, ...] = ()
+    full_values = None
+    if any(block.kind == "descriptors" for block in result.blocks.values()):
+        _check_cancel(cancel_event)
+        try:
+            full_names, full_values, _calculated = _learning_matrix(
+                df,
+                oids,
+                np.arange(len(oids)),
+                _mol_by_oid([(int(oid), mol) for oid, mol in zip(oids, mols, strict=True)]),
+                [column for column in df.columns if column in _needed_table_columns(result)],
+                None,
+                result.activity_column,
+                cancel_event,
+                None,
+            )
+        except ValueError:
+            full_names = ()
+            full_values = None
+    for name, block in result.blocks.items():
+        if block.kind == "descriptors" and descriptor_block is not None:
+            if full_values is None:
+                found[name] = _QueryBlock(
+                    values=np.full((len(oids), len(block.columns)), np.nan),
+                    valid=np.zeros(len(oids), dtype=bool),
+                )
+                continue
+            position = {column: index for index, column in enumerate(full_names)}
+            selected = [position[column] for column in block.columns if column in position]
+            if len(selected) != len(block.columns):
+                values = np.full((len(oids), len(block.columns)), np.nan)
+                valid = np.zeros(len(oids), dtype=bool)
+            else:
+                values = full_values[:, selected]
+                valid = np.isfinite(values).all(axis=1)
+                if block.requires_structure:
+                    valid &= np.array([mol is not None for mol in mols], dtype=bool)
+            found[name] = _QueryBlock(values=values, valid=valid)
+            continue
+        if block.kind != "fingerprints":
+            continue
+        values = np.zeros((len(mols), int(block.bit_ids.size)), dtype=np.float32)
+        valid = np.array([mol is not None for mol in mols], dtype=bool)
+        column = {int(bit): index for index, bit in enumerate(block.bit_ids)}
+        for row, mol in enumerate(mols):
+            if mol is None:
+                continue
+            try:
+                bits = _on_bit_ids(mol, block.fingerprint_kind)
+            except (
+                ValueError,
+                TypeError,
+                RuntimeError,
+                ArithmeticError,
+                AttributeError,
+                KeyError,
+                IndexError,
+            ):
+                valid[row] = False
+                continue
+            for bit in bits:
+                index = column.get(int(bit))
+                if index is not None:
+                    values[row, index] = 1.0
+        found[name] = _QueryBlock(values=values, valid=valid)
+    return found
+
+
+def _needed_table_columns(result: AutoQSARResult) -> set[str]:
+    block = result.blocks.get(DESCRIPTOR_SET)
+    if block is None:
+        return set()
+    calculated_prefixes = ("AUTOCORR2D_", "MQN_")
+    return {
+        column
+        for column in block.columns
+        if not column.startswith(calculated_prefixes) and column not in _known_rdkit_names()
+    }
+
+
+def _known_rdkit_names() -> set[str]:
+    from .auto_qsar_features import rdkit_descriptor_names
+
+    return set(rdkit_descriptor_names())
+
+
+def _row_is_ready(model: AutoQSARModel, blocks: Mapping[str, _QueryBlock], row: int) -> bool:
+    query = blocks.get(model.feature_set)
+    return query is not None and bool(query.valid[row])
+
+
+def _probability_map(estimator: Any, row: np.ndarray) -> dict[Any, float]:
+    if not hasattr(estimator, "probabilities"):
+        return {}
+    packed = estimator.probabilities(row)
+    if packed is None:
+        return {}
+    classes, proba = packed
+    mapped: dict[Any, float] = {}
+    for index, label in enumerate(classes):
+        try:
+            key: Any = int(label)
+        except (TypeError, ValueError):
+            key = label
+        mapped[key] = float(proba[0, index])
+    return mapped
+
+
+def _consensus_class(
+    predictions: Sequence[Any],
+    probabilities: Sequence[Mapping[Any, float]],
+) -> tuple[Any, float]:
+    votes = Counter(predictions)
+    top = max(votes.values())
+    tied = [label for label, count in votes.items() if count == top]
+    if len(tied) == 1:
+        winner = tied[0]
+        return winner, votes[winner] / len(predictions)
+    best = tied[0]
+    best_probability = -1.0
+    for label in tied:
+        average = float(np.mean([row.get(label, 0.0) for row in probabilities]))
+        if average > best_probability:
+            best = label
+            best_probability = average
+    return best, best_probability
+
+
+def _class_label(labels: tuple[Any, ...] | None, code: Any) -> str:
+    if labels is None:
+        return str(code)
+    try:
+        return str(labels[int(code)])
+    except (TypeError, ValueError, IndexError):
+        return str(code)
+
+
+def _fill_descriptor_cells(
+    payload: dict[str, str],
+    columns: Sequence[str],
+    block: FeatureBlock | None,
+    queries: Mapping[str, _QueryBlock],
+    row: int,
+) -> None:
+    if block is None or not columns:
+        return
+    query = queries.get(block.name)
+    if query is None:
+        return
+    position = {name: index for index, name in enumerate(block.columns)}
+    for name in columns:
+        index = position.get(name)
+        if index is None or not np.isfinite(query.values[row, index]):
+            payload[name] = "N/A"
+            continue
+        payload[name] = f"{float(query.values[row, index]):.6g}"

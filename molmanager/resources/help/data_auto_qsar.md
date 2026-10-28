@@ -1,42 +1,61 @@
 # AutoQSAR
 
-AutoQSAR searches descriptors and models for one activity column, then writes predictions for the winner.
+AutoQSAR builds a pool of models for one activity column, keeps the best of them, and predicts with their consensus.
 
 ## Goal
 
-Choose a useful feature set and algorithm without setting fingerprints, hyperparameters, or a column checklist.
+Get a model without choosing fingerprints, latent factors, or a descriptor checklist. **Generate Model** remains the manual tool.
 
 ## When to use
 
-Open it from **Data → QSAR → AutoQSAR**. Use it when labeled rows are available and the goal is a first model. Use **Generate Model** when the feature columns and algorithm should stay under manual control.
+Open it from **Data → QSAR → AutoQSAR**. Use it when labeled rows are available and the goal is a first model. Use **Generate Model** when the columns and algorithm should stay under manual control.
 
 ## Inputs / scope
 
-- **Visible Rows Only** / **Selected Rows Only** / **Refresh columns**.
+- **Visible Rows Only** / **Selected Rows Only** / **Refresh columns**. The learning set is this scope.
 - **Activity (Y)** column. **Task**: Auto, Regression, or Classification.
-- **Effort**: Quick (default hyperparameters, 3-fold CV) or Standard (a short second-stage grid, 5-fold CV).
-- **Structure** source, used to calculate descriptors and fingerprint blocks.
+- **Structure** source. Structures are not standardized or deduplicated.
+- **Table columns**. Checked numeric columns are added to the calculated descriptors. Nothing in that list is included until it is checked. The activity column is skipped.
 - **Prediction column**, default `AutoQSAR_<activity>`.
+- **Consensus of retained models**, on by default. Uncheck it to predict with the selected leaderboard row. Selecting a row does not turn consensus off.
 
-The training fraction is fixed at 80%. Selection never uses the hold-out rows.
+At least 8 learning rows are required. A learning row needs a numeric activity and, when any structure is available, a structure. **Add predictions** scores the visible table and ignores **Selected Rows Only**, so a selected learning set can be applied to the other visible rows.
 
 ## What the search tries
 
-- Numeric columns already on the table, except the activity column and fingerprint on-bit counts.
-- 2D catalog descriptors (physiochemical, counts, complexity, electronic, QED, and Ro5). LogD, LogS at pH 7.4, and other ionization-backed scores are not calculated.
-- 3D descriptors only when a 3D pose exists for at least 80% of the structures.
-- Morgan and MACCS fingerprint blocks. Standard also tries the RDKit fingerprint, then a short hyperparameter grid on the best candidates.
-- The best numeric set combined with Morgan.
+One descriptor pool, filtered once before the splits:
 
-Columns that are already filled are reused. A column is written back only when the winning model uses a descriptor this search calculated.
+- RDKit 2D descriptors, including 2D autocorrelation and MQN. 3D descriptors, ionization scores, and orbital energies are not calculated.
+- Ipc, qed, the three Morgan fingerprint densities, and the unspecified-stereocenter count are left out. Ro5 and ESOL are not calculated.
+- Checked numeric columns from the table. The activity, the prediction column, and fingerprint on-bit counts stay out. A column whose name matches a calculated descriptor uses the calculated value.
 
-## Workflow
+The filter drops a column when 90% of the learning rows share one value or the variance is negligible, then keeps one descriptor from each cluster of columns whose absolute correlation is at least 0.8. That filter does not look at the activity.
 
-1. Filter or select the modeling set (at least 8 rows).
-2. Choose the activity column, task, and effort.
-3. Run AutoQSAR and read the leaderboard. The top row is the winner. Trust the hold-out score more than the selection CV.
-4. Add predictions to the table. Any new descriptors the winner uses are written in the same step.
+Four unfolded fingerprints are scored on their own, never concatenated with descriptors. Each keeps the 10,000 highest-variance bits:
 
-## Tips and limits
+- Radial (Morgan, radius 2)
+- Linear (RDKit path)
+- Dendritic (atom pair)
+- MOLPRINT2D, represented here by unfolded feature-Morgan (FCFP), radius 2
 
-Small sets overfit. The selection score is training-set CV; the hold-out number is the one that was not used to pick the model. Fingerprints are tried as whole blocks, not as individual bits. Quick skips SVR. This is not a deep-learning AutoQSAR and it does not estimate an applicability domain.
+Regression on descriptors uses best-subsets MLR, PLS, PCR, and kernel PLS. Regression on a fingerprint uses kernel PLS only. Classification on descriptors uses naive Bayes and an ensemble of 100 trees. Classification on a fingerprint uses naive Bayes only. PLS, PCR, and kernel PLS stop adding latent factors before the training R² passes 0.9.
+
+## How models are scored
+
+Each split is a random 75/25 cut. Classification splits are stratified when that is possible. The search repeats the cut 50 times and keeps the 10 best models.
+
+The score is test accuracy times one minus the absolute gap between train and test accuracy. A negative test accuracy is used as the score, so a very poor test cannot become a large positive score. Continuous test accuracy divides the residual variance by the variance of the learning-set activity, not by the variance of the test rows alone. Categorical accuracy is the unweighted mean of per-class recall.
+
+The leaderboard lists Score, Test accuracy, Train accuracy, Method, Features, and Split.
+
+## Predictions, interval, and domain
+
+The default prediction is the unweighted consensus: the mean for regression, and a majority vote for classification. A tied vote uses the average class probability.
+
+Regression writes the prediction, a separate interval column, and a domain column. The interval is a 90% half-width, so the range is prediction ± interval. It comes from the absolute residuals on that model's own 25% test rows. The consensus interval is the mean of those half-widths. Classification writes the class, a probability column, and a domain column instead of an interval.
+
+A row is out of domain when its distance to the model's training rows is greater than the 95th percentile of nearest-neighbor distances inside that training set. Descriptor models use Euclidean distance. Fingerprint models use Tanimoto distance. The consensus calls a row in domain when at least half of the models do.
+
+Rows in the learning set were used to train some of the retained models, so those predictions overlap the models. Rows outside the learning scope are the external set. Duplicate structures are kept and only mentioned in the report.
+
+Calculated descriptor columns are written back only when a retained descriptor model uses them and the column is not already complete. Table columns and fingerprint bits are not written back.

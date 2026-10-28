@@ -27,11 +27,10 @@ from PyQt5.QtCore import QObject, QRunnable, pyqtSignal
 from ..analysis.auto_qsar import (
     AutoQSARCancelled,
     AutoQSARResult,
-    attach_catalog_descriptors,
+    predict_auto_qsar,
     search_auto_qsar,
     table_numeric_feature_columns,
 )
-from ..analysis.qsar_models import predict_qsar_rows
 from ..chem.structure_payload import mol_rows_from_job_params
 from ..platform_support.exception_policy import log_swallowed_exception
 from ..platform_support.tool_progress import ToolProgressState, report_tool_progress
@@ -114,38 +113,20 @@ class AutoQSARSearchWorker(QRunnable):
 
     def _search(self) -> AutoQSARJobResult:
         oids = [int(oid) for oid in self.params["oids"]]
-        n = max(1, len(oids))
-        report_tool_progress(
-            message="AutoQSAR: calculating descriptors…",
-            done=0,
-            total=n,
-            progress_state=self.progress_state,
-        )
         activity = str(self.params["activity_column"])
         source = self.params["dataframe"]
         blocked = [str(self.params.get("prediction_column") or "").strip()]
-        table_columns = table_numeric_feature_columns(
+        allowed = table_numeric_feature_columns(
             source,
             activity,
             blocked_columns=[column for column in blocked if column],
         )
-        mol_rows = mol_rows_from_job_params(self.params)
-
-        def on_row(done: int, total: int) -> None:
-            report_tool_progress(
-                message="AutoQSAR: calculating descriptors…",
-                done=done,
-                total=max(1, total),
-                progress_state=self.progress_state,
-            )
-
-        attached = attach_catalog_descriptors(
-            source,
-            oids,
-            mol_rows,
-            cancel_event=self.cancel_event,
-            on_row=on_row,
-        )
+        requested = self.params.get("table_columns")
+        if requested is None:
+            table_columns = allowed
+        else:
+            allowed_names = set(allowed)
+            table_columns = [str(column) for column in requested if str(column) in allowed_names]
 
         def on_progress(done: int, total: int, message: str) -> None:
             report_tool_progress(
@@ -156,27 +137,18 @@ class AutoQSARSearchWorker(QRunnable):
             )
 
         searched = search_auto_qsar(
-            df=attached.dataframe,
+            df=source,
             oids=oids,
             activity_column=activity,
             task_mode=str(self.params.get("task_mode") or "auto"),
-            effort=str(self.params.get("effort") or "quick"),
-            mol_rows=mol_rows,
+            effort=str(self.params.get("effort") or "standard"),
+            mol_rows=mol_rows_from_job_params(self.params),
             table_columns=table_columns,
-            descriptor_columns=attached.pool_columns,
-            computed_columns=attached.computed_columns,
             blocked_columns=[column for column in blocked if column],
-            initial_notes=attached.notes,
             cancel_event=self.cancel_event,
             on_progress=on_progress,
         )
-        report_tool_progress(
-            message="AutoQSAR: done",
-            done=n,
-            total=n,
-            progress_state=self.progress_state,
-        )
-        return AutoQSARJobResult(search=searched, dataframe=attached.dataframe, oids=oids)
+        return AutoQSARJobResult(search=searched, dataframe=source, oids=oids)
 
 
 class AutoQSARPredictWorker(QRunnable):
@@ -208,12 +180,14 @@ class AutoQSARPredictWorker(QRunnable):
                 total=n,
                 progress_state=self.progress_state,
             )
-            rows = predict_qsar_rows(
-                self.params["bundle"],
+            rows = predict_auto_qsar(
+                self.params["search"],
                 df=self.params["dataframe"],
                 oids=oids,
                 mol_rows=mol_rows_from_job_params(self.params),
-                output_column=self.params.get("output_column"),
+                output_column=str(self.params.get("output_column") or ""),
+                model_index=self.params.get("model_index"),
+                cancel_event=self.cancel_event,
             )
             if self.cancel_event is not None and self.cancel_event.is_set():
                 _emit_cancelled(self.signals)
@@ -225,6 +199,8 @@ class AutoQSARPredictWorker(QRunnable):
                 progress_state=self.progress_state,
             )
             self.signals.predict_finished.emit(rows)
+        except AutoQSARCancelled:
+            _emit_cancelled(self.signals)
         except _JOB_ERRORS as exc:
             logger.exception("AutoQSAR prediction failed")
             _emit_failed(self.signals, str(exc) or exc.__class__.__name__)
