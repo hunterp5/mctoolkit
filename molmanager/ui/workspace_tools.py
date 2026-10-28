@@ -31,7 +31,6 @@ from typing import Any
 
 from .app_kernel import AppKernel, bind_mixin_methods
 from .macro_tools import MacroTools
-from .reinvent_tools import ReinventTools
 
 
 class _LazyMixinHost:
@@ -120,7 +119,6 @@ class WorkspaceTools:
         )
         self.structure_prep = _LazyMixinHost(app, _load_structure_prep)
         self.macros = MacroTools(app)
-        self.reinvent = ReinventTools(app)
         self.conformers = _LazyMixinHost(
             app,
             lambda: _load(

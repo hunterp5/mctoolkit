@@ -94,8 +94,6 @@ _EXPORTS: dict[str, str] = {
     "RandomNumberDialog": ".random_number",
     "RandomNumberDialogParams": ".random_number",
     "ReactionEnumerationDialog": ".reaction_enumeration",
-    "ReinventLearningDialog": ".reinvent_learning",
-    "ReinventSamplingDialog": ".reinvent_sampling",
     "RGroupEnumerationDialog": ".rgroup_enumeration",
     "ReactionExtractDialog": ".reaction_extract",
     "ReactionExtractDialogParams": ".reaction_extract",

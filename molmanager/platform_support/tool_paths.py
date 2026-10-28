@@ -29,8 +29,6 @@ TOOL_GNINA = "gnina"
 TOOL_JAVA = "java"
 TOOL_MAFFT = "mafft"
 TOOL_OBABEL = "obabel"
-TOOL_REINVENT = "reinvent"
-TOOL_XTB = "xtb"
 
 _SETTINGS_KEYS = {
     TOOL_AIZYNTH_CONFIG: "tools/aizynthfinder_config",
@@ -41,8 +39,6 @@ _SETTINGS_KEYS = {
     TOOL_JAVA: "tools/java_executable",
     TOOL_MAFFT: "tools/mafft_executable",
     TOOL_OBABEL: "tools/obabel_executable",
-    TOOL_REINVENT: "tools/reinvent_executable",
-    TOOL_XTB: "tools/xtb_executable",
 }
 
 # Machine policy keys. A present key wins over Settings → Configure.
@@ -55,8 +51,6 @@ _POLICY_KEYS = {
     TOOL_JAVA: "MOLMANAGER_TOOL_JAVA",
     TOOL_MAFFT: "MOLMANAGER_TOOL_MAFFT",
     TOOL_OBABEL: "MOLMANAGER_TOOL_OBABEL",
-    TOOL_REINVENT: "MOLMANAGER_TOOL_REINVENT",
-    TOOL_XTB: "MOLMANAGER_TOOL_XTB",
 }
 
 

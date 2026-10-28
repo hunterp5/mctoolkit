@@ -42,8 +42,6 @@ from ...platform_support.tool_paths import (
     TOOL_JAVA,
     TOOL_MAFFT,
     TOOL_OBABEL,
-    TOOL_REINVENT,
-    TOOL_XTB,
     configured_executable,
     policy_tool_path,
     save_tool_path,
@@ -175,28 +173,6 @@ def _probe_obabel(path: str) -> tuple[bool, str]:
     return False, MISSING_OPENBABEL_MSG
 
 
-def _initial_reinvent() -> str:
-    return configured_executable(TOOL_REINVENT)
-
-
-def _probe_reinvent(path: str) -> tuple[bool, str]:
-    from ...generative.reinvent_sampling import describe_reinvent
-
-    return describe_reinvent(path)
-
-
-def _initial_xtb() -> str:
-    from ...platform_support.bundled_paths import default_external_executable
-
-    return configured_executable(TOOL_XTB) or default_external_executable("xtb")
-
-
-def _probe_xtb(path: str) -> tuple[bool, str]:
-    from ...descriptors.orbitals import describe_xtb
-
-    return describe_xtb(path)
-
-
 @dataclass(frozen=True)
 class ToolPathSpec:
     """One Settings → Configure page: a path, optional folder browse, and Test."""
@@ -289,32 +265,6 @@ _SPECS: dict[str, ToolPathSpec] = {
         initial=_initial_obabel,
         probe=_probe_obabel,
         browse_title="Open Babel executable",
-    ),
-    TOOL_REINVENT: ToolPathSpec(
-        key=TOOL_REINVENT,
-        title="REINVENT",
-        tooltip=(
-            "reinvent command from a separate REINVENT 4 environment. "
-            "Leave blank to use reinvent on PATH. Do not point this at MolManager's Python."
-        ),
-        placeholder="reinvent",
-        file_filter="REINVENT (reinvent.exe reinvent);;All files (*.*)",
-        initial=_initial_reinvent,
-        probe=_probe_reinvent,
-        browse_title="REINVENT executable",
-    ),
-    TOOL_XTB: ToolPathSpec(
-        key=TOOL_XTB,
-        title="xtb",
-        tooltip=(
-            "xtb executable for GFN2-xTB HOMO and LUMO descriptors. "
-            "Leave blank to use xtb on PATH, or install the tblite package instead."
-        ),
-        placeholder="xtb",
-        file_filter="Executables (xtb.exe xtb);;All files (*.*)",
-        initial=_initial_xtb,
-        probe=_probe_xtb,
-        browse_title="xtb executable",
     ),
 }
 

@@ -89,7 +89,6 @@ from ..table_write_service import TableWriteService
 from ..tool_dialog_scope import ToolDialogScope
 from ..session_notepad import SessionNotepadHost
 from ..macro_tools import MacroTools
-from ..reinvent_tools import ReinventTools
 from ..workspace_tools import WorkspaceTools
 from .activity_cliff_mixin import ActivityCliffMixin
 from .align_substructure_mixin import AlignSubstructureMixin
@@ -602,7 +601,6 @@ class ChemistryWorkspaceWindow(QMainWindow):
         self.table.set_structure_column_minimum_width(structure_column_minimum_width())
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_table_menu)
-        self.table.doubleClicked.connect(self._on_table_double_clicked)
         self.table.structure_depict_resized.connect(self.commit_structure_depict_resize)
         self.table.set_row_selection_controller(
             TableRowSelectionController(
@@ -742,10 +740,6 @@ class ChemistryWorkspaceWindow(QMainWindow):
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802 — Qt API name
         handle_file_drop(self, event)
 
-    def _on_table_double_clicked(self, index) -> None:
-        if index.isValid():
-            self.on_cell_double_click(index.row(), index.column())
-
 
 install_window_forwards(
     ChemistryWorkspaceWindow, "progress", (AppProgressMixin, ProgressController)
@@ -800,7 +794,6 @@ install_window_forwards(
 )
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.mpo", (MpoMixin,))
 install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.macros", (MacroTools,))
-install_window_forwards(ChemistryWorkspaceWindow, "workspace_tools.reinvent", (ReinventTools,))
 install_window_forwards(
     ChemistryWorkspaceWindow, "workspace_tools.conformers", (ConformersToolsMixin,)
 )
