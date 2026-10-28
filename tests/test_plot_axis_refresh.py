@@ -72,6 +72,62 @@ def test_set_axis_combo_items_optional_none(qapp):
     assert normalize_axis_name(combo.currentText()) is None
 
 
+def test_plotter_opens_options_until_plot(qapp):
+    from molmanager.ui.plot import PlotDialog
+
+    dlg = PlotDialog(None)
+    widget = dlg._plot_widget
+    drawn: list[bool] = []
+    widget.plot = lambda: drawn.append(True)
+    try:
+        assert widget.plot_btn.text() == "Plot"
+        assert widget._opts_dialog.windowTitle() == "Plotter"
+        assert widget._plot_btn_host.parent() is widget._opts_panel
+        assert not widget._plot_btn_host.isHidden()
+        assert not widget._plot_shown
+        widget._on_axis_change()
+        assert not widget._plot_debounce.isActive()
+
+        widget.present_initial_ui()
+        qapp.processEvents()
+        assert widget._opts_dialog.isVisible()
+        assert widget._plot_btn_host.isVisible()
+        assert not dlg.isVisible()
+
+        widget.plot_btn.click()
+        qapp.processEvents()
+        assert drawn == [True]
+        assert widget._plot_shown
+        assert dlg.isVisible()
+        assert not widget._opts_dialog.isVisible()
+
+        widget._open_plot_options()
+        qapp.processEvents()
+        assert widget._opts_dialog.isVisible()
+        assert widget._opts_dialog.windowTitle() == "Plot Options"
+        assert not widget._plot_btn_host.isVisible()
+    finally:
+        widget._plot_shown = True
+        dlg._force_close = True
+        dlg.close()
+        widget._opts_dialog.hide()
+        qapp.processEvents()
+
+
+def test_closing_plotter_options_discards_unplotted_window(qapp):
+    from PyQt5 import sip
+
+    from molmanager.ui.plot import PlotDialog
+
+    dlg = PlotDialog(None)
+    widget = dlg._plot_widget
+    widget.present_initial_ui()
+    qapp.processEvents()
+    widget._opts_dialog.reject()
+    qapp.processEvents()
+    assert sip.isdeleted(dlg) or not dlg.isVisible()
+
+
 def test_plotter_markers_box_is_shared(qapp):
     from molmanager.ui.plot_markers_controls import PlotMarkersControls
 

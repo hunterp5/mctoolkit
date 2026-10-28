@@ -48,6 +48,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QSizePolicy,
     QSplitter,
     QVBoxLayout,
@@ -77,6 +78,7 @@ from .dockable_plot import (
     PLOT_BODY_MARGINS,
     PLOT_BODY_SPACING,
     apply_plot_chrome_glyphs,
+    hide_plot_options_dialog,
     make_add_to_main_button,
     make_clear_selection_button,
     make_close_plot_button,
@@ -157,6 +159,9 @@ class PlotWidget(
         self._heat_x_edges: list[float] = []
         self._heat_y_edges: list[float] = []
         self._radar_oids: list[int] = []
+        # Stay false until Plot (or a restored session) so opening the plotter
+        # does not draw a default figure before the user picks axes.
+        self._plot_shown = False
 
     def _build_plot_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -438,12 +443,28 @@ class PlotWidget(
         )
         opts_root.addWidget(self._controls_bottom, 1)
 
+        self._plot_btn_host = QWidget(self._opts_panel)
+        plot_row = QHBoxLayout(self._plot_btn_host)
+        plot_row.setContentsMargins(0, 10, 0, 6)
+        plot_row.addStretch()
+        self.plot_btn = QPushButton("Plot")
+        self.plot_btn.setMinimumWidth(160)
+        self.plot_btn.setStyleSheet("QPushButton { padding: 8px 28px; }")
+        self.plot_btn.setToolTip("Draw the plot with the axes and options selected above.")
+        self.plot_btn.clicked.connect(self._on_plot_clicked)
+        plot_row.addWidget(self.plot_btn)
+        plot_row.addStretch()
+        opts_root.addWidget(self._plot_btn_host)
+
         self._opts_dialog = make_plot_options_dialog(
             self,
             self._opts_panel,
+            title="Plotter",
             min_width=720,
-            min_height=420,
+            min_height=520,
         )
+        self._opts_dialog.resize(1000, 780)
+        self._opts_dialog.finished.connect(self._on_plot_options_finished)
 
         root.addWidget(plot_surface, 1)
 
@@ -520,8 +541,62 @@ class PlotWidget(
             model.headerDataChanged.connect(self._on_table_header_data_changed)
 
     def _open_plot_options(self) -> None:
-        """Open the plot configuration dialog (axes, titles, color, fit, statistics)."""
+        """Open plot settings. Plot is only on the setup dialog, before a figure exists."""
+        setup = not self._plot_shown
+        self._plot_btn_host.setVisible(setup)
+        self._opts_dialog.setWindowTitle("Plotter" if setup else "Plot Options")
         show_plot_options_dialog(self._opts_dialog)
+
+    def present_initial_ui(self) -> None:
+        """Open plotter options until the user plots; then show the plot window."""
+        if self._plot_shown or self._is_docked_in_main_window():
+            self.reveal_plot_window()
+            return
+        self._open_plot_options()
+
+    def reveal_plot_window(self) -> None:
+        """Show the floating plot host once the user has asked for a figure."""
+        if self._is_docked_in_main_window():
+            self.show()
+            return
+        win = self.window()
+        if win is None or win is self:
+            return
+        try:
+            win.show()
+            win.raise_()
+            win.activateWindow()
+        except RuntimeError:
+            return
+
+    def _on_plot_clicked(self) -> None:
+        """Draw the figure and reveal the plot window."""
+        self._plot_shown = True
+        hide_plot_options_dialog(self._opts_dialog)
+        self.reveal_plot_window()
+        self.plot()
+
+    def _on_plot_options_finished(self, _result: int = 0) -> None:
+        """Close a plotter the user dismissed before plotting."""
+        if self._plot_shown or self._is_docked_in_main_window():
+            return
+        win = self.window()
+        if win is None or win is self:
+            return
+        try:
+            if win.isVisible():
+                return
+        except RuntimeError:
+            return
+        QTimer.singleShot(0, lambda host=win: self._close_host_if_unplotted(host))
+
+    def _close_host_if_unplotted(self, host) -> None:
+        if self._plot_shown:
+            return
+        try:
+            host.close()
+        except RuntimeError:
+            return
 
     def _add_to_main_window(self) -> None:
         if self.parent_app is None:
@@ -632,6 +707,8 @@ class PlotWidget(
         self._on_axis_change()
 
     def _schedule_plot(self) -> None:
+        if not getattr(self, "_plot_shown", False):
+            return
         timer = getattr(self, "_plot_debounce", None)
         if timer is None:
             return

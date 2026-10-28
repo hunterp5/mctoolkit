@@ -59,6 +59,11 @@ class ViewerOpenersMixin:
         self._register_plot_dialog(dlg)
         self._sync_dialog_only_selected_scope(dlg)
         self._sync_active_plots_from_table_selection()
+        widget = getattr(dlg, "_plot_widget", None)
+        present = getattr(widget, "present_initial_ui", None)
+        if callable(present):
+            present()
+            return
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()

@@ -257,6 +257,10 @@ class SessionPlotsMixin:
                         and getattr(panel, "_plot_kind", None) == "lipe"
                         and getattr(panel, "_full_dataset", None) is None
                     )
+                    or (
+                        getattr(dlg, "_plot_widget", None) is panel
+                        and not getattr(panel, "_plot_shown", True)
+                    )
                 ):
                     continue
             except RuntimeError:

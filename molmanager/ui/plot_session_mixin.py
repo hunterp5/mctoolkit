@@ -173,6 +173,7 @@ class PlotSessionMixin:
             for edit, text in zip(self.entry_edits, entries, strict=False):
                 edit.setText(str(text) if text is not None else "")
         self._update_color_controls()
+        self._plot_shown = True
         self._schedule_plot()
 
     @classmethod
