@@ -364,7 +364,7 @@ class PredictToolsMixin:
         )
 
     def open_metabolite_viewer(self) -> None:
-        """Open the metabolite browser from the Predict → Metabolites → Viewer menu."""
+        """Open the metabolite browser from Calculate → Metabolites → Viewer."""
         from ..metabolite_browser import records_from_table
 
         records = list(getattr(self, "_metabolite_browse_records", None) or ())

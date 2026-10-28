@@ -10,7 +10,7 @@ Repeat a preparation you already do by hand: calculate a few descriptors, derive
 
 Each step is one of:
 
-- **Calculate descriptors** — the same descriptors as Chemistry → Calculate Descriptors, chosen by their internal key (`MolWt`, `MolLogP`), not the column title (`Mol Weight`).
+- **Calculate descriptors** — the same descriptors as Chemistry → Calculate → Descriptors, chosen by their internal key (`MolWt`, `MolLogP`), not the column title (`Mol Weight`).
 - **Calculator** — a numeric expression. Bracket column names (`[MolWt]`). The new column is `${stepId.output}` for later steps.
 - **Filter** — numeric range, text, or substructure cards. By default this replaces the filter panel. A numeric card uses that column's current data range, the same way a filter card does.
 - **Protonate** — dominant protomer at a pH. Later steps can use `${stepId.output}`, `${stepId.percent}`, and `${stepId.pka}`.

@@ -309,35 +309,10 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 "filters, structure preparation, enumeration, potency, and plots."
             ),
         ),
-        SEPARATOR,
-        action(
-            "&Sketcher…",
-            "open_sketcher",
-            hotkey="tools.sketcher",
-            tooltip="Open the structure sketcher to draw or edit molecules.",
-        ),
-        action(
-            "Design Studio…",
-            "open_design_studio",
-            tooltip=(
-                "Open a sketcher with a live descriptor strip and a design list. "
-                "An empty SAR Matrix cell builds that analog here."
-            ),
-        ),
         tooltips_visible=True,
     ),
     submenu(
         "&Chemistry",
-        action(
-            "Calculate Descriptors…",
-            "open_calc",
-            hotkey="tools.calculate_descriptors",
-            tooltip=(
-                "Compute RDKit molecular descriptors and structural-alert catalogs, "
-                "and append them as columns (selected or visible rows)."
-            ),
-        ),
-        SEPARATOR,
         submenu(
             "Structure Preparation",
             action(
@@ -361,6 +336,49 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
             tooltips_visible=True,
         ),
         SEPARATOR,
+        submenu(
+            "Calculate",
+            action(
+                "&Descriptors…",
+                "open_calc",
+                hotkey="tools.calculate_descriptors",
+                tooltip=(
+                    "Compute RDKit molecular descriptors and structural-alert catalogs, "
+                    "and append them as columns (selected or visible rows)."
+                ),
+            ),
+            action(
+                "pKa…",
+                "open_pka_predictor",
+                tooltip="Estimate ionization / pKa-related properties when the predictor is available.",
+            ),
+            action(
+                "Permeability…",
+                "open_permeability_predictor",
+                tooltip=(
+                    "Predict Caco-2 and MDCK permeability / efflux endpoints "
+                    "(optional Chemprop install)."
+                ),
+            ),
+            submenu(
+                "Metabolites",
+                action(
+                    "Predict…",
+                    "open_biotransformer_predictor",
+                    tooltip="Predict metabolite structures with a local BioTransformer JAR.",
+                ),
+                action(
+                    "Viewer",
+                    "open_metabolite_viewer",
+                    tooltip="Open the metabolite browser when Predict Metabolites results are in the table.",
+                    attr="_act_metabolite_viewer",
+                    enabled=False,
+                ),
+                tooltips_visible=True,
+            ),
+            tooltips_visible=True,
+            about_to_show="_sync_predict_viewer_actions",
+        ),
         submenu(
             "&Conformations",
             submenu(
@@ -434,40 +452,6 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 ),
             ),
             tooltips_visible=True,
-        ),
-        submenu(
-            "&Predict",
-            action(
-                "pKa…",
-                "open_pka_predictor",
-                tooltip="Estimate ionization / pKa-related properties when the predictor is available.",
-            ),
-            action(
-                "Permeability…",
-                "open_permeability_predictor",
-                tooltip=(
-                    "Predict Caco-2 and MDCK permeability / efflux endpoints "
-                    "(optional Chemprop install)."
-                ),
-            ),
-            submenu(
-                "Metabolites",
-                action(
-                    "Predict…",
-                    "open_biotransformer_predictor",
-                    tooltip="Predict metabolite structures with a local BioTransformer JAR.",
-                ),
-                action(
-                    "Viewer",
-                    "open_metabolite_viewer",
-                    tooltip="Open the metabolite browser when Predict Metabolites results are in the table.",
-                    attr="_act_metabolite_viewer",
-                    enabled=False,
-                ),
-                tooltips_visible=True,
-            ),
-            tooltips_visible=True,
-            about_to_show="_sync_predict_viewer_actions",
         ),
         submenu(
             "Structure &Decomposition",
@@ -559,6 +543,21 @@ MAIN_WINDOW_MENUS: tuple[MenuItem, ...] = (
                 about_to_show="_sync_retrosynthesis_actions",
             ),
             tooltips_visible=True,
+        ),
+        SEPARATOR,
+        action(
+            "&Sketcher…",
+            "open_sketcher",
+            hotkey="tools.sketcher",
+            tooltip="Open the structure sketcher to draw or edit molecules.",
+        ),
+        action(
+            "Design Studio…",
+            "open_design_studio",
+            tooltip=(
+                "Open a sketcher with a live descriptor strip and a design list. "
+                "An empty SAR Matrix cell builds that analog here."
+            ),
         ),
         tooltips_visible=True,
     ),

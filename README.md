@@ -304,7 +304,7 @@ The table, sketcher, RDKit descriptors, and stochastic conformers do not need an
 | AmberTools | GAFF / GAFF2 minimization | AmberTools | `MOLMANAGER_TOOL_AMBER` |
 | AiZynthFinder | Chemistry → Reaction → Retrosynthesis | AiZynthFinder | `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG` |
 | Java | BioTransformer | Java | `MOLMANAGER_TOOL_JAVA` |
-| BioTransformer | Chemistry → Predict → Metabolites | BioTransformer | `MOLMANAGER_BIOTRANSFORMER_JAR` (environment variable; checked before the saved path) |
+| BioTransformer | Chemistry → Calculate → Metabolites | BioTransformer | `MOLMANAGER_BIOTRANSFORMER_JAR` (environment variable; checked before the saved path) |
 | CONFORGE | Conformations → Generate → CONFORGE | CONFORGE | `MOLMANAGER_TOOL_CONFGEN` |
 | Gnina | Protein → Dock Ligand | Gnina | `MOLMANAGER_TOOL_GNINA` |
 | MAFFT | Protein → Sequence | MAFFT | `MOLMANAGER_TOOL_MAFFT` |
@@ -376,7 +376,7 @@ Confirm with `java -version`. **Settings → Configure → Java** — leave the 
 
 ### BioTransformer
 
-**Chemistry → Predict → Metabolites**. The JAR is not in git. `supportfiles/` and a knowledge-base folder (`btkb/`, `database/`, or `bkdb/`) must sit next to the JAR.
+**Chemistry → Calculate → Metabolites**. The JAR is not in git. `supportfiles/` and a knowledge-base folder (`btkb/`, `database/`, or `bkdb/`) must sit next to the JAR.
 
 With the MolManager environment active, from the repository root:
 

@@ -37,7 +37,7 @@ def _click(widget, pos: QPoint) -> None:
 
 
 def test_package_import_opens_a_blank_sketcher(qapp) -> None:  # noqa: ARG001
-    """Tools → Sketcher imports the dialog and shows an empty drawing canvas."""
+    """Chemistry → Sketcher imports the dialog and shows an empty drawing canvas."""
     assert RXN_ANNOTATION_HEADER == "Reaction Annotation"
     dialog = SketcherDialog()
     dialog.resize(1400, 900)

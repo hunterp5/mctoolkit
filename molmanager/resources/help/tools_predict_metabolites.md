@@ -36,7 +36,7 @@ Install steps for Java and the JAR are in **External tools**. Run `python script
 2. Choose table rows or paste SMILES.
 3. Pick metabolism, steps, and the product cap.
 4. Run **Predict** and wait on **Processes**.
-5. Review parent columns (**Metabolite Count**, **Metabolite Reactions**, **Metabolite SMILES**) and the **Predict Metabolites Browser**. The table lists the parent first, then metabolites (structure, reaction, enzyme, step); click a row to show that structure on the canvas. **Browse Only Selected** is in the footer. Reopen it from **Chemistry → Predict → Metabolites → Viewer**. A saved session keeps the browser records (reaction, enzyme, generation, and every product SMILES), so Viewer shows the same results after Open. Parent-row columns alone keep a shorter SMILES list when no browser records were saved.
+5. Review parent columns (**Metabolite Count**, **Metabolite Reactions**, **Metabolite SMILES**) and the **Predict Metabolites Browser**. The table lists the parent first, then metabolites (structure, reaction, enzyme, step); click a row to show that structure on the canvas. **Browse Only Selected** is in the footer. Reopen it from **Chemistry → Calculate → Metabolites → Viewer**. A saved session keeps the browser records (reaction, enzyme, generation, and every product SMILES), so Viewer shows the same results after Open. Parent-row columns alone keep a shorter SMILES list when no browser records were saved.
 
 ## Use cases
 

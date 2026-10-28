@@ -172,8 +172,8 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
         (
             _e(
                 "tools_calc_descriptors",
-                "Calculate Descriptors",
-                "Calculate Descriptors",
+                "Descriptors",
+                "Descriptors",
                 "RDKit descriptors, structural alerts, and 3D shape when confs exist.",
             ),
             _e(
@@ -270,7 +270,7 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_design_studio",
                 "Design Studio",
                 "Design Studio",
-                "Tools → Design Studio. Floating sketcher, property strip, and design list.",
+                "Chemistry → Design Studio. Floating sketcher, property strip, and design list.",
             ),
             _e(
                 "tools_gen_conformations",
@@ -434,13 +434,16 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "tools_predict_metabolites",
                 "Predict Metabolites",
                 "Metabolites",
-                "BioTransformer metabolite structures; reopen from Predict → Metabolites → Viewer.",
+                (
+                    "BioTransformer metabolite structures; reopen from "
+                    "Chemistry → Calculate → Metabolites → Viewer."
+                ),
             ),
             _e(
                 "tools_pka",
                 "Predict pKa",
                 "pKa",
-                "Uni-pKa macro pKa values from Predict → pKa.",
+                "Uni-pKa macro pKa values from Chemistry → Calculate → pKa.",
             ),
             _e(
                 "data_qsar",

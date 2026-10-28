@@ -121,30 +121,40 @@ def test_prepare_and_fast_prepare_are_chemistry_commands():
     assert "Prepare…" not in labels
     assert "Fast Prepare…" not in labels
     assert "Prepare Structures" not in labels
-    prep_at = labels.index("Structure Preparation")
-    assert labels[prep_at + 1] == ""
-    assert labels[prep_at + 2] == "Conformations"
+    assert labels[0] == "Structure Preparation"
+    assert labels[1] == ""
+    assert labels[2] == "Calculate"
+    assert labels.index("Conformations") == labels.index("Calculate") + 1
+    assert "Predict" not in labels
+    assert "Calculate Descriptors…" not in labels
     prep = find_submenu(tools.items, "Structure Preparation")
     assert menu_outline(prep.items) == ["Preparation Menu…", "Fast Prepare…"]
     prepare = next(item for item in prep.items if item.title == "&Preparation Menu…")
     fast = next(item for item in prep.items if item.title == "Fast Prepare…")
     assert prepare.slot == "run_prepare"
     assert fast.slot == "run_fast_prepare"
-    predict = find_submenu(tools.items, "Predict")
-    predict_labels = [
-        x if isinstance(x, str) else next(iter(x)) for x in menu_outline(predict.items)
+    calc = find_submenu(tools.items, "Calculate")
+    assert menu_outline(calc.items) == [
+        "Descriptors…",
+        "pKa…",
+        "Permeability…",
+        {"Metabolites": ["Predict…", "Viewer"]},
     ]
-    assert "pKa…" in predict_labels
+    assert calc.about_to_show == "_sync_predict_viewer_actions"
+    descriptors = next(item for item in calc.items if item.title == "&Descriptors…")
+    assert descriptors.slot == "open_calc"
+    assert descriptors.hotkey == "tools.calculate_descriptors"
     assert "Align to Substructure…" not in labels
 
 
-def test_substructure_menu_sits_between_conformations_and_predict():
+def test_substructure_menu_sits_between_conformations_and_decomposition():
     tools = find_submenu(MAIN_WINDOW_MENUS, "Chemistry")
     labels = [x if isinstance(x, str) else next(iter(x)) for x in menu_outline(tools.items)]
     assert "Fingerprints" not in labels
     assert "Similarity" not in labels
+    assert "Predict" not in labels
     assert labels.index("Substructure") == labels.index("Conformations") + 1
-    assert labels.index("Substructure") + 1 == labels.index("Predict")
+    assert labels.index("Substructure") + 1 == labels.index("Structure Decomposition")
     sub = find_submenu(tools.items, "Substructure")
     assert menu_outline(sub.items) == [
         "Bemis–Murcko…",
@@ -160,9 +170,10 @@ def test_reaction_menu_outline():
     assert "Extract Reaction Info…" not in labels
     assert "Retrosynthesis" not in labels
     assert "Reaction Based…" not in labels
-    assert labels.index("Structure Decomposition") == labels.index("Predict") + 1
+    assert labels.index("Structure Decomposition") == labels.index("Substructure") + 1
     assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
     assert labels.index("Reaction") == labels.index("Structure Enumeration") + 1
+    assert labels[-3:] == ["", "Sketcher…", "Design Studio…"]
     reaction = find_submenu(tools.items, "Reaction")
     assert menu_outline(reaction.items) == [
         "Extract Reaction Info…",
@@ -291,9 +302,6 @@ def test_tools_menu_expands_calculator_random_and_notepad():
         "Query Database",
         "",
         "Macros…",
-        "",
-        "Sketcher…",
-        "Design Studio…",
     ]
     utilities = find_submenu(tools.items, "Utilities")
     util_labels = [

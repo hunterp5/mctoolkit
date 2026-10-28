@@ -27,7 +27,7 @@ If `MOLMANAGER_TOOL_ALLOWLIST` is set, the program name or path must be on that 
 | WSL | Windows host for Gnina and AmberTools | WSL | `MOLMANAGER_TOOL_WSL` |
 | AmberTools | GAFF minimization | AmberTools | `MOLMANAGER_TOOL_AMBER` |
 | AiZynthFinder | Chemistry → Reaction → Retrosynthesis | AiZynthFinder | `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG` |
-| BioTransformer | Chemistry → Predict → Metabolites | BioTransformer | `MOLMANAGER_BIOTRANSFORMER_JAR` (environment variable) |
+| BioTransformer | Chemistry → Calculate → Metabolites | BioTransformer | `MOLMANAGER_BIOTRANSFORMER_JAR` (environment variable) |
 | Java | BioTransformer | Java | `MOLMANAGER_TOOL_JAVA` |
 | CONFORGE | Conformations → Generate → CONFORGE | CONFORGE | `MOLMANAGER_TOOL_CONFGEN` |
 | Gnina | Protein → Dock Ligand | Gnina | `MOLMANAGER_TOOL_GNINA` |
@@ -124,7 +124,7 @@ Install a current Temurin or distro JRE and confirm `java -version` works.
 
 ## BioTransformer
 
-Local metabolite prediction for **Chemistry → Predict → Metabolites**. The JAR is not in git. `supportfiles/` and a knowledge-base folder (`btkb/`, `database/`, or `bkdb/`) must sit next to the JAR.
+Local metabolite prediction for **Chemistry → Calculate → Metabolites**. The JAR is not in git. `supportfiles/` and a knowledge-base folder (`btkb/`, `database/`, or `bkdb/`) must sit next to the JAR.
 
 ### Install
 

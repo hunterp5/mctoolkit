@@ -1,6 +1,6 @@
-# Calculate Descriptors
+# Descriptors
 
-Calculate Descriptors computes RDKit and related property columns (physicochemical, names, drug-likeness, counts, fingerprints, and more) into the table.
+Descriptors computes RDKit and related property columns (physicochemical, names, drug-likeness, counts, fingerprints, and more) into the table.
 
 ## Goal
 
@@ -8,7 +8,7 @@ Add numeric/text descriptor columns used by filters, plots, MPO, and models.
 
 ## When to use
 
-Use after loading structures and before property-based triage, MPO scoring, or feature selection for QSAR.
+Use after loading structures and before property-based triage, MPO scoring, or feature selection for QSAR. Open it from **Chemistry → Calculate → Descriptors…**.
 
 ## Inputs / scope
 

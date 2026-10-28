@@ -83,7 +83,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
         COMMAND_DESCRIPTORS,
         STEP_DESCRIPTORS,
         "Calculate descriptors",
-        "Chemistry → Calculate Descriptors",
+        "Chemistry → Calculate → Descriptors",
         COMPLETION_PROCESS_QUEUE,
     ),
     CommandSpec(

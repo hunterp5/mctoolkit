@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Chemistry → Predict → Metabolites (BioTransformer)."""
+"""Chemistry → Calculate → Metabolites (BioTransformer)."""
 
 from __future__ import annotations
 

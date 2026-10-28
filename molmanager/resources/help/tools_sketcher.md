@@ -34,7 +34,7 @@ Starts from a blank canvas or an existing molecule when launched in an edit cont
 
 ## Workflow
 
-1. Open **Sketcher** from the tools entry point.
+1. Open **Chemistry → Sketcher**.
 2. Draw or edit the molecule. For a reaction, draw reactants, click the reaction-arrow tool, drag from reactants toward products, then draw products on the head side.
 3. Validate valence/stereo visually.
 4. **File → Add to Table** asks, then adds the sketch as new rows. When the sketcher was opened from a Structure cell, **File → Update Table Entry** asks, then replaces that row, and that write can be undone. Closing the sketcher asks you to confirm.

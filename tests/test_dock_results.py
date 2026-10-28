@@ -75,19 +75,20 @@ def test_dock_menu_includes_smina(qapp):  # noqa: ARG001
     )
     assert not any(a.text().replace("&", "") == "Dock" for a in tools.actions())
     assert not any(a.text().replace("&", "") == "Dock" for a in chemistry.actions())
-    predict = None
+    calculate = None
     for act in chemistry.actions():
         menu = act.menu()
-        if menu is not None and act.text().replace("&", "") == "Predict":
-            predict = menu
+        if menu is not None and act.text().replace("&", "") == "Calculate":
+            calculate = menu
             break
-    assert predict is not None
-    pred_labels = [a.text() for a in predict.actions() if a.text()]
-    assert any("pKa" in t for t in pred_labels)
-    assert any("Permeability" in t for t in pred_labels)
-    assert not any(t.replace("&", "") == "SOM" for t in pred_labels)
+    assert calculate is not None
+    calc_labels = [a.text() for a in calculate.actions() if a.text()]
+    assert any(t.replace("&", "") == "Descriptors…" for t in calc_labels)
+    assert any("pKa" in t for t in calc_labels)
+    assert any("Permeability" in t for t in calc_labels)
+    assert not any(t.replace("&", "") == "SOM" for t in calc_labels)
     mets = None
-    for act in predict.actions():
+    for act in calculate.actions():
         menu = act.menu()
         label = act.text().replace("&", "")
         if menu is not None and label == "Metabolites":

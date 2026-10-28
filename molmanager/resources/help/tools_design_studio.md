@@ -8,7 +8,7 @@ Edit one analog and see molecular weight, lipophilicity, polarity, QED, and a co
 
 ## When to use
 
-Use **Tools → Design Studio** to draw or edit a structure in its own window. Use it from **Data → SAR Matrix**, or right-click a structure and choose **Open in Design Studio**, when you want that structure on the canvas. The window is not docked into the table.
+Use **Chemistry → Design Studio** to draw or edit a structure in its own window. Use it from **Data → SAR Matrix**, or right-click a structure and choose **Open in Design Studio**, when you want that structure on the canvas. The window is not docked into the table.
 
 ## Inputs / scope
 
@@ -30,7 +30,7 @@ The strip reads the molecule on the canvas. SAR Matrix can send a row's structur
 
 ## Workflow
 
-1. Open **Tools → Design Studio**, or right-click a structure cell and choose **Open in Design Studio**. It opens in its own window. The table row stays unchanged. Undo, copy, paste, and delete edit the sketch. The other application shortcuts, such as open, save, and search, still run.
+1. Open **Chemistry → Design Studio**, or right-click a structure cell and choose **Open in Design Studio**. It opens in its own window. The table row stays unchanged. Undo, copy, paste, and delete edit the sketch. The other application shortcuts, such as open, save, and search, still run.
 2. Draw or edit. The strip refreshes shortly after each change.
 3. **Add suggestions** for MMP and R-group ideas. **Chemistry → Bioisosteric Replacement** adds replacements for the selected atoms. Click a row to inspect it on the canvas.
 4. Select the designs you want and **Send to table**. The others stay on the list.

@@ -1443,9 +1443,12 @@ def test_prepare_and_fast_prepare_are_chemistry_commands(qapp):  # noqa: ARG001
     assert "Prepare…" not in labels
     assert "Fast Prepare…" not in labels
     assert "Prepare Structures" not in labels
-    prep_at = labels.index("Structure Preparation")
-    assert labels[prep_at + 1] == ""
-    assert labels[prep_at + 2] == "Conformations"
+    assert labels[0] == "Structure Preparation"
+    assert labels[1] == ""
+    assert labels[2] == "Calculate"
+    assert labels.index("Conformations") == labels.index("Calculate") + 1
+    assert "Predict" not in labels
+    assert "Calculate Descriptors…" not in labels
     prep = next(
         a.menu() for a in tools.actions() if a.text().replace("&", "") == "Structure Preparation"
     )
@@ -1453,9 +1456,13 @@ def test_prepare_and_fast_prepare_are_chemistry_commands(qapp):  # noqa: ARG001
         "Preparation Menu…",
         "Fast Prepare…",
     ]
-    predict = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "Predict")
-    predict_labels = [a.text().replace("&", "") for a in predict.actions()]
-    assert "pKa…" in predict_labels
+    calc = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "Calculate")
+    assert [a.text().replace("&", "") for a in calc.actions()] == [
+        "Descriptors…",
+        "pKa…",
+        "Permeability…",
+        "Metabolites",
+    ]
     assert "Align to Substructure…" not in labels
     sub = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "Substructure")
     sub_labels = [a.text().replace("&", "") for a in sub.actions()]
@@ -1472,9 +1479,10 @@ def test_tools_menu_nests_reaction_tools(qapp):  # noqa: ARG001
     assert "Extract Reaction Info…" not in labels
     assert "Retrosynthesis" not in labels
     assert "Reaction Based…" not in labels
-    assert labels.index("Structure Decomposition") == labels.index("Predict") + 1
+    assert labels.index("Structure Decomposition") == labels.index("Substructure") + 1
     assert labels.index("Structure Enumeration") == labels.index("Structure Decomposition") + 1
     assert labels.index("Reaction") == labels.index("Structure Enumeration") + 1
+    assert labels[-3:] == ["", "Sketcher…", "Design Studio…"]
     reaction = next(a.menu() for a in tools.actions() if a.text().replace("&", "") == "Reaction")
     reaction_labels = [a.text().replace("&", "") for a in reaction.actions()]
     assert reaction_labels == ["Extract Reaction Info…", "Retrosynthesis"]
