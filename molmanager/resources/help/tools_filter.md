@@ -42,4 +42,4 @@ All table rows; cards reference structure sources or property columns. Tools tha
 
 ## Tips and limits
 
-Disabled cards are ignored. Invert on multiple cards can be easy to misread - rename titles clearly. Substructure performance depends on library size and SMARTS complexity. Filters change visibility; they do not permanently delete data.
+Disabled cards are ignored. A row with no value in the filtered column, or no structure for a substructure card, stays hidden, including when Invert is on. Invert on multiple cards can be easy to misread - rename titles clearly. Substructure performance depends on library size and SMARTS complexity. Filters change visibility; they do not permanently delete data.

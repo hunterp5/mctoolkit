@@ -49,6 +49,30 @@ def _src_row_visible(w: ChemistryWorkspaceWindow, source_row: int) -> bool:
     return w._is_source_row_visible(source_row)
 
 
+def test_numeric_range_filter_hides_rows_with_no_value(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    w.headers = ["ID_HIDDEN", "Structure", "SMILES", "MW"]
+    w._table_model.set_headers(list(w.headers))
+    w._table_model.append_row(0, {"SMILES": "C", "MW": "0"})
+    w._table_model.append_row(1, {"SMILES": "CC", "MW": "5"})
+    w._table_model.append_row(2, {"SMILES": "CCC", "MW": ""})
+    w._table_model.append_row(3, {"SMILES": "CCCC", "MW": "n/a"})
+    for i, smi in enumerate(("C", "CC", "CCC", "CCCC")):
+        w.mols[i] = Chem.MolFromSmiles(smi)
+    w.next_oid = 4
+    w.calculate_global_bounds()
+    w._rebuild_sqlite_store_from_model()
+    w._sqlite_store_dirty = False
+    card = FilterCard(list(w.global_bounds.keys()), w, initial_property="MW")
+    card.restore_state("MW", 0.0, 5.0)
+    w.filters = [card]
+    w._apply_filters_impl_sync(None)
+    assert _src_row_visible(w, 0) is True
+    assert _src_row_visible(w, 1) is True
+    assert _src_row_visible(w, 2) is False
+    assert _src_row_visible(w, 3) is False
+
+
 def test_numeric_range_filter_hides_row_outside_bounds(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     _setup_two_row_mw_table(w)
@@ -75,6 +99,29 @@ def test_text_filter_partial_substring(qapp):  # noqa: ARG001
     w._apply_filters_impl_sync(None)
     assert _src_row_visible(w, 0) is True
     assert _src_row_visible(w, 1) is False
+
+
+def test_inverted_text_filter_hides_blank_cells(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    w.headers = ["ID_HIDDEN", "Structure", "SMILES", "Note"]
+    w._table_model.set_headers(list(w.headers))
+    w._table_model.append_row(0, {"SMILES": "CC", "Note": "ethane lot"})
+    w._table_model.append_row(1, {"SMILES": "C", "Note": ""})
+    w._table_model.append_row(2, {"SMILES": "CCC", "Note": "argon cylinder"})
+    w.mols[0] = Chem.MolFromSmiles("CC")
+    w.mols[1] = Chem.MolFromSmiles("C")
+    w.mols[2] = Chem.MolFromSmiles("CCC")
+    w.next_oid = 3
+    w.calculate_global_bounds()
+    card = TextFilterCard(["SMILES", "Note"], w)
+    card.set_column("Note")
+    card.text_edit.setText("eth")
+    card.restore_filter_flags(True, True)
+    w.filters = [card]
+    w._apply_filters_impl_sync(None)
+    assert _src_row_visible(w, 0) is False
+    assert _src_row_visible(w, 1) is False
+    assert _src_row_visible(w, 2) is True
 
 
 def test_text_filter_enable_btn_highlighted_when_on(qapp):  # noqa: ARG001
@@ -135,6 +182,36 @@ def test_category_filter_all_button_selects_every_value(qapp):  # noqa: ARG001
     assert _src_row_visible(w, 1) is True
 
 
+def test_category_filter_hides_rows_with_no_value(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    w.headers = ["ID_HIDDEN", "Structure", "SMILES", "Phase"]
+    w._table_model.set_headers(list(w.headers))
+    w._table_model.append_row(0, {"SMILES": "CC", "Phase": "prep"})
+    w._table_model.append_row(1, {"SMILES": "C", "Phase": ""})
+    w._table_model.append_row(2, {"SMILES": "CCC", "Phase": "ship"})
+    w.mols[0] = Chem.MolFromSmiles("CC")
+    w.mols[1] = Chem.MolFromSmiles("C")
+    w.mols[2] = Chem.MolFromSmiles("CCC")
+    w.next_oid = 3
+    w.calculate_global_bounds()
+    card = CategoryFilterCard(["SMILES", "Phase"], w)
+    card.set_column("Phase")
+    assert "" not in card.checked_values()
+    labels = {card.list_widget.item(i).text() for i in range(card.list_widget.count())}
+    assert "(blank)" not in labels
+    w.filters = [card]
+    w._apply_filters_impl_sync(None)
+    assert _src_row_visible(w, 0) is True
+    assert _src_row_visible(w, 1) is False
+    assert _src_row_visible(w, 2) is True
+    card.restore_filter_flags(True, True)
+    card.restore_from_session("Phase", ["prep"])
+    w._apply_filters_impl_sync(None)
+    assert _src_row_visible(w, 0) is False
+    assert _src_row_visible(w, 1) is False
+    assert _src_row_visible(w, 2) is True
+
+
 def test_category_filter_only_checked_values_visible(qapp):  # noqa: ARG001
     w = ChemistryWorkspaceWindow()
     w.headers = ["ID_HIDDEN", "Structure", "SMILES", "Phase"]
@@ -169,6 +246,27 @@ def test_substructure_sync_benzene_smarts_hides_non_aromatic(qapp):  # noqa: ARG
     w._apply_filters_impl_sync(None)
     assert _src_row_visible(w, 0) is True
     assert _src_row_visible(w, 1) is False
+
+
+def test_inverted_substructure_filter_hides_rows_with_no_structure(qapp):  # noqa: ARG001
+    w = ChemistryWorkspaceWindow()
+    w.headers = ["ID_HIDDEN", "Structure", "SMILES"]
+    w._table_model.set_headers(list(w.headers))
+    w._table_model.append_row(0, {"SMILES": "c1ccccc1"})
+    w._table_model.append_row(1, {"SMILES": ""})
+    w._table_model.append_row(2, {"SMILES": "CC"})
+    w.mols[0] = Chem.MolFromSmiles("c1ccccc1")
+    w.mols[2] = Chem.MolFromSmiles("CC")
+    w.next_oid = 3
+    w.calculate_global_bounds()
+    card = SubstructureFilterCard()
+    card.set_smarts("c1ccccc1")
+    card.restore_filter_flags(True, True)
+    w.filters = [card]
+    w._apply_filters_impl_sync(None)
+    assert _src_row_visible(w, 0) is False
+    assert _src_row_visible(w, 1) is False
+    assert _src_row_visible(w, 2) is True
 
 
 def test_substructure_invalid_smarts_sets_status(qapp):  # noqa: ARG001

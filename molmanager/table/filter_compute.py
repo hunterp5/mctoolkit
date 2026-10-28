@@ -18,11 +18,40 @@
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
+from ..chem.molecule_conversion import safe_float
 from ..services.sqlite_text_match import sqlite_text_match_clause
+
+
+def _nonempty_text_sql(quoted_column: str) -> str:
+    """True when a text cell has a non-blank value."""
+    return f"TRIM(COALESCE(\"{quoted_column}\", '')) <> ''"
+
+
+def _mm_numeric_match(value: object, lo: float, hi: float, inverted: int) -> int:
+    """1 when *value* is a finite number inside (or, if inverted, outside) the range.
+
+    Blank and non-numeric cells never match. SQLite ``CAST(x AS REAL)`` turns those
+    into 0, which would otherwise pass a range that includes 0.
+    """
+    number = safe_float(value)
+    if number is None or not math.isfinite(number):
+        return 0
+    inside = float(lo) <= float(number) <= float(hi)
+    if inverted:
+        return 0 if inside else 1
+    return 1 if inside else 0
+
+
+def _connect_readonly(db_path: str | Path) -> sqlite3.Connection:
+    uri = f"file:{Path(db_path).resolve()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.create_function("mm_numeric_match", 4, _mm_numeric_match, deterministic=True)
+    return conn
 
 
 def build_sqlite_where(
@@ -46,9 +75,17 @@ def build_sqlite_where(
             prop = str(spec.get("column") or "")
             if not prop or prop not in header_set:
                 continue
-            checked = list(spec.get("values") or [])
+            checked = [str(v) for v in (spec.get("values") or []) if str(v).strip()]
             qp = prop.replace('"', '""')
-            if not checked:
+            nonempty = _nonempty_text_sql(qp)
+            if spec.get("inverted", False):
+                if not checked:
+                    where_parts.append(f"({nonempty})")
+                else:
+                    placeholders = ", ".join(["?"] * len(checked))
+                    where_parts.append(f'({nonempty} AND "{qp}" NOT IN ({placeholders}))')
+                    args.extend(sorted(checked))
+            elif not checked:
                 where_parts.append("0")
             else:
                 placeholders = ", ".join(["?"] * len(checked))
@@ -62,11 +99,8 @@ def build_sqlite_where(
             qp = prop.replace('"', '""')
             lo = float(spec.get("min", 0.0))
             hi = float(spec.get("max", 0.0))
-            if spec.get("inverted", False):
-                where_parts.append(f'(CAST("{qp}" AS REAL) < ? OR CAST("{qp}" AS REAL) > ?)')
-            else:
-                where_parts.append(f'(CAST("{qp}" AS REAL) >= ? AND CAST("{qp}" AS REAL) <= ?)')
-            args.extend([lo, hi])
+            where_parts.append(f'(mm_numeric_match("{qp}", ?, ?, ?))')
+            args.extend([lo, hi, 1 if spec.get("inverted", False) else 0])
             continue
         if kind == "text":
             prop = str(spec.get("column") or "")
@@ -81,7 +115,7 @@ def build_sqlite_where(
                 case_sensitive=bool(spec.get("case_sensitive", False)),
             )
             if spec.get("inverted", False):
-                where_parts.append(f"(NOT ({expr}))")
+                where_parts.append(f"({_nonempty_text_sql(qp)} AND NOT ({expr}))")
             else:
                 where_parts.append(f"({expr})")
             args.extend(match_args)
@@ -93,8 +127,7 @@ def build_sqlite_where(
 
 
 def sqlite_count_matching(db_path: str | Path, where_sql: str, args: tuple) -> int:
-    uri = f"file:{Path(db_path).resolve()}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    conn = _connect_readonly(db_path)
     try:
         row = conn.execute(
             f"SELECT COUNT(*) AS c FROM table_rows WHERE {where_sql}",
@@ -114,8 +147,7 @@ def fetch_matching_oids(
     progress_cb: Callable[[int, int], None] | None = None,
 ) -> frozenset[int]:
     """Fetch all OIDs matching ``where_sql`` using a read-only SQLite connection."""
-    uri = f"file:{Path(db_path).resolve()}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    conn = _connect_readonly(db_path)
     try:
         page = max(1, int(page_size))
         out: set[int] = set()

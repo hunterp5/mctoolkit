@@ -170,6 +170,7 @@ class CategoryFilterCard(_FilterCardDragMixin, _FilterCardEnableInvertMixin, QFr
                     seen.add(v)
                     ordered.append(v)
             ordered.sort(key=lambda x: x.lower())
+        ordered = [v for v in ordered if str(v).strip()]
         truncated = len(ordered) > cap
         for v in ordered[:cap]:
             label = "(blank)" if v == "" else v
@@ -220,6 +221,8 @@ class CategoryFilterCard(_FilterCardDragMixin, _FilterCardEnableInvertMixin, QFr
         if not prop:
             return True
         raw = self.app._table_model.value_for_header(row, prop) or ""
+        if not str(raw).strip():
+            return False
         n_checkable = int(self._category_n_checkable_cache or 0)
         if n_checkable == 0:
             return True

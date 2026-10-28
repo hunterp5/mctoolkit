@@ -311,30 +311,20 @@ class TableSelectionMixin:
         return proxy is not None and view_model is proxy
 
     def _is_source_row_visible(self, source_row: int) -> bool:
-        """Proxy-aware check for whether a source-model row index is currently shown."""
-        if self._use_filter_proxy_for_table():
-            proxy = self._filter_proxy_model
-            return proxy.mapFromSource(self._table_model.index(source_row, 0)).isValid()
-        return not self.table.isRowHidden(source_row)
+        """Whether a source-model row index is currently shown by the filter proxy."""
+        proxy = self._filter_proxy_model
+        return proxy.mapFromSource(self._table_model.index(source_row, 0)).isValid()
 
     def _visible_oids_set(self) -> frozenset[int] | None:
         """OIDs currently shown by table filters. ``None`` means every row is visible."""
-        if self._use_filter_proxy_for_table():
-            proxy = self._filter_proxy_model
-            oids = proxy.visible_oids()
-            if oids is None:
-                return None
-            src_n = self._table_model.rowCount()
-            if src_n > 0 and len(oids) >= src_n:
-                return None
-            return oids
-        n = self._table_model.rowCount()
-        hidden = [r for r in range(n) if self.table.isRowHidden(r)]
-        if not hidden:
+        proxy = self._filter_proxy_model
+        oids = proxy.visible_oids()
+        if oids is None:
             return None
-        return frozenset(
-            int(self._table_model.row_oid(r)) for r in range(n) if not self.table.isRowHidden(r)
-        )
+        src_n = self._table_model.rowCount()
+        if src_n > 0 and len(oids) >= src_n:
+            return None
+        return oids
 
     def _invalidate_visible_source_rows_cache(self) -> None:
         """Drop cached visible source-row indices (call when filter visibility changes)."""

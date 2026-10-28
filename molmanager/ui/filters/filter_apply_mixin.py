@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from contextlib import nullcontext
 
 from ...platform_support.config import MolManagerConfig, load_config
@@ -52,6 +53,7 @@ class FilterApplyMixin:
                         "enabled": f.filter_enabled(),
                         "column": f.column_name(),
                         "values": sorted(f.checked_values()),
+                        "inverted": bool(f.filter_inverted()),
                     }
                 )
                 continue
@@ -109,6 +111,17 @@ class FilterApplyMixin:
             args,
             page_size=page,
         )
+
+    def _numeric_filter_hides_cell(self, cfg: dict, raw: object) -> bool:
+        """True when a numeric card hides this cell, including a blank or non-numeric cell."""
+        value = safe_float(raw)
+        if value is None or not math.isfinite(value):
+            return True
+        lo, hi = cfg["min"], cfg["max"]
+        inside = lo <= value <= hi
+        if cfg.get("inverted", False):
+            return bool(inside)
+        return not inside
 
     def _filters_include_substructure(self) -> bool:
         return any(
@@ -300,27 +313,7 @@ class FilterApplyMixin:
                 hide = oid not in sqlite_oids
             for f in [] if sqlite_oids is not None else self.filters:
                 if isinstance(f, SubstructureFilterCard):
-                    if not f.filter_enabled():
-                        continue
-                    inv = f.filter_inverted()
-                    ov_oids = self._override_for_substructure_card(f, overrides)
-                    if ov_oids is not None:
-                        matched = oid in ov_oids
-                        if inv:
-                            if matched:
-                                hide = True
-                                break
-                        elif not matched:
-                            hide = True
-                            break
-                        continue
-                    mol = self._mol_for_substructure_filter_row(r, f.structure_source())
-                    matched = f.match_mol(mol)
-                    if inv:
-                        if matched:
-                            hide = True
-                            break
-                    elif not matched:
+                    if self._substructure_card_hides_row(f, r, int(oid), overrides):
                         hide = True
                         break
                     continue
@@ -346,17 +339,9 @@ class FilterApplyMixin:
                 prop = cfg_column(fcfg)
                 if not prop or prop not in h_map:
                     continue
-                v = safe_float(self._table_model.value_for_header(r, prop))
-                if v is None:
-                    hide = True
-                    break
-                lo, hi = fcfg["min"], fcfg["max"]
-                inside = lo <= v <= hi
-                if fcfg.get("inverted", False):
-                    if inside:
-                        hide = True
-                        break
-                elif not inside:
+                if self._numeric_filter_hides_cell(
+                    fcfg, self._table_model.value_for_header(r, prop)
+                ):
                     hide = True
                     break
             if not hide:
@@ -404,8 +389,11 @@ class FilterApplyMixin:
                         ):
                             break
                         inv = f.filter_inverted()
+                        universe = self._oids_with_filter_subject(
+                            f.structure_source(), set(self.mols)
+                        )
                         visible_oids = (
-                            {oid for oid in self.mols if oid not in override_oids}
+                            {oid for oid in universe if oid not in override_oids}
                             if inv
                             else set(override_oids)
                         )
@@ -553,8 +541,11 @@ class FilterApplyMixin:
                             ):
                                 break
                             inv = f.filter_inverted()
+                            universe = self._oids_with_filter_subject(
+                                f.structure_source(), set(self.mols)
+                            )
                             visible_oids = (
-                                {oid for oid in self.mols if oid not in override_oids}
+                                {oid for oid in universe if oid not in override_oids}
                                 if inv
                                 else set(override_oids)
                             )
@@ -568,27 +559,7 @@ class FilterApplyMixin:
                             hide = oid not in sqlite_oids
                         for f in [] if sqlite_oids is not None else self.filters:
                             if isinstance(f, SubstructureFilterCard):
-                                if not f.filter_enabled():
-                                    continue
-                                inv = f.filter_inverted()
-                                ov_oids = self._override_for_substructure_card(f, overrides)
-                                if ov_oids is not None:
-                                    matched = oid in ov_oids
-                                    if inv:
-                                        if matched:
-                                            hide = True
-                                            break
-                                    elif not matched:
-                                        hide = True
-                                        break
-                                    continue
-                                mol = self._mol_for_substructure_filter_row(r, f.structure_source())
-                                matched = f.match_mol(mol)
-                                if inv:
-                                    if matched:
-                                        hide = True
-                                        break
-                                elif not matched:
+                                if self._substructure_card_hides_row(f, r, int(oid), overrides):
                                     hide = True
                                     break
                                 continue
@@ -614,17 +585,9 @@ class FilterApplyMixin:
                             prop = cfg_column(cfg)
                             if not prop or prop not in h_map:
                                 continue
-                            v = safe_float(self._table_model.value_for_header(r, prop))
-                            if v is None:
-                                hide = True
-                                break
-                            lo, hi = cfg["min"], cfg["max"]
-                            inside = lo <= v <= hi
-                            if cfg.get("inverted", False):
-                                if inside:
-                                    hide = True
-                                    break
-                            elif not inside:
+                            if self._numeric_filter_hides_cell(
+                                cfg, self._table_model.value_for_header(r, prop)
+                            ):
                                 hide = True
                                 break
                         if not hide:
@@ -685,6 +648,10 @@ class FilterApplyMixin:
                     if src not in targets_by_src:
                         targets_by_src[src] = self._substructure_filter_targets(src)
                     queries.append((smarts, src, targets_by_src[src]))
+            self._substructure_subject_oids_by_source = {
+                src: frozenset(int(item[0]) for item in targets)
+                for src, targets in targets_by_src.items()
+            }
             sigs = getattr(self, "_substructure_filter_signals", None)
             if sigs is None:
                 self._route_filter_apply(None)

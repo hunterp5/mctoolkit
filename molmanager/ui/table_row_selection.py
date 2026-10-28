@@ -92,11 +92,10 @@ class TableRowSelectionController:
         """Select every entry shown in the view (filtered-out rows stay unselected)."""
         model = self._view.model()
         n = model.rowCount() if model is not None else 0
-        rows = [r for r in range(n) if not self._view.isRowHidden(r)]
         sm = self._view.selectionModel()
         if sm is not None:
             sm.clearSelection()
-        self._store.set(self._oids_for_view_rows(rows), origin=ORIGIN_TABLE)
+        self._store.set(self._oids_for_view_rows(list(range(n))), origin=ORIGIN_TABLE)
 
     def clear_for_cell_input(self) -> None:
         self._store.clear(origin=ORIGIN_TABLE)
@@ -110,4 +109,4 @@ class TableRowSelectionController:
             rows = [header.logicalIndex(v) for v in range(lo, hi + 1)]
         else:
             rows = list(range(lo, hi + 1))
-        return [r for r in rows if r >= 0 and not self._view.isRowHidden(r)]
+        return [r for r in rows if r >= 0]

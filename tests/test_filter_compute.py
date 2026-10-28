@@ -117,6 +117,122 @@ def test_category_filter_in_clause(tmp_path):
     assert oids == frozenset({0, 2})
 
 
+def test_numeric_filter_hides_blank_and_non_numeric_cells(tmp_path):
+    store = SqliteTableStore(tmp_path / "blank_numeric.sqlite3")
+    headers = ["ID_HIDDEN", "Structure", "SMILES", "MW", "Phase"]
+    store.rebuild(
+        headers,
+        [
+            (0, {"SMILES": "C", "MW": "0", "Phase": "prep"}),
+            (1, {"SMILES": "CC", "MW": "10", "Phase": "ship"}),
+            (2, {"SMILES": "CCC", "MW": "", "Phase": "prep"}),
+            (3, {"SMILES": "CCCC", "MW": "n/a", "Phase": ""}),
+        ],
+    )
+    where = build_sqlite_where(
+        [
+            {
+                "kind": "numeric",
+                "enabled": True,
+                "column": "MW",
+                "min": 0.0,
+                "max": 10.0,
+                "inverted": False,
+            }
+        ],
+        headers=store.headers,
+    )
+    assert where is not None
+    where_sql, args = where
+    assert fetch_matching_oids(store.db_path, where_sql, args) == frozenset({0, 1})
+
+
+def test_inverted_numeric_filter_hides_blank_cells(tmp_path):
+    store = SqliteTableStore(tmp_path / "inv_numeric.sqlite3")
+    headers = ["ID_HIDDEN", "Structure", "SMILES", "MW"]
+    store.rebuild(
+        headers,
+        [
+            (0, {"SMILES": "C", "MW": "10"}),
+            (1, {"SMILES": "CC", "MW": "30"}),
+            (2, {"SMILES": "CCC", "MW": ""}),
+        ],
+    )
+    where = build_sqlite_where(
+        [
+            {
+                "kind": "numeric",
+                "enabled": True,
+                "column": "MW",
+                "min": 10.0,
+                "max": 20.0,
+                "inverted": True,
+            }
+        ],
+        headers=store.headers,
+    )
+    assert where is not None
+    where_sql, args = where
+    assert fetch_matching_oids(store.db_path, where_sql, args) == frozenset({1})
+
+
+def test_inverted_text_filter_hides_blank_cells(tmp_path):
+    store = _store_with_rows(tmp_path)
+    store.rebuild(
+        store.headers,
+        [
+            (0, {"SMILES": "C", "MW": "16", "Phase": "prep"}),
+            (1, {"SMILES": "CC", "MW": "30", "Phase": ""}),
+            (2, {"SMILES": "CCC", "MW": "44", "Phase": "ship"}),
+        ],
+    )
+    where = build_sqlite_where(
+        [
+            {
+                "kind": "text",
+                "enabled": True,
+                "column": "Phase",
+                "text": "prep",
+                "partial_match": True,
+                "case_sensitive": False,
+                "inverted": True,
+            }
+        ],
+        headers=store.headers,
+    )
+    assert where is not None
+    where_sql, args = where
+    assert fetch_matching_oids(store.db_path, where_sql, args) == frozenset({2})
+
+
+def test_category_filter_hides_blank_cells(tmp_path):
+    store = SqliteTableStore(tmp_path / "blank_category.sqlite3")
+    headers = ["ID_HIDDEN", "Structure", "SMILES", "Phase"]
+    store.rebuild(
+        headers,
+        [
+            (0, {"SMILES": "C", "Phase": "prep"}),
+            (1, {"SMILES": "CC", "Phase": ""}),
+            (2, {"SMILES": "CCC", "Phase": "ship"}),
+        ],
+    )
+    where = build_sqlite_where(
+        [
+            {
+                "kind": "category",
+                "enabled": True,
+                "column": "Phase",
+                "values": ["prep", "ship", ""],
+                "inverted": False,
+            }
+        ],
+        headers=store.headers,
+    )
+    assert where is not None
+    where_sql, args = where
+    assert fetch_matching_oids(store.db_path, where_sql, args) == frozenset({0, 2})
+
+
 def test_fetch_matching_oids_keyset_pages(tmp_path):
     store = _store_with_rows(tmp_path)
     where = build_sqlite_where(

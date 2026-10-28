@@ -144,10 +144,12 @@ class TextFilterCard(_FilterCardDragMixin, _FilterCardEnableInvertMixin, QFrame)
         prop = self.cb.currentText()
         if not prop:
             return True
-        raw = self.app._table_model.value_for_header(row, prop) or ""
         needle = (self.text_edit.text() or "").strip()
         if not needle:
             return True
+        raw = self.app._table_model.value_for_header(row, prop) or ""
+        if not str(raw).strip():
+            return False
         if self._partial_match:
             if self._case_sensitive:
                 inside = needle in raw

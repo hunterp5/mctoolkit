@@ -206,6 +206,53 @@ class FilterSubstructureMixin:
         self._invalidate_substructure_async_jobs()
         self._route_filter_apply(None)
 
+    def _substructure_card_hides_row(self, card, row: int, oid: int, overrides) -> bool:
+        """Hide *row* for one substructure card.
+
+        An enabled card with a query hides rows that have no structure for its
+        source. Invert keeps the complement of matches, and still drops rows
+        with no structure.
+        """
+        if not card.filter_enabled():
+            return False
+        query = (card.smarts_edit.text() or "").strip()
+        inverted = card.filter_inverted()
+        if not query:
+            return inverted
+        source = card.structure_source()
+        override_oids = self._override_for_substructure_card(card, overrides)
+        if override_oids is not None:
+            matched = int(oid) in override_oids
+            if not matched and not self._oid_has_substructure_subject(source, int(oid), row):
+                return True
+        else:
+            mol = self._mol_for_substructure_filter_row(row, source)
+            if mol is None:
+                return True
+            matched = card.match_mol(mol)
+        if inverted:
+            return bool(matched)
+        return not bool(matched)
+
+    def _oid_has_substructure_subject(self, source: str, oid: int, row: int) -> bool:
+        cached = getattr(self, "_substructure_subject_oids_by_source", None) or {}
+        subject = cached.get(source)
+        if subject is not None:
+            return int(oid) in subject
+        return self._mol_for_substructure_filter_row(row, source) is not None
+
+    def _oids_with_filter_subject(self, source: str, candidates: set[int]) -> set[int]:
+        """Candidates that have structure data for *source* when that set is known."""
+        cached = getattr(self, "_substructure_subject_oids_by_source", None) or {}
+        subject = cached.get(source)
+        if subject is not None:
+            return {int(oid) for oid in candidates if int(oid) in subject}
+        src = (source or "Structure").strip() or "Structure"
+        if src == "Structure":
+            mols = getattr(self, "mols", None) or {}
+            return {int(oid) for oid in candidates if mols.get(int(oid)) is not None}
+        return {int(oid) for oid in candidates}
+
     def _apply_substructure_override_to_visible(
         self,
         base: frozenset[int],
@@ -220,9 +267,10 @@ class FilterSubstructureMixin:
             if not self._substructure_override_matches_card(f, override_smarts, override_source):
                 continue
             inv = f.filter_inverted()
+            present = self._oids_with_filter_subject(f.structure_source(), set(base))
             if inv:
-                return {oid for oid in base if oid not in override_oids}
-            return {oid for oid in base if oid in override_oids}
+                return {oid for oid in present if oid not in override_oids}
+            return {oid for oid in present if oid in override_oids}
         return set(base)
 
     def _apply_substructure_overrides_to_visible(
@@ -237,6 +285,7 @@ class FilterSubstructureMixin:
             oids = self._override_for_substructure_card(f, overrides)
             if oids is None:
                 continue
+            visible = self._oids_with_filter_subject(f.structure_source(), visible)
             if f.filter_inverted():
                 visible = {oid for oid in visible if oid not in oids}
             else:
