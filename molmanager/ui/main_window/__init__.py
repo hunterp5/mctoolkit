@@ -14,8 +14,27 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Main window package: ``ChemistryWorkspaceWindow`` is a QMainWindow facade over kernel collaborators."""
+"""Main window package: ``ChemistryWorkspaceWindow`` is a QMainWindow facade over kernel collaborators.
 
-from .chemistry_workspace_window import ChemistryWorkspaceWindow
+The class is imported on first use. Loading it from this package's init pulls the
+progress owner while that owner is still importing a mixin from this package.
+"""
+
+from __future__ import annotations
+
+from typing import Any
 
 __all__ = ["ChemistryWorkspaceWindow"]
+
+
+def __getattr__(name: str) -> Any:
+    if name == "ChemistryWorkspaceWindow":
+        from .chemistry_workspace_window import ChemistryWorkspaceWindow
+
+        globals()[name] = ChemistryWorkspaceWindow
+        return ChemistryWorkspaceWindow
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
