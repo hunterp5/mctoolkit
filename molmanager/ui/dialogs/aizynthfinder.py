@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MolManager. If not, see <https://www.gnu.org/licenses/>.
 
-"""Chemistry → Retrosynthesis → Search."""
+"""Chemistry → Reaction → Retrosynthesis → Search."""
 
 from __future__ import annotations
 
@@ -131,7 +131,8 @@ class AizynthFinderDialog(QDialog):
             QMessageBox.warning(
                 self,
                 TOOL_RETROSYNTHESIS,
-                "Choose the AiZynthFinder config.yml from download_public_data.",
+                "Choose the AiZynthFinder config.yml. Settings → Configure → AiZynthFinder "
+                "→ Download… writes one next to the model files.",
             )
             return
         options = self._search_options()

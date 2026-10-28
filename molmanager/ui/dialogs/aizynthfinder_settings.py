@@ -18,7 +18,9 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
+from pathlib import Path
+
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication,
     QDialog,
@@ -38,8 +40,32 @@ from ...platform_support.tool_paths import (
     policy_tool_path,
     save_tool_path,
 )
+from ...platform_support.session_runtime import NetworkDisabled
+from ...predictions.aizynthfinder_data import download_public_data
 from ...predictions.aizynthfinder_run import probe_install
 from ..qt_widget_utils import make_window_minimizable
+
+_DOWNLOAD_ERRORS = (OSError, TimeoutError, NetworkDisabled)
+
+
+class _DataDownload(QThread):
+    """Fetch the public models without blocking the settings dialog."""
+
+    status = pyqtSignal(str)
+    finished_ok = pyqtSignal(str)
+    failed = pyqtSignal(str)
+
+    def __init__(self, folder: Path) -> None:
+        super().__init__()
+        self._folder = folder
+
+    def run(self) -> None:  # noqa: N802
+        try:
+            config = download_public_data(self._folder, progress=self.status.emit)
+        except _DOWNLOAD_ERRORS as exc:
+            self.failed.emit(str(exc))
+            return
+        self.finished_ok.emit(str(config))
 
 
 class AizynthFinderSettingsDialog(QDialog):
@@ -71,11 +97,19 @@ class AizynthFinderSettingsDialog(QDialog):
         self.config_edit = QLineEdit(configured_executable(TOOL_AIZYNTH_CONFIG))
         self.config_edit.setPlaceholderText("config.yml")
         self.config_edit.setToolTip(
-            "config.yml written by download_public_data, next to the model files."
+            "config.yml next to the model files. Download… fetches them from Zenodo."
         )
         if policy_tool_path(TOOL_AIZYNTH_CONFIG) is not None:
             self.config_edit.setReadOnly(True)
         root.addLayout(self._path_row(self.config_edit, "Browse config…", self._browse_config))
+        self.download_button = QPushButton("Download…")
+        self.download_button.setToolTip(
+            "Download the public models and ZINC stock from Zenodo (about 1.5 GB) "
+            "and write config.yml next to them."
+        )
+        self.download_button.setEnabled(not self.config_edit.isReadOnly())
+        self.download_button.clicked.connect(self._download)
+        root.addWidget(self.download_button)
 
         buttons = QHBoxLayout()
         buttons.addStretch()
@@ -145,6 +179,47 @@ class AizynthFinderSettingsDialog(QDialog):
         )
         if path:
             self.config_edit.setText(path)
+
+    def _download(self) -> None:
+        start = self.selected_config() or str(Path.home() / "aizynth-data")
+        folder = QFileDialog.getExistingDirectory(self, "AiZynthFinder data folder", start)
+        if not folder:
+            return
+        reply = QMessageBox.question(
+            self,
+            self.windowTitle(),
+            "Download the public USPTO models and ZINC stock (about 1.5 GB) into:\n\n"
+            f"{folder}\n\n"
+            "config.yml is written in that folder. The files are not stored in git. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self.download_button.setEnabled(False)
+        self.status.setText("Starting download…")
+        thread = _DataDownload(Path(folder))
+        thread.status.connect(self.status.setText)
+        thread.finished_ok.connect(self._download_finished)
+        thread.failed.connect(self._download_failed)
+        thread.finished.connect(thread.deleteLater)
+        self._download_thread = thread
+        thread.start()
+
+    def _download_finished(self, config: str) -> None:
+        self.config_edit.setText(config)
+        self.download_button.setEnabled(not self.config_edit.isReadOnly())
+        self.status.setText(f"Downloaded: {config}")
+        QMessageBox.information(self, self.windowTitle(), f"Downloaded:\n{config}")
+
+    def _download_failed(self, message: str) -> None:
+        self.download_button.setEnabled(not self.config_edit.isReadOnly())
+        self.status.setText(message.splitlines()[0] if message else "Download failed.")
+        QMessageBox.warning(
+            self,
+            self.windowTitle(),
+            f"Could not download the public data:\n{message}",
+        )
 
     def _test(self) -> None:
         QApplication.setOverrideCursor(Qt.WaitCursor)

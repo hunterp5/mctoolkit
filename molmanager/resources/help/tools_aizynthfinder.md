@@ -8,7 +8,7 @@ See whether a structure has a solved route in the public USPTO policy and ZINC s
 
 ## When to use
 
-Use **Chemistry → Retrosynthesis → Search** when you want a buyable-precursor route for one molecule or a small set. BRICS and RECAP still split a structure into fragments; they do not search a stock.
+Use **Chemistry → Reaction → Retrosynthesis → Search** when you want a buyable-precursor route for one molecule or a small set. BRICS and RECAP still split a structure into fragments; they do not search a stock.
 
 ## Inputs / scope
 
@@ -29,9 +29,9 @@ A structure column, **Selected Rows Only**, or one pasted SMILES. The Python int
 ## Workflow
 
 1. Create a conda environment with Python 3.10–3.12. Leave MolManager's environment alone: AiZynthFinder 4.4.1 requires RDKit 2023.x, and MolManager uses RDKit 2025.9 or newer.
-2. In that environment run ``python -m pip install aizynthfinder "pyarrow>=19,<26"``, then ``download_public_data`` into a folder you choose (about 1.8 GB: ONNX models, templates, and ``zinc_stock.hdf5``). AiZynthFinder 4.4.1 stays on NumPy 1.26, and PyArrow 26 will not import on that NumPy.
+2. In that environment run ``python -m pip install aizynthfinder "pyarrow>=19,<26"``. Then open **Settings → Configure → AiZynthFinder** and click **Download…**, or run ``python scripts/bootstrap_aizynth_data.py`` on a folder you choose (about 1.5 GB: ONNX models, templates, ``zinc_stock.hdf5``, and ``config.yml``). The stock comes from Zenodo. AiZynthFinder's own ``download_public_data`` fetches ZINC from a Figshare link that expires after 10 seconds, so that file fails and ``config.yml`` is never written. AiZynthFinder 4.4.1 stays on NumPy 1.26, and PyArrow 26 will not import on that NumPy.
 3. Open **Settings → Configure → AiZynthFinder**, set that environment's ``python.exe`` and the ``config.yml`` next to the model files, and click **Test**.
-4. Open **Chemistry → Retrosynthesis → Search**, choose the rows, and run it.
+4. Open **Chemistry → Reaction → Retrosynthesis → Search**, choose the rows, and run it.
 5. Read the ``AiZynth`` columns. They keep the solved state, score, step count, search time, precursor lists, and the other search statistics AiZynthFinder reports, including when the first route was found, the size of the search, and which policies and stocks were used. **Routes…** opens the route tree from that search.
 
 ## Use cases

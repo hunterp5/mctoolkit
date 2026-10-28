@@ -212,7 +212,10 @@ def ready_message(python_text: str = "", config_text: str = "") -> str | None:
         )
     config = resolve_config(config_text)
     if config is None:
-        return "Choose the AiZynthFinder config.yml from download_public_data."
+        return (
+            "Choose the AiZynthFinder config.yml. Download… in AiZynthFinder settings "
+            "writes one next to the model files."
+        )
     try:
         body = config.read_text(encoding="utf-8")
     except OSError as exc:
