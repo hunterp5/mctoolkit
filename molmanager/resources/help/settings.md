@@ -23,7 +23,7 @@ Global UI preferences for this installation/session; they do not alter table che
   - **Font...** - **Application font size**, **Table font size**, **Table text alignment** (3×3: top/center/bottom × left/center/right), **Reset to Default**.
 - **Hotkeys...** - category/command/shortcut table with OK/Cancel, **Clear Selected**, and **Reset to Default**.
 - **Status Bar** - show or hide the bottom bar (status messages and memory use).
-- **Configure** - paths for optional external programs. Each page has **Browse...**, **Test**, and **OK**.
+- **Configure** - paths for optional external programs. Each page has **Browse...**, **Test**, and **OK**. Install steps, what **Test** checks, and the search order when a path is blank are in **External tools**.
   - **WSL...** - path to ``wsl.exe`` so Windows can run Linux-only tools (Gnina, AmberTools / GAFF, and similar). **Test** runs ``uname -s`` inside WSL.
   - **AmberTools...** - ``antechamber`` command, bin folder, or executable. ``parmchk2`` and ``tleap`` are taken from the same folder. On Windows the command runs in WSL.
   - **AiZynthFinder...** - Python from a separate environment, plus the local ``config.yml`` from ``download_public_data``. **Test** imports ``aizynthfinder`` and refuses a remote policy server or a non-local MongoDB stock.

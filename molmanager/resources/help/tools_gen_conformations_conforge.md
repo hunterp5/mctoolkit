@@ -14,7 +14,7 @@ Use when you want CONFORGE’s published knowledge-based sampling instead of RDK
 
 ## Inputs / scope
 
-Scoped rows with valid structures; **Selected Rows Only** when checked. Output may go to table and/or SDF file. CONFORGE is optional.
+Scoped rows with valid structures; **Selected Rows Only** when checked. Output may go to table and/or SDF file. CONFORGE is optional. Install and path setup are in **External tools**.
 
 **Windows (Python 3.11):** PyPI has no `cdpkit` wheel, so `pip install cdpkit` compiles from source and fails without Boost. Install the CDPKit **MSVC** installer from [GitHub Releases](https://github.com/molinfo-vienna/CDPKit/releases), then set `confgen.exe` under **Settings → Configure → CONFORGE** (usually `C:\Program Files\CDPKit\Bin\confgen.exe`) or add that `Bin` folder to PATH.
 

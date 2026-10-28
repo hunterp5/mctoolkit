@@ -18,7 +18,7 @@ Protein Viewer **Tools → Prepare → Fast Prepare…** and **Tools → Prepare
 
 Requires a **Gnina** command, receptor PDB or PDBQT, ligands, and an output path. Ligands come from a **file** or from **selected table rows** plus a **conformations** column. Box defined by center and size, or **Autobox**.
 
-On **Windows**, Gnina is the official Linux binary and runs through **Settings → Configure → WSL** (same path as AmberTools). Put `gnina` on the WSL PATH, or set a Linux path such as `/usr/local/bin/gnina` under **Settings → Configure → Gnina**. You can also copy the binary to `molmanager/resources/bin/linux/gnina`. GPU CNN scoring uses CUDA inside WSL. `nvidia-smi` in WSL only checks the Windows GPU driver; Gnina also needs Linux **user-space** CUDA 12 and cuDNN 9 libraries (`libcudnn.so.9`, `libcudart.so.12`, …). If Gnina exits 127 with “error while loading shared libraries”, install those libs in WSL, for example:
+Install and path setup are in **External tools**. On **Windows**, Gnina is the official Linux binary and runs through **Settings → Configure → WSL** (same path as AmberTools). Put `gnina` on the WSL PATH, or set a Linux path such as `/usr/local/bin/gnina` under **Settings → Configure → Gnina**. You can also copy the binary to `molmanager/resources/bin/linux/gnina`. GPU CNN scoring uses CUDA inside WSL. `nvidia-smi` in WSL only checks the Windows GPU driver; Gnina also needs Linux **user-space** CUDA 12 and cuDNN 9 libraries (`libcudnn.so.9`, `libcudart.so.12`, …). If Gnina exits 127 with “error while loading shared libraries”, install those libs in WSL, for example:
 
 `conda create -n gnina-cuda -c nvidia -c conda-forge libcudnn cuda-cudart libcublas libcufft libcusparse libcusolver`
 

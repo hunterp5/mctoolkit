@@ -16,7 +16,7 @@ Use when you need candidate metabolite SMILES for design, MS annotation, or soft
 
 Rows with valid molecules in the chosen structure **Source**, or a single **SMILES string**. Optional **Selected Rows Only**. Requires **Java on PATH** and a BioTransformer 3 install (JAR plus sibling `btkb/` or `database/` and `supportfiles/`).
 
-Run `python scripts/bootstrap_biotransformer.py`, use **Settings → Configure → BioTransformer** (**Browse JAR…** / **Install…**), or set `MOLMANAGER_BIOTRANSFORMER_JAR`. Java is **Settings → Configure → Java** when it is not on PATH. Official docs target UNIX; on Windows try a current JRE, or run the JAR under WSL.
+Install steps for Java and the JAR are in **External tools**. Run `python scripts/bootstrap_biotransformer.py`, use **Settings → Configure → BioTransformer** (**Browse JAR…** / **Install…**), or set `MOLMANAGER_BIOTRANSFORMER_JAR`. Java is **Settings → Configure → Java** when it is not on PATH. Official docs target UNIX; on Windows try a current JRE, or run the JAR under WSL.
 
 ## Options
 

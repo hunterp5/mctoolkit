@@ -286,47 +286,230 @@ Every time you want to use MolManager:
 
 ---
 
-## Optional — Extra setup
+## External tools
 
-Most Python packages are already installed by **Step 6b**. The items below are binaries or data files that are not installed by pip.
+The table, sketcher, RDKit descriptors, and stochastic conformers do not need anything in this section. Each program below is optional. Install the ones for the menus you use, then set **Settings → Configure** and click **Test**. The same steps are in the in-app user manual under **External tools** (Help, or F1).
 
-### pKa / PyTorch
+### How MolManager finds a program
 
-`pip install -r requirements.txt` installs CPU PyTorch. If you have an NVIDIA GPU, run the script in **Step 6d** (same venv) so Uni-pKa uses CUDA. With no flags it selects CUDA when `nvidia-smi` sees a GPU.
+1. A key in the machine policy file, when that key is present. The Configure field is then read-only. Paths are in [Configuration](#configuration-environment-variables) below.
+2. The path saved by **Settings → Configure**. **OK** writes it. A blank path clears it. **Test** checks the field and does not save.
+3. A built-in search: `molmanager/resources/bin/win`, `linux`, or `mac`, then the directory in `MOLMANAGER_BUNDLE_DIR` when that variable is set, then a program of that name on `PATH`, then the install folders named under each tool.
 
-If **Chemistry → Predict → pKa** fails with a PyTorch version error (often after installing another package that upgrades torch), run the same script again to repair the stack. Do **not** create a second environment. Pass `-Cpu` / `--cpu` to force the CPU wheel, or `-Cuda` / `--cuda` to force CUDA. The first **Predict pKa** run downloads Uni-pKa fold weights from Hugging Face (`unipka-download-model`). For offline machines, prefetch with that CLI or copy the fold into unipkainfer’s `model_dir`.
+`MOLMANAGER_TOOL_ALLOWLIST` refuses any program whose name or path is not on the list. `MOLMANAGER_TOOL_DIGESTS` refuses a program whose SHA-256 is not in that file.
 
-### Docking (Gnina)
+| Tool | Used by | Configure page | Policy or environment key |
+|------|---------|----------------|---------------------------|
+| WSL | Windows host for Gnina and AmberTools | WSL | `MOLMANAGER_TOOL_WSL` |
+| AmberTools | GAFF / GAFF2 minimization | AmberTools | `MOLMANAGER_TOOL_AMBER` |
+| AiZynthFinder | Chemistry → Retrosynthesis | AiZynthFinder | `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG` |
+| Java | BioTransformer | Java | `MOLMANAGER_TOOL_JAVA` |
+| BioTransformer | Chemistry → Predict → Metabolites | BioTransformer | `MOLMANAGER_BIOTRANSFORMER_JAR` (environment variable; checked before the saved path) |
+| CONFORGE | Conformations → Generate → CONFORGE | CONFORGE | `MOLMANAGER_TOOL_CONFGEN` |
+| Gnina | Protein → Dock Ligand | Gnina | `MOLMANAGER_TOOL_GNINA` |
+| MAFFT | Protein → Sequence | MAFFT | `MOLMANAGER_TOOL_MAFFT` |
+| Open Babel | Conformations → Generate → Systematic | Open Babel | `MOLMANAGER_TOOL_OBABEL` |
+| REINVENT | Chemistry → REINVENT → Sampling and Learning | REINVENT | `MOLMANAGER_TOOL_REINVENT` |
+| xtb | Calculate Descriptors → Electronic | xtb | `MOLMANAGER_TOOL_XTB` |
 
-Docking is **Protein → Dock Ligand → Gnina…** (file-based CLI with CNN scoring). Receptor PDBQT still comes from **Prepare → Receptor PDB…** then **Prepare → PDBQT…** (Gnina also accepts a PDB receptor). Ligand PDBQT can come from the same PDBQT dialog (Meeko). Python pieces are in the docking extra (`pip install -e ".[docking]"` or `requirements.txt`). Protein Viewer **Render → Interactions** uses ProLIF from that same extra.
+AiZynthFinder and REINVENT must stay in their own conda environments. Installing either into `.venv` breaks MolManager’s NumPy and RDKit pins.
 
-The **Gnina** engine is not included in the Python install. Download the official Linux binary from [https://github.com/gnina/gnina](https://github.com/gnina/gnina). On Windows, install it in WSL (Settings → Configure → WSL) so `gnina` is on that distro’s PATH, or set the binary under Settings → Configure → Gnina. On Linux, either:
+### WSL (Windows)
 
-- Put `gnina` in:
-  - `molmanager/resources/bin/linux/`
-- Or set `MOLMANAGER_BUNDLE_DIR` to a folder that contains the executable.
+Gnina and AmberTools are Linux programs. On Windows, MolManager starts them with `wsl.exe`. Linux and macOS skip this page.
 
-macOS has no official Gnina binary. See **Protein → Dock Ligand** in the app after the binary is reachable.
+1. In an elevated PowerShell, run `wsl --install`, reboot, and finish the Linux account (Ubuntu is the usual default).
+2. In that distro, `uname -s` should print `Linux`.
+3. In MolManager, open **Settings → Configure → WSL**. The usual path is `C:\Windows\System32\wsl.exe`. **Test** runs `uname -s` and should report `Linux`.
 
-### Systematic conformers (Open Babel)
+Those tools use a login shell (`bash -lic`). A `conda activate` line in the distro’s `~/.bashrc` is visible. A path exported only in the current terminal is not.
 
-**Chemistry → Conformations → Generate → Systematic…** uses Open Babel Confab. Open Babel is a project dependency (`pip install openbabel`, also in `requirements-core.txt`). A blank **Settings → Configure → Open Babel** path uses that wheel’s `obabel` (`site-packages/openbabel/bin/obabel`). Place `obabel.exe` / `obabel` under `molmanager/resources/bin/<platform>/` to prefer a bundled copy, or point Configure at a specific executable.
+### AmberTools
 
-Distance-geometry ensembles remain **Chemistry → Conformations → Generate → Stochastic…** (RDKit ETKDG; no Open Babel).
+`antechamber`, `parmchk2`, and `tleap` parameterize ligands for **GAFF** and **GAFF2** minimization. OpenMM, in the MolManager environment, then minimizes in vacuum.
 
-### HOMO / LUMO (xtb)
+On Linux, or inside WSL on Windows:
 
-**Calculate Descriptors → Electronic** can write **HOMO (eV)**, **LUMO (eV)**, and **HOMO-LUMO gap (eV)**. Those columns are a gas-phase GFN2-xTB single point on the lowest-energy conformer in **confs** when that column exists. A 2D structure is embedded once (ETKDG) and minimized with MMFF94 (UFF fallback) for the single point only. Install the [`xtb` binary](https://github.com/grimme-lab/xtb) and set it under Settings → Configure → xtb, or `pip install tblite` when the binary is not available. The geometry is not reoptimized with xTB.
+```bash
+conda install -c conda-forge ambertools
+```
 
-### CONFORGE conformers (CDPKit)
+Debian and Ubuntu can use the distro package instead:
 
-**Chemistry → Conformations → Generate → CONFORGE…** uses CONFORGE from [CDPKit](https://cdpkit.org).
+```bash
+sudo apt update && sudo apt install ambertools
+```
 
-On **Windows with Python 3.11**, `pip install cdpkit` (and `pip install -e ".[conforge]"`) will try to compile from source and fail — PyPI has wheels for Windows 3.10/3.12/3.14, not 3.11. Install the CDPKit **MSVC** package from [GitHub Releases](https://github.com/molinfo-vienna/CDPKit/releases), then set `confgen.exe` under **Settings → Configure → CONFORGE** (usually `C:\Program Files\CDPKit\Bin\confgen.exe`) or add that `Bin` folder to PATH. MolManager also looks in `Program Files\CDPKit\Bin` automatically.
+On Windows, put `conda activate` for that environment in the WSL `~/.bashrc`, or install the apt package so `antechamber` is on the default login `PATH`. macOS uses the conda-forge package natively. There is no Windows executable.
 
-On **Linux/macOS**, `pip install cdpkit` uses a wheel when one exists for your Python version. You can still use a `confgen` binary from PATH, `resources/bin/<platform>/`, or **Settings → Configure → CONFORGE**.
+OpenMM stays in the MolManager environment (`pip install "openmm>=8.2,<8.3"`, already in `requirements.txt` and the `docking` extra). OpenMM 8.3 and newer crash the simulation subprocess on Windows. GAFF does not fall back to MMFF when parameterization fails.
 
-### Guided optional setup script
+**Settings → Configure → AmberTools** accepts the command `antechamber`, the `bin` folder that contains it, or the `antechamber` file. `parmchk2` and `tleap` are taken from that same folder. **Folder…** picks the directory. **Test** runs through WSL on Windows.
+
+### AiZynthFinder
+
+**Chemistry → Retrosynthesis → Search**. Release 4.4.1 needs RDKit 2023.x, so it cannot use MolManager’s interpreter (RDKit 2025.9 or newer).
+
+```bash
+conda create -n aizynth python=3.11
+conda activate aizynth
+python -m pip install aizynthfinder "pyarrow>=19,<26"
+download_public_data ~/aizynth-data
+```
+
+`download_public_data` writes `config.yml` plus the public USPTO models, templates, and `zinc_stock.hdf5` (about 1.8 GB). Python must be 3.10, 3.11, or 3.12. AiZynthFinder 4.4.1 stays on NumPy 1.26, and PyArrow 26 will not import on that NumPy.
+
+**Settings → Configure → AiZynthFinder:**
+
+- **Python** — that environment’s interpreter, for example `C:\Users\you\miniconda3\envs\aizynth\python.exe` or `~/miniconda3/envs/aizynth/bin/python`. Do not pick `.venv`.
+- **config.yml** — the file next to the downloaded models.
+
+**Test** imports `aizynthfinder` and reads the config. `use_remote_models: true`, or a MongoDB stock on a host other than localhost, is refused. The search reads models and the stock from disk.
+
+### Java
+
+BioTransformer needs a JRE. MolManager does not bundle one.
+
+- Windows: a current Temurin (or other) JRE, with `java` on `PATH`, or note the path to `java.exe`.
+- Debian / Ubuntu: `sudo apt install default-jre`.
+- macOS: `brew install openjdk`.
+
+Confirm with `java -version`. **Settings → Configure → Java** — leave the field blank to use `PATH`, or **Browse…** to `java` / `java.exe`. **Test** runs `java -version`.
+
+### BioTransformer
+
+**Chemistry → Predict → Metabolites**. The JAR is not in git. `supportfiles/` and a knowledge-base folder (`btkb/`, `database/`, or `bkdb/`) must sit next to the JAR.
+
+With the MolManager environment active, from the repository root:
+
+```bash
+python scripts/bootstrap_biotransformer.py
+```
+
+That places the official Bitbucket package (`BioTransformer3.0_20230525.jar`, `btkb/`, `supportfiles/`) in `molmanager/resources/models/biotransformer/`. **Settings → Configure → BioTransformer → Install…** downloads the same package (about 120 MB). **Browse JAR…** picks a JAR you already have. **Test** checks Java and the sibling folders.
+
+`MOLMANAGER_BIOTRANSFORMER_JAR` is checked before the saved path. `MOLMANAGER_OFFLINE=1` refuses the download. Manual download: [Bitbucket](https://bitbucket.org/wishartlab/biotransformer3.0jar) / [GitHub](https://github.com/Wishartlab-openscience/Biotransformer). Official docs target UNIX. On Windows, try the JRE first; if the JAR fails, use the same folder tree under WSL. Commercial redistribution of these files needs permission from the authors.
+
+### CONFORGE (CDPKit)
+
+**Chemistry → Conformations → Generate → CONFORGE…** uses `confgen` from [CDPKit](https://cdpkit.org).
+
+On **Windows**, including Python 3.11, `pip install cdpkit` compiles from source and fails without Boost. PyPI wheels for Windows are CPython 3.10, 3.12, and 3.14, not 3.11. Install the CDPKit **MSVC** package from [GitHub Releases](https://github.com/molinfo-vienna/CDPKit/releases). `confgen.exe` is usually `C:\Program Files\CDPKit\Bin\confgen.exe`.
+
+On **Linux and macOS**, when a wheel exists for your Python:
+
+```bash
+pip install cdpkit
+```
+
+`pip install -e ".[conforge]"` is the same package. A `confgen` binary still works without the wheel.
+
+**Settings → Configure → CONFORGE** — set the full path, or leave it blank. A blank field is enough when `confgen` is on `PATH`, a copy is under `resources/bin/<platform>/` or `MOLMANAGER_BUNDLE_DIR`, the CDPKit `Bin` folder is in a default location (`Program Files\CDPKit\Bin`, `%LOCALAPPDATA%\CDPKit\Bin`, `/opt/CDPKit/Bin`, `/usr/local/CDPKit/Bin`, `/Users/Shared/CDPKit/Bin`, or `~/CDPKit/Bin`), or the `CDPL` Python bindings import and no path is set. **Test** reports the executable, or the bindings when no path is set.
+
+### Gnina
+
+**Protein → Dock Ligand → Gnina…** is a file-based CLI with CNN scoring. The engine is not in the Python install. Download the official **Linux** binary from [GitHub Releases](https://github.com/gnina/gnina/releases). There is no macOS build and no native Windows executable.
+
+Inside Linux, or inside WSL on Windows:
+
+```bash
+chmod +x gnina
+sudo mv gnina /usr/local/bin/gnina
+command -v gnina
+```
+
+You can instead copy that file to `molmanager/resources/bin/linux/gnina`. On Windows, set **WSL** first. MolManager still launches the binary through WSL.
+
+**Settings → Configure → Gnina:**
+
+- Windows: `gnina` when that command is on the WSL `PATH`, or a Linux path such as `/usr/local/bin/gnina`.
+- Linux: a full path, or `gnina` on `PATH`.
+
+**Test** resolves the command and reports the path. GPU scoring needs CUDA 12 and cuDNN 9 user-space libraries in that Linux environment (`libcudnn.so.9`, `libcudart.so.12`, and the cuBLAS family). `nvidia-smi` only shows that the driver is visible. If Gnina exits 127 while loading shared libraries:
+
+```bash
+conda create -n gnina-cuda -c nvidia -c conda-forge libcudnn cuda-cudart libcublas libcufft libcusparse libcusolver
+```
+
+MolManager prepends matching conda `lib` directories to `LD_LIBRARY_PATH`. If `nvidia-smi` fails entirely, docking adds `--no_gpu`.
+
+Receptor PDBQT still comes from **Prepare → Receptor PDB…** then **Prepare → PDBQT…** (Gnina also accepts a PDB receptor). Ligand PDBQT can come from the same dialog (Meeko). Those Python pieces, and Protein Viewer **Render → Interactions** (ProLIF), are in the docking extra (`pip install -e ".[docking]"` or `requirements.txt`).
+
+### MAFFT
+
+**Protein → Sequence** runs `mafft --auto --amino`.
+
+- Debian / Ubuntu: `sudo apt install mafft`
+- macOS: `brew install mafft`
+- conda: `conda install -c bioconda mafft`
+- Windows: the all-in-one zip from [mafft.cbrc.jp](https://mafft.cbrc.jp/alignment/software/windows.html). Keep `mafft.bat` and the sibling `usr/` folder together. Copy both into `molmanager/resources/bin/win/`, or into one subfolder such as `mafft-win/` under that directory.
+
+**Settings → Configure → MAFFT** accepts `mafft`, `mafft.bat`, or the folder that contains them. **Folder…** picks the directory. A blank field uses `PATH`, then `resources/bin/<platform>/` (one child directory deep, including `usr/bin/mafft`). **Test** reports the file it resolved.
+
+### Open Babel
+
+**Chemistry → Conformations → Generate → Systematic…** uses Open Babel Confab. Stochastic ensembles stay on RDKit ETKDG and do not need Open Babel.
+
+Open Babel is already a project dependency (`openbabel` in `requirements-core.txt` and `requirements.txt`). A blank **Settings → Configure → Open Babel** field uses, in order, a copy under `resources/bin/<platform>/` or `MOLMANAGER_BUNDLE_DIR`, the wheel’s `site-packages/openbabel/bin/obabel`, then `obabel` on `PATH`. Set a full path only to force a specific executable. **Test** reports the file it resolved.
+
+MolManager sets `BABEL_LIBDIR` and `BABEL_DATADIR` from that executable. The pip wheel’s import would otherwise point those variables at folders that do not contain `UFF.prm` on Windows, and Confab then fails.
+
+### REINVENT 4
+
+**Chemistry → REINVENT → Sampling** and **Learning**. REINVENT pins its own NumPy, pandas, and PyTorch, so it cannot share the MolManager environment. **Test** refuses MolManager’s Python.
+
+Processor names below are PyTorch index names: `cpu`, a CUDA tag such as `cu126` when the driver matches, or `mac` on Apple silicon.
+
+```bash
+git clone --depth 1 https://github.com/MolecularAI/REINVENT4.git
+conda create --name reinvent4 python=3.11
+conda activate reinvent4
+cd REINVENT4
+python install.py cpu
+reinvent -V
+```
+
+The installer puts `reinvent` on that environment’s `PATH` (`Scripts\reinvent.exe` on Windows, `bin/reinvent` on Linux and macOS).
+
+Public priors are a separate download ([doi:10.5281/zenodo.15641296](https://doi.org/10.5281/zenodo.15641296)). Place them in that install’s `priors` folder. The preset ids MolManager offers are `.reinvent`, `.libinvent`, `.linkinvent`, and `.m2m_similarity`. Those names resolve to files in that folder. A full path to a `.prior` file also works.
+
+**Settings → Configure → REINVENT** — browse to that environment’s `reinvent` command. A blank field uses `reinvent` on the `PATH` MolManager inherited, which is empty unless the environment was already active. Prefer the full path. **Test** runs `reinvent -V`. In the sampling and learning dialogs, **Device** is `cpu` or `cuda:0`. `cuda:0` needs a CUDA install (`python install.py cu126`, or the tag that matches the driver).
+
+### xtb
+
+**Calculate Descriptors → Electronic** writes **HOMO (eV)**, **LUMO (eV)**, and **HOMO-LUMO gap (eV)**. The single point uses the lowest-energy conformer in **confs** when that column exists. A 2D structure is embedded once (ETKDG) and minimized with MMFF94 (UFF fallback) for the single point only. xtb does not reoptimize that geometry.
+
+Install the binary from [GitHub](https://github.com/grimme-lab/xtb) or conda:
+
+```bash
+conda install -c conda-forge xtb
+```
+
+On Windows, use the release `xtb.exe`. You can copy `xtb` or `xtb.exe` into `molmanager/resources/bin/<platform>/`.
+
+When no binary is configured, MolManager uses the `tblite` package in the MolManager environment (`pip install tblite`). The binary is preferred when both are present.
+
+**Settings → Configure → xtb** — a full path, or blank to use `PATH` and then a bundled copy. **Test** expects a version line from the binary. With the field blank and only `tblite` installed, **Test** reports the Python package.
+
+### Packages in the MolManager environment
+
+These are not Configure pages.
+
+**Uni-pKa / PyTorch.** `requirements.txt` installs a CPU wheel. With an NVIDIA GPU, run **Step 6d** in the same environment so Predict pKa, Protonate, and LogD use CUDA. If pKa later fails with a PyTorch version error, run that script again. Do not create a second environment for it. `-Cpu` / `--cpu` forces the CPU wheel. `-Cuda` / `--cuda` forces CUDA. The first **Predict pKa** run downloads Uni-pKa fold weights (`unipka-download-model`). For an offline machine, prefetch with that CLI or copy the fold into unipkainfer’s `model_dir`. `MOLMANAGER_PKA_GPU=0` forces CPU even with a CUDA wheel.
+
+**Permeability weights.** Chemprop is in `requirements.txt`. The GNN-MTL weights file is not in git:
+
+```bash
+python scripts/bootstrap_gnn_mtl_model.py
+```
+
+Override the file with `MOLMANAGER_GNN_MTL_MODEL`.
+
+**Docking helpers.** Meeko, PDBFixer, PDB2PQR, ProLIF, and OpenMM come from `pip install -e ".[docking]"` or `requirements.txt`.
+
+### Guided setup script
+
+The script installs the Python stack. It does not install Gnina, AmberTools, AiZynthFinder, REINVENT, MAFFT, xtb, or CONFORGE.
 
 **Windows:**
 
@@ -340,25 +523,7 @@ On **Linux/macOS**, `pip install cdpkit` uses a wheel when one exists for your P
 bash scripts/bootstrap_optional_tools.sh
 ```
 
-This runs `pip install -r requirements.txt`, `pip install -e .`, then `install_pytorch_pka` (CUDA PyTorch when an NVIDIA GPU is present), and can download permeability model weights.
-
-### Permeability model weights
-
-The Chemprop Python packages are in `requirements.txt`, but the **GNN-MTL model file** is not stored in git. Download it once:
-
-```bash
-python scripts/bootstrap_gnn_mtl_model.py
-```
-
-### BioTransformer (Predict Metabolites)
-
-The JAR is **not** in git. Install a JRE so `java` is on `PATH`, then download BioTransformer 3 once:
-
-```bash
-python scripts/bootstrap_biotransformer.py
-```
-
-That places the official Bitbucket package (`BioTransformer3.0_20230525.jar`, `btkb/`, `supportfiles/`) in `molmanager/resources/models/biotransformer/`. You can also **Browse JAR…** under **Settings → Configure → BioTransformer**, or set `MOLMANAGER_BIOTRANSFORMER_JAR` (the knowledge-base folder and `supportfiles/` must sit next to the JAR). Manual download: [Bitbucket](https://bitbucket.org/wishartlab/biotransformer3.0jar) / [GitHub](https://github.com/Wishartlab-openscience/Biotransformer). Official docs target UNIX; on Windows try a current JRE, or run the JAR under WSL.
+It runs `pip install -r requirements.txt`, `pip install -e .`, then `install_pytorch_pka` (CUDA PyTorch when `nvidia-smi` sees a GPU), and can download the permeability weights and the BioTransformer package.
 
 ---
 
@@ -504,7 +669,9 @@ Optional settings for power users and IT deployments:
 | `MOLMANAGER_SQLITE_BACKEND_PAGE_SIZE` | SQLite cache page size for filters (default `5000`) |
 | `MOLMANAGER_DISABLE_CUSTOM_CALC` | Set to `1` / `true` to disable Tools → Custom Calculator |
 | `MOLMANAGER_OFFLINE` | Set to `1` / `true` to refuse PubChem, ChEMBL, SureChEMBL, ZINC, vendor lookup, BioTransformer download, and the 3Dmol network script |
-| `MOLMANAGER_SQL_WRITES` | Set to `0` / `false` to refuse SQL that modifies a database, even if Read-only is unchecked |
+| `MOLMANAGER_SQL_WRITES` | Set to `0` / `false` to refuse SQL that modifies a database, even if Read-only is unchecked. A read-only load also sets a server read-only transaction on PostgreSQL and MySQL, and refuses any statement that is not a query |
+| `MOLMANAGER_SESSION_PLAINTEXT` | Set to `1` / `true` to save a `.cms` as a plain SQLite file. Unset encrypts the file for this OS user. Plaintext sessions still open |
+| `MOLMANAGER_SESSION_KEY_DIR` | Directory for `session.key`. Default is `%LOCALAPPDATA%\MolManager` on Windows (DPAPI), `~/Library/Application Support/MolManager` on macOS, and `~/.local/share/MolManager` on Linux (`0600`) |
 | `MOLMANAGER_TOOL_ALLOWLIST` | Comma-separated program names or paths, or a text file of one name per line. Unset allows every external program |
 | `MOLMANAGER_TOOL_DIGESTS` | Text file of `sha256` and a program name or path. Unset does not hash programs. A mismatch refuses that launch |
 | `MOLMANAGER_LOG_DIR` | Directory for rotating `molmanager.log` (platform default under user app data / state) |
@@ -512,7 +679,7 @@ Optional settings for power users and IT deployments:
 | `MOLMANAGER_BUNDLE_DIR` | Folder containing optional `gnina` / `vina` binaries |
 | `MOLMANAGER_BIOTRANSFORMER_JAR` | Path to the BioTransformer JAR (`btkb/` or `database/`, and `supportfiles/`, must be siblings of the JAR) |
 
-`MOLMANAGER_OFFLINE`, `MOLMANAGER_SQL_WRITES`, `MOLMANAGER_TOOL_ALLOWLIST`, and `MOLMANAGER_TOOL_DIGESTS` can also be written in a machine policy file, one `KEY=value` per line. On Windows that file is `%ProgramData%\MolManager\policy.txt`. On macOS it is `/Library/Application Support/MolManager/policy.txt`. On Linux it is `/etc/molmanager/policy.txt`. A key in that file wins over the process environment and over Settings → Configure. Tool paths use `MOLMANAGER_TOOL_GNINA`, `MOLMANAGER_TOOL_OBABEL`, `MOLMANAGER_TOOL_JAVA`, `MOLMANAGER_TOOL_MAFFT`, `MOLMANAGER_TOOL_XTB`, `MOLMANAGER_TOOL_CONFGEN`, `MOLMANAGER_TOOL_REINVENT`, `MOLMANAGER_TOOL_AMBER`, `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG`, and `MOLMANAGER_TOOL_WSL`. Lines starting with `#` are comments. If the file is absent, only the environment and Configure dialog are used.
+`MOLMANAGER_OFFLINE`, `MOLMANAGER_SQL_WRITES`, `MOLMANAGER_SESSION_PLAINTEXT`, `MOLMANAGER_SESSION_KEY_DIR`, `MOLMANAGER_TOOL_ALLOWLIST`, and `MOLMANAGER_TOOL_DIGESTS` can also be written in a machine policy file, one `KEY=value` per line. On Windows that file is `%ProgramData%\MolManager\policy.txt`. On macOS it is `/Library/Application Support/MolManager/policy.txt`. On Linux it is `/etc/molmanager/policy.txt`. A key in that file wins over the process environment and over Settings → Configure. Tool paths use `MOLMANAGER_TOOL_GNINA`, `MOLMANAGER_TOOL_OBABEL`, `MOLMANAGER_TOOL_JAVA`, `MOLMANAGER_TOOL_MAFFT`, `MOLMANAGER_TOOL_XTB`, `MOLMANAGER_TOOL_CONFGEN`, `MOLMANAGER_TOOL_REINVENT`, `MOLMANAGER_TOOL_AMBER`, `MOLMANAGER_TOOL_AIZYNTH_PYTHON`, `MOLMANAGER_TOOL_AIZYNTH_CONFIG`, and `MOLMANAGER_TOOL_WSL`. Lines starting with `#` are comments. If the file is absent, only the environment and Configure dialog are used.
 
 **Custom calculator:** expressions always use a restricted AST interpreter (`calculator_expressions`). Treat them as trusted input only. `MOLMANAGER_CUSTOM_CALC_LEGACY_EVAL` is retired and ignored if set.
 

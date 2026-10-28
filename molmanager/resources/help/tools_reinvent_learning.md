@@ -14,7 +14,7 @@ Use when sampling from the prior is not selective enough. REINVENT Sampling is t
 
 ## Inputs / scope
 
-The same REINVENT 4 command as sampling: **Settings → Configure → REINVENT**. The prior ids are files in that install's `priors` folder.
+The same REINVENT 4 command as sampling: **Settings → Configure → REINVENT**. Install steps are in **External tools**. The prior ids are files in that install's `priors` folder.
 
 De novo learning needs no seeds. R-group, linker, and similar-molecule generators need seeds from the selection, from every row, or from pasted SMILES.
 

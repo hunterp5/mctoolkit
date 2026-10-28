@@ -22,7 +22,7 @@ Works on the current session table (structures plus property columns). Most tool
 - **Chemistry** - calculate descriptors, prepare structures, conformations, fingerprints, substructure (Bemis–Murcko scaffolds and common core), reactions, R-group enumeration, and predictors (pKa, permeability, SOM).
 - **Protein** - 3D structure viewer for PDB, mmCIF, and related crystallographic files, **Sequence** for MAFFT multiple-sequence alignment, docking, and interaction fingerprints for stored poses.
 - **Data** - table operations, lists, statistics, clustering, plotter, MedChem plots, dimensionality reduction, QSAR, MPO, SAR matrix, selectivity ratios, filters, and table search.
-- **Settings** - theme, fonts, hotkeys, WSL executable for Linux-only tools, and **Help**.
+- **Settings** - theme, fonts, hotkeys, paths for optional external programs, and **Help**. **External tools** is the install and configuration guide for those programs.
 - **Layout** - rearrange or restore workspace panes.
 - **Log** - inspect running/queued background jobs and the session log (tool output, status history, warnings).
 - **Settings → Help** - User Guide and Citations. F1 also opens the guide.

@@ -94,6 +94,13 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
                 "Settings",
                 "Theme, fonts, status bar, keyboard shortcuts, external tool paths, and Help.",
             ),
+            _e(
+                "external_tools",
+                "External tools",
+                "External tools",
+                "Install and configure WSL, Gnina, AmberTools, AiZynthFinder, REINVENT, "
+                "and the other local programs.",
+            ),
         ),
     ),
     GuideSection(

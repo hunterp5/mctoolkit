@@ -18,7 +18,7 @@ Does not read or write the compound table.
 - **Paste FASTA / sequences…** — FASTA headers, or bare amino-acid strings separated by blank lines.
 - **Add from Protein Viewer** — polymer chains from the open Viewer. Uppercase and lowercase letters become the same amino acid; Viewer hetero tokens `+` / `*` / `~` are dropped.
 
-You need at least two sequences to Align.
+You need at least two sequences to Align. MAFFT install and path setup are in **External tools**.
 
 ## Options
 

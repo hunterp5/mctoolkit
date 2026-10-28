@@ -12,7 +12,7 @@ Use **Chemistry → Retrosynthesis → Search** when you want a buyable-precurso
 
 ## Inputs / scope
 
-A structure column, **Selected Rows Only**, or one pasted SMILES. The Python interpreter and ``config.yml`` come from **Settings → Configure → AiZynthFinder**.
+A structure column, **Selected Rows Only**, or one pasted SMILES. The Python interpreter and ``config.yml`` come from **Settings → Configure → AiZynthFinder**. Install steps are in **External tools**.
 
 ## Options
 

@@ -20,7 +20,7 @@ Scoped rows with valid structures; **Selected Rows Only** when checked. Output m
 
 - **Conformers** - ETKDG search budget (up to 1,000). This is how many poses to embed, not how many are stored.
 - **Energy window** - keep conformers within this window (0 = keep all).
-- **Force field** - MMFF94s (default), MMFF94, or UFF (MMFF variants fall back to UFF if parameters are missing). **GAFF2** / **GAFF** minimize each pose with AmberTools (antechamber / parmchk2 / tleap) and OpenMM in vacuum. They require AmberTools on PATH (WSL on Windows: Settings → Configure → WSL, or Settings → Configure → AmberTools) and OpenMM (`pip install 'openmm>=8.2,<8.3'`). There is no silent fallback to MMFF/UFF if parameterization fails.
+- **Force field** - MMFF94s (default), MMFF94, or UFF (MMFF variants fall back to UFF if parameters are missing). **GAFF2** / **GAFF** minimize each pose with AmberTools (antechamber / parmchk2 / tleap) and OpenMM in vacuum. Install steps are in **External tools**. They require AmberTools on PATH (WSL on Windows: Settings → Configure → WSL, or Settings → Configure → AmberTools) and OpenMM (`pip install 'openmm>=8.2,<8.3'`). There is no silent fallback to MMFF/UFF if parameterization fails.
 - **Seed** - reproducibility control.
 - **RMS prune (embed)** - drop near-duplicates during ETKDG embedding (−1 = ETKDG default).
 - **RMS prune (post-min)** - after minimization, drop higher-energy poses within this RMS of a kept conformer (0 = off).

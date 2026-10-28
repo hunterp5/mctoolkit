@@ -14,7 +14,7 @@ Use when you want ideas from a generative model and then keep working with them 
 
 ## Inputs / scope
 
-REINVENT 4 installed in **its own** Python environment. MolManager's environment cannot host it. Set the `reinvent` command under **Settings → Configure → REINVENT**. A blank path uses `reinvent` on PATH.
+REINVENT 4 installed in **its own** Python environment. MolManager's environment cannot host it. Install steps are in **External tools**. Set the `reinvent` command under **Settings → Configure → REINVENT**. A blank path uses `reinvent` on PATH.
 
 De novo sampling needs no table rows. The other generators need seeds from the selection, from every row, or from pasted SMILES.
 

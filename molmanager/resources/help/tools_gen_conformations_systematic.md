@@ -14,7 +14,7 @@ Use for flexible ligands when you want a systematic (not stochastic) search, or 
 
 ## Inputs / scope
 
-Scoped rows with valid structures; **Selected Rows Only** when checked. Output may go to table and/or SDF file. Open Babel is installed with the project (`pip install openbabel`). The `obabel` path is **Settings → Configure → Open Babel**. A copy under `resources/bin` is used when that path is blank.
+Scoped rows with valid structures; **Selected Rows Only** when checked. Output may go to table and/or SDF file. Open Babel is installed with the project (`pip install openbabel`). The `obabel` path is **Settings → Configure → Open Babel**. Install and search order are in **External tools**. A copy under `resources/bin` is used when that path is blank.
 
 Confab requires a 3D starting geometry. If a row is 2D, MolManager embeds once with ETKDG before calling Confab.
 

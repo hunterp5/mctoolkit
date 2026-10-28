@@ -7,6 +7,8 @@
 
 ## Optional CLI binaries (not in git — place locally or use installer)
 
+Install and **Settings → Configure** steps for each tool are in the project [README](../../README.md) and in the in-app user manual (**External tools**).
+
 molmanager can run these when installed on the system **or** when copied into:
 
 ```
