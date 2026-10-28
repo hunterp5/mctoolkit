@@ -175,6 +175,46 @@ def test_generation_progress_label_calls_out_last_molecule():
     assert generation_progress_label(1, 1) == "Generate conformations…"
 
 
+def test_clearing_prepare_progress_drops_the_unnamed_copy(qapp):  # noqa: ARG001
+    from PyQt5.QtCore import QObject
+    from PyQt5.QtWidgets import QLabel
+
+    from molmanager.ui.progress_controller import ProgressController
+
+    class _Queue:
+        def snapshot(self):
+            return {"running": {"job_id": "prep"}}
+
+    class _Host(QObject):
+        def __init__(self):
+            super().__init__()
+            self.status_label = QLabel()
+            self._tool_progress_state = ToolProgressState()
+            self.background_activity = None
+            self._loading_detail = None
+            self._export_busy = False
+            self.process_queue = _Queue()
+
+        def _workspace_loading_overlay_visible(self) -> bool:
+            return False
+
+        def _session_overlay_owns_loading_detail(self) -> bool:
+            return False
+
+        def _status_work_is_active(self) -> bool:
+            return False
+
+    host = _Host()
+    progress = ProgressController(host)
+    state = host._tool_progress_state
+    state.begin("Fast prepare", 4, job_id="prep")
+    state.update("Preparing structures…", 4, 4, job_id="prep")
+    state.update("Preparing structures…", 4, 4)
+    progress._clear_tool_progress()
+    assert state.any_active() is False
+    assert "100%" not in host.status_label.text()
+
+
 def test_drain_completed_futures_keeps_pending_and_collects_done():
     from concurrent.futures import Future
 

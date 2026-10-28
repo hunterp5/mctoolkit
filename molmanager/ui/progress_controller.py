@@ -172,7 +172,7 @@ class ProgressController:
         final_msg = message or msg or self._active_label
         if total > 0 and (active or done < total):
             self._on_tool_progress(final_msg, total, total, job_id=key)
-        state.end(job_id=key)
+        self._end_progress_slot(key, also_message=str(msg or ""))
         leftover = getattr(state, "snapshots", None)
         if key and callable(leftover) and not any(jid for jid in leftover() if jid):
             state.end()
@@ -216,6 +216,29 @@ class ProgressController:
             return str(named[0])
         return None
 
+    def _end_progress_slot(self, job_id: str | None, *, also_message: str = "") -> None:
+        """Stop *job_id* and the unnamed copy a worker signal writes beside it.
+
+        Queue workers update a named slot and also emit ``tool_progress``, which
+        the status handler stores with no job id. Ending only the named slot
+        leaves that copy at 100%, and the poll paints it forever.
+        """
+        state = self._app._tool_progress_state
+        messages = {str(also_message or "")}
+        if job_id:
+            with suppress(TypeError):
+                messages.add(str(state.snapshot(job_id=job_id)[0] or ""))
+        state.end(job_id=job_id)
+        messages.discard("")
+        if not job_id or not messages:
+            return
+        try:
+            default_message, _done, _total, active = state.snapshot(job_id="")
+        except TypeError:
+            return
+        if active and str(default_message or "") in messages:
+            state.end(job_id="")
+
     def _clear_tool_progress(
         self,
         *,
@@ -224,7 +247,7 @@ class ProgressController:
     ) -> None:
         """Stop polled tool progress; reset status line unless ``status_message`` is ``None``."""
         key = self._resolve_progress_job_id(job_id)
-        self._app._tool_progress_state.end(job_id=key)
+        self._end_progress_slot(key)
         if self._progress_any_active():
             self._refresh_status_from_slots()
             self._notify_activity_hub()
