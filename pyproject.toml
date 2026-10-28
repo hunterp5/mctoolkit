@@ -22,6 +22,7 @@ dependencies = [
     "openpyxl>=3.1",
     "scipy>=1.10",
     "sqlalchemy>=2.0",
+    "cryptography>=44",
     "pubchempy>=1.0.4",
     "chembl_webresource_client>=0.10.9",
     "rdkit>=2025.9.1",  # official PyPI name; do not install rdkit-pypi alongside it
@@ -66,6 +67,8 @@ conforge = [
 ]
 dev = [
     "pytest>=7.4,<9",
+    "pytest-cov>=5",
+    "mypy>=1.13",
     "ruff>=0.6",
     "pip-audit>=2.7",
     "fonttools>=4.40",  # scripts/build_font_metrics.py
@@ -118,3 +121,18 @@ select = [
     "S110",
     "SIM105",
 ]
+
+[tool.mypy]
+python_version = "3.11"
+files = [
+    "molmanager/services/sql_load_policy.py",
+    "molmanager/table/session_seal.py",
+]
+follow_imports = "silent"
+disallow_untyped_defs = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["sqlalchemy", "sqlalchemy.*", "cryptography", "cryptography.*"]
+ignore_missing_imports = true
