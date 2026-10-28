@@ -31,7 +31,11 @@ from PyQt5.QtWidgets import QApplication, QMessageBox
 
 from ...platform_support.config import load_config
 from ...storage import load_mols_from_parse_result
-from ...services.sql_load_policy import engine_kwargs_for_sql_load, sql_looks_destructive
+from ...services.sql_load_policy import (
+    engine_kwargs_for_sql_load,
+    install_read_only_guards,
+    sql_looks_destructive,
+)
 from ...chem.molecule_conversion import redact_sqlalchemy_url
 from ...workers.sql_load_worker import SqlLoadParseResult, SqlLoadSignals, SqlLoadWorker
 from ..background_jobs import register_background_job, unregister_background_job
@@ -142,6 +146,8 @@ class SqlLoadMixin:
         # Precount warning stays on the GUI (needs a modal confirm).
         if apply_limit and limit_eff > 0 and precowarn > 0:
             eng = create_engine(out_url, **eng_kw)
+            if read_only:
+                install_read_only_guards(eng, out_url)
             try:
                 with eng.connect() as conn:
                     est = None
@@ -236,6 +242,7 @@ class SqlLoadMixin:
             url=out_url,
             engine_kwargs=eng_kw,
             sql=sql,
+            read_only=bool(read_only),
             page_size=page_size,
             limit_eff=limit_eff,
             apply_limit=bool(apply_limit),

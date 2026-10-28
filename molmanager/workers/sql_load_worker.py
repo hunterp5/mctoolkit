@@ -47,6 +47,12 @@ def _safe_emit(obj: QObject | None, emitter_name: str, *args) -> None:
         pass
 
 
+def _redact_url(text: str) -> str:
+    from ..chem.molecule_conversion import redact_sqlalchemy_url
+
+    return redact_sqlalchemy_url(text)
+
+
 def mol_blob_from_smiles(smiles: str) -> bytes | None:
     """Parse *smiles* to an RDKit pickle, or ``None`` when the string is invalid."""
     smi = (smiles or "").strip()
@@ -125,11 +131,13 @@ class SqlLoadWorker(QRunnable):
         generation: int,
         cancel_event: threading.Event | None = None,
         progress_state: ToolProgressState | None = None,
+        read_only: bool = True,
     ):
         super().__init__()
         self.setAutoDelete(True)
         self.url = str(url)
         self.engine_kwargs = dict(engine_kwargs or {})
+        self.read_only = bool(read_only)
         self.sql = str(sql)
         self.page_size = max(1, int(page_size))
         self.limit_eff = max(0, int(limit_eff))
@@ -170,6 +178,11 @@ class SqlLoadWorker(QRunnable):
         eng = None
         try:
             eng = create_engine(self.url, **self.engine_kwargs)
+            if self.read_only:
+                from ..services.sql_load_policy import install_read_only_guards
+
+                install_read_only_guards(eng, self.url)
+            self.url = _redact_url(self.url)
             with eng.connect() as conn:
                 if self._cancelled():
                     _safe_emit(self.signals, "failed", "Cancelled.")
@@ -263,8 +276,9 @@ class SqlLoadWorker(QRunnable):
                 ),
             )
         except Exception as exc:
-            logger.exception("SQL load failed")
-            _safe_emit(self.signals, "failed", str(exc) or exc.__class__.__name__)
+            message = _redact_url(str(exc) or exc.__class__.__name__)
+            logger.error("SQL load failed: %s", message)
+            _safe_emit(self.signals, "failed", message)
         finally:
             if eng is not None:
                 try:

@@ -117,11 +117,11 @@ def parse_molecule_from_cell_text(raw: str):
 
 
 def redact_sqlalchemy_url(url: str) -> str:
-    """Mask ``user:password`` in a SQLAlchemy URL for logs (best-effort, not a security guarantee)."""
+    """Mask ``user:password`` in a SQLAlchemy URL, including one embedded in an error."""
     if not url or "@" not in url:
         return url
     # scheme://user:pass@host -> scheme://user:***@host
-    return re.sub(r"(://[^/?#:@]+):([^@/?#]+)@", r"\1:***@", url, count=1)
+    return re.sub(r"(://[^/?#:@\s]+):([^@/?#\s]+)@", r"\1:***@", url)
 
 
 def safe_float(value):

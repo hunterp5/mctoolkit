@@ -185,7 +185,9 @@ class ExternalDBDialog(QDialog):
                 read_only=bool(self.chk_read_only.isChecked()),
             )
         except Exception as e:
-            QMessageBox.critical(self, "Query Database", str(e))
+            from ...chem.molecule_conversion import redact_sqlalchemy_url
+
+            QMessageBox.critical(self, "Query Database", redact_sqlalchemy_url(str(e)))
             return
 
         self.accept()
